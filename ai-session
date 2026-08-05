@@ -1,0 +1,8 @@
+#aichat -m "qwen2.5-coder:1.5b" --session "$@"
+
+#aichat -m "ollama/qwen2.5-coder:1.5b" --session "$@"
+
+#!/bin/bash
+aichat -m "qwen2.5-coder:1.5b" --session "$@"
+
+

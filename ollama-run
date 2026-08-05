@@ -1,0 +1,2 @@
+ollama run $1 --hidethinking $* 2>/dev/null
+
