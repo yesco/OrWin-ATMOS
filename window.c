@@ -50,7 +50,7 @@ void updatewinptr() {
 }
 
 void clreol() {
-  fill(winp->x, winp->y, winp->w, 1, winp->bg);
+  fill(winp->c, winp->r, winp->w, 1, winp->bg);
 }
 
 char putc(char c) {
@@ -71,7 +71,7 @@ void puts(char* s) {
 }
 
 void clrscr() {
-  fill(winp->x-1, winp->y, winp->w+1, winp->h, winp->bg);
+  fill(winp->x, winp->y, winp->w, winp->h, winp->bg);
   winp->r= 0;
   winp->c= 0;
 }
