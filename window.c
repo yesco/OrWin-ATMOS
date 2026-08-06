@@ -166,10 +166,6 @@ char window(char x, char y, char w, char h, char bg, char fg) {
 
 // TODO: apps
 
-extern void counter_loop();
-extern void atmos_loop();
-extern void ascii_loop();
-
 int main() {
   char a, b, c;
   int i= 0, j= 0, z= 0;
@@ -193,9 +189,14 @@ int main() {
 
   while(1) {
 
+    extern void counter_loop();
+    extern void atmos_loop();
+    extern void ascii_loop();
+
     setwin(a); counter_loop();
     setwin(b); atmos_loop();
     setwin(c); ascii_loop();
+
   }
   
   return 0;
