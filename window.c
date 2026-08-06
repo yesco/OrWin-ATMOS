@@ -222,10 +222,9 @@ extern int atmos_main();
 // TODO: apps
 
 int main() {
-  char a, b, c;
   int i= 0, j= 0, z= 0;
 
-  int napp= 0;
+  int napp;
   
   // clear background to "gray" checkerboard
   fill(0, 0, SCREENCOLS, SCREENROWS, 126);
@@ -235,27 +234,23 @@ int main() {
   strncpy(SCREENXY(34, 1), "\x0a""0rWin", 6);
   strncpy(SCREENXY(34, 2),      " ATMOS", 6);
   
-  a= window( 5,  2, 23,  7, GREEN, BLACK);
-  wstatus(-1, "Counter");
-
-  c= window( 5, 13,  7,  7, BLUE,  WHITE);
-  wstatus(-1, "ASCII");
-
-  b= window(20, 12, 14, 14, BLACK, YELLOW);
-  wstatus(-1, "File Edit Options Tools");
 
   // initlize multitasker!
   orwinjmp= &appjmp; // we're just an APP!
 
-  setwin(a);
-  if (!setjmp(*orwinjmp)) spawn(counter_main);
-  
-  setwin(b);
-  if (!setjmp(*orwinjmp)) spawn(atmos_main);
 
-  setwin(c);
+  window( 5,  2, 23,  7, GREEN, BLACK);
+  wstatus(-1, "Counter");
+  if (!setjmp(*orwinjmp)) spawn(counter_main);
+
+  window( 5, 13,  7,  7, BLUE,  WHITE);
+  wstatus(-1, "ASCII");
   if (!setjmp(*orwinjmp)) spawn(ascii_main);
 
+  window(20, 12, 14, 14, BLACK, YELLOW);
+  wstatus(-1, "File Edit Options Tools");
+  if (!setjmp(*orwinjmp)) spawn(atmos_main);
+ 
   napp= nwin;
 
   // make us always come back here!
@@ -272,15 +267,5 @@ int main() {
     else cputc('\\');
   }
 
-  return 0;
-  
-  while(1) {
-
-    setwin(a); counter_loop();
-    setwin(b); atmos_loop();
-    setwin(c); ascii_loop();
-
-  }
-  
   return 0;
 }
