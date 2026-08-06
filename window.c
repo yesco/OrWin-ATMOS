@@ -125,7 +125,8 @@ int main() {
 
   while(++i) {
     //    if (i & 1)
-      { setwin(a); puts("Oric "); }
+    //      { setwin(a); puts("Oric "); }
+    { setwin(a); puts(".  "); }
     //    if (i & 2)
       { setwin(b); puts("Oric Atmos "); }
     //    if (i & 4)
