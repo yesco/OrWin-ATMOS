@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <string.h>
 
 #define WIN_MAX 16
 
@@ -48,7 +49,13 @@ Window win[WIN_MAX], *winp;
 
 
 void updatewinptr() {
-  winp->p= SCREENXY(winp->x + winp->c, winp->y + winp->r);
+  winp->p= SCREENXY(winp->x + winp->c, winp->y + winp->r - (winp->r==255)*40);
+}
+
+void wgotoxy(char x, char y) {
+  winp->c= x;
+  winp->r= y;
+  updatewinptr();
 }
 
 void wclreol() {
@@ -78,6 +85,12 @@ void wputi(int i) {
   wputs(s);
 }
 
+void wstatus(signed char c, char* s) {
+  char* p= winp->y * 40 + winp->x + c + TEXTSCREEN - 40;
+  char* w= winp->w + 2 + 1;
+  while(*s && w--) *p++= *s++ ^ 128;
+}
+	     
 void wclrscr() {
   fill(winp->x, winp->y, winp->w, winp->h, 32);
   // reset cursor position
@@ -104,13 +117,13 @@ char window(char x, char y, char w, char h, char bg, char fg) {
   
   // header
   // TODO: only when active
-  fill(x-2, y-1, w+4, 1, 127); // gray
+  fill(x-2, y-1, w+4, 1, 127); // white block
 
   // shadow (resets BG to BLACK)
   fill(x-1, y, w+4, h+1, BG+BLACK);
 
   // background color
-  fill(x-2, y, w+2, h, BG | bg);
+  fill(x-2, y, w+4, h, BG | bg);
 
   // set text color
   fill(winp->x-1, winp->y, 1, winp->h, winp->fg);
@@ -126,7 +139,7 @@ char window(char x, char y, char w, char h, char bg, char fg) {
 
 int main() {
   char a, b, c;
-  int i= 0;
+  int i= 0, j= 0;
   
   // clear background to "gray" checkerboard
   fill(0, 0, SCREENCOLS, SCREENROWS, 126);
@@ -135,9 +148,10 @@ int main() {
   c= window( 5, 13,  7,  7, BLUE,  WHITE);
   b= window(20, 11, 13, 14, BLACK, YELLOW);
 
+  wstatus(-1, "File Edit Options Tools");
+
   while(++i) {
-    //    if (i & 1)
-    //      { setwin(a); puts("Oric "); }
+    if (i % 25 == 0)
       { setwin(a); wputi(i); wputc(' '); }
     //    if (i & 2)
       { setwin(b); wputs("Oric Atmos "); }
