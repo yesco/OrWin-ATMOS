@@ -145,9 +145,12 @@ int main() {
   fill(0, 0, SCREENCOLS, SCREENROWS, 126);
 
   a= window( 3,  1, 25,  7, GREEN, BLACK);
-  c= window( 5, 13,  7,  7, BLUE,  WHITE);
-  b= window(20, 11, 13, 14, BLACK, YELLOW);
+  wstatus(-1, "TIME");
 
+  c= window( 5, 13,  7,  7, BLUE,  WHITE);
+  wstatus(-1, "Small");
+
+  b= window(20, 11, 13, 14, BLACK, YELLOW);
   wstatus(-1, "File Edit Options Tools");
 
   while(++i) {
