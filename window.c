@@ -1,3 +1,5 @@
+#include <stdio.h>
+
 #define WIN_MAX 16
 
 #define TEXTSCREEN ((char*)0xBB80) // $BB80-BF3F
@@ -49,29 +51,36 @@ void updatewinptr() {
   winp->p= SCREENXY(winp->x + winp->c, winp->y + winp->r);
 }
 
-void clreol() {
+void wclreol() {
   fill(winp->x + winp->c, winp->y + winp->r, winp->w - winp->c, 1, winp->bg);
 }
 
-char putc(char c) {
+char wputc(char c) {
   if (c!=10) *winp->p++= c;
   // overflow line?
   if (c==10 || winp->c++ >= winp->w) {
     winp->c= 0;
     // overflow rows?
     if (winp->r++ +1 >= winp->h) winp->r= 0;
-    clreol();
+    wclreol();
     updatewinptr();
   }
   return c;
 }
 
-void puts(char* s) {
-  while(*s) putc(*s++);
+void wputs(char* s) {
+  while(*s) wputc(*s++);
 }
 
-void clrscr() {
-  fill(winp->x-1, winp->y, winp->w+1, winp->h, winp->bg);
+void wputi(int i) {
+  char s[10]= {0};
+  sprintf(s, "%d ", i);
+  wputs(s);
+}
+
+void wclrscr() {
+  fill(winp->x, winp->y, winp->w, winp->h, 32);
+  // reset cursor position
   winp->r= 0;
   winp->c= 0;
 }
@@ -89,25 +98,28 @@ char window(char x, char y, char w, char h, char bg, char fg) {
   winp->y= y;
   winp->w= w;
   winp->h= h;
-  winp->bg= BG+bg;
+  winp->bg= BG | bg;
   winp->fg= fg;
   // TODO: verify space/clash/overflow?
   
   // header
-  fill(x-2, y-1, w+4, 1, 127);
+  // TODO: only when active
+  fill(x-2, y-1, w+4, 1, 127); // gray
 
-  // shadow (set black)
+  // shadow (resets BG to BLACK)
   fill(x-1, y, w+4, h+1, BG+BLACK);
 
-  // text area background
-  clrscr();
+  // background color
+  fill(x-2, y, w+2, h, BG | bg);
 
-  // set text color before! (TODO: require "spacing" between frames
-  fill(x-2, y, 1, h, fg+128); // white on left-UGLY
-  //fill(x-2, y, 1, h, fg); // black on left too
+  // set text color
+  fill(winp->x-1, winp->y, 1, winp->h, winp->fg);
 
   // set text color after! (TODO: require "spacing" between frames
   fill(x+w+1, y, 1, h, WHITE);
+
+  // text area background
+  wclrscr();
 
   return nwin;
 }
@@ -126,11 +138,11 @@ int main() {
   while(++i) {
     //    if (i & 1)
     //      { setwin(a); puts("Oric "); }
-    { setwin(a); puts(".  "); }
+      { setwin(a); wputi(i); wputc(' '); }
     //    if (i & 2)
-      { setwin(b); puts("Oric Atmos "); }
+      { setwin(b); wputs("Oric Atmos "); }
     //    if (i & 4)
-      { setwin(c); puts("Atmos "); }
+      { setwin(c); wputs("Atmos "); }
   }
   
   return 0;
