@@ -59,15 +59,19 @@ char putc(char c) {
   if (c==10 || winp->c++ >= winp->w) {
     winp->c= 0;
     // overflow rows?
-    if (winp->r++ >= winp->h) winp->r= 0;
+    if (winp->r++ +1 >= winp->h) winp->r= 0;
     clreol();
     updatewinptr();
   }
   return c;
 }
 
+void puts(char* s) {
+  while(*s) putc(*s++);
+}
+
 void clrscr() {
-  fill(winp->x, winp->y, winp->w, winp->h, winp->bg);
+  fill(winp->x-1, winp->y, winp->w+1, winp->h, winp->bg);
   winp->r= 0;
   winp->c= 0;
 }
@@ -89,14 +93,21 @@ char window(char x, char y, char w, char h, char bg, char fg) {
   winp->fg= fg;
   // TODO: verify space/clash/overflow?
   
+  // header
+  fill(x-2, y-1, w+4, 1, 127);
+
   // shadow (set black)
-  fill(x+1, y+1, w+1, h+1, BG+BLACK);
+  fill(x-1, y, w+4, h+1, BG+BLACK);
 
   // text area background
   clrscr();
 
   // set text color before! (TODO: require "spacing" between frames
-  fill(x-1, y, 1, h, fg);
+  fill(x-2, y, 1, h, fg+128); // white on left-UGLY
+  //fill(x-2, y, 1, h, fg); // black on left too
+
+  // set text color after! (TODO: require "spacing" between frames
+  fill(x+w+1, y, 1, h, WHITE);
 
   return nwin;
 }
@@ -106,16 +117,16 @@ int main() {
   int i= 0;
   
   // clear background to "gray" checkerboard
-  fill(0, 0, SCREENCOLS, SCREENROWS, 127);
+  fill(0, 0, SCREENCOLS, SCREENROWS, 126);
 
-  a= window(3,  3,  10, 10, WHITE, BLACK);
-  b= window(15, 15, 10, 10, GREEN, BLACK);
-  c= window(5,  13,  7,  8, BLUE,  WHITE);
+  a= window( 3,  1, 25,  7, GREEN, BLACK);
+  c= window( 5, 13,  7,  7, BLUE,  WHITE);
+  b= window(20, 11, 13, 14, BLACK, YELLOW);
 
   while(++i) {
-    if (i & 1) { setwin(a); putc('a'); }
-    if (i & 2) { setwin(b); putc('b'); }
-    if (i & 4) { setwin(c); putc('c'); }
+    if (i & 1) { setwin(a); puts("Oric "); }
+    if (i & 2) { setwin(b); puts("Oric Atmos "); }
+    if (i & 4) { setwin(c); puts("Atmos "); }
   }
   
   return 0;
