@@ -9,16 +9,7 @@
 #define SCREENSIZE (SCREENROWS*SCREENCOLS)
 #define SCREENLAST (TEXTSCREEN+SCREENSIZE-1)
 
-#define BLACK    0
-#define RED      1
-#define GREEN    2
-#define YELLOW   3
-#define BLUE     4
-#define MAGNENTA 5
-#define CYAN     6
-#define WHITE    7
-
-#define BG      16
+#include "orwin.h"
 
 
 #define curscr TEXTSCREEN
@@ -173,14 +164,11 @@ char window(char x, char y, char w, char h, char bg, char fg) {
   return nwin;
 }
 
-// TODO: "orwin.h"
-
-#undef putc
-#define putc wputc
-#define puti wputi
-#define puts wputs
-
 // TODO: apps
+
+extern void counter_loop();
+extern void atmos_loop();
+extern void ascii_loop();
 
 int main() {
   char a, b, c;
@@ -203,22 +191,11 @@ int main() {
   b= window(20, 12, 14, 14, BLACK, YELLOW);
   wstatus(-1, "File Edit Options Tools");
 
-  while(++i) {
+  while(1) {
 
-    // Timer
-    if (i % 25 == 0) {
-      setwin(a); puti(i); putc('\t');
-      ++z; z&= 63;
-    }
-
-    // Oric Atmos curves
-    setwin(b); {
-      for(j=z; j--; ) putc(' ');
-      putc(i&7); puts("Atmos");
-    }
-    
-    // write ascii table
-    setwin(c); putc((i%96)+32);
+    setwin(a); counter_loop();
+    setwin(b); atmos_loop();
+    setwin(c); ascii_loop();
   }
   
   return 0;

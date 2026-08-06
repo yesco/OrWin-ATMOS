@@ -25,25 +25,25 @@ rm fil
 # TODO: linker -D __AUTORUN__=$C7
 
 # orig (opts)
-( cl65 -r -Oirs $* $OPTS '-D__AUTORUN__=$C7' -t atmos $name.c -o $name.tap -vm -m $name.map 2>&1 | sed 's/(\([0-9]\+\))/:\1/g' ) || (echo "??????????????? FAILED ???????????"; exit 72)
+( cl65 -r -Oirs $* $OPTS '-D__AUTORUN__=$C7' -t atmos $name.c app-*.c -o $name.tap -vm -m $name.map 2>&1 | sed 's/(\([0-9]\+\))/:\1/g' ) || (echo "??????????????? FAILED ???????????"; exit 72)
 
 # opt for size?
-#( cl65 -O $* $OPTS '-D__AUTORUN__=$C7' -t atmos $name.c -o $name.tap -vm -m $name.map 2>&1 | sed 's/(\([0-9]\+\))/:\1/g' ) || (echo "??????????????? FAILED ???????????"; exit 72)
+#( cl65 -O $* $OPTS '-D__AUTORUN__=$C7' -t atmos $name.c app-*.c -o $name.tap -vm -m $name.map 2>&1 | sed 's/(\([0-9]\+\))/:\1/g' ) || (echo "??????????????? FAILED ???????????"; exit 72)
 
 # local static vars
-#( cl65 -r -Cl -Os $* $OPTS '-D__AUTORUN__=$C7' -t atmos $name.c -o $name.tap -vm -m $name.map 2>&1 | sed 's/(\([0-9]\+\))/:\1/g' ) || (echo "??????????????? FAILED ???????????"; exit 72)
+#( cl65 -r -Cl -Os $* $OPTS '-D__AUTORUN__=$C7' -t atmos $name.c app-*.c -o $name.tap -vm -m $name.map 2>&1 | sed 's/(\([0-9]\+\))/:\1/g' ) || (echo "??????????????? FAILED ???????????"; exit 72)
 
 # generate .s file
 echo "--gen .s--"
 #rm $name.s
 #cc65 -r -Oirs $OPTS -T $name.c 2>/dev/null
 
-cl65 -r -t atmos -Os $OPTS -S -T $name.c
+cl65 -r -t atmos -Os $OPTS -S -T $name.c app-*.c
 
 ls -l $name.s
 
 # generate .lst file (with "relative" addresses)
-ca65 -t atmos $name.s -l $name.lst # 2>/dev/null 1>/dev/null
+#ca65 -t atmos $name.s -l $name.lst # 2>/dev/null 1>/dev/null
 
 ls -l $name.lst
 
