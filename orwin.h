@@ -28,6 +28,4 @@ extern jmp_buf *orwinjmp;
 
 static jmp_buf appjmp;
 
-extern jmp_buf *other;
-
 #define YIELD() yield(&appjmp)

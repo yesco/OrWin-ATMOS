@@ -195,10 +195,12 @@ void spawn_alloc(char n, app main) {
     cputc('!');
     cgetc();
     main();
+
     // process exit!
     cputc('*');
     cgetc();
-    // set bad
+
+    // set BAD
     winp->cont= NULL;
     longjmp(*orwinjmp, 1);
   } 
@@ -212,7 +214,7 @@ extern void counter_loop();
 extern void atmos_loop();
 extern void ascii_loop();
 
-extern int countermain();
+extern int counter_main();
 extern int ascii_main();
 extern int atmos_main();
 
@@ -245,7 +247,13 @@ int main() {
   // initlize multitasker!
   orwinjmp= &appjmp; // we're just an APP!
 
+  setwin(a);
+  if (!setjmp(*orwinjmp)) spawn(counter_main);
+  
+  setwin(b);
   if (!setjmp(*orwinjmp)) spawn(atmos_main);
+
+  setwin(c);
   if (!setjmp(*orwinjmp)) spawn(ascii_main);
 
   napp= nwin;
@@ -253,7 +261,6 @@ int main() {
   // make us always come back here!
   while(setjmp(*orwinjmp)!=42) {
     cputc('^');
-    cgetc();
 
     // move next app
     if (!--napp) napp= nwin;
@@ -262,6 +269,7 @@ int main() {
     cgetc();
     
     if (*winp->cont) longjmp(*winp->cont, 1);
+    else cputc('\\');
   }
 
   return 0;
