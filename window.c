@@ -67,6 +67,12 @@ void wclrscr() {
   // reset cursor position
   winp->r= 0;
   winp->c= 0;
+
+  // background color
+  fill(winp->x-2, winp->y, winp->w+4, winp->h, BG | winp->bg);
+
+  // set text color
+  fill(winp->x-1, winp->y, 1, winp->h, winp->fg);
 }
 
 // minimal terminal codes
@@ -91,10 +97,14 @@ char wputc(char c) {
   case 28: case 29: case 30: case 31:
 
   // All other codes are oric attributes (color/blink)
-  // 0-7   : inc
-  // 16-23 : paper
   case 27: break; // ESC, TODO: understood by puts maybe
-  default: *winp->p++= c;
+    //case 0...7:  winf->fg= c; break;   // 0-7   : inc
+    //case 16...23: winp->bg= c; break; // 16-23 : paper
+
+  default:
+    if (c<24) if (c<8) winp->fg= c; else winp->bg= c;
+
+    *winp->p++= c;
   }
 
   // newline / line wrap?
@@ -102,6 +112,11 @@ char wputc(char c) {
     winp->c= 0;
     // overflow rows?
     if (winp->r++ +1 >= winp->h) winp->r= 0;
+
+    // set current (new) colors
+    *SCREENXY(winp->x-2, winp->y + winp->r)= BG | winp->bg;
+    *SCREENXY(winp->x-1, winp->y + winp->r)=      winp->fg;
+
     wclreol();
     updatewinptr();
   }
@@ -149,17 +164,11 @@ char window(char x, char y, char w, char h, char bg, char fg) {
   // shadow (resets BG to BLACK)
   fill(x-1, y, w+4, h+1, BG+BLACK);
 
-  // background color
-  fill(x-2, y, w+4, h, BG | bg);
-
-  // set text color
-  fill(winp->x-1, winp->y, 1, winp->h, winp->fg);
+  // text area background
+  wclrscr();
 
   // set text color after! (TODO: require "spacing" between frames
   fill(x+w+1, y, 1, h, WHITE);
-
-  // text area background
-  wclrscr();
 
   return nwin;
 }
@@ -175,7 +184,7 @@ char window(char x, char y, char w, char h, char bg, char fg) {
 
 int main() {
   char a, b, c;
-  int i= 0, j= 0;
+  int i= 0, j= 0, z= 0;
   
   // clear background to "gray" checkerboard
   fill(0, 0, SCREENCOLS, SCREENROWS, 126);
@@ -186,21 +195,30 @@ int main() {
   strncpy(SCREENXY(34, 2),      " ATMOS", 6);
   
   a= window( 5,  2, 23,  7, GREEN, BLACK);
-  wstatus(-1, "TIME");
+  wstatus(-1, "Counter");
 
   c= window( 5, 13,  7,  7, BLUE,  WHITE);
-  wstatus(-1, "Small");
+  wstatus(-1, "ASCII");
 
-  b= window(20, 12, 13, 14, BLACK, YELLOW);
+  b= window(20, 12, 14, 14, BLACK, YELLOW);
   wstatus(-1, "File Edit Options Tools");
 
   while(++i) {
-    if (i % 25 == 0)
-      { setwin(a); puti(i); putc('\t'); }
-    //    if (i & 2)
-      { setwin(b); puts("Oric Atmos "); }
-    //    if (i & 4)
-      { setwin(c); puts("Atmos "); }
+
+    // Timer
+    if (i % 25 == 0) {
+      setwin(a); puti(i); putc('\t');
+      ++z; z&= 63;
+    }
+
+    // Oric Atmos curves
+    setwin(b); {
+      for(j=z; j--; ) putc(' ');
+      putc(i&7); puts("Atmos");
+    }
+    
+    // write ascii table
+    setwin(c); putc((i%96)+32);
   }
   
   return 0;
