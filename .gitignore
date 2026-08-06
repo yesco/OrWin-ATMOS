@@ -1,0 +1,11 @@
+*~
+ORIC
+fil
+*.tmp
+#*#
+*.lst
+*.map
+*.o
+*.s
+*.tap
+
