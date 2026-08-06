@@ -19,7 +19,9 @@ void atmos_loop() {
 int atmos_main() {
   atmos_init();
   
-  while(1) atmos_loop();
+  do { atmos_loop(); } while(YIELD());
+	  
+  //while(1) atmos_loop();
   
   return 0;
 }

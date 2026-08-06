@@ -15,7 +15,7 @@ int counter_main() {
 
   counter_init();
   
-  while(1) counter_loop();
+  do { counter_loop(); } while(YIELD());
   
   return 0;
 }

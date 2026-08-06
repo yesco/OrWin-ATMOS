@@ -19,3 +19,15 @@ extern void wputs(char*);
 #define putc wputc
 #define puti wputi
 #define puts wputs
+
+#include <setjmp.h>
+
+extern char yield(jmp_buf*);
+
+extern jmp_buf *orwinjmp;
+
+static jmp_buf appjmp;
+
+extern jmp_buf *other;
+
+#define YIELD() yield(&appjmp)

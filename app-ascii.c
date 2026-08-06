@@ -12,7 +12,7 @@ void ascii_loop() {
 int ascii_main() {
   ascii_init();
   
-  while(1) ascii_loop();
+  do { ascii_loop(); } while(YIELD());
   
   return 0;
 }

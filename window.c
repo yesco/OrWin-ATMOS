@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <string.h>
+#include <conio.h>
 
 #define WIN_MAX 16
 
@@ -11,6 +12,7 @@
 
 #include "orwin.h"
 
+jmp_buf *orwinjmp;
 
 #define curscr TEXTSCREEN
 
@@ -32,6 +34,8 @@ typedef struct Window {
   char r, c;
   char *p;
   char bg, fg;
+
+  jmp_buf* cont;
 } Window;
 
 char nwin= 0;
@@ -139,6 +143,8 @@ void setwin(char w) {
 // TODO: title+= bar?
 char window(char x, char y, char w, char h, char bg, char fg) {
   if (nwin==WIN_MAX) return 0;
+
+  // TODO: so 0 is full screen...
   winp= win+ ++nwin;
   winp->x= x;
   winp->y= y;
@@ -164,11 +170,60 @@ char window(char x, char y, char w, char h, char bg, char fg) {
   return nwin;
 }
 
+char yield(jmp_buf* app) {
+  cputc('?');
+  winp->cont= app;
+
+  // it returns non-zero when we come back to app!
+  if (setjmp(*app)) return 1;
+
+  // if 0 then we're in OrWin!
+  cputc('/');
+  cgetc();
+
+  longjmp(*orwinjmp, 1);
+}
+
+typedef int (*app)();
+
+void spawn_alloc(char n, app main) {
+  char dummy[32]= {0};
+
+  cputc('.');
+  if (n) spawn_alloc(n-1, main);
+  else {
+    cputc('!');
+    cgetc();
+    main();
+    // process exit!
+    cputc('*');
+    cgetc();
+    // set bad
+    winp->cont= NULL;
+    longjmp(*orwinjmp, 1);
+  } 
+}
+
+void spawn(app main) {
+  spawn_alloc(32, main);
+}
+
+extern void counter_loop();
+extern void atmos_loop();
+extern void ascii_loop();
+
+extern int countermain();
+extern int ascii_main();
+extern int atmos_main();
+
+
 // TODO: apps
 
 int main() {
   char a, b, c;
   int i= 0, j= 0, z= 0;
+
+  int napp= 0;
   
   // clear background to "gray" checkerboard
   fill(0, 0, SCREENCOLS, SCREENROWS, 126);
@@ -187,11 +242,31 @@ int main() {
   b= window(20, 12, 14, 14, BLACK, YELLOW);
   wstatus(-1, "File Edit Options Tools");
 
-  while(1) {
+  // initlize multitasker!
+  orwinjmp= &appjmp; // we're just an APP!
 
-    extern void counter_loop();
-    extern void atmos_loop();
-    extern void ascii_loop();
+  if (!setjmp(*orwinjmp)) spawn(atmos_main);
+  if (!setjmp(*orwinjmp)) spawn(ascii_main);
+
+  napp= nwin;
+
+  // make us always come back here!
+  while(setjmp(*orwinjmp)!=42) {
+    cputc('^');
+    cgetc();
+
+    // move next app
+    if (!--napp) napp= nwin;
+    setwin(napp);
+    cputc('0'+napp);
+    cgetc();
+    
+    if (*winp->cont) longjmp(*winp->cont, 1);
+  }
+
+  return 0;
+  
+  while(1) {
 
     setwin(a); counter_loop();
     setwin(b); atmos_loop();
