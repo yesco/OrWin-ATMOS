@@ -50,7 +50,7 @@ void updatewinptr() {
 }
 
 void clreol() {
-  fill(winp->c, winp->r, winp->w, 1, winp->bg);
+  fill(winp->x + winp->c, winp->y + winp->r, winp->w - winp->c, 1, winp->bg);
 }
 
 char putc(char c) {
@@ -71,7 +71,7 @@ void puts(char* s) {
 }
 
 void clrscr() {
-  fill(winp->x, winp->y, winp->w, winp->h, winp->bg);
+  fill(winp->x-1, winp->y, winp->w+1, winp->h, winp->bg);
   winp->r= 0;
   winp->c= 0;
 }
@@ -124,9 +124,12 @@ int main() {
   b= window(20, 11, 13, 14, BLACK, YELLOW);
 
   while(++i) {
-    if (i & 1) { setwin(a); puts("Oric "); }
-    if (i & 2) { setwin(b); puts("Oric Atmos "); }
-    if (i & 4) { setwin(c); puts("Atmos "); }
+    //    if (i & 1)
+      { setwin(a); puts("Oric "); }
+    //    if (i & 2)
+      { setwin(b); puts("Oric Atmos "); }
+    //    if (i & 4)
+      { setwin(c); puts("Atmos "); }
   }
   
   return 0;
