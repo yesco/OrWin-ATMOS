@@ -49,7 +49,7 @@ Window win[WIN_MAX], *winp;
 
 
 void updatewinptr() {
-  winp->p= SCREENXY(winp->x + winp->c, winp->y + winp->r - (winp->r==255)*40);
+  winp->p= SCREENXY(winp->x + winp->c, winp->y + winp->r);
 }
 
 void wgotoxy(char x, char y) {
@@ -59,12 +59,45 @@ void wgotoxy(char x, char y) {
 }
 
 void wclreol() {
-  fill(winp->x + winp->c, winp->y + winp->r, winp->w - winp->c, 1, winp->bg);
+  fill(winp->x + winp->c, winp->y + winp->r, winp->w - winp->c + 1, 1, winp->bg);
 }
 
+void wclrscr() {
+  fill(winp->x, winp->y, winp->w, winp->h, 32);
+  // reset cursor position
+  winp->r= 0;
+  winp->c= 0;
+}
+
+// minimal terminal codes
+// Free codes: 11, 14; 24,25,26, 28,29,30,31
 char wputc(char c) {
-  if (c!=10) *winp->p++= c;
-  // overflow line?
+  switch(c) {
+  case 8: if (winp->c) winp->c--;  // CTRL-H = \b - BS - ^h
+    else  if (winp->r) winp->r--,winp->c= winp->w-1;
+    goto done;
+  // Tab 8 forward
+  case '\t': if ((winp->c= ((winp->c + 8) & 0xf8)) > winp->w) {
+      c=10; break; } else updatewinptr(); goto done;
+  case 10: break;             // CTRL-J = \n - see below
+  case 11: goto done;         // CTRL-K
+  case 12: wclrscr(); break;  // CTRL-L
+  case 13: winp->c= 0; break; // CTRL-M = \r = CR
+  case 14: wclreol(); break;  // CTRL-N
+  case 15: goto done;         // CTRL-O
+
+  // Graphical/Text-Mode switches
+  case 24: case 25: case 26:
+  case 28: case 29: case 30: case 31:
+
+  // All other codes are oric attributes (color/blink)
+  // 0-7   : inc
+  // 16-23 : paper
+  case 27: break; // ESC, TODO: understood by puts maybe
+  default: *winp->p++= c;
+  }
+
+  // newline / line wrap?
   if (c==10 || winp->c++ >= winp->w) {
     winp->c= 0;
     // overflow rows?
@@ -72,6 +105,7 @@ char wputc(char c) {
     wclreol();
     updatewinptr();
   }
+ done:
   return c;
 }
 
@@ -81,23 +115,16 @@ void wputs(char* s) {
 
 void wputi(int i) {
   char s[10]= {0};
-  sprintf(s, "%d ", i);
+  sprintf(s, "%d", i);
   wputs(s);
 }
 
 void wstatus(signed char c, char* s) {
   char* p= winp->y * 40 + winp->x + c + TEXTSCREEN - 40;
-  char* w= winp->w + 2 + 1;
+  char w= winp->w + 2 + 1;
   while(*s && w--) *p++= *s++ ^ 128;
 }
 	     
-void wclrscr() {
-  fill(winp->x, winp->y, winp->w, winp->h, 32);
-  // reset cursor position
-  winp->r= 0;
-  winp->c= 0;
-}
-
 void setwin(char w) {
   // TODO: set curwin?
   winp= win+w;
@@ -137,6 +164,15 @@ char window(char x, char y, char w, char h, char bg, char fg) {
   return nwin;
 }
 
+// TODO: "orwin.h"
+
+#undef putc
+#define putc wputc
+#define puti wputi
+#define puts wputs
+
+// TODO: apps
+
 int main() {
   char a, b, c;
   int i= 0, j= 0;
@@ -144,22 +180,27 @@ int main() {
   // clear background to "gray" checkerboard
   fill(0, 0, SCREENCOLS, SCREENROWS, 126);
 
-  a= window( 3,  1, 25,  7, GREEN, BLACK);
+  // Print logo in Right-Hand Corner
+  strncpy(SCREENXY(34, 0), "\x0a""0rWin", 6);
+  strncpy(SCREENXY(34, 1), "\x0a""0rWin", 6);
+  strncpy(SCREENXY(34, 2),      " ATMOS", 6);
+  
+  a= window( 5,  2, 23,  7, GREEN, BLACK);
   wstatus(-1, "TIME");
 
   c= window( 5, 13,  7,  7, BLUE,  WHITE);
   wstatus(-1, "Small");
 
-  b= window(20, 11, 13, 14, BLACK, YELLOW);
+  b= window(20, 12, 13, 14, BLACK, YELLOW);
   wstatus(-1, "File Edit Options Tools");
 
   while(++i) {
     if (i % 25 == 0)
-      { setwin(a); wputi(i); wputc(' '); }
+      { setwin(a); puti(i); putc('\t'); }
     //    if (i & 2)
-      { setwin(b); wputs("Oric Atmos "); }
+      { setwin(b); puts("Oric Atmos "); }
     //    if (i & 4)
-      { setwin(c); wputs("Atmos "); }
+      { setwin(c); puts("Atmos "); }
   }
   
   return 0;
