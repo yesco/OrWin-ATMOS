@@ -259,8 +259,9 @@ char wkbhit(char win) {
     case 'N': case ' ': case 9:   setfocus(wfocus+1); break;
     case 'P':           case 8:   setfocus(wfocus-1); break;
     case 27 :           case 11:  setfocus(wprev); break; // toggle 
-    case 'L': case 'R': case 'S': setfocus(0); break; // List
     case 127: case 'Q': case 'K': winkill(); setfocus(wfocus+1); break; // Kill
+    case 13 : case 10:
+    case 'L': case 'R': case 'S': setfocus(0); break; // List
     }
     wdecorate();
     return 0;
