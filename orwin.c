@@ -392,24 +392,44 @@ void spawn(app main) {
 
 #define IS_BAD_CONTRAST(fg, bg) ((0xB1 >> ((fg) ^ (bg))) & 1)
 
+char overlap(char x, char y, char w, char h) {
+  int i, j;
+
+  if (x+w >= 39) return 1;
+  if (y+h >= 27) return 1;
+  
+  for(i= x-2; i<x+w+3; ++i)
+    for(j= y-1; j<y+h+3; ++j)
+      if (*SCREENXY(i, j)!=126) return 1;
+  return 0;
+}
+
 void newwin(char* title, app main) {
   char x, y, w, h, bg, fg;
 
  again:
   do {
-    x= rand() % (40-10-6)+1;
-    y= rand() % (28-10-4)+1;
-    w= rand() % (40-x-4-7) + 7;
-    h= rand() % (28-y-4-7) + 7;
+
+    do {
+      x= (rand() % (40-6-4)) + 1;
+      y= (rand() % (28-5-3)) + 1;
+      w= (rand() % (25-x-3-3)) + 3;
+      h= (rand() % (15-y-3-4)) + 4;
+    } while(overlap(x, y, w, h));
+
     do {
       bg= rand() & 7;
       fg= rand() & 7;
     } while(IS_BAD_CONTRAST(fg,bg));
+
   } while(0);
   
   window(x, y, w, h, bg, fg);
   wstatus(-1, title);
+  //  wputc('('); wputi(x); wputc(','); wputi(y); wputc(')');
+  //  wputi(w); wputc('x'); wputi(h);
   //  spawn(main);
+  cprintf("(%d,%d) %dx%d  ", x,y,w,h);
   cgetc();
   goto again;
 }
