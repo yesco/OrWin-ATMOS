@@ -236,11 +236,15 @@ char wkey= 0;
 #undef kbhit
 
 // non-blocking
+// (win=0 to not yield here as its called fom yield)
 char wkbhit(char win) {
   char c;
   
   if (wkey && wfocus==win) return wkey;
-  if (!kbhit()) { yield(); return 0; }
+  if (!kbhit()) {
+    if (win) yield();
+    return 0;
+  }
   
   c= cgetc();
 
@@ -256,8 +260,6 @@ char wkbhit(char win) {
     case 127: case 'Q': case 'K': winkill(); setfocus(wfocus+1); break; // Kill
     }
     wdecorate();
-    // activate new focus
-    //  yield();
     return 0;
   }
 
@@ -284,6 +286,9 @@ char wgetc(char win) {
 char yield() {
   DEB('?');
 
+  // Handle keyboard, if there are no keyboard apps
+  if (kbhit()) wkbhit(0);
+  
   // it returns non-zero when we come back to app!
   if (wfocus==wcur) togglecursor();
   if (setjmp(winp->cont)) {
