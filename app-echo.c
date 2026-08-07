@@ -21,12 +21,12 @@ void loop(APP* app) {
     case ' '+128: setfocus(); return;
     }
 		     
-    togglecursor();
+    //togglecursor();
 
     putc(c);
     if (c==13) putc(10); // CR-LF
 
-    togglecursor();
+    //togglecursor();
   }
 }  
 
