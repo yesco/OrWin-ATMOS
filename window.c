@@ -210,7 +210,7 @@ void spawn_alloc(char n) {
   else {
     // arrived at end of allocated stack
     DEB('!');
-    //cprintf("@%u ", &dummy);
+    cprintf("@%u ", &dummy);
     DEB('\n');
     DKEY();
 
@@ -244,7 +244,8 @@ void spawn_alloc(char n) {
 
 // TODO: parameters
 void spawn(app main) {
-  longjmp(orwinnext, (int)main);
+  if (!setjmp(orwinjmp))
+    longjmp(orwinnext, (int)main);
 }
 
 extern void counter_loop();
@@ -270,22 +271,21 @@ int main() {
   strncpy(SCREENXY(34, 0), "\x0a""0rWin", 6);
   strncpy(SCREENXY(34, 1), "\x0a""0rWin", 6);
   strncpy(SCREENXY(34, 2),      " ATMOS", 6);
-  
 
   // initlize multitasker!
   spawn_alloc(SPAWN_REC);
 
   window( 5,  2, 23,  7, GREEN, BLACK);
   wstatus(-1, "Counter");
-  if (!setjmp(orwinjmp)) spawn(counter_main);
+  spawn(counter_main);
 
   window( 5, 13,  7,  7, BLUE,  WHITE);
   wstatus(-1, "ASCII");
-  if (!setjmp(orwinjmp)) spawn(ascii_main);
+  spawn(ascii_main);
 
   window(20, 12, 14, 14, BLACK, YELLOW);
   wstatus(-1, "File Edit Options Tools");
-  if (!setjmp(orwinjmp)) spawn(atmos_main);
+  spawn(atmos_main);
  
   napp= nwin;
 
