@@ -1,7 +1,13 @@
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <conio.h>
 #include <ctype.h>
+
+extern int counter_main();
+extern int ascii_main();
+extern int atmos_main();
+extern int echo_main();
 
 #define WIN_MAX 16
 
@@ -9,6 +15,8 @@
 #define SPAWN_REC 20
 // SPAWN_STEP*SPAWN_REC is Data stack allocation
 #define SPAWN_STEP 15
+
+typedef int (*app)();
 
 //#define TRACE
 
@@ -209,6 +217,7 @@ void setwin(char w) {
   wcur= w;
 }
 
+
 // TODO: title+= bar?
 char window(char x, char y, char w, char h, char bg, char fg) {
   if (nwin==WIN_MAX) return 0;
@@ -242,13 +251,16 @@ char window(char x, char y, char w, char h, char bg, char fg) {
   return nwin;
 }
 
+
 void help() {
   char tmp[40];
   memcpy(tmp, TEXTSCREEN, sizeof(tmp));
-  ;  memcpy(TEXTSCREEN, HELP, sizeof(HELP));
+  memcpy(TEXTSCREEN, HELP, sizeof(HELP));
   cgetc();
   memcpy(TEXTSCREEN, tmp, sizeof(tmp));
 }
+
+void newwin(char* title, app main);
 
 char wkey= 0;
 
@@ -278,7 +290,7 @@ char wkbhit(char win) {
     case 27 : case 'T': case 'I': setfocus(wprev); break; // toggle 
     case 127: case 'Q': case 'K': winkill(); setfocus(wfocus+1); break; // Kill
     case 13 : case 10:
-    case 'L': case 'R': case 'S': setfocus(0); break; // List
+    case 'L': case 'R': case 'S': newwin("foo", ascii_main); break; // List
     case 'H': help(); break;
     default:  if (isdigit(c))     setfocus(c-'0');
     }
@@ -326,8 +338,6 @@ char yield() {
 
   longjmp(orwinjmp, 1);
 }
-
-typedef int (*app)();
 
 // basically recurses doing stack allocations
 // at end marks it in orwinnext, longjmp there
@@ -380,15 +390,29 @@ void spawn(app main) {
     longjmp(orwinnext, (int)main);
 }
 
-extern void counter_loop();
-extern void atmos_loop();
-extern void ascii_loop();
+#define IS_BAD_CONTRAST(fg, bg) ((0xB1 >> ((fg) ^ (bg))) & 1)
 
-extern int counter_main();
-extern int ascii_main();
-extern int atmos_main();
-extern int echo_main();
+void newwin(char* title, app main) {
+  char x, y, w, h, bg, fg;
 
+ again:
+  do {
+    x= rand() % (40-10-6)+1;
+    y= rand() % (28-10-4)+1;
+    w= rand() % (40-x-4-7) + 7;
+    h= rand() % (28-y-4-7) + 7;
+    do {
+      bg= rand() & 7;
+      fg= rand() & 7;
+    } while(IS_BAD_CONTRAST(fg,bg));
+  } while(0);
+  
+  window(x, y, w, h, bg, fg);
+  wstatus(-1, title);
+  //  spawn(main);
+  cgetc();
+  goto again;
+}
 
 // TODO: apps
 
@@ -421,6 +445,10 @@ int main() {
   // initlize multitasker!
   spawn_alloc(SPAWN_REC);
 
+#define DEMO
+#define FISH
+  
+#ifdef DEMO
   // OK
   // window( 3,  2, 23,  7, GREEN, BLACK);
   // CRASH: smaller than 23 crash+++
@@ -430,6 +458,7 @@ int main() {
   wstatus(-1, "Counter");
   spawn(counter_main);
 
+#ifdef FISH
   window( 4, 12, 11,  7, BLUE,  WHITE);
   wstatus(-1, "ECHO");
   spawn(echo_main);
@@ -445,6 +474,10 @@ int main() {
   window(31,  5,  6,  5, WHITE, BLUE);
   wstatus(-1, "ASCII");
   spawn(ascii_main);
+#endif 
+
+#endif // DEMO
+  
 
   // done setup
   wdecorate();

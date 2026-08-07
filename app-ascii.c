@@ -12,7 +12,7 @@ void* ascii_init() {
 }
 
 void ascii_loop(APP* app) {
-  putc((app->i++ % 96)+32);
+  putchar((app->i++ % 96)+32);
 }  
 
 int ascii_main() {

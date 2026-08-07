@@ -7,8 +7,8 @@ int atmos_main() {
   
   while(1) {
     if (++i >= 64) i= 0;
-    for(j= i & 31; j--; ) putc(' ');
-    putc(i & 7); puts("Atmos");
+    for(j= i & 31; j--; ) putchar(' ');
+    putchar(i & 7); puts("Atmos");
   }
   
   return 0;

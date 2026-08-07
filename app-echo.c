@@ -11,12 +11,12 @@ int echo_main() {
 
     // Terminal stuff
     if (c==127) { // Del key
-      putc(8);
-      putc(' ');
-      putc(8);
+      putchar(8);
+      putchar(' ');
+      putchar(8);
     } else {
-      putc(c);
-      if (c==13) putc(10); // CR-LF
+      putchar(c);
+      if (c==13) putchar(10); // CR-LF
     }
   }
 

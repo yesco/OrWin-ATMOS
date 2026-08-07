@@ -12,7 +12,7 @@ static void* init() {
 
 static void loop(APP* app) {
   if (++app->i % 25 == 0) {
-    puti(app->i); putc('\t');
+    puti(app->i); putchar('\t');
   }
 }  
 
