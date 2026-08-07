@@ -94,7 +94,8 @@ void wclrscr() {
 char wputc(char c) {
   switch(c) {
   case 8: if (winp->c) winp->c--;  // CTRL-H = \b - BS - ^h
-    else  if (winp->r) winp->r--,winp->c= winp->w-1;
+    else  if (winp->r) winp->r--,winp->c= winp->w;
+    updatewinptr();
     goto done;
   // Tab 8 forward
   case '\t': if ((winp->c= ((winp->c + 8) & 0xf8)) > winp->w) {
@@ -338,8 +339,8 @@ int main() {
   spawn(counter_main);
 
   window( 4, 12,  7,  7, BLUE,  WHITE);
-  wstatus(-1, "ASCII");
-  spawn(ascii_main);
+  wstatus(-1, "ECHO");
+  spawn(echo_main);
 
   window( 2, 22, 14,  5, CYAN,  RED);
   wstatus(-1, "ASCII");
@@ -349,9 +350,9 @@ int main() {
   wstatus(-1, "File Edit Options Tools");
   spawn(atmos_main);
  
-  window(31,  4,  6,  6, WHITE, BLACK);
-  wstatus(-1, "ECHO");
-  spawn(echo_main);
+  window(31,  5,  6,  5, WHITE, BLUE);
+  wstatus(-1, "ASCII");
+  spawn(ascii_main);
 
   napp= nwin;
 

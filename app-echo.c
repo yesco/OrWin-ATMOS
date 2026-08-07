@@ -4,36 +4,31 @@
 
 #include "orwin.h"
 
-typedef struct APP {
-  int i;
-} APP;
-
-static void* init() {
-  return calloc(sizeof(APP), 1);
-}
-
-static void loop(APP* app) {
-  // TODO: not nice
-  if (kbhit()) {
-    char c= cgetc();
-
-    switch(c) {
-    case ' '+128: setfocus(); return;
-    }
-		     
-    //togglecursor();
-
-    putc(c);
-    if (c==13) putc(10); // CR-LF
-
-    //togglecursor();
-  }
-}  
-
 int echo_main() {
-  void* app= init();
-  
-  do { loop(app); } while(YIELD());
-  
+
+  while(1) {
+
+    // TODO: remove
+  next:
+    if (kbhit()) {
+      char c= cgetc();
+
+      // TODO: hid inside kbhit and wfocus
+      switch(c) {
+      case ' '+128: setfocus(); goto next;
+      }
+
+      if (c==127) { // Del key
+	putc(8);
+	putc(' ');
+	putc(8);
+      } else {
+	putc(c);
+	if (c==13) putc(10); // CR-LF
+      }
+
+    } else yield();
+  }
+
   return 0;
 }
