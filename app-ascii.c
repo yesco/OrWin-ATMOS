@@ -1,18 +1,24 @@
+#include <stdio.h>
+#include <stdlib.h>
+
 #include "orwin.h"
 
-static int i= 0;
+typedef struct APP {
+  int i;
+} APP;
 
-void ascii_init() {
+void* ascii_init() {
+  return calloc(sizeof(APP), 1);
 }
 
-void ascii_loop() {
-  putc((i++ % 96)+32);
+void ascii_loop(APP* app) {
+  putc((app->i++ % 96)+32);
 }  
 
 int ascii_main() {
-  ascii_init();
+  void* app= ascii_init();
   
-  do { ascii_loop(); } while(YIELD());
+  do { ascii_loop(app); } while(YIELD());
   
   return 0;
 }

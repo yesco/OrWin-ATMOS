@@ -289,12 +289,9 @@ int main() {
   wstatus(-1, "ASCII");
   spawn(ascii_main);
 
-  // app using globals...
-  if (0) {
-    window( 2, 22, 14,  5, CYAN,  RED);
-    wstatus(-1, "ASCII");
-    spawn(ascii_main);
-  }
+  window( 2, 22, 14,  5, CYAN,  RED);
+  wstatus(-1, "ASCII");
+  spawn(ascii_main);
 
   window(22, 12, 14, 14, BLACK, YELLOW);
   wstatus(-1, "File Edit Options Tools");
