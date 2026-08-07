@@ -8,6 +8,9 @@ rm app-*.s app-*.ext app-*.reg apprun.x app-*.o apps.reg apps.ext
 cat app-*.reg > apps.reg
 cat app-*.ext > apps.ext
 
-cl65 -t atmos apprun.c app-*.o -o apprun.x
+#cl65 -t atmos apprun.c app-*.o -o apprun.x
+cl65 -t sim6502 apprun.c app-*.o -o apprun.x
 
+echo
+echo 
 sim65 ./apprun.x

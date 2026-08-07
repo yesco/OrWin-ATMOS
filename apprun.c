@@ -20,10 +20,11 @@ int main() {
   struct apps *p= apps;
 
   while(p->name) {
-    printf("%4H: %s/n", p->main, p->name);
+    printf("- %04X: %s\n", p->main, p->name);
     ++p;
   }
-
+  putchar('\n');
+  
   return 0;
 }
 

@@ -7,7 +7,7 @@ int main() {
   
   while(1) {
     if (++i >= 64) i= 0;
-    for(j= i & 31; j--; ) putc(' ');
+    for(j= i & 31; j--; ) putchar(' ');
     putchar(i & 7); puts("Atmos");
   }
   
