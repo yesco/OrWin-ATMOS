@@ -1,0 +1,13 @@
+# TODO: ALL
+# ls -1 *.c | grep -iv orwin.c | sed 's/\.c//' | xargs -l1 ./appwrap
+
+rm app-*.s app-*.reg apprun.x app-*.o
+
+./appwrap atmos
+
+cat app-*.reg > apps.reg
+cat app-*.ext > apps.ext
+
+cl65 -t atmos apprun.c app-*.o -o apprun.x
+
+sim65 ./apprun.x

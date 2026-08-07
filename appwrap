@@ -8,8 +8,14 @@ cc65 -t atmos -Dmain=_app_main $1.c -o $1_temp.s
 echo ".proc $1_app" 
 echo ".export $1_main := _app_main"
 cat $1_temp.s
+echo ".endproc"
 ) > $1_wrapped.s
 
 ca65 $1_wrapped.s -o app-$1.o
 
-echo "{\"$1\",$1_}" > app-$1.reg
+echo "extern int $1_main();" > app-$1.ext
+echo "{\"$1\", $1_main},"    > app-$1.reg
+
+echo
+ls -l *-$1.[sor]*
+
