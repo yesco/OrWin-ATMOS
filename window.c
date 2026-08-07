@@ -7,7 +7,7 @@
 // SPAWN_REC is a measure of Hardware stack allocation
 #define SPAWN_REC 20
 // SPAWN_STEP*SPAWN_REC is Data stack allocation
-#define SPAWN_STEP 16
+#define SPAWN_STEP 10
 
 //#define TRACE
 
@@ -56,7 +56,7 @@ typedef struct Window {
   char exit;
 } Window;
 
-char nwin= 0;
+char nwin= 0, wfocus= 0, wcur= 0;
 Window win[WIN_MAX], *winp;
 
 
@@ -80,7 +80,8 @@ void wclrscr() {
   // reset cursor position
   winp->r= 0;
   winp->c= 0;
-
+  updatewinptr();
+  
   // background color
   fill(winp->x-2, winp->y, winp->w+4, winp->h, BG | winp->bg);
 
@@ -150,12 +151,45 @@ void wputi(int i) {
 void wstatus(signed char c, char* s) {
   char* p= winp->y * 40 + winp->x + c + TEXTSCREEN - 40;
   char w= winp->w + 2 + 1;
-  while(*s && w--) *p++= *s++ ^ 128;
+  //char xor= winp->bg&7==7?0 :128;
+  char xor= 128;
+  while(*s && w--) *p++= *s++ ^ xor;
 }
 	     
+
+void setfocus() {
+  // UNFOCUS
+  char* p= win[wfocus].y * 40 + win[wfocus].x + TEXTSCREEN - 40 -2;
+  char i;
+  for(i= win[wfocus].w+4; i--; ) p[i]^= 128;
+
+  //*p= RED | BG | 128;
+  //p[win[wfocus].w+3]= BLACK | BG | 128;
+
+  
+
+  if (++wfocus > nwin) wfocus= 1;
+  
+
+  // FOCUSED
+  p= win[wfocus].y * 40 + win[wfocus].x + TEXTSCREEN - 40 - 2;
+  for(i= win[wfocus].w+4; i--; ) p[i]^= 128;
+
+  //*p= '*';
+  //*p= 32 | 128;
+  //*p= RED | BG;
+  //p[win[wfocus].w+3]= BLACK | BG; // | 128;
+}
+
+// returns old state
+char togglecursor() {
+  return !(*winp->p^= 128);
+}
+
 void setwin(char w) {
   // TODO: set curwin?
   winp= win+w;
+  wcur= w;
 }
 
 // TODO: title+= bar?
@@ -192,7 +226,12 @@ char yield() {
   DEB('?');
 
   // it returns non-zero when we come back to app!
-  if (setjmp(winp->cont)) return 1;
+  if (wfocus==wcur) togglecursor();
+  if (setjmp(winp->cont)) {
+    // and we're back
+    if (wfocus==wcur) togglecursor();
+    return 1;
+  }
 
   // if 0 then we're in OrWin scheduler!
   DEB('/');
@@ -261,6 +300,7 @@ extern void ascii_loop();
 extern int counter_main();
 extern int ascii_main();
 extern int atmos_main();
+extern int echo_main();
 
 
 // TODO: apps
@@ -269,6 +309,17 @@ int main() {
   int i= 0, j= 0, z= 0;
 
   int napp;
+  
+  // cursor(0); // doesn't work
+  // status location is at #26A.
+  //  1 – cursor ON when set.
+  //  2 – screen ON when set.
+  //  4 – not used.
+  //  8 – keyboard click OFF when set.
+  // 16 – ESC has been pressed.
+  // 32 – columns 0 and 1 protected when set.
+  #define SCREENSTATE *((char*)0x26a)
+  SCREENSTATE= 0+2+0+8+0;
   
   // clear background to "gray" checkerboard
   fill(0, 0, SCREENCOLS, SCREENROWS, 126);
@@ -281,7 +332,7 @@ int main() {
   // initlize multitasker!
   spawn_alloc(SPAWN_REC);
 
-  window( 5,  2, 23,  7, GREEN, BLACK);
+  window( 3,  2, 23,  7, GREEN, BLACK);
   wstatus(-1, "Counter");
   spawn(counter_main);
 
@@ -297,12 +348,21 @@ int main() {
   wstatus(-1, "File Edit Options Tools");
   spawn(atmos_main);
  
+  window(31,  4,  6,  6, WHITE, BLACK);
+  wstatus(-1, "ECHO");
+  spawn(echo_main);
+
   napp= nwin;
 
   // make us always come back here!
   while(setjmp(orwinjmp)!=42) {
     DEB('^');
 
+    if (0 && kbhit()) {
+      cputc('!');
+      cputc(cgetc());
+    }
+    
     // move next app
     if (!--napp) napp= nwin;
     setwin(napp);
