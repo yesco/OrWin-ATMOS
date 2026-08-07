@@ -1,21 +1,26 @@
+#include <stdlib.h>
+
 #include "orwin.h"
 
-static int i= 0;
+typedef struct APP {
+  int i;
+} APP;
 
-void counter_init() {
+static void* init() {
+  return calloc(sizeof(APP), 1);
 }
 
-void counter_loop() {
-  if (++i % 25 == 0) {
-    puti(i); putc('\t');
+static void loop(APP* app) {
+  if (++app->i % 25 == 0) {
+    puti(app->i); putc('\t');
   }
 }  
 
 int counter_main() {
 
-  counter_init();
+  APP* app= init();
   
-  do { counter_loop(); } while(YIELD());
+  do { loop(app); } while(YIELD());
   
   return 0;
 }

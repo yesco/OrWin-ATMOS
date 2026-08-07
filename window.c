@@ -140,6 +140,7 @@ char wputc(char c) {
 
 void wputs(char* s) {
   while(*s) wputc(*s++);
+  yield();
 }
 
 void wputi(int i) {

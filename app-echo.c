@@ -8,11 +8,11 @@ typedef struct APP {
   int i;
 } APP;
 
-void* init() {
+static void* init() {
   return calloc(sizeof(APP), 1);
 }
 
-void loop(APP* app) {
+static void loop(APP* app) {
   // TODO: not nice
   if (kbhit()) {
     char c= cgetc();
