@@ -17,8 +17,9 @@ void loop(APP* app) {
   if (kbhit()) {
     char c= cgetc();
 
-    // TODO: abstract focus etc...
-    if (c==9) { setfocus(); return; }
+    switch(c) {
+    case ' '+128: setfocus(); return;
+    }
 		     
     togglecursor();
 
@@ -31,8 +32,6 @@ void loop(APP* app) {
 
 int echo_main() {
   void* app= init();
-  
-  togglecursor();
   
   do { loop(app); } while(YIELD());
   
