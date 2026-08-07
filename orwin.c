@@ -174,10 +174,13 @@ char wprev= 1;
 void setfocus(signed char new) {
   //cputc('#');
   //cputc('0'+new);
+ next:
   wprev= wfocus;
   wfocus= new;
   if (new > nwin) wfocus= 1;
   if (new <= 0)   wfocus= nwin;
+  // TODO: eteral loop/block if no actives
+  if (!win[wfocus].status) { new= wfocus+1; goto next; }
 }
 
 void winkill() {
@@ -398,7 +401,12 @@ int main() {
   // initlize multitasker!
   spawn_alloc(SPAWN_REC);
 
-  window( 3,  2, 23,  7, GREEN, BLACK);
+  // OK
+  // window( 3,  2, 23,  7, GREEN, BLACK);
+  // CRASH: smaller than 23 crash+++
+  // window( 3,  2, 22,  7, GREEN, BLACK);
+  // ok
+  window( 2,  2, 23,  7, GREEN, BLACK);
   wstatus(-1, "Counter");
   spawn(counter_main);
 
