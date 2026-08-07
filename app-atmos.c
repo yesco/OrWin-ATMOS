@@ -8,7 +8,7 @@ void atmos_init() {
 void atmos_loop() {
   if (++i>64) {
     i= 0;
-    ++z; z&= 63;
+    ++z; z&= 31;
   }
 
   for(j=z; j--; ) putc(' ');

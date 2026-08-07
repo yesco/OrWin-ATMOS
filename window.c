@@ -4,8 +4,12 @@
 
 #define WIN_MAX 16
 
-#define SPAWN_REC 16
-#define SPAWN_STEP 32
+// SPAWN_REC is a measure of Hardware stack allocation
+#define SPAWN_REC 20
+// SPAWN_STEP*SPAWN_REC is Data stack allocation
+#define SPAWN_STEP 16
+
+//#define TRACE
 
 #ifdef TRACE
   #define DEB(c) cputc(c)
@@ -199,6 +203,9 @@ char yield() {
 
 typedef int (*app)();
 
+// basically recurses doing stack allocations
+// at end marks it in orwinnext, longjmp there
+// with app main to call! It'll push ahead.
 void spawn_alloc(char n) {
   char dummy[SPAWN_STEP]= {0};
   char var= n;
@@ -210,7 +217,7 @@ void spawn_alloc(char n) {
   else {
     // arrived at end of allocated stack
     DEB('!');
-    cprintf("@%u ", &dummy);
+    //cprintf("@%u\r\n", &dummy);
     DEB('\n');
     DKEY();
 
@@ -218,7 +225,7 @@ void spawn_alloc(char n) {
     main= (void*)setjmp(orwinnext);
     if (!main) {
 
-      // we've allocated a chunk
+      // we've allocated the next spawn stack chunk
       return;
 
     } else {
@@ -237,7 +244,6 @@ void spawn_alloc(char n) {
 
       // go back to scheduler
       longjmp(orwinjmp, 1);
-
     }
   } 
 }
@@ -279,11 +285,18 @@ int main() {
   wstatus(-1, "Counter");
   spawn(counter_main);
 
-  window( 5, 13,  7,  7, BLUE,  WHITE);
+  window( 4, 12,  7,  7, BLUE,  WHITE);
   wstatus(-1, "ASCII");
   spawn(ascii_main);
 
-  window(20, 12, 14, 14, BLACK, YELLOW);
+  // app using globals...
+  if (0) {
+    window( 2, 22, 14,  5, CYAN,  RED);
+    wstatus(-1, "ASCII");
+    spawn(ascii_main);
+  }
+
+  window(22, 12, 14, 14, BLACK, YELLOW);
   wstatus(-1, "File Edit Options Tools");
   spawn(atmos_main);
  
