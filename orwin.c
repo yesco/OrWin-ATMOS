@@ -27,7 +27,13 @@
 #define SCREENSIZE (SCREENROWS*SCREENCOLS)
 #define SCREENLAST (TEXTSCREEN+SCREENSIZE-1)
 
+// TODO: make my own interrupt timer!
+#define TIMER (*(unsigned int*)0x306)
+
 #include "orwin.h"
+
+//////////////----------------------------------------
+#define HELP "FUNCT-3 spc Prev Next Toggle Run Kill"
 
 jmp_buf orwinjmp;
 jmp_buf orwinnext;
@@ -236,6 +242,14 @@ char window(char x, char y, char w, char h, char bg, char fg) {
   return nwin;
 }
 
+void help() {
+  char tmp[40];
+  memcpy(tmp, TEXTSCREEN, sizeof(tmp));
+  ;  memcpy(TEXTSCREEN, HELP, sizeof(HELP));
+  cgetc();
+  memcpy(TEXTSCREEN, tmp, sizeof(tmp));
+}
+
 char wkey= 0;
 
 #undef kbhit
@@ -261,10 +275,11 @@ char wkbhit(char win) {
     switch(toupper(c)) {
     case 'N': case ' ': case 9:   setfocus(wfocus+1); break;
     case 'P':           case 8:   setfocus(wfocus-1); break;
-    case 27 :           case 11:  setfocus(wprev); break; // toggle 
+    case 27 : case 'T': case 'I': setfocus(wprev); break; // toggle 
     case 127: case 'Q': case 'K': winkill(); setfocus(wfocus+1); break; // Kill
     case 13 : case 10:
     case 'L': case 'R': case 'S': setfocus(0); break; // List
+    case 'H': help(); break;
     default:  if (isdigit(c))     setfocus(c-'0');
     }
     wdecorate();
