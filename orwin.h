@@ -30,3 +30,14 @@ extern char yield();
 extern jmp_buf orwinjmp;
 
 #define YIELD() yield()
+
+
+extern char wcur;
+
+extern char wkbhit(char win);
+extern char wgetc(char win);
+
+#define kbhit wkbhit(wcur)
+#undef getc
+#define getc() wgetc(wcur)
+

@@ -224,6 +224,44 @@ char window(char x, char y, char w, char h, char bg, char fg) {
   return nwin;
 }
 
+char wkey= 0;
+
+#undef kbhit
+
+// non-blocking
+char wkbhit(char win) {
+  char c;
+  
+  if (wkey && wfocus==win) return wkey;
+  if (!kbhit()) { yield(); return 0; }
+  
+  c= cgetc();
+  
+  // Capture FUNC keys Window Keys
+  switch(c) {
+  case ' '+128: setfocus(); return 0;
+  }
+
+  // save it
+  wkey= c;
+  return wkey && wfocus==win;
+}
+
+// blocking per app, but will yield
+char wgetc(char win) {
+  char c;
+  
+  while(1) {
+    // TODO: suspend and wake up
+    while(!wkbhit(win)) yield();
+    if (wkey && wfocus==win) {
+      c= wkey;
+      wkey= 0;
+      return c;
+    }
+  }
+}
+
 char yield() {
   DEB('?');
 
@@ -360,11 +398,6 @@ int main() {
   while(setjmp(orwinjmp)!=42) {
     DEB('^');
 
-    if (0 && kbhit()) {
-      cputc('!');
-      cputc(cgetc());
-    }
-    
     // move next app
     if (!--napp) napp= nwin;
     setwin(napp);

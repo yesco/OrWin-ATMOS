@@ -4,34 +4,6 @@
 
 #include "orwin.h"
 
-char wkbhit() {
-  if (!kbhit()) yield();
-  return kbhit();
-}
-
-char wgetc() {
-  char c;
-
- again:
-  while(!wkbhit()) yield();
-
-  c= cgetc();
-
-  // Capture FUNC keys Window Keys
-  switch(c) {
-  case ' '+128: setfocus(); goto again;
-  }
-
-  return c;
-}
-
-
-#define kbhit wkbhit
-#undef getc
-#define getc wgetc
-
-
-
 int echo_main() {
 
   while(1) {
