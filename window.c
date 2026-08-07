@@ -1,13 +1,14 @@
 #include <stdio.h>
 #include <string.h>
 #include <conio.h>
+#include <ctype.h>
 
 #define WIN_MAX 16
 
 // SPAWN_REC is a measure of Hardware stack allocation
 #define SPAWN_REC 20
 // SPAWN_STEP*SPAWN_REC is Data stack allocation
-#define SPAWN_STEP 10
+#define SPAWN_STEP 15
 
 //#define TRACE
 
@@ -52,13 +53,14 @@ typedef struct Window {
   char *p;
   char bg, fg;
 
+  char status;
   jmp_buf cont;
   char exit;
 } Window;
 
 char nwin= 0, wfocus= 0, wcur= 0;
-Window win[WIN_MAX], *winp;
-
+Window win[WIN_MAX];
+Window* winp= 0;
 
 
 void updatewinptr() {
@@ -158,29 +160,31 @@ void wstatus(signed char c, char* s) {
   while(*s && w--) *p++= *s++ ^ xor;
 }
 	     
-
-void setfocus() {
-  // UNFOCUS
-  char* p= win[wfocus].y * 40 + win[wfocus].x + TEXTSCREEN - 40 -2;
+// (un)decorate wfocus
+void wdecorate() {
+  Window* w= win+wfocus;
+  // Invert header (make it black if focused)
+  char* p= w->y * 40 + w->x + TEXTSCREEN - 40 -2;
   char i;
-  for(i= win[wfocus].w+4; i--; ) p[i]^= 128;
+  for(i= w->w+4; i--; ) p[i]^= 128;
+}
 
-  //*p= RED | BG | 128;
-  //p[win[wfocus].w+3]= BLACK | BG | 128;
+char wprev= 1;
 
-  
+void setfocus(signed char new) {
+  //cputc('#');
+  //cputc('0'+new);
+  wprev= wfocus;
+  wfocus= new;
+  if (new > nwin) wfocus= 1;
+  if (new <= 0)   wfocus= nwin;
+}
 
-  if (++wfocus > nwin) wfocus= 1;
-  
-
-  // FOCUSED
-  p= win[wfocus].y * 40 + win[wfocus].x + TEXTSCREEN - 40 - 2;
-  for(i= win[wfocus].w+4; i--; ) p[i]^= 128;
-
-  //*p= '*';
-  //*p= 32 | 128;
-  //*p= RED | BG;
-  //p[win[wfocus].w+3]= BLACK | BG; // | 128;
+void winkill() {
+  Window* w= win+wfocus;
+  // TODO: disable entry somehow
+  fill(w->x-2, w->y-1, w->w+5, w->h+3, 126);
+  w->status= 0;
 }
 
 // returns old state
@@ -206,6 +210,9 @@ char window(char x, char y, char w, char h, char bg, char fg) {
   winp->h= h;
   winp->bg= BG | bg;
   winp->fg= fg;
+  winp->exit= 0;
+  winp->status= 1;
+    
   // TODO: verify space/clash/overflow?
   
   // header
@@ -236,10 +243,22 @@ char wkbhit(char win) {
   if (!kbhit()) { yield(); return 0; }
   
   c= cgetc();
-  
-  // Capture FUNC keys Window Keys
-  switch(c) {
-  case ' '+128: setfocus(); return 0;
+
+  if (c&128) {
+    //cprintf("  #%d '%c' ", c, c&0x7f);
+    wdecorate();
+    // Capture FUNC keys Window Keys
+    switch(toupper(c^128)) {
+    case 'N': case ' ': case 9:   setfocus(wfocus+1); break;
+    case 'P':           case 8:   setfocus(wfocus-1); break;
+    case 27 :           case 11:  setfocus(wprev); break; // toggle 
+    case 'L': case 'R': case 'S': setfocus(0); break; // List
+    case 127: case 'Q': case 'K': winkill(); setfocus(wfocus+1); break; // Kill
+    }
+    wdecorate();
+    // activate new focus
+    //  yield();
+    return 0;
   }
 
   // save it
@@ -369,6 +388,8 @@ int main() {
   strncpy(SCREENXY(34, 1), "\x0a""0rWin", 6);
   strncpy(SCREENXY(34, 2),      " ATMOS", 6);
 
+  memset(win, 0, sizeof(win));
+
   // initlize multitasker!
   spawn_alloc(SPAWN_REC);
 
@@ -392,6 +413,12 @@ int main() {
   wstatus(-1, "ASCII");
   spawn(ascii_main);
 
+  // done setup
+  wdecorate();
+
+
+  ///////////////////////////////////
+  // SCHEDULER!
   napp= nwin;
 
   // make us always come back here!
@@ -399,11 +426,16 @@ int main() {
     DEB('^');
 
     // move next app
+  next:
     if (!--napp) napp= nwin;
     setwin(napp);
+    // TODO: if no active windows will go on 
+    if (!winp->status) goto next;
+    
     DEB('0'+napp);
     DKEY();
     
+    // TODO: how can I use it as a test value, LOL
     if (*winp->cont) longjmp(winp->cont, 1);
     else DEB('\\');
   }

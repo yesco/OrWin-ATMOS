@@ -16,7 +16,7 @@ extern void wputi(int);
 extern void wputs(char*);
 extern void wstatus(signed char, char*);
 extern char togglecursor();
-extern void setfocus();
+extern void setfocus(signed char);
 
 #undef putc
 #define putc wputc
