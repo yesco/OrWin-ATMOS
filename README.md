@@ -16,23 +16,27 @@ and multitasking environment for the ORIC ATMOS.
 
 - Simple, low effort window system
 - Compile + run several C program together
-- Pre-empting multitasking (stack ptr manipulation/copy)
 - Mimic several (fixed size/position) ORIC text screens
+- A process is a window!
+- YIELD(); (TODO: Pre-emptying multitasking)
 
 - Override: <tt>putc puts puti clrscr clreol gotoxy</tt>
 - Minimal API: <tt>window setwin wstatus</tt>
-- Terminal Special Characters: \n (\r \t \h) inc:0-7 paper:16-23 inverse|128
+- Terminal Special Characters: \n (\r \t \h) inc:0-7 paper:16-23 inverse|128
 - Wraparound instead of scroll (optional scroll)
+
+- VT100/52 compat
 
 - Simple Emacs-style editor
 - Simple script/interactive programming language, maybe minipanda
+- Simple telnet
 
 
 ## Non-Goals
 
 - No Overlapping terminals
 - No Movable terminal
-- No Graphics, at least for now, or All graphics!
+- No Graphics, at least for now, or make it All graphics!
 - No separate binaries
 - No generic relocation
 - No for pre-exising programs

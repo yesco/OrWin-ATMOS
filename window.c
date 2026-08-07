@@ -4,6 +4,18 @@
 
 #define WIN_MAX 16
 
+#define SPAWN_REC 16
+#define SPAWN_STEP 32
+
+#ifdef TRACE
+  #define DEB(c) cputc(c)
+  #define DKEY() cgetc()
+#else
+  #define DEB(c) 
+  #define DKEY() 
+#endif
+
+
 #define TEXTSCREEN ((char*)0xBB80) // $BB80-BF3F
 #define SCREENROWS 28
 #define SCREENCOLS 40
@@ -12,7 +24,8 @@
 
 #include "orwin.h"
 
-jmp_buf *orwinjmp;
+jmp_buf orwinjmp;
+jmp_buf orwinnext;
 
 #define curscr TEXTSCREEN
 
@@ -35,7 +48,8 @@ typedef struct Window {
   char *p;
   char bg, fg;
 
-  jmp_buf* cont;
+  jmp_buf cont;
+  char exit;
 } Window;
 
 char nwin= 0;
@@ -170,44 +184,67 @@ char window(char x, char y, char w, char h, char bg, char fg) {
   return nwin;
 }
 
-char yield(jmp_buf* app) {
-  cputc('?');
-  winp->cont= app;
+char yield() {
+  DEB('?');
 
   // it returns non-zero when we come back to app!
-  if (setjmp(*app)) return 1;
+  if (setjmp(winp->cont)) return 1;
 
-  // if 0 then we're in OrWin!
-  cputc('/');
-  cgetc();
+  // if 0 then we're in OrWin scheduler!
+  DEB('/');
+  DKEY();
 
-  longjmp(*orwinjmp, 1);
+  longjmp(orwinjmp, 1);
 }
 
 typedef int (*app)();
 
-void spawn_alloc(char n, app main) {
-  char dummy[32]= {0};
+void spawn_alloc(char n) {
+  char dummy[SPAWN_STEP]= {0};
+  char var= n;
+  app main;
 
-  cputc('.');
-  if (n) spawn_alloc(n-1, main);
+  DEB('.');
+
+  if (n) spawn_alloc(n-1 + dummy[0]);
   else {
-    cputc('!');
-    cgetc();
-    main();
+    // arrived at end of allocated stack
+    DEB('!');
+    //cprintf("@%u ", &dummy);
+    DEB('\n');
+    DKEY();
 
-    // process exit!
-    cputc('*');
-    cgetc();
+    // mark current stack pointer as next allocation
+    main= (void*)setjmp(orwinnext);
+    if (!main) {
 
-    // set BAD
-    winp->cont= NULL;
-    longjmp(*orwinjmp, 1);
+      // we've allocated a chunk
+      return;
+
+    } else {
+
+      // we got a function address to call (an app main)
+
+      // alloate space for this process by moving orwinnext forward (for next allocation)
+      spawn_alloc(SPAWN_REC);
+
+      // run & exit
+      winp->exit= main();
+      // TODO: reuse allocation winp->cont
+  
+      DEB('*');
+      DKEY();
+
+      // go back to scheduler
+      longjmp(orwinjmp, 1);
+
+    }
   } 
 }
 
+// TODO: parameters
 void spawn(app main) {
-  spawn_alloc(32, main);
+  longjmp(orwinnext, (int)main);
 }
 
 extern void counter_loop();
@@ -236,35 +273,34 @@ int main() {
   
 
   // initlize multitasker!
-  orwinjmp= &appjmp; // we're just an APP!
-
+  spawn_alloc(SPAWN_REC);
 
   window( 5,  2, 23,  7, GREEN, BLACK);
   wstatus(-1, "Counter");
-  if (!setjmp(*orwinjmp)) spawn(counter_main);
+  if (!setjmp(orwinjmp)) spawn(counter_main);
 
   window( 5, 13,  7,  7, BLUE,  WHITE);
   wstatus(-1, "ASCII");
-  if (!setjmp(*orwinjmp)) spawn(ascii_main);
+  if (!setjmp(orwinjmp)) spawn(ascii_main);
 
   window(20, 12, 14, 14, BLACK, YELLOW);
   wstatus(-1, "File Edit Options Tools");
-  if (!setjmp(*orwinjmp)) spawn(atmos_main);
+  if (!setjmp(orwinjmp)) spawn(atmos_main);
  
   napp= nwin;
 
   // make us always come back here!
-  while(setjmp(*orwinjmp)!=42) {
-    cputc('^');
+  while(setjmp(orwinjmp)!=42) {
+    DEB('^');
 
     // move next app
     if (!--napp) napp= nwin;
     setwin(napp);
-    cputc('0'+napp);
-    cgetc();
+    DEB('0'+napp);
+    DKEY();
     
-    if (*winp->cont) longjmp(*winp->cont, 1);
-    else cputc('\\');
+    if (*winp->cont) longjmp(winp->cont, 1);
+    else DEB('\\');
   }
 
   return 0;

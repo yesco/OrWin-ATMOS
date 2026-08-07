@@ -22,10 +22,8 @@ extern void wputs(char*);
 
 #include <setjmp.h>
 
-extern char yield(jmp_buf*);
+extern char yield();
 
-extern jmp_buf *orwinjmp;
+extern jmp_buf orwinjmp;
 
-static jmp_buf appjmp;
-
-#define YIELD() yield(&appjmp)
+#define YIELD() yield()
