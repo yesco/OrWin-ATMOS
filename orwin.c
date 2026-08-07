@@ -155,9 +155,11 @@ void wputi(int i) {
 void wstatus(signed char c, char* s) {
   char* p= winp->y * 40 + winp->x + c + TEXTSCREEN - 40;
   char w= winp->w + 2 + 1;
-  //char xor= winp->bg&7==7?0 :128;
+  //char xor= winp->bg&7==7?0 :128; // if white back
   char xor= 128;
   while(*s && w--) *p++= *s++ ^ xor;
+
+  p[w-1]= ('0' | 128) + nwin;
 }
 	     
 // (un)decorate wfocus
@@ -255,13 +257,15 @@ char wkbhit(char win) {
     //cprintf("  #%d '%c' ", c, c&0x7f);
     wdecorate();
     // Capture FUNC keys Window Keys
-    switch(toupper(c^128)) {
+    c^= 128;
+    switch(toupper(c)) {
     case 'N': case ' ': case 9:   setfocus(wfocus+1); break;
     case 'P':           case 8:   setfocus(wfocus-1); break;
     case 27 :           case 11:  setfocus(wprev); break; // toggle 
     case 127: case 'Q': case 'K': winkill(); setfocus(wfocus+1); break; // Kill
     case 13 : case 10:
     case 'L': case 'R': case 'S': setfocus(0); break; // List
+    default:  if (isdigit(c))     setfocus(c-'0');
     }
     wdecorate();
     return 0;
