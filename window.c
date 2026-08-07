@@ -338,7 +338,7 @@ int main() {
   wstatus(-1, "Counter");
   spawn(counter_main);
 
-  window( 4, 12,  7,  7, BLUE,  WHITE);
+  window( 4, 12, 11,  7, BLUE,  WHITE);
   wstatus(-1, "ECHO");
   spawn(echo_main);
 
