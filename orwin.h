@@ -18,8 +18,8 @@ extern void wstatus(signed char, char*);
 extern char togglecursor();
 extern void setfocus(signed char);
 
-#undef putc
-#define putc wputc
+#undef putchar
+#define putchar wputc
 #define puti wputi
 #define puts wputs
 

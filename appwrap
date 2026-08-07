@@ -6,7 +6,7 @@ cc65 -t atmos -Dmain=_app_main $1.c -o $1_temp.s
 
 (
 echo ".proc $1_app" 
-echo ".export $1_main := _app_main"
+echo ".export _$1_main := _app_main"
 cat $1_temp.s
 echo ".endproc"
 ) > $1_wrapped.s
