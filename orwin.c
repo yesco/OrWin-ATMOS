@@ -4,6 +4,9 @@
 #include <conio.h>
 #include <ctype.h>
 
+// (- 10647 8975) = 1672 bytes code for moving :-(
+#define MOWIN
+
 extern int counter_main();
 extern int ascii_main();
 extern int atmos_main();
@@ -300,14 +303,17 @@ char wkbhit(char win) {
     case 'L': case 'R': newwin("foo", ascii_main); break; // List
     case 'H': help(); break;
 
+#ifdef MOWIN
     case   8: mowin(-1,0,0,0); break;
     case   9: mowin(+1,0,0,0); break;
     case  10: mowin(0,+1,0,0); break;
     case  11: mowin(0,-1,0,0); break;
+      // TODO: conflicting, conflat with SHIFT/CTRL
     case 'W': mowin(0,0,+1,0); break;
     case 'S': mowin(0,0,-1,0); break;
     case 'T': mowin(0,0,0,+1); break;
     case 'Z': mowin(0,0,0,-1); break;
+#endif // MOWIN
 
     default:  if (isdigit(c))     setfocus(c-'0');
     }
@@ -455,15 +461,19 @@ void newwin(char* title, app main) {
 // TODO: colors messed up...
 //   (because rewrite doesnpt restore fb bg only r c)
 void mowin(signed char dx, signed char dy, signed char dw, signed char dh) {
+#ifdef MOWIN
   Window* wf= win+wfocus;
-  char x= wf->x, y= wf->y, w= wf->w, h= wf->h;
+  char x= wf->x, y= wf->y, w= wf->w, h= wf->h, b= wf->bg, f= wf->fg;
   char i, j;
-  int z= (w+1)*y+1;
+  int z= (w+3)*y+1; // 3= bg+fg+\n
   char *tmp= malloc(z), *t= tmp-1;
 
   // save text w newlines
   for(j= y; j<y+h; ++j) {
-    for(i= x; i<x+w; ++i)
+    // TODO: -2 to include bg,fg of each line!
+    // but printing it may take space, lol
+    // Adjust printing after NL
+    for(i= x; i<x+w; ++i) 
       *++t= *SCREENXY(i, j);
     // TODO: edgecases...
     while(*t==' ') t--,cputc(8);
@@ -486,20 +496,22 @@ void mowin(signed char dx, signed char dy, signed char dw, signed char dh) {
     setwin(wf-win);
     updatewinptr();
 
+    // Draw new pusition + text
     windraw(wf);
     t= tmp;
-    // notusing wputs as it will yield
-    // TODO: problem when yield in wputc...
+    // not using wputs as it will yield()
     while(*t) wputc(*t++);
 
-    // TODO: valid
+    // restore cursor position & color
     wf->c= i > wf->w? wf->w: i;
     wf->r= j > wf->h? wf->h: j;
+    wf->bg= b; wf->fg= f;
     updatewinptr();
 
     setwin(iw);
   }
   free(tmp);
+#endif // MOWIN
 }
 
 // TODO: apps
