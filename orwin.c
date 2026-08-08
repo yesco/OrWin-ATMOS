@@ -199,10 +199,13 @@ void setfocus(signed char new) {
   if (!win[wfocus].status) { new= wfocus+1; goto next; }
 }
 
+void winerase(Window* w) {
+  fill(w->x-2, w->y-1, w->w+5, w->h+3, 126);
+}
+
 void winkill() {
   Window* w= win+wfocus;
-  // TODO: disable entry somehow
-  fill(w->x-2, w->y-1, w->w+5, w->h+3, 126);
+  winerase(w);
   w->status= 0;
 }
 
@@ -217,6 +220,20 @@ void setwin(char w) {
   wcur= w;
 }
 
+void windraw(Window* w) {
+  // header
+  // TODO: only when active
+  fill(w->x-2, w->y-1, w->w+4, 1, 127); // white block
+
+  // shadow (resets BG to BLACK)
+  fill(w->x-1, w->y, w->w+4, w->h+1, BG+BLACK);
+
+  // text area background
+  wclrscr();
+
+  // set text color after! (TODO: require "spacing" between frames
+  fill(w->x + w->w +1, w->y, 1, w->h, WHITE);
+}
 
 // TODO: title+= bar?
 char window(char x, char y, char w, char h, char bg, char fg) {
@@ -234,20 +251,8 @@ char window(char x, char y, char w, char h, char bg, char fg) {
   winp->status= 1;
     
   // TODO: verify space/clash/overflow?
+  windraw(winp);
   
-  // header
-  // TODO: only when active
-  fill(x-2, y-1, w+4, 1, 127); // white block
-
-  // shadow (resets BG to BLACK)
-  fill(x-1, y, w+4, h+1, BG+BLACK);
-
-  // text area background
-  wclrscr();
-
-  // set text color after! (TODO: require "spacing" between frames
-  fill(x+w+1, y, 1, h, WHITE);
-
   return nwin;
 }
 
@@ -261,6 +266,7 @@ void help() {
 }
 
 void newwin(char* title, app main);
+void mowin(signed char dx, signed char dy, signed char dw, signed char dh);
 
 char wkey= 0;
 
@@ -278,6 +284,7 @@ char wkbhit(char win) {
   }
   
   c= cgetc();
+  sprintf(TEXTSCREEN, "[%d]", c);
 
   if (c&128) {
     //cprintf("  #%d '%c' ", c, c&0x7f);
@@ -285,13 +292,23 @@ char wkbhit(char win) {
     // Capture FUNC keys Window Keys
     c^= 128;
     switch(toupper(c)) {
-    case 'N': case ' ': case 9:   setfocus(wfocus+1); break;
-    case 'P':           case 8:   setfocus(wfocus-1); break;
-    case 27 : case 'T': case 'I': setfocus(wprev); break; // toggle 
+    case 'N': case ' ': setfocus(wfocus+1); break;
+    case 'P':           setfocus(wfocus-1); break;
+    case 27 : case 'I': setfocus(wprev); break; // toggle 
     case 127: case 'Q': case 'K': winkill(); setfocus(wfocus+1); break; // Kill
-    case 13 : case 10:
-    case 'L': case 'R': case 'S': newwin("foo", ascii_main); break; // List
+    case 13 :
+    case 'L': case 'R': newwin("foo", ascii_main); break; // List
     case 'H': help(); break;
+
+    case   8: mowin(-1,0,0,0); break;
+    case   9: mowin(+1,0,0,0); break;
+    case  10: mowin(0,+1,0,0); break;
+    case  11: mowin(0,-1,0,0); break;
+    case 'W': mowin(0,0,+1,0); break;
+    case 'S': mowin(0,0,-1,0); break;
+    case 'T': mowin(0,0,0,+1); break;
+    case 'Z': mowin(0,0,0,-1); break;
+
     default:  if (isdigit(c))     setfocus(c-'0');
     }
     wdecorate();
@@ -395,11 +412,11 @@ void spawn(app main) {
 char overlap(char x, char y, char w, char h) {
   int i, j;
 
-  if (x+w >= 39) return 1;
-  if (y+h >= 27) return 1;
+  if (x<2 || x+w >= 39) return 1;
+  if (y<1 || y+h >= 27) return 1;
   
-  for(i= x-2; i<x+w+3; ++i)
-    for(j= y-1; j<y+h+3; ++j)
+  for(j= y-1; j<y+h+3; ++j)
+    for(i= x-2; i<x+w+3; ++i)
       if (*SCREENXY(i, j)!=126) return 1;
   return 0;
 }
@@ -432,6 +449,54 @@ void newwin(char* title, app main) {
   cprintf("(%d,%d) %dx%d  ", x,y,w,h);
   cgetc();
   goto again;
+}
+
+void mowin(signed char dx, signed char dy, signed char dw, signed char dh) {
+  Window* wf= win+wfocus;
+  char x= wf->x, y= wf->y, w= wf->w, h= wf->h;
+  char i, j;
+  int z= (w+1)*y+1;
+  char *tmp= malloc(z), *t= tmp-1;
+
+  // save text w newlines
+  for(j= y; j<y+h; ++j) {
+    for(i= x; i<x+w; ++i)
+      *++t= *SCREENXY(i, j);
+    // TODO: edgecases...
+    while(*t==' ') t--,cputc(8);
+    *++t= '\n';
+  }
+  *++t= 0;
+
+  winerase(wf);
+
+  // only move if not overlap
+  if (overlap(wf->x+dx, wf->y+dy, wf->w+dw, wf->h+dh)) {
+    windraw(wf); return;
+  } else {
+    char iw= winp-win;
+    
+    wf->x+= dx; wf->y+= dy; wf->w+= dw; wf->h+= dh;
+    i= wf->c; j= wf->r;
+
+    // Pretend to be in wfocus
+    setwin(wf-win);
+    updatewinptr();
+
+    windraw(wf);
+    t= tmp;
+    // notusing wputs as it will yield
+    // TODO: problem when yield in wputc...
+    while(*t) wputc(*t++);
+
+    // TODO: valid
+    wf->c= i > wf->w? wf->w: i;
+    wf->r= j > wf->h? wf->h: j;
+    updatewinptr();
+
+    setwin(iw);
+  }
+  free(tmp);
 }
 
 // TODO: apps
