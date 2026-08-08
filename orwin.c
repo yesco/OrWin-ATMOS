@@ -413,9 +413,9 @@ char overlap(char x, char y, char w, char h) {
   int i, j;
 
   if (x<2 || x+w >= 38) return 1;
-  if (y<1 || y+h >= 26) return 1;
+  if (y<1 || y+h >= 28) return 1;
   
-  for(j= y-1; j<y+h+3; ++j)
+  for(j= y-1; j<y+h+2; ++j)
     for(i= x-2; i<x+w+3; ++i)
       if (*SCREENXY(i, j)!=126) return 1;
   return 0;
