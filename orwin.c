@@ -411,16 +411,16 @@ void newwin(char* title, app main) {
   do {
 
     do {
-      x= (rand() % (40-6-4)) + 1;
-      y= (rand() % (28-5-3)) + 1;
-      w= (rand() % (25-x-3-3)) + 3;
-      h= (rand() % (15-y-3-4)) + 4;
+      x= (rand() % (40-3-4-2)) + 2;
+      y= (rand() % (28-4-3-1)) + 1;
+      w= (rand() % (30-x/2-3-3)) + 3;
+      h= (rand() % (20-y/2-3-4)) + 4;
     } while(overlap(x, y, w, h));
 
     do {
       bg= rand() & 7;
       fg= rand() & 7;
-    } while(IS_BAD_CONTRAST(fg,bg));
+    } while(IS_BAD_CONTRAST(fg, bg));
 
   } while(0);
   
