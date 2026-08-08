@@ -412,8 +412,8 @@ void spawn(app main) {
 char overlap(char x, char y, char w, char h) {
   int i, j;
 
-  if (x<2 || x+w >= 39) return 1;
-  if (y<1 || y+h >= 27) return 1;
+  if (x<2 || x+w >= 38) return 1;
+  if (y<1 || y+h >= 26) return 1;
   
   for(j= y-1; j<y+h+3; ++j)
     for(i= x-2; i<x+w+3; ++i)
@@ -451,6 +451,9 @@ void newwin(char* title, app main) {
   goto again;
 }
 
+// TODO: title not moved...
+// TODO: colors messed up...
+//   (because rewrite doesnpt restore fb bg only r c)
 void mowin(signed char dx, signed char dy, signed char dw, signed char dh) {
   Window* wf= win+wfocus;
   char x= wf->x, y= wf->y, w= wf->w, h= wf->h;
