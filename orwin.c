@@ -4,7 +4,7 @@
 #include <conio.h>
 #include <ctype.h>
 
-// (- 10647 8975) = 1672 bytes code for moving :-(
+// (- 10710 8975) = 1735 bytes code for mowin :-(
 #define MOWIN
 
 extern int counter_main();
