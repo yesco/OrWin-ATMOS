@@ -18,7 +18,7 @@ void ascii_loop(APP* app) {
 int ascii_main() {
   void* app= ascii_init();
   
-  do { ascii_loop(app); } while(YIELD());
+  do { ascii_loop(app); } while(1);
   
   return 0;
 }

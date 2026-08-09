@@ -39,7 +39,11 @@ typedef int (*app)();
 #define SCREENLAST (TEXTSCREEN+SCREENSIZE-1)
 
 // TODO: make my own interrupt timer!
-#define TIMER (*(unsigned int*)0x306)
+#define HITIME (*(unsigned char*)0x305)
+
+// hi byte of timer at yield
+char wtime= 0;
+
 
 #include "orwin.h"
 
@@ -147,6 +151,9 @@ char wputc(char c) {
     // overflow rows?
     if (winp->r++ +1 >= winp->h) winp->r= 0;
 
+    // yield at new line (minimize jitter/zig)
+    yield();
+
     // set current (new) colors
     *SCREENXY(winp->x-2, winp->y + winp->r)= BG | winp->bg;
     *SCREENXY(winp->x-1, winp->y + winp->r)=      winp->fg;
@@ -154,12 +161,18 @@ char wputc(char c) {
     wclreol();
     updatewinptr();
   }
+
  done:
+  // TODO: somehow here yield() crashes!
+
+  // 4th bit => 0..4095ms
+  //  if ((wtime^HITIME) & 0b1000) yield();
   return c;
 }
 
 void wputs(char* s) {
   while(*s) wputc(*s++);
+  // good time to release, minimic terminal avoid jitter
   yield();
 }
 
@@ -344,6 +357,9 @@ char yield() {
 
   // Handle keyboard, if there are no keyboard apps
   if (kbhit()) wkbhit(0);
+  
+  // snapshot hi byte
+  wtime= HITIME;
   
   // it returns non-zero when we come back to app!
   if (wfocus==wcur) togglecursor();
