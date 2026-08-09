@@ -4,13 +4,13 @@
 #include <conio.h>
 #include <ctype.h>
 
-// (- 10710 8975) = 1735 bytes code for mowin :-(
+// (- 10719 8975) = 1744 bytes code for mowin :-(
 #define MOWIN
 
-extern int counter_main();
-extern int ascii_main();
-extern int atmos_main();
-extern int echo_main();
+extern int counter_main(int argc, char** argv);
+extern int ascii_main(int argc, char** argv);
+extern int atmos_main(int argc, char** argv);
+extern int echo_main(int argc, char** argv);
 
 #define WIN_MAX 16
 
@@ -224,24 +224,22 @@ void setwin(char w) {
 }
 
 void windraw(Window* w) {
-  // header
-  // TODO: only when active
-  fill(w->x-2, w->y-1, w->w+4, 1, 127); // white block
+  // header (white block)
+  fill(w->x-2, w->y-1, w->w+4, 1, 127);
 
   // shadow (resets BG to BLACK)
   fill(w->x-1, w->y, w->w+4, w->h+1, BG+BLACK);
 
-  // text area background
   wclrscr();
 
-  // set text color after! (TODO: require "spacing" between frames
+  // set text color after
   fill(w->x + w->w +1, w->y, 1, w->h, WHITE);
 }
 
 // TODO: title+= bar?
 char window(char x, char y, char w, char h, char bg, char fg) {
   if (nwin==WIN_MAX) return 0;
-
+  
   // TODO: so 0 is full screen...
   winp= win+ ++nwin;
   winp->x= x;
@@ -395,7 +393,7 @@ void spawn_alloc(char n) {
       spawn_alloc(SPAWN_REC);
 
       // run & exit
-      winp->exit= main();
+      winp->exit= main(-1, NULL);
       // TODO: reuse allocation winp->cont
   
       DEB('*');

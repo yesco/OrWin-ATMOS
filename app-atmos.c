@@ -2,7 +2,7 @@
 
 #include "orwin.h"
 
-int atmos_main() {
+int atmos_main(int argc, char** argv) {
   char j, i= 0;
   
   while(1) {

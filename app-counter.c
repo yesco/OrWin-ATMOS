@@ -16,7 +16,7 @@ static void loop(APP* app) {
   }
 }  
 
-int counter_main() {
+int counter_main(int argc, char** argv) {
 
   APP* app= init();
   

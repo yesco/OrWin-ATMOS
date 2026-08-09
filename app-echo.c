@@ -4,7 +4,7 @@
 
 #include "orwin.h"
 
-int echo_main() {
+int echo_main(int argc, char** argv) {
 
   while(1) {
     char c= getc();
