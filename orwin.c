@@ -14,8 +14,25 @@ extern int echo_main(int argc, char** argv);
 
 #define WIN_MAX 16
 
+// Process Stack allocation sizes
+// ==============================
+
+// The cc65 stack has two parts:
+// - Hardware stack 256 bytes ~ 128 calls deeep
+// - Data stack (hi memory) ~ 2048 bytes
+
+//                       (/ 128 R)   (* R S)
+// SPAWN_REC  SPAWN_STEP  #procs   #stacksize
+// ---------  ----------  ------   ----------
+//    20          15        6         300      works for 5 + 1
+//    15
+
+// (/ 128 20)
+
 // SPAWN_REC is a measure of Hardware stack allocation
 #define SPAWN_REC 20
+//#define SPAWN_REC 15
+
 // SPAWN_STEP*SPAWN_REC is Data stack allocation
 #define SPAWN_STEP 15
 
@@ -75,7 +92,7 @@ typedef struct Window {
   char bg, fg;
 
   char status;
-  jmp_buf cont;
+  jmp_buf start, cont;
   char exit;
 } Window;
 
@@ -381,7 +398,7 @@ char yield() {
 // with app main to call! It'll push ahead.
 void spawn_alloc(char n) {
   char dummy[SPAWN_STEP]= {0};
-  char var= n;
+  unsigned int safe= 0x54FE; // check for overflow
   app main;
 
   DEB('.');
@@ -403,6 +420,9 @@ void spawn_alloc(char n) {
 
     } else {
 
+      // make the stack reusable
+      memcpy(winp->start, orwinnext, sizeof(orwinnext));
+      
       // we got a function address to call (an app main)
 
       // alloate space for this process by moving orwinnext forward (for next allocation)
