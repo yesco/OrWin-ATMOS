@@ -30,11 +30,14 @@ extern int echo_main(int argc, char** argv);
 // (/ 128 20)
 
 // SPAWN_REC is a measure of Hardware stack allocation
+//#define SPAWN_REC 20
+//#define SPAWN_REC 16 // works a while
+//#define SPAWN_REC 19 // like 20
 #define SPAWN_REC 20
-//#define SPAWN_REC 15
 
 // SPAWN_STEP*SPAWN_REC is Data stack allocation
-#define SPAWN_STEP 15
+//#define SPAWN_STEP 15
+#define SPAWN_STEP 30
 
 typedef int (*app)();
 
@@ -288,6 +291,8 @@ char window(char x, char y, char w, char h, char bg, char fg) {
 }
 
 
+void info();
+
 void help() {
   char tmp[40];
   memcpy(tmp, TEXTSCREEN, sizeof(tmp));
@@ -325,10 +330,13 @@ char wkbhit(char win) {
     switch(toupper(c)) {
     case 'N': case ' ': setfocus(wfocus+1); break;
     case 'P':           setfocus(wfocus-1); break;
-    case 27 : case 'I': setfocus(wprev); break; // toggle 
+    case 27 : case 'I': setfocus(wprev);    break; // toggle 
     case 127: case 'Q': case 'K': winkill(); setfocus(wfocus+1); break; // Kill
+
     case 13 :
-    case 'L': case 'R': newwin("foo", ascii_main); break; // List
+    case 'R': newwin("foo", ascii_main); break; // List
+
+    case 'L': info(); break;
     case 'H': help(); break;
 
 #ifdef MOWIN
@@ -597,18 +605,18 @@ int main() {
   wstatus(-1, "ECHO");
   spawn(echo_main);
 
+  window(22, 12, 14, 14, BLACK, YELLOW);
+  wstatus(-1, "File Edit Options Tools");
+  spawn(atmos_main);
+#endif 
+
   window( 2, 22, 14,  5, CYAN,  RED);
   wstatus(-1, "ASCII");
   spawn(ascii_main);
 
-  window(22, 12, 14, 14, BLACK, YELLOW);
-  wstatus(-1, "File Edit Options Tools");
-  spawn(atmos_main);
- 
   window(31,  5,  6,  5, WHITE, BLUE);
   wstatus(-1, "ASCII");
   spawn(ascii_main);
-#endif 
 
 #endif // DEMO
   
@@ -641,4 +649,40 @@ int main() {
   }
 
   return 0;
+}
+
+void cput1h(char x) { x&= 0xf; cputc(x + (x<10? '0': 'A'-10)); }
+void cput2h(char x) { cput1h(x>>4); cput1h(x); }
+void cput4h(unsigned int x) { cput2h(x>>8); cput2h(x&0xff); }
+
+void cputd(unsigned int d) { if (d>=10) cputd(d/10); cputc('0'+(d % 10)); }
+
+void printbuf(char* j) {
+  cputc(' ');
+  //  cputd(j[2]);
+  // cputd(*(unsigned*)j);
+  // cputd((((unsigned int)j[3])<<8) | j[4]);
+}
+
+void info() {
+  char i, *save= malloc(SCREENSIZE);
+  Window* w= win;
+
+  if (!save) return;
+  memcpy(save, TEXTSCREEN, SCREENSIZE);
+
+  clrscr();
+
+#undef clrscr
+  for(i= 0; i<WIN_MAX; ++i,++w) {
+    cputc('\r'); cputc('\n');
+    cput2h(i); cputc(' '); cput2h(w->status);
+    cput2h(w->exit);
+    printbuf((char*)&w->start);
+    printbuf((char*)&w->cont);
+  }
+  cgetc();
+
+  memcpy(TEXTSCREEN, save, SCREENSIZE);
+  free(save);
 }
