@@ -46,7 +46,9 @@ extern int echo_main(int argc, char** argv);
 
 // SPAWN_STEP*SPAWN_REC is Data stack allocation
 //#define SPAWN_STEP 15
-#define SPAWN_STEP 30
+//#define SPAWN_STEP 18 // lines up
+#define SPAWN_STEP 8 // lines up
+//#define SPAWN_STEP 30
 
 typedef int (*app)();
 
@@ -417,14 +419,17 @@ char yield() {
 // at end marks it in orwinnext, longjmp there
 // with app main to call! It'll push ahead.
 void spawn_alloc(char n) {
+  //  unsigned int safe= 0x54FE; // check for overflow
   char dummy[SPAWN_STEP]= {0};
-  unsigned int safe= 0x54FE; // check for overflow
-  app main;
 
   DEB('.');
 
+  //  memset(dummy, n, SPAWN_STEP);
+  //  dummy[0]= 0;
+  
   if (n) spawn_alloc(n-1 + dummy[0]);
   else {
+    app main;
     // arrived at end of allocated stack
     DEB('!');
     //cprintf("@%u\r\n", &dummy);
@@ -685,9 +690,9 @@ char* printbuf(char* j) {
   cspc();
   cputd(j[2]);
   cputc('-');
-  cputd(*(unsigned*)j);
+  cputd(r= *(unsigned*)j);
   cputc(':');
-  cputd(r=(((unsigned int)j[3])<<8) | j[4]);
+  cputd((((unsigned int)j[3])<<8) | j[4]);
   return r;
 }
 
@@ -714,9 +719,10 @@ void info() {
     if (w->status) {
       unsigned int n;
       #define BYTES (SPAWN_REC*(SPAWN_STEP+4))
-      cputc('\r'); cputc('\n');
+      cputc('\r'); cputc('\n'); cputc('=');
+	//      for(j=0; j<BYTES; ++j)
       for(j=0; j<BYTES; ++j)
-	cput2h(
+	if (*--r) cput2h(*r); else cputc('.');
     }
   }
   cgetc();
