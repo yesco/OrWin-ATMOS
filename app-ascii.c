@@ -4,7 +4,7 @@
 #include "orwin.h"
 
 typedef struct APP {
-  int i;
+  char c;
 } APP;
 
 void* ascii_init() {
@@ -12,7 +12,7 @@ void* ascii_init() {
 }
 
 void ascii_loop(APP* app) {
-  putchar((app->i++ % 96)+32);
+  putchar((app->c++ % 96)+32);
 }  
 
 int ascii_main() {

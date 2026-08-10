@@ -33,7 +33,13 @@ extern int echo_main(int argc, char** argv);
 //#define SPAWN_REC 20
 //#define SPAWN_REC 16 // works a while
 //#define SPAWN_REC 19 // like 20
-#define SPAWN_REC 20
+
+//#define SPAWN_REC 20
+// FUNCT-List needs 24 rets! (48 bytes)
+// to run everywhere, seems we are "deepP
+// cprintf was taking too much, cputd is 6 recursive
+// TODO: nested yields?
+#define SPAWN_REC 24
 
 // SPAWN_STEP*SPAWN_REC is Data stack allocation
 //#define SPAWN_STEP 15
@@ -588,7 +594,7 @@ int main() {
   spawn_alloc(SPAWN_REC);
 
 #define DEMO
-#define FISH
+  //#define FISH
   
 #ifdef DEMO
   // OK
@@ -615,6 +621,13 @@ int main() {
   spawn(ascii_main);
 
   window(31,  5,  6,  5, WHITE, BLUE);
+  wstatus(-1, "ASCII");
+  spawn(ascii_main);
+
+#else
+  
+  // apparently need at least one because allocations
+  window(31,  5,  6,  5, BLUE, WHITE);
   wstatus(-1, "ASCII");
   spawn(ascii_main);
 
@@ -657,11 +670,16 @@ void cput4h(unsigned int x) { cput2h(x>>8); cput2h(x&0xff); }
 
 void cputd(unsigned int d) { if (d>=10) cputd(d/10); cputc('0'+(d % 10)); }
 
+void cspc() { cputc(' '); }
+
+
 void printbuf(char* j) {
-  cputc(' ');
-  //  cputd(j[2]);
-  // cputd(*(unsigned*)j);
-  // cputd((((unsigned int)j[3])<<8) | j[4]);
+  cspc();
+  cputd(j[2]);
+  cputc('-');
+  cputd(*(unsigned*)j);
+  cputc(':');
+  cputd((((unsigned int)j[3])<<8) | j[4]);
 }
 
 void info() {
@@ -676,7 +694,7 @@ void info() {
 #undef clrscr
   for(i= 0; i<WIN_MAX; ++i,++w) {
     cputc('\r'); cputc('\n');
-    cput2h(i); cputc(' '); cput2h(w->status);
+    cput2h(i); cspc(); cput2h(w->status); cspc();
     cput2h(w->exit);
     printbuf((char*)&w->start);
     printbuf((char*)&w->cont);
