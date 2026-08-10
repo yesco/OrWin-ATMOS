@@ -13,7 +13,8 @@
 // Enable to get some stats (#putc)
 #define STATS
 
-///
+// optimized version
+// TODO: make putz default and putc call it?
 #define OPTPUTZ
 
 extern int counter_main(int argc, char** argv);
@@ -254,14 +255,14 @@ void wputz(char* s) {
     *++p= k;
     if (++c >= w) {
       winp->c= c= 0;
-      winp->r = r = (++r >= h)? 0: r;
+      winp->r= r= (++r >= h)? 0: r;
       p= updatewinptr()-1;
     }
   }
   
-  winp->c= c, winp->r= r, winp->p= p+1;
-
-  if (k) { wputc(k); goto restart; }
+  winp->c= c; winp->p= p+1;
+	       
+  if (k) { wputc(k); ++s; goto restart; }
 
   // good time to release, minimic terminal avoid jitter
   yield();

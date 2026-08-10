@@ -9,7 +9,7 @@ int flipflop_main(int argc, char** argv) {
   char* spc= calloc(z+1, 1);
   int i;
   
-  for(i= z; i--;) {
+  for(i= z; i--; ) {
     a[i]= 'a'+(i%10);
     spc[i]= 32;
   }
