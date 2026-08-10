@@ -10,9 +10,17 @@
 // (- 11136 10883) = 256 bytes
 #define INFO
 
+// Enable to get some stats (#putc)
+#define STATS
+
+///
+#define OPTPUTZ
+
 extern int counter_main(int argc, char** argv);
+extern int timer_main(int argc, char** argv);
 extern int ascii_main(int argc, char** argv);
 extern int atmos_main(int argc, char** argv);
+extern int flipflop_main(int argc, char** argv);
 extern int echo_main(int argc, char** argv);
 
 #define WIN_MAX 16
@@ -113,6 +121,9 @@ typedef struct Window {
   char status;
   jmp_buf start, cont;
   char exit;
+#ifdef STATS
+  unsigned int nputc;
+#endif
 } Window;
 
 char nwin= 0, wfocus= 0, wcur= 0;
@@ -151,6 +162,10 @@ void wclrscr() {
 // minimal terminal codes
 // Free codes: 11, 14; 24,25,26, 28,29,30,31
 char wputc(char c) {
+#ifdef STATS
+  ++winp->nputc;
+#endif
+  
   switch(c) {
   case 8: if (winp->c) winp->c--;  // CTRL-H = \b - BS - ^h
     else  if (winp->r) winp->r--,winp->c= winp->w;
@@ -205,14 +220,56 @@ char wputc(char c) {
   // TODO: somehow here yield() crashes!
 
   // 4th bit => 0..4095ms
-  //  if ((wtime^HITIME) & 0b1000) yield();
+  // not clear why higher value crawsh more easy?
+  //if ((wtime^HITIME) & 0b100000) yield(); // crash
+  //if ((wtime^HITIME) & 0b10000) yield(); // crash
+  //  if ((wtime^HITIME) & 0b1000) yield(); // crash later
+  //if ((wtime^HITIME) & 0b100) yield(); // every 3 chars
+  //if ((wtime^HITIME) & 0b10) yield(); // every 1.5 char
+  //if ((wtime^HITIME) & 0b1) yield(); // every 1.5 char
   return c;
 }
 
-void wputs(char* s) {
+void nl() { putchar('\n'); }
+
+#ifndef OPTPUTZ
+void wputz(char* s) {
   while(*s) wputc(*s++);
   // good time to release, minimic terminal avoid jitter
   yield();
+}
+#else
+void wputz(char* s) {
+  char c, r, w, h, *p, k;
+
+ restart:
+  c= winp->c, r= winp->r, w= winp->w, h= winp->h;
+  p= winp->p - 1;
+  --s;
+
+  while((k= *++s)) {
+    // handle special chars
+    if (k & 0x7f < 32) break;
+    // just put it there
+    *++p= k;
+    if (++c >= w) {
+      winp->c= c= 0;
+      winp->r = r = (++r >= h)? 0: r;
+      p= updatewinptr()-1;
+    }
+  }
+  
+  winp->c= c, winp->r= r, winp->p= p+1;
+
+  if (k) { wputc(k); goto restart; }
+
+  // good time to release, minimic terminal avoid jitter
+  yield();
+}
+#endif
+
+void wputs(char* s) {
+  wputz(s); nl();
 }
 
 void wputi(int i) {
@@ -397,6 +454,9 @@ char wgetc(char win) {
 }
 
 char yield() {
+  // Enable to "see" yields!
+  //wputc('|');
+  
   DEB('?');
 
   // Handle keyboard, if there are no keyboard apps
@@ -634,7 +694,8 @@ int main() {
   // ok
   window( 2,  2, 23,  7, GREEN, BLACK);
   wstatus(-1, "Counter");
-  spawn(counter_main);
+  //  spawn(counter_main);
+  spawn(timer_main);
 
 #ifdef FISH
   window( 4, 12, 11,  7, BLUE,  WHITE);
@@ -650,9 +711,11 @@ int main() {
   wstatus(-1, "ASCII");
   spawn(ascii_main);
 
+  // Atmos
   window(22, 12, 14, 14, BLACK, YELLOW);
   wstatus(-1, "File Edit Options Tools");
-  spawn(atmos_main);
+  //spawn(atmos_main);
+  spawn(flipflop_main);
 
 #else
   
@@ -789,6 +852,11 @@ void info() {
       cspc(); cputc('R'); cputc(':'); cputd(s-slnz);
       cputc('/'); cputd(2*SPAWN_REC);
     }
+
+#ifdef STATS
+    cspc(); cputc('#'); cputd(w->nputc);
+#endif     
+
   }
   cgetc();
 

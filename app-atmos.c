@@ -8,7 +8,7 @@ int atmos_main(int argc, char** argv) {
   while(1) {
     if (++i >= 64) i= 0;
     for(j= i & 31; j--; ) putchar(' ');
-    putchar(i & 7); puts("Atmos");
+    putchar(i & 7); putz("Atmos");
   }
   
   return 0;

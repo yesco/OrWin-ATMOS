@@ -13,6 +13,8 @@
 
 extern char wputc(char);
 extern void wputi(int);
+extern void nl();
+extern void wputz(char*);
 extern void wputs(char*);
 extern void wstatus(signed char, char*);
 extern char togglecursor();
@@ -21,6 +23,7 @@ extern void setfocus(signed char);
 #undef putchar
 #define putchar wputc
 #define puti wputi
+#define putz wputz
 #define puts wputs
 
 #include <setjmp.h>
