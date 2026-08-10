@@ -241,11 +241,10 @@ void wputz(char* s) {
 }
 #else
 void wputz(char* s) {
-  char c, r, w, h, *p, k;
+  char c, r, *p, k, w= winp->w, h= winp->h;
 
  restart:
-  c= winp->c, r= winp->r, w= winp->w, h= winp->h;
-  p= winp->p - 1;
+  c= winp->c, r= winp->r, p= winp->p - 1;
   --s;
 
   while((k= *++s)) {
