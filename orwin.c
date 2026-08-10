@@ -113,8 +113,8 @@ Window win[WIN_MAX];
 Window* winp= 0;
 
 
-void updatewinptr() {
-  winp->p= SCREENXY(winp->x + winp->c, winp->y + winp->r);
+char* updatewinptr() {
+  return winp->p= SCREENXY(winp->x + winp->c, winp->y + winp->r);
 }
 
 void wgotoxy(char x, char y) {
@@ -176,6 +176,8 @@ char wputc(char c) {
 
   // newline / line wrap?
   if (c==10 || winp->c++ >= winp->w) {
+    char* p;
+    
     winp->c= 0;
     // overflow rows?
     if (winp->r++ +1 >= winp->h) winp->r= 0;
@@ -183,12 +185,13 @@ char wputc(char c) {
     // yield at new line (minimize jitter/zig)
     yield();
 
+    p= updatewinptr();
+
     // set current (new) colors
-    *SCREENXY(winp->x-2, winp->y + winp->r)= BG | winp->bg;
-    *SCREENXY(winp->x-1, winp->y + winp->r)=      winp->fg;
+    p[-2]= BG | winp->bg;
+    p[-1]=      winp->fg;
 
     wclreol();
-    updatewinptr();
   }
 
  done:
@@ -614,18 +617,18 @@ int main() {
   wstatus(-1, "ECHO");
   spawn(echo_main);
 
-  window(22, 12, 14, 14, BLACK, YELLOW);
-  wstatus(-1, "File Edit Options Tools");
-  spawn(atmos_main);
+  window(31,  5,  6,  5, WHITE, BLUE);
+  wstatus(-1, "ASCII");
+  spawn(ascii_main);
 #endif 
 
   window( 2, 22, 14,  5, CYAN,  RED);
   wstatus(-1, "ASCII");
   spawn(ascii_main);
 
-  window(31,  5,  6,  5, WHITE, BLUE);
-  wstatus(-1, "ASCII");
-  spawn(ascii_main);
+  window(22, 12, 14, 14, BLACK, YELLOW);
+  wstatus(-1, "File Edit Options Tools");
+  spawn(atmos_main);
 
 #else
   
@@ -698,7 +701,9 @@ void info() {
 #undef clrscr
   for(i= 0; i<WIN_MAX; ++i,++w) {
     cputc('\r'); cputc('\n');
-    cput2h(i); cspc(); cput2h(w->status); cspc();
+    cput2h(i);
+    cputc(i==wfocus? '!': i==wcur? '=': ' ');
+    cput2h(w->status); cspc();
     cput2h(w->exit);
     printbuf((char*)&w->start);
     printbuf((char*)&w->cont);
