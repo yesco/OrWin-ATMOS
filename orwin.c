@@ -679,18 +679,22 @@ void cputd(unsigned int d) { if (d>=10) cputd(d/10); cputc('0'+(d % 10)); }
 void cspc() { cputc(' '); }
 
 
-void printbuf(char* j) {
+// returns
+char* printbuf(char* j) {
+  char * r;
   cspc();
   cputd(j[2]);
   cputc('-');
   cputd(*(unsigned*)j);
   cputc(':');
-  cputd((((unsigned int)j[3])<<8) | j[4]);
+  cputd(r=(((unsigned int)j[3])<<8) | j[4]);
+  return r;
 }
 
 void info() {
 #ifdef INFO
-  char i, *save= malloc(SCREENSIZE);
+  char i, *save= malloc(SCREENSIZE), *r;
+  unsigned int j;
   Window* w= win;
 
   if (!save) return;
@@ -699,14 +703,21 @@ void info() {
   clrscr();
 
 #undef clrscr
-  for(i= 0; i<WIN_MAX; ++i,++w) {
+  for(i= 0; i<nwin; ++i,++w) {
     cputc('\r'); cputc('\n');
     cput2h(i);
     cputc(i==wfocus? '!': i==wcur? '=': ' ');
     cput2h(w->status); cspc();
     cput2h(w->exit);
-    printbuf((char*)&w->start);
+    r= printbuf((char*)&w->start);
     printbuf((char*)&w->cont);
+    if (w->status) {
+      unsigned int n;
+      #define BYTES (SPAWN_REC*(SPAWN_STEP+4))
+      cputc('\r'); cputc('\n');
+      for(j=0; j<BYTES; ++j)
+	cput2h(
+    }
   }
   cgetc();
 
