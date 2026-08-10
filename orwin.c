@@ -42,13 +42,18 @@ extern int echo_main(int argc, char** argv);
 // to run everywhere, seems we are "deepP
 // cprintf was taking too much, cputd is 6 recursive
 // TODO: nested yields?
-#define SPAWN_REC 24
+
+//#define SPAWN_REC 24 // works with CTRL-L
+#define SPAWN_REC 30
 
 // SPAWN_STEP*SPAWN_REC is Data stack allocation
 //#define SPAWN_STEP 15
 //#define SPAWN_STEP 18 // lines up
 #define SPAWN_STEP 8 // lines up
 //#define SPAWN_STEP 30
+
+#define BYTES (SPAWN_REC*(SPAWN_STEP+1))
+
 
 typedef int (*app)();
 
@@ -427,7 +432,7 @@ void spawn_alloc(char n) {
   //  memset(dummy, n, SPAWN_STEP);
   //  dummy[0]= 0;
   
-  if (n) spawn_alloc(n-1 + dummy[0]);
+  if (--n) spawn_alloc(n + dummy[0]);
   else {
     app main;
     // arrived at end of allocated stack
@@ -453,6 +458,16 @@ void spawn_alloc(char n) {
       // alloate space for this process by moving orwinnext forward (for next allocation)
       spawn_alloc(SPAWN_REC);
 
+      // clear rest of unused stack
+      // clean the stack so can measure usage
+      {
+	char ss= winp->start[2];
+	char so=    orwinjmp[2];
+	char d= ss-so;
+      
+	memset(0x100, 0, ss-1);
+      }
+
       // run & exit
       winp->exit= main(-1, NULL);
       // TODO: reuse allocation winp->cont
@@ -464,6 +479,8 @@ void spawn_alloc(char n) {
       longjmp(orwinjmp, 1);
     }
   } 
+
+  n= 0; // make memory "clean"
 }
 
 // TODO: parameters
@@ -603,6 +620,8 @@ int main() {
 
   // initlize multitasker!
   spawn_alloc(SPAWN_REC);
+  // make it "pseudo task"
+  win[0].status= -1;
 
 #define DEMO
   //#define FISH
@@ -698,31 +717,77 @@ char* printbuf(char* j) {
 
 void info() {
 #ifdef INFO
-  char i, *save= malloc(SCREENSIZE), *r;
+  char i, s, *save= malloc(SCREENSIZE), *r, *p;
   unsigned int j;
   Window* w= win;
 
   if (!save) return;
   memcpy(save, TEXTSCREEN, SCREENSIZE);
 
+#undef clrscr
   clrscr();
 
-#undef clrscr
-  for(i= 0; i<nwin; ++i,++w) {
+  for(i= 0; i<=nwin; ++i,++w) {
     cputc('\r'); cputc('\n');
     cput2h(i);
     cputc(i==wfocus? '!': i==wcur? '=': ' ');
-    cput2h(w->status); cspc();
-    cput2h(w->exit);
-    r= printbuf((char*)&w->start);
+    cput2h(w->status);
+    cspc(); cput2h(w->exit);
+    s= w->start[2];
+
+#ifdef DEBUG
+    p= r= printbuf((char*)&w->start);
     printbuf((char*)&w->cont);
+#else
+    cspc(); cput2h(s);
+    cputc('-'); cput2h(w->cont[2]);
+    p= r= *(unsigned*)&w->start;
+#endif
+
     if (w->status) {
-      unsigned int n;
-      #define BYTES (SPAWN_REC*(SPAWN_STEP+4))
+      // data stack
+      char slnz= s, *lastnonzero= p;
+#ifdef DEBUG
       cputc('\r'); cputc('\n'); cputc('=');
-	//      for(j=0; j<BYTES; ++j)
+#endif
       for(j=0; j<BYTES; ++j)
-	if (*--r) cput2h(*r); else cputc('.');
+	if (*--p) {
+	  lastnonzero= p;
+	  //cput2h(*p);
+	}
+	else
+	  // cputc('.')
+	  ;
+      cspc(); cputc('S'); cputc(':'); cputd(r-lastnonzero);
+      cputc('/'); cputd(BYTES);
+
+      // R 6502 HardWare stack (page 1)
+#if 0
+      // print whole stack
+      s= 255;
+      p= (char*)0x200;
+      for(j=256; --j; )
+	if (*--p) {
+	  slnz= j;
+	  cput2h(*p);
+	}
+	else
+	  cputc('.')
+	  ;
+      cgetc();
+#else
+      p= (char*)(0x100+s);
+      for(j=s; j>s-SPAWN_REC*2+1; --j)
+	if (*--p) {
+	  slnz= j;
+	  //cput2h(*p);
+	}
+	else
+	  //cputc('.')
+	  ;
+#endif
+      cspc(); cputc('R'); cputc(':'); cputd(s-slnz);
+      cputc('/'); cputd(2*SPAWN_REC);
     }
   }
   cgetc();
