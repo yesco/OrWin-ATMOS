@@ -7,6 +7,9 @@
 // (- 10719 8975) = 1744 bytes code for mowin :-(
 #define MOWIN
 
+// (- 11136 10883) = 256 bytes
+#define INFO
+
 extern int counter_main(int argc, char** argv);
 extern int ascii_main(int argc, char** argv);
 extern int atmos_main(int argc, char** argv);
@@ -683,6 +686,7 @@ void printbuf(char* j) {
 }
 
 void info() {
+#ifdef INFO
   char i, *save= malloc(SCREENSIZE);
   Window* w= win;
 
@@ -703,4 +707,5 @@ void info() {
 
   memcpy(TEXTSCREEN, save, SCREENSIZE);
   free(save);
+#endif
 }
