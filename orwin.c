@@ -7,6 +7,7 @@
 // (- 10719 8975) = 1744 bytes code for mowin :-(
 // WARNING: crashes,maybe need more RSTACK 40 is not enoug
 #define MOWIN 
+#define OPTMOV
 
 // (- 11136 10883) = 256 bytes
 #define INFO
@@ -18,6 +19,8 @@
 // TODO: make putz default and putc call it?
 #define OPTPUTZ
 #define MAXPUTZ 128
+
+// TODO: see apprun.c !
 
 extern int counter_main(int argc, char** argv);
 extern int timer_main(int argc, char** argv);
@@ -106,6 +109,7 @@ jmp_buf orwinnext;
 
 #define TEXTSCREEN ((char*)0xBB80) // $BB80-BF3F
 #define SCREENROWS 28
+
 #define SCREENCOLS 40
 #define SCREENSIZE (SCREENROWS*SCREENCOLS)
 #define SCREENLAST (TEXTSCREEN+SCREENSIZE-1)
@@ -563,7 +567,7 @@ void spawn_alloc(char n) {
 	char so=    orwinjmp[2];
 	char d= ss-so;
       
-	memset(0x100, 0, ss-1);
+	memset((char*)0x100, 0, ss-1);
       }
 
       // run & exit
@@ -603,6 +607,7 @@ char overlap(char x, char y, char w, char h) {
 
 void newwin(char* title, app main) {
   char x, y, w, h, bg, fg;
+  (void)main;
 
  again:
   do {
@@ -636,6 +641,44 @@ void newwin(char* title, app main) {
 //   (because rewrite doesnpt restore fb bg only r c)
 void mowin(signed char dx, signed char dy, signed char dw, signed char dh) {
 #ifdef MOWIN
+#ifdef OPTMOV
+
+  // Idea, cut a +1 on all sides cutout from screen and just MOVE that
+  // if not gray when expanding or moving there then, then abort
+
+  // for now, no resize
+  if (dw || dh) return;
+
+  {
+    Window* wf= win+wfocus;
+    char x= wf->x, y= wf->y, w= wf->w, h= wf->h, b= wf->bg, f= wf->fg;
+    char i, *t, *p, W= w+4+2, H= h+2+2;
+    char *tmp= malloc(W*H), *s= SCREENXY(x-3, y-2);
+
+    if (!tmp) return;
+
+    // copy from screen to tmp (strided)
+    p= s; t= tmp;
+    for(i= H; i--;) {
+      memcpy(t, p, W);
+      p+= 40; t+= H;
+    }
+
+    // calculate new pos to read from
+    t= tmp - dx - dy*W;
+
+    // copy back from tmp to screen (strided)
+    p= s;
+    for(i= H; i--;) {
+      memcpy(p, t, W-1);
+      p+= 40; t+= H;
+    }
+
+    free(tmp);
+  }
+
+#else // !OPTMOV
+
   Window* wf= win+wfocus;
   char x= wf->x, y= wf->y, w= wf->w, h= wf->h, b= wf->bg, f= wf->fg;
   char i, j;
@@ -685,7 +728,10 @@ void mowin(signed char dx, signed char dy, signed char dw, signed char dh) {
     setwin(iw);
   }
   free(tmp);
+
+#endif // !OPTMOV
 #endif // MOWIN
+
 }
 
 // TODO: apps
@@ -823,11 +869,11 @@ void cspc() { cputc(' '); }
 
 // returns
 char* printbuf(char* j) {
-  char *r;
+  char *r= (char*)*(unsigned int*)j;;
   cspc();
   cputd(j[2]);
   cputc('-');
-  cputd(r= (char*)*(unsigned*)j);
+  cputd((unsigned int)r);
   cputc(':');
   cputd((((unsigned int)j[3])<<8) | j[4]);
   return r;
