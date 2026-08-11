@@ -9,7 +9,7 @@
 
 int timer_main(int argc, char** argv) {
   unsigned int last, now= TIMER;
-  char buf[16];
+  char buf[16]= {0};
 
   while(1) {
     last= now;

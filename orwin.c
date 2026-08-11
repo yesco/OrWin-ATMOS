@@ -249,7 +249,7 @@ void wputz(char* s) {
 
   while((k= *++s)) {
     // handle special chars
-    if (k & 0x7f < 32) break;
+    if ((k & 0x7f) < 32) break;
     // just put it there
     *++p= k;
     if (++c >= w) {
