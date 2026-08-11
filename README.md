@@ -54,7 +54,8 @@ Prev window:           FUNCT-P   FUNCT-leftarrow
 Last window: FUNCT-ESC FUNCT-T   FUNCT-I
 
 KILL window: FUNCT-K   FUNCT-Q   FUNCT-DEL
-List/Runwin: FUNCT-L   FUNCT-L   FUNCT-RETURN
+List window: FUNCT-L   
+Run new app: FUNCT-R   FUNCT-RETURN
 ```
 
 TODO: List/Run
@@ -97,6 +98,64 @@ int atmos_main() {
 - `puts() puti() kbkhit() getc()` implicitly calls `yield()` which makes it all tick
 - if you do long calculations, it'll block
 - you then need to insert `yield()` at convenient locations
+
+
+## "YIELD THE POWER" - Interactivety
+
+In order for a decent user experience, interactive
+applications should be called more often. Typically,
+you it would be the app that has the focus and where
+you currently type. When typing, you'd want it to respond
+*immediatly*.
+
+We have made the following design choices:
+- if the app has focus:
+- `kbhit` will return immediately if there is a keypress
+- otherwise, it will yield
+- `getc` will call `kbhit` in a loop and behave as expected
+- it returns without yielding if there is a key to read
+
+=> If there is no keypress, the app will yield(), with
+the assumption that it's waiting, but maybe has some
+"background" task of it's own to do. When its turn comes
+again, it will return from `kbhit` allow for that.
+
+It could be possible that a user "typing" so fast, and/or
+that the program is so slow that it totally "monopolizes"
+the CPU. Not sure if we need safe-guards against that.
+As long as it's waiting on real keyboard presses.
+
+If it reads from other source, it may be a different
+consideration.
+
+
+TODO:
+- mark if an app `getc` is waiting/checking for input
+- if not in focus, don't run at all (waiting in getc)
+
+
+## Throughput
+
+Interrupting a flow of data printed may feel "chunky".
+`putchar` employs the trick of yielding when it prints a
+newline or wraps around to next line. This mimics old
+terminals and feels natural.
+
+Even so, we want to limit, so we do a timming test since
+last yield; if we "exhausted" our quota putchar will yield
+automatically.
+
+Bulk operations like `puts putz` may do a lot of work;
+you use them because they are efficient, but since they
+are unbounded and may make other programs hickup.
+
+We have implemented a minimal-overhead `putz` (called by puts),
+enabled by OPTPUTZ, and it has maybe 3x higher througput than
+repeated calls to `putchar`. Still, We will yield after
+ca 64 (MAXPUTZ) characters, or explicit newlines.
+
+**TODO:**
+- 
 
 
 ## Ideas

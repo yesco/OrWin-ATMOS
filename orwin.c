@@ -16,6 +16,7 @@
 // optimized version
 // TODO: make putz default and putc call it?
 #define OPTPUTZ
+#define MAXPUTZ 128
 
 extern int counter_main(int argc, char** argv);
 extern int timer_main(int argc, char** argv);
@@ -83,14 +84,22 @@ typedef int (*app)();
 #define SCREENSIZE (SCREENROWS*SCREENCOLS)
 #define SCREENLAST (TEXTSCREEN+SCREENSIZE-1)
 
+#include "orwin.h"
+
+
 // TODO: make my own interrupt timer!
 #define HITIME (*(unsigned char*)0x305)
 
 // hi byte of timer at yield
 char wtime= 0;
 
+clock_t clock() {
+  // ORIC TIMER 100 interrupts/s,
+  // TODO: make clock_t bigger and handle wraparound
+  return ~*(unsigned int*)0x276;
+}
 
-#include "orwin.h"
+
 
 //////////////----------------------------------------
 #define HELP "FUNCT-3 spc Prev Next Toggle Run Kill"
@@ -220,11 +229,12 @@ char wputc(char c) {
  done:
   // TODO: somehow here yield() crashes!
 
-  // 4th bit => 0..4095ms
   // not clear why higher value crawsh more easy?
-  //if ((wtime^HITIME) & 0b100000) yield(); // crash
-  //if ((wtime^HITIME) & 0b10000) yield(); // crash
-  //  if ((wtime^HITIME) & 0b1000) yield(); // crash later
+  //if ((wtime^HITIME) & 0b1000000) yield();
+  if ((wtime^HITIME) & 0b1000000) yield();
+  //if ((wtime^HITIME) & 0b10000) yield();
+  // 4th bit => 0..4095us
+  //if ((wtime^HITIME) & 0b1000) yield();
   //if ((wtime^HITIME) & 0b100) yield(); // every 3 chars
   //if ((wtime^HITIME) & 0b10) yield(); // every 1.5 char
   //if ((wtime^HITIME) & 0b1) yield(); // every 1.5 char
@@ -241,18 +251,28 @@ void wputz(char* s) {
 }
 #else
 void wputz(char* s) {
-  char c, r, *p, k, w= winp->w, h= winp->h;
+  char n, c, r, *p, k, w= winp->w, h= winp->h;
+#ifdef STATS
+  unsigned int nputc= winp->nputc;
+#endif
 
  restart:
-  c= winp->c, r= winp->r, p= winp->p - 1;
+  n= MAXPUTZ; c= winp->c, r= winp->r, p= winp->p - 1;
   --s;
 
   while((k= *++s)) {
     // handle special chars
     if ((k & 0x7f) < 32) break;
+
+    //    if ((wtime^HITIME) & 0b1000000) yield(); // feels chunky
+    if (!--n) yield();
+
     // just put it there
     *++p= k;
-    if (++c >= w) {
+#ifdef STATS
+    ++nputc;
+#endif
+    if (c++ >= w) {
       winp->c= c= 0;
       winp->r= r= (++r >= h)? 0: r;
       p= updatewinptr()-1;
@@ -260,6 +280,9 @@ void wputz(char* s) {
   }
   
   winp->c= c; winp->p= p+1;
+#ifdef STATS
+  winp->nputc= nputc;
+#endif
 	       
   if (k) { wputc(k); ++s; goto restart; }
 

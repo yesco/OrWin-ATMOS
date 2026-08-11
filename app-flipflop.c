@@ -17,6 +17,8 @@ int flipflop_main(int argc, char** argv) {
   while(1) {
     putz(a);
     putz(spc);
+
+    //    for(i=635535; --i;);
   }
   
   return 0;

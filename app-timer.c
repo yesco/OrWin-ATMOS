@@ -4,17 +4,15 @@
 
 #include "orwin.h"
 
-// TODO: uptime unix call? lol
-#define TIMER (*(unsigned int*)0x304)
-
 int timer_main(int argc, char** argv) {
-  unsigned int last, now= TIMER;
+  clock_t last, now= clock();
   char buf[16]= {0};
 
   while(1) {
     last= now;
-    now= TIMER;
-    sprintf(buf, "%u\t", (last-now)/1000);
+    now= clock();
+    //sprintf(buf, "%u\t", (last-now)/1000);
+    sprintf(buf, "%u\t%u\n", now, now-last);
     putz(buf);
   }
 

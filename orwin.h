@@ -44,3 +44,8 @@ extern char wgetc(char win);
 #undef getc
 #define getc() wgetc(wcur)
 
+#define CLOCKS_PER_SEC 100
+typedef unsigned int clock_t;
+
+extern clock_t clock();
+
