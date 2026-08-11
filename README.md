@@ -48,12 +48,12 @@ and multitasking environment for the ORIC ATMOS.
 ```
 HELP       : FUNC-H
 
-Go #-window: FUNCT-number
-Next window: FUNCT-spc FUNCT-N   FUNCT-rightarrow
-Prev window:           FUNCT-P   FUNCT-leftarrow
-Last window: FUNCT-ESC FUNCT-T   FUNCT-I
+Go #-window: FUNCT-1   FUNCT-2   ...
+Next window: FUNCT-N
+Prev window: FUNCT-P
+Last window: FUNCT-ESC FUNCT-spc
 
-KILL window: FUNCT-K   FUNCT-Q   FUNCT-DEL
+Kill window: FUNCT-K   FUNCT-DEL
 List window: FUNCT-L   
 Run new app: FUNCT-R   FUNCT-RETURN
 ```

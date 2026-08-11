@@ -99,7 +99,7 @@ clock_t clock() {
 
 
 //////////////----------------------------------------
-#define HELP "FUNCT-3 spc Prev Next Toggle Run Kill"
+#define HELP "FUNCT-3 spc Prev Next List Run Kill"
 
 jmp_buf orwinjmp;
 jmp_buf orwinnext;
@@ -432,7 +432,7 @@ char wkbhit(char win) {
   // $a4 - left shift
   // $a5 - FUNCT key
   // $a7 - right shift
-  sprintf(TEXTSCREEN, "[%d %x] ", c, k);
+  sprintf(SCREENXY(30,27), "[%d %x] ", c, k);
 
   // FUNCT || CTRL & ARROWKEY
   if (c&128 || (k==0xa2 && c>=8 && c<=11)) {
@@ -441,10 +441,10 @@ char wkbhit(char win) {
     // Capture FUNC keys Window Keys
     c^= 128;
     switch(toupper(c)) {
-    case 'N': case ' ': setfocus(wfocus+1); break;
     case 'P':           setfocus(wfocus-1); break;
-    case 27 : case 'I': setfocus(wprev);    break; // toggle 
-    case 127: case 'Q': case 'K': winkill(); setfocus(wfocus+1); break; // Kill
+    case 'N': case 'I': setfocus(wfocus+1); break;
+    case 27 : case ' ': setfocus(wprev);    break; // toggle 
+    case 127: case 'K': winkill(); setfocus(wfocus+1); break; // Kill
 
     case 13 :
     case 'R': newwin("foo", ascii_main); break; // List

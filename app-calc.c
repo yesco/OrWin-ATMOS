@@ -12,13 +12,16 @@ char *KEYS= " \
 \
  1 2 3 - \
 \
-     0     + \
+ e 0 < + \
 ";
 
 int calc_main(int argc, char** argv) {
   char c, *p= KEYS, buf[30];
-  int n, stack[MAX]= {0};
+  long n= 2, stack[MAX]= {0};
 
+  // TODO: orwin cursor toggle...
+  //togglecursor();
+  
   clrscr();
 
   gotoxy(0, 3);
@@ -36,9 +39,9 @@ int calc_main(int argc, char** argv) {
   }
 
   do {
-    int tos= stack[n], nos= stack[n-1];
+    long tos= stack[n], nos= stack[n-1];
     
-    sprintf(buf, BGBLACK WHITE "     %6d  " BGWHITE MAGENTA, tos);
+    sprintf(buf, BGBLACK WHITE "%11ld  " BGWHITE, tos);
     // TODO: for double height may need shift down one row!
     gotoxy(1, 1); putz(buf);
     gotoxy(1, 2); putz(buf);
@@ -52,13 +55,20 @@ int calc_main(int argc, char** argv) {
     case '-': tos= tos-nos; goto POP;
     case '*': tos= tos*nos; goto POP;
     case '/': tos= tos/nos; goto POP;
-    case ' ': case 10: case 13: tos= 0; break;
+    case 'e': case ' ': case 10: case 13:
+      // PUSH
+      ++n;
+    case 'c':
+      tos= 0; break;
+    case 127: tos/= 10; break;
     default: if (isdigit(c)) tos= tos*10 + c-'0';
     }
 
+    stack[n]= tos;
     continue;
     
   POP:
+    if (n<=2) n==2;
     stack[--n]= tos;
 
   } while(1);
