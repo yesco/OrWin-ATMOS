@@ -11,5 +11,6 @@ int atmos_main(int argc, char** argv) {
     putchar(i & 7); putz("Atmos");
   }
   
+  (void)argc; (void)argv;
   return 0;
 }

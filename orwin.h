@@ -1,21 +1,46 @@
-#define BLACK    0
-#define RED      1
-#define GREEN    2
-#define YELLOW   3
-#define BLUE     4
-#define MAGNENTA 5
-#define CYAN     6
-#define WHITE    7
+#define black    0
+#define red      1
+#define green    2
+#define yellow   3
+#define blue     4
+#define magenta  5
+#define cyan     6
+#define white    7
 
 #define BG      16
 
-// TODO: "orwin.h"
+// text colours
+#define BLACK    "\x0"
+#define RED      "\x1"
+#define GREEN    "\x2"
+#define YELLOW   "\x3"
+#define BLUE     "\x4"
+#define MAGENTA  "\x5"
+#define CYAN     "\x6"
+#define WHITE    "\x7"
+
+// background colours
+#define BGBLACK    "\x10"
+#define BGRED      "\x11"
+#define BGGREEN    "\x12"
+#define BGYELLOW   "\x13"
+#define BGBLUE     "\x14"
+#define BGMAGENTA  "\x15"
+#define BGCYAN     "\x16"
+#define BGWHITE    "\x17"
+
 
 extern char wputc(char);
 extern void wputi(int);
 extern void nl();
 extern void wputz(char*);
 extern void wputs(char*);
+extern char* winptr();
+
+extern void wgotoxy(char x, char y);
+extern void wclreol();
+extern void wclrscr();
+
 extern void wstatus(signed char, char*);
 extern char togglecursor();
 extern void setfocus(signed char);
@@ -25,6 +50,11 @@ extern void setfocus(signed char);
 #define puti wputi
 #define putz wputz
 #define puts wputs
+
+#define clrscr wclrscr
+#define clreol wclreol
+#define gotoxy wgotoxy
+
 
 #include <setjmp.h>
 

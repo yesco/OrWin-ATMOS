@@ -21,5 +21,6 @@ int flipflop_main(int argc, char** argv) {
     //    for(i=635535; --i;);
   }
   
+  (void)argc; (void)argv;
   return 0;
 }

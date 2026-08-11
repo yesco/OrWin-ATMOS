@@ -16,5 +16,6 @@ int timer_main(int argc, char** argv) {
     putz(buf);
   }
 
+  (void)argc; (void)argv;
   return 0;
 }

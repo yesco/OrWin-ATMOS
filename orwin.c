@@ -5,7 +5,8 @@
 #include <ctype.h>
 
 // (- 10719 8975) = 1744 bytes code for mowin :-(
-#define MOWIN
+// WARNING: crashes,maybe need more RSTACK 40 is not enoug
+#define MOWIN 
 
 // (- 11136 10883) = 256 bytes
 #define INFO
@@ -24,6 +25,7 @@ extern int ascii_main(int argc, char** argv);
 extern int atmos_main(int argc, char** argv);
 extern int flipflop_main(int argc, char** argv);
 extern int echo_main(int argc, char** argv);
+extern int calc_main(int argc, char** argv);
 
 #define WIN_MAX 16
 
@@ -54,7 +56,8 @@ extern int echo_main(int argc, char** argv);
 // TODO: nested yields?
 
 //#define SPAWN_REC 24 // works with CTRL-L
-#define SPAWN_REC 30
+#define SPAWN_REC 25 
+//#define SPAWN_REC 40 // not even enough for move+
 
 // SPAWN_STEP*SPAWN_REC is Data stack allocation
 //#define SPAWN_STEP 15
@@ -77,12 +80,6 @@ typedef int (*app)();
   #define DKEY() 
 #endif
 
-
-#define TEXTSCREEN ((char*)0xBB80) // $BB80-BF3F
-#define SCREENROWS 28
-#define SCREENCOLS 40
-#define SCREENSIZE (SCREENROWS*SCREENCOLS)
-#define SCREENLAST (TEXTSCREEN+SCREENSIZE-1)
 
 #include "orwin.h"
 
@@ -107,10 +104,14 @@ clock_t clock() {
 jmp_buf orwinjmp;
 jmp_buf orwinnext;
 
+#define TEXTSCREEN ((char*)0xBB80) // $BB80-BF3F
+#define SCREENROWS 28
+#define SCREENCOLS 40
+#define SCREENSIZE (SCREENROWS*SCREENCOLS)
+#define SCREENLAST (TEXTSCREEN+SCREENSIZE-1)
+
 #define curscr TEXTSCREEN
-
 #define SCREENXY(x, y) ((char*)(curscr+(5*(y))*8+(x)))
-
 
 void fill(char x, char y, char w, char h, char c) {
   char* p= SCREENXY(x, y);
@@ -146,8 +147,8 @@ char* updatewinptr() {
 }
 
 void wgotoxy(char x, char y) {
-  winp->c= x;
-  winp->r= y;
+  winp->c= x<winp->w? x: winp->w;
+  winp->r= y<winp->h? y: winp->h;
   updatewinptr();
 }
 
@@ -167,6 +168,10 @@ void wclrscr() {
 
   // set text color
   fill(winp->x-1, winp->y, 1, winp->h, winp->fg);
+}
+
+char* winptr() {
+  return winp->p;
 }
 
 // minimal terminal codes
@@ -360,12 +365,12 @@ void windraw(Window* w) {
   fill(w->x-2, w->y-1, w->w+4, 1, 127);
 
   // shadow (resets BG to BLACK)
-  fill(w->x-1, w->y, w->w+4, w->h+1, BG+BLACK);
+  fill(w->x-1, w->y, w->w+4, w->h+1, BG+black);
 
   wclrscr();
 
   // set text color after
-  fill(w->x + w->w +1, w->y, 1, w->h, WHITE);
+  fill(w->x + w->w +1, w->y, 1, w->h, white);
 }
 
 // TODO: title+= bar?
@@ -410,7 +415,7 @@ char wkey= 0;
 // non-blocking
 // (win=0 to not yield here as its called fom yield)
 char wkbhit(char win) {
-  char c;
+  char c, k;
   
   if (wkey && wfocus==win) return wkey;
   if (!kbhit()) {
@@ -418,10 +423,19 @@ char wkbhit(char win) {
     return 0;
   }
   
-  c= cgetc();
-  sprintf(TEXTSCREEN, "[%d]", c);
+  c= cgetc(); k= *(char*)0x209;
 
-  if (c&128) {
+  // debug print key
+  // ORIC ATMOS: ROM magical shift key $209
+  // $38 - no key
+  // $a2 - CTRL key
+  // $a4 - left shift
+  // $a5 - FUNCT key
+  // $a7 - right shift
+  sprintf(TEXTSCREEN, "[%d %x] ", c, k);
+
+  // FUNCT || CTRL & ARROWKEY
+  if (c&128 || (k==0xa2 && c>=8 && c<=11)) {
     //cprintf("  #%d '%c' ", c, c&0x7f);
     wdecorate();
     // Capture FUNC keys Window Keys
@@ -439,15 +453,16 @@ char wkbhit(char win) {
     case 'H': help(); break;
 
 #ifdef MOWIN
-    case   8: mowin(-1,0,0,0); break;
-    case   9: mowin(+1,0,0,0); break;
-    case  10: mowin(0,+1,0,0); break;
-    case  11: mowin(0,-1,0,0); break;
-      // TODO: conflicting, conflat with SHIFT/CTRL
-    case 'W': mowin(0,0,+1,0); break;
-    case 'S': mowin(0,0,-1,0); break;
-    case 'T': mowin(0,0,0,+1); break;
-    case 'Z': mowin(0,0,0,-1); break;
+    // moving using FUNCT & ARROWKEYS
+    case 0x08: mowin(-1,0,0,0); break;
+    case 0x09: mowin(+1,0,0,0); break;
+    case 0x0a: mowin(0,+1,0,0); break;
+    case 0x0b: mowin(0,-1,0,0); break;
+    // resizing using CTRL & ARROWKYS
+    case 0x88: mowin(0,0,+1,0); break;
+    case 0x89: mowin(0,0,-1,0); break;
+    case 0x8a: mowin(0,0,0,+1); break;
+    case 0x8b: mowin(0,0,0,-1); break;
 #endif // MOWIN
 
     default:  if (isdigit(c))     setfocus(c-'0');
@@ -611,7 +626,7 @@ void newwin(char* title, app main) {
   //  wputc('('); wputi(x); wputc(','); wputi(y); wputc(')');
   //  wputi(w); wputc('x'); wputi(h);
   //  spawn(main);
-  cprintf("(%d,%d) %dx%d  ", x,y,w,h);
+  //cprintf("(%d,%d) %dx%d  ", x,y,w,h);
   cgetc();
   goto again;
 }
@@ -707,7 +722,11 @@ int main() {
   win[0].status= -1;
 
 #define DEMO
-  //#define FISH
+//#define ATMOS
+//#define FISH
+//#define ECHO
+//#define ASCII2
+#define CALC
   
 #ifdef DEMO
   // OK
@@ -715,35 +734,48 @@ int main() {
   // CRASH: smaller than 23 crash+++
   // window( 3,  2, 22,  7, GREEN, BLACK);
   // ok
-  window( 2,  2, 23,  7, GREEN, BLACK);
+  window( 2,  2, 23,  7, green, black);
   wstatus(-1, "Counter");
   //  spawn(counter_main);
   spawn(timer_main);
 
-#ifdef FISH
-  window( 4, 12, 11,  7, BLUE,  WHITE);
+#ifdef ECHO
+  window( 4, 12, 11,  7, blue,  white);
   wstatus(-1, "ECHO");
   spawn(echo_main);
+#endif
 
-  window(31,  5,  6,  5, WHITE, BLUE);
+#ifdef FISH
+  window(31,  5,  6,  5, white, blue);
   wstatus(-1, "ASCII");
   spawn(ascii_main);
 #endif 
 
-  window( 2, 22, 14,  5, CYAN,  RED);
+#ifdef CALC
+  // Need odd line! for double!
+  window( 4, 13, 17, 13, white,  black);
+  wstatus(-1, "RPN-CALC");
+  spawn(calc_main);
+#endif
+
+#ifdef ASCII2
+  window( 2, 22, 14,  5, cyan,  red);
   wstatus(-1, "ASCII");
   spawn(ascii_main);
-
+#endif
+  
+#ifdef ATMOS
   // Atmos
-  window(22, 12, 14, 14, BLACK, YELLOW);
+  window(22, 12, 14, 14, black, yellow);
   wstatus(-1, "File Edit Options Tools");
   //spawn(atmos_main);
   spawn(flipflop_main);
-
+#endif ATMOS
+  
 #else
   
   // apparently need at least one because allocations
-  window(31,  5,  6,  5, BLUE, WHITE);
+  window(31,  5,  6,  5, blue, white);
   wstatus(-1, "ASCII");
   spawn(ascii_main);
 
@@ -791,11 +823,11 @@ void cspc() { cputc(' '); }
 
 // returns
 char* printbuf(char* j) {
-  char * r;
+  char *r;
   cspc();
   cputd(j[2]);
   cputc('-');
-  cputd(r= *(unsigned*)j);
+  cputd(r= (char*)*(unsigned*)j);
   cputc(':');
   cputd((((unsigned int)j[3])<<8) | j[4]);
   return r;
@@ -827,7 +859,7 @@ void info() {
 #else
     cspc(); cput2h(s);
     cputc('-'); cput2h(w->cont[2]);
-    p= r= *(unsigned*)&w->start;
+    p= r= (char*)*(unsigned*)&w->start;
 #endif
 
     if (w->status) {

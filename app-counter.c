@@ -22,5 +22,6 @@ int counter_main(int argc, char** argv) {
   
   do { loop(app); } while(YIELD());
   
+  (void)argc; (void)argv;
   return 0;
 }
