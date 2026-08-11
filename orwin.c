@@ -656,8 +656,13 @@ void mowin(signed char dx, signed char dy, signed char dw, signed char dh) {
     char i, *t, *p, W= w+4+2+1, H= h+2+2;
     char *tmp, *s= SCREENXY(x-3, y-2);
 
+    // make sure to have 1 line of gray around!
     if (x+dx < 3) return;
     if (x+w+dx >= 40-3) return;
+
+    if (y+dy < 2) return;
+    if (y+h+dy >= 28-1) return;
+
 
     tmp= malloc(W*H);
     if (!tmp) return;
@@ -675,6 +680,8 @@ void mowin(signed char dx, signed char dy, signed char dw, signed char dh) {
 
     // copy back from tmp to screen (strided)
     p= s;
+    if (dy>0) p+= 40;
+
     for(i= H; --i;) {
       memcpy(p, t, W+dx);
       p+= 40; t+= W;
