@@ -649,12 +649,17 @@ void mowin(signed char dx, signed char dy, signed char dw, signed char dh) {
   // for now, no resize
   if (dw || dh) return;
 
+
   {
     Window* wf= win+wfocus;
     char x= wf->x, y= wf->y, w= wf->w, h= wf->h, b= wf->bg, f= wf->fg;
     char i, *t, *p, W= w+4+2+1, H= h+2+2;
-    char *tmp= malloc(W*H), *s= SCREENXY(x-3, y-2);
+    char *tmp, *s= SCREENXY(x-3, y-2);
 
+    if (x+dx < 3) return;
+    if (x+w+dx >= 40-3) return;
+
+    tmp= malloc(W*H);
     if (!tmp) return;
 
     // copy from screen to tmp (strided)
@@ -665,12 +670,13 @@ void mowin(signed char dx, signed char dy, signed char dw, signed char dh) {
     }
 
     // calculate new pos to read from
-    t= tmp - dx - dy*W;
+    t= tmp - dx;
+    if (dy<0) t+= W;
 
     // copy back from tmp to screen (strided)
     p= s;
-    for(i= H; i--;) {
-      memcpy(p, t, W-1);
+    for(i= H; --i;) {
+      memcpy(p, t, W+dx);
       p+= 40; t+= W;
     }
 
