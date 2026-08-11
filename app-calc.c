@@ -20,8 +20,6 @@ int calc_main(int argc, char** argv) {
   long n= 2, stack[MAX]= {0};
 
   // TODO: orwin cursor toggle...
-  //togglecursor();
-  
   clrscr();
 
   gotoxy(0, 3);
@@ -48,13 +46,17 @@ int calc_main(int argc, char** argv) {
     gotoxy(3, 1); *winptr()= 0xa; // DOUBLE
     gotoxy(3, 2); *winptr()= 0xa; // DOUBLE
 
+    // hmmm, put explicit pos, then get rid of cursor
+    gotoxy(1, 3);
+    togglecursor();
     c= getc();
+    togglecursor();
 
     switch(c) {
-    case '+': tos= tos-nos; goto POP;
-    case '-': tos= tos-nos; goto POP;
-    case '*': tos= tos*nos; goto POP;
-    case '/': tos= tos/nos; goto POP;
+    case '+': tos= nos+tos; goto POP;
+    case '-': tos= nos-tos; goto POP;
+    case '*': tos= nos*tos; goto POP;
+    case '/': tos= nos/tos; goto POP;
     case 'e': case ' ': case 10: case 13:
       // PUSH
       ++n;
