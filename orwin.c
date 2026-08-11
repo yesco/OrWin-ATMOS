@@ -652,7 +652,7 @@ void mowin(signed char dx, signed char dy, signed char dw, signed char dh) {
   {
     Window* wf= win+wfocus;
     char x= wf->x, y= wf->y, w= wf->w, h= wf->h, b= wf->bg, f= wf->fg;
-    char i, *t, *p, W= w+4+2, H= h+2+2;
+    char i, *t, *p, W= w+4+2+1, H= h+2+2;
     char *tmp= malloc(W*H), *s= SCREENXY(x-3, y-2);
 
     if (!tmp) return;
@@ -661,7 +661,7 @@ void mowin(signed char dx, signed char dy, signed char dw, signed char dh) {
     p= s; t= tmp;
     for(i= H; i--;) {
       memcpy(t, p, W);
-      p+= 40; t+= H;
+      p+= 40; t+= W;
     }
 
     // calculate new pos to read from
@@ -671,9 +671,11 @@ void mowin(signed char dx, signed char dy, signed char dw, signed char dh) {
     p= s;
     for(i= H; i--;) {
       memcpy(p, t, W-1);
-      p+= 40; t+= H;
+      p+= 40; t+= W;
     }
 
+    wf->x+= dx; wf->y+= dy;
+    
     free(tmp);
   }
 
