@@ -661,8 +661,19 @@ void mowin(signed char dx, signed char dy, signed char dw, signed char dh) {
     if (y+h+dy >= 28-1) return;
 
     // test to make sure have gray line
-    // above
-    // below
+    // TODO: too much code ! ?
+    if (dy) {
+      tmp= s + (dy<0? -40: 40*H);
+      for(i= W; i--;)
+	if (tmp[i] != 126) return;
+    } else {
+      tmp= s + (dx<0? -1: W);
+      for(i= H; i--;) {
+	if (*tmp != 126) return;
+	tmp+= 40;
+      }
+    }
+      
     // on right
     // on left
     // two empty so can move back
@@ -787,7 +798,8 @@ int main() {
   // make it "pseudo task"
   win[0].status= -1;
 
-#define DEMO
+  //#define DEMO
+  //#define TIMER
 //#define ATMOS
 //#define FISH
 //#define ECHO
@@ -800,11 +812,16 @@ int main() {
   // CRASH: smaller than 23 crash+++
   // window( 3,  2, 22,  7, GREEN, BLACK);
   // ok
+#ifdef TIMER
+  window( 2,  2, 12,  7, green, black);
+  wstatus(-1, "Timer");
+  spawn(timer_main);
+#else
   window( 2,  2, 23,  7, green, black);
   wstatus(-1, "Counter");
-  //  spawn(counter_main);
-  spawn(timer_main);
-
+  spawn(counter_main);
+#endif
+  
 #ifdef ECHO
   window( 4, 12, 11,  7, blue,  white);
   wstatus(-1, "ECHO");
@@ -839,8 +856,9 @@ int main() {
 #endif ATMOS
   
 #else
+
   // TODO: need at least one because allocations
-  window(31,  5,  6,  5, blue, white);
+  window(30,  5,  6,  5, blue, white);
   wstatus(-1, "ASCII");
   spawn(ascii_main);
 
