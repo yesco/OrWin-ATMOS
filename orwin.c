@@ -4,9 +4,10 @@
 #include <conio.h>
 #include <ctype.h>
 
-// (- 10719 8975) = 1744 bytes code for mowin :-(
-// WARNING: crashes,maybe need more RSTACK 40 is not enoug
+// (- 13701 12410) = 1291 bytes code for mowin :-(
+// TODO: RESIZE crashes... 
 #define MOWIN 
+// (- 14332 12410) = 1922, (- 1922 1291) = 631 bytes more
 #define OPTMOV
 
 // (- 11136 10883) = 256 bytes
@@ -639,20 +640,16 @@ void newwin(char* title, app main) {
 // TODO: title not moved...
 // TODO: colors messed up...
 //   (because rewrite doesnpt restore fb bg only r c)
-void mowin(signed char dx, signed char dy, signed char dw, signed char dh) {
 #ifdef MOWIN
+void mowin(signed char dx, signed char dy, signed char dw, signed char dh) {
+  Window* wf= win+wfocus;
+  char x= wf->x, y= wf->y, w= wf->w, h= wf->h, b= wf->bg, f= wf->fg;
+
 #ifdef OPTMOV
-
-  // Idea, cut a +1 on all sides cutout from screen and just MOVE that
-  // if not gray when expanding or moving there then, then abort
-
-  // for now, no resize
-  if (dw || dh) return;
-
-
-  {
-    Window* wf= win+wfocus;
-    char x= wf->x, y= wf->y, w= wf->w, h= wf->h, b= wf->bg, f= wf->fg;
+  // MOVING only smoothly
+  if (!dw && !dh) {
+    // Idea, cut a +1 on all sides cutout from screen and just MOVE that
+    // if not gray when expanding or moving there then, then abort
     char i, *t, *p, W= w+4+2+1, H= h+2+2;
     char *tmp, *s= SCREENXY(x-3, y-2);
 
@@ -663,6 +660,12 @@ void mowin(signed char dx, signed char dy, signed char dw, signed char dh) {
     if (y+dy < 2) return;
     if (y+h+dy >= 28-1) return;
 
+    // test to make sure have gray line
+    // above
+    // below
+    // on right
+    // on left
+    // two empty so can move back
 
     tmp= malloc(W*H);
     if (!tmp) return;
@@ -690,64 +693,63 @@ void mowin(signed char dx, signed char dy, signed char dw, signed char dh) {
     wf->x+= dx; wf->y+= dy;
     
     free(tmp);
-  }
+  } else
+#endif
+  // TODO: RESIZE crashes!
+  // Resize by capture text, undraw, and redraw
+  {
+    char i, j;
+    int z= (w+3)*y+1; // 3= bg+fg+\n
+    char *tmp= malloc(z), *t= tmp-1;
 
-#else // !OPTMOV
+    // save text w newlines
+    for(j= y; j<y+h; ++j) {
+      // TODO: -2 to include bg,fg of each line!
+      // but printing it may take space, lol
+      // Adjust printing after NL
+      for(i= x; i<x+w; ++i) 
+	*++t= *SCREENXY(i, j);
+      // TODO: edgecases...
+      while(*t==' ') t--,cputc(8);
+      *++t= '\n';
+    }
+    *++t= 0;
 
-  Window* wf= win+wfocus;
-  char x= wf->x, y= wf->y, w= wf->w, h= wf->h, b= wf->bg, f= wf->fg;
-  char i, j;
-  int z= (w+3)*y+1; // 3= bg+fg+\n
-  char *tmp= malloc(z), *t= tmp-1;
+    winerase(wf);
 
-  // save text w newlines
-  for(j= y; j<y+h; ++j) {
-    // TODO: -2 to include bg,fg of each line!
-    // but printing it may take space, lol
-    // Adjust printing after NL
-    for(i= x; i<x+w; ++i) 
-      *++t= *SCREENXY(i, j);
-    // TODO: edgecases...
-    while(*t==' ') t--,cputc(8);
-    *++t= '\n';
-  }
-  *++t= 0;
-
-  winerase(wf);
-
-  // only move if not overlap
-  if (overlap(wf->x+dx, wf->y+dy, wf->w+dw, wf->h+dh)) {
-    windraw(wf); return;
-  } else {
-    char iw= winp-win;
+    // only move if not overlap
+    if (overlap(wf->x+dx, wf->y+dy, wf->w+dw, wf->h+dh)) {
+      windraw(wf); return;
+    } else {
+      char iw= winp-win;
     
-    wf->x+= dx; wf->y+= dy; wf->w+= dw; wf->h+= dh;
-    i= wf->c; j= wf->r;
+      wf->x+= dx; wf->y+= dy; wf->w+= dw; wf->h+= dh;
+      i= wf->c; j= wf->r;
 
-    // Pretend to be in wfocus
-    setwin(wf-win);
-    updatewinptr();
+      // Pretend to be in wfocus
+      setwin(wf-win);
+      updatewinptr();
 
-    // Draw new pusition + text
-    windraw(wf);
-    t= tmp;
-    // not using wputs as it will yield()
-    while(*t) wputc(*t++);
+      // Draw new pusition + text
+      windraw(wf);
+      t= tmp;
+      // not using wputs as it will yield()
+      while(*t) wputc(*t++);
 
-    // restore cursor position & color
-    wf->c= i > wf->w? wf->w: i;
-    wf->r= j > wf->h? wf->h: j;
-    wf->bg= b; wf->fg= f;
-    updatewinptr();
+      // restore cursor position & color
+      wf->c= i > wf->w? wf->w: i;
+      wf->r= j > wf->h? wf->h: j;
+      wf->bg= b; wf->fg= f;
+      updatewinptr();
 
-    setwin(iw);
+      setwin(iw);
+    }
+
+    free(tmp);
   }
-  free(tmp);
-
-#endif // !OPTMOV
-#endif // MOWIN
 
 }
+#endif // MOWIN
 
 // TODO: apps
 
