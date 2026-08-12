@@ -758,6 +758,11 @@ int main() {
 
   int napp;
   
+  // KBRPT - keyboard repeat rate
+  *(char*)0x24f= 2;
+  // KBDLY - keyboard delay before repeat
+  *(char*)0x24e= 3;
+  
   // cursor(0); // doesn't work
   // status location is at #26A.
   //  1 – cursor ON when set.
@@ -784,7 +789,7 @@ int main() {
   // make it "pseudo task"
   win[0].status= -1;
 
-#define DEMO
+//#define DEMO
 //#define ATMOS
 //#define FISH
 //#define ECHO
@@ -836,8 +841,7 @@ int main() {
 #endif ATMOS
   
 #else
-  
-  // apparently need at least one because allocations
+  // TODO: need at least one because allocations
   window(31,  5,  6,  5, blue, white);
   wstatus(-1, "ASCII");
   spawn(ascii_main);
