@@ -660,7 +660,8 @@ void mowin(signed char dx, signed char dy, signed char dw, signed char dh) {
     if (y+dy < 2) return;
     if (y+h+dy >= 28-1) return;
 
-    // test to make sure have gray line
+    // non-overlap, or directly adjacent
+    // (make sure have gray line at edge)
     // TODO: too much code ! ?
     if (dy) {
       tmp= s + (dy<0? -40: 40*H);
@@ -674,10 +675,7 @@ void mowin(signed char dx, signed char dy, signed char dw, signed char dh) {
       }
     }
       
-    // on right
-    // on left
-    // two empty so can move back
-
+    // let's copy part to mvoe
     tmp= malloc(W*H);
     if (!tmp) return;
 
@@ -701,6 +699,7 @@ void mowin(signed char dx, signed char dy, signed char dw, signed char dh) {
       p+= 40; t+= W;
     }
 
+    // update it
     wf->x+= dx; wf->y+= dy;
     
     free(tmp);
