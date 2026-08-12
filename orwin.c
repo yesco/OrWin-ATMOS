@@ -447,8 +447,9 @@ char wkbhit(char win) {
     c^= 128;
     switch(toupper(c)) {
     case 'P':           setfocus(wfocus-1); break;
-    case 'N': case 'I': setfocus(wfocus+1); break;
-    case 27 : case ' ': setfocus(wprev);    break; // toggle 
+    case 'N': case ' ': setfocus(wfocus+1); break;
+    case 27 : case   9: setfocus(wprev);    break; // toggle 
+    // TODO: too easy kill, ask question!
     case 127: case 'K': winkill(); setfocus(wfocus+1); break; // Kill
 
     case 13 :
@@ -509,6 +510,8 @@ void yield() {
   wtime= HITIME;
   
   // it returns non-zero when we come back to app!
+  // TODO: it seems to expect cursor to always
+  //   be overwritten, what if gotoxy?
   if (wfocus==wcur) togglecursor();
   if (setjmp(winp->cont)) {
     // and we're back
@@ -797,13 +800,13 @@ int main() {
   // make it "pseudo task"
   win[0].status= -1;
 
-  //#define DEMO
-  //#define TIMER
+#define DEMO
+#define TIMER
 //#define ATMOS
 //#define FISH
-//#define ECHO
-//#define ASCII2
-#define CALC
+#define ECHO
+#define ASCII2
+//#define CALC
   
 #ifdef DEMO
   // OK
