@@ -496,7 +496,7 @@ char wgetc(char win) {
   }
 }
 
-char yield() {
+void yield() {
   // Enable to "see" yields!
   //wputc('|');
   
@@ -513,7 +513,7 @@ char yield() {
   if (setjmp(winp->cont)) {
     // and we're back
     if (wfocus==wcur) togglecursor();
-    return 1;
+    return;
   }
 
   // if 0 then we're in OrWin scheduler!
@@ -756,8 +756,6 @@ void mowin(signed char dx, signed char dy, signed char dw, signed char dh) {
 int main() {
   int i= 0, j= 0, z= 0;
 
-  int napp;
-  
   // KBRPT - keyboard repeat rate
   *(char*)0x24f= 2;
   // KBDLY - keyboard delay before repeat
@@ -789,7 +787,7 @@ int main() {
   // make it "pseudo task"
   win[0].status= -1;
 
-//#define DEMO
+#define DEMO
 //#define ATMOS
 //#define FISH
 //#define ECHO
@@ -849,13 +847,12 @@ int main() {
 #endif // DEMO
   
 
-  // done setup
-  wdecorate();
-
-
   ///////////////////////////////////
   // SCHEDULER!
-  napp= nwin;
+  wcur= nwin;
+  wfocus= nwin;
+
+  wdecorate();
 
   // make us always come back here!
   while(setjmp(orwinjmp)!=42) {
@@ -863,12 +860,12 @@ int main() {
 
     // move next app
   next:
-    if (!--napp) napp= nwin;
-    setwin(napp);
+    if (!--wcur) wcur= nwin;
+    setwin(wcur);
     // TODO: if no active windows will go on 
     if (!winp->status) goto next;
     
-    DEB('0'+napp);
+    DEB('0'+wcur);
     DKEY();
     
     // TODO: how can I use it as a test value, LOL

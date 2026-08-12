@@ -20,7 +20,7 @@ int counter_main(int argc, char** argv) {
 
   APP* app= init();
   
-  do { loop(app); } while(YIELD());
+  do { loop(app); } while(1);
   
   (void)argc; (void)argv;
   return 0;

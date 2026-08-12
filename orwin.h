@@ -58,7 +58,7 @@ extern void setfocus(signed char);
 
 #include <setjmp.h>
 
-extern char yield();
+extern void yield();
 
 extern jmp_buf orwinjmp;
 
