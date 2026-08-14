@@ -1,7 +1,11 @@
-# TODO: ALL
-# ls -1 *.c | grep -iv orwin.c | sed 's/\.c//' | xargs -l1 ./appwrap
+# TODO: subdirs each an app?
 
-rm app-*.s app-*.ext app-*.reg apprun.x app-*.o apps.reg apps.ext
+rm -f app-*.s app-*.ext app-*.reg app-*.o
+rm -f apps.reg apps.ext
+rm -f apprun.x apprun.sim apprun.tap
+
+ls -1 app-*.c | grep -iv orwin.c | sed 's/\.c//' \
+| xargs -l1 ./appwrap
 
 ./appwrap atmos
 
@@ -9,8 +13,11 @@ cat app-*.reg > apps.reg
 cat app-*.ext > apps.ext
 
 #cl65 -t atmos apprun.c app-*.o -o apprun.x
+
 cl65 -t sim6502 apprun.c app-*.o -o apprun.x
 
 echo
 echo 
-sim65 ./apprun.x
+
+sim65 ./apprun.sim
+
