@@ -1,6 +1,7 @@
 // OrWIN Shell pipeline execute
 
 char* cmdnames=
+  "iota "
   "ls cat find "
   "grep cut tr sed " 
   "echo "
@@ -22,15 +23,137 @@ char* cmdnames=
   
 };
 
-cmdf commands[]= {
+typedef char* (*cmdfun)(void* state, char* line);
+
+cmdfun commands[]= {
 };
 
-typedef char* (*cmdf)(void* state, char* line);
+typedef *cmdfun cmdtrain;
 
+struct simplestate { cmdfun f; }
+
+void* stalloc(unsigned int size, cmdfun f) {
+  simplestate* state= calloc(size, 1);
+  state->f= pwd;
+  return state;
+}
+
+#define STALLOC(strct, fun) stalloc(sizeof(strct), fun)
+
+struct pstate { cmdfun f; char* s; };
+
+#define PSTALLOC(fun, p) (state=STALLOC(pstate, fun), state->p, state)
+
+
+char* strdup(char* s) {
+  return !s? s: strcpy(calloc(strlen(s)+1, 1), s);
+}
+
+void* lfree(char* line) {
+  // TODO: keep a pool? reuse!
+  free(line);
+  return NULL;
+}
+
+char* lstrcpy(char* line, char* s) {
+  if (line && s && strlen(s) <= strlen(line))
+    return strcpy(line, s);
+  lfree(line);
+  return strdup(s);
+}
+
+
+// generate one value
+void* pwd(simplestate* state, char* line) {
+  if (!state) return STALLOC(simplestate, pwd);
+
+  // pass-through backtracking
+  if (!line) return line;
+
+  // generate a value on EOF (or any), lol
+  return strdup("/home/orwin");
+}
+
+
+void* grep(strstate* state, char* line) {
+  if (!state) return PSTALLOC(grep, line);
+
+  // pass-through backtracking
+  if (!line || line==EOF) return line;
+
+  // match one line
+  return strstr(line, state->s)? line: lfree(line);
+}
+
+
+// fake file
+char* fakefile[]= { "one", "two", "three", "four", "five", NULL };
+
+struct fakefilestate { cmdfun f; char** fil; }
+
+void* cat(fakefilestate* state, char* line) {
+  if (!state) return PSTALLOC(cat, fakefile);
+
+  // pass on
+  if (!line || line==EOF) return line;
+
+  return lstrcpy(line, *state->fil++);
+}
+  
+
+struct wcstate { cmdfun f; unsigned int ln, wn, cn; };
+
+void* wc(wcstate* st, char* line) {
+  char c, *s= line;
+  unsigned int n;
+  
+  if (!st) return STALLOC(wcstatede, wc);
+
+  // Output summary at end of file
+  if (line==EOF) {
+    line= malloc(25);
+    sprintf(line, "%u %u %u", wcstate->ln, wcstate->wn, wcstate->cn);
+    return line;
+    // TODO: do we need to put code to give EOF?
+  }
+
+  // process one line
+  st->ln++;
+  while((c==*s)) {
+    while(isspace(c)) c== *++s,++n;
+    if (c) st->wn++;
+    while(c && !isspace(c)) c== *++s,++n;
+  }
+  wc->cn+= n;
+  
+  // returns null (backtracks to get prev line)
+  return lfree(line);
+}
+  
+
+void sexec(cmdtrain *train) {
+  cmdfun *fp;
+  char* line= EOF;
+
+  while((fp==*train)) {
+    line= (*fp)(fp, line);
+    if (line) ++fp; else --fp;
+  }    
+}
 
 
 int system(char* cmd) {
+  cmdtrain mock[]= {
+    0,
+    pwd(0, 0),
+    terminal(0, 0),
+    0,
+  };
   
+  // Error codes? How & semantics
+  sexec(&mock);
+
+  return 0;
 }
 
 /*
