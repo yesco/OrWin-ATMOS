@@ -31,7 +31,7 @@ void* stalloc(unsigned int size, void* f) {
 
 typedef struct pstate { cmdfun f; char* s; } pstate;
 
-#define PSTALLOC(fun, p) (state=STALLOC(pstate, fun), state->s=p, state)
+#define PSTALLOC(fun, p) (state=STALLOC(pstate, fun), state->s=strdup(p), state)
 
 void* memdup(void* p, unsigned int bytes) {
   char* r= malloc(bytes);
@@ -103,14 +103,17 @@ typedef struct fakefilestate { cmdfun f; char** fil; } fakefilestate;
 void* cat(fakefilestate* state, char* line) {
   if (!state) {
     state= STALLOC(fakefilestate, cat);
+    // strdup(line)
     state->fil= fakefile;
     return state;
   }
 
   // pass on
-  if (!line || line==EOS) return line;
+  //if (!line || line==EOS) return line;
 
-  return lstrcpy(line, *state->fil++);
+  //return *state->fil? lstrcpy(line, *state->fil++): EOS;
+  if (line!=EOS) lfree(line);
+  return *state->fil? strdup(*state->fil++): EOS;
 }
   
 
@@ -158,8 +161,8 @@ void* terminal(simplestate* state, char* line) {
   if (line==EOS) puts("*EOS*");
   else if (line) puts(line);
   else puts("*NULL*");
-  // force backtracking
-  return NULL;
+  // force backtracking, why different?
+  return line==EOS? EOS: NULL;
 }
 
 char* cmdnames[]= {
@@ -208,7 +211,8 @@ int wsystrain(cmdtrain *train) {
   ++train; // skip initial 0
 
   while((fp=*train)) {
-    printf("\t[%d \"%s\" =>]\n", (char)(train-origtrain), line&&line!=EOS? line: "(NULL)");
+    printf("\t[%d \"%s\" =>]\n", (char)(train-origtrain),
+	   !line? "(NULL)": line==EOS? "*EOS*": line);
     line= (*fp)(fp, line);
     if (line) ++train; else --train;
   }    
@@ -273,10 +277,12 @@ int wsystem(char* cmd) {
     p= line;
     // skip spaces
     while(isspace(*cmd)) ++cmd;
-    // copy rest of command
+    // copy rest of arguments
     while((c=*cmd) && c != '|') *p++= c,++cmd;
-    while(isspace(p[-1]==' ') && p>line) --p;
-    *++p= 0;
+
+    // remove trailing spaces
+    while(isspace(p[-1]) && p>line) --p;
+    *p= 0;
     
     // TODO: crash
     arr[++i]= state= (*f)(0, line);
@@ -292,7 +298,7 @@ int wsystem(char* cmd) {
 }
 
 int main(int argc, char** argv) {
-  printf("------------ wsystrain\n");
+  printf("------------ wsystrain: pwd | terminal\n");
   cmdtrain mock[]= {
     0,
     pwd(0, 0),
@@ -302,9 +308,13 @@ int main(int argc, char** argv) {
   
   wsystrain(mock);
   
-  printf("------------ wsystem\n");
+  printf("------------ wsystem: pwd | terminal\n");
   // Error codes? How & semantics
   wsystem("pwd | terminal");
+
+  printf("------------ wsystem: cat fil | grep o | terminal\n");
+  // Error codes? How & semantics
+  wsystem("cat fil | grep o | terminal");
 
   return 0;
 }
