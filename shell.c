@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
-
+#include <assert.h>
 
 #include <stdio.h>
 
@@ -33,14 +33,24 @@ typedef struct pstate { cmdfun f; char* s; } pstate;
 
 #define PSTALLOC(fun, p) (state=STALLOC(pstate, fun), state->s=p, state)
 
+void* memdup(void* p, unsigned int bytes) {
+  char* r= malloc(bytes);
+  assert(r);
+  return memcpy(r, p, bytes);
+}
+
 #if !defined(_POSIX_C_SOURCE) && !defined(__ANDROID__) && !defined(_STRDUP_DEFINED)
   #define strdup(s) safe_fallback_strdup(s)
   
   static char* safe_fallback_strdup(const char* s) {
-      if (!s) return NULL;
-      size_t len = strlen(s) + 1;
-      char* d = malloc(len);
-      return d ? memcpy(d, s, len) : NULL;
+#if 1
+    return memdup(s, strlen(s)+1);
+#else
+    if (!s) return NULL;
+    size_t len = strlen(s) + 1;
+    char* d = malloc(len);
+    return d ? memcpy(d, s, len) : NULL;
+#endif      
   }
 #endif
 
@@ -190,39 +200,47 @@ void* commands[]= {
 ////////////////////////////////////////////////////////////
 
 
-void wsystrain(cmdtrain *train) {
+int wsystrain(cmdtrain *train) {
   cmdfun *fp;
   char* line= EOS;
   cmdtrain *origtrain= train;
 
   ++train; // skip initial 0
+
   while((fp=*train)) {
     printf("\t[%d \"%s\" =>]\n", (char)(train-origtrain), line&&line!=EOS? line: "(NULL)");
     line= (*fp)(fp, line);
     if (line) ++train; else --train;
   }    
+
+  // TODO: address of last program
+  return 0;
 }
 
 
 int wsystem(char* cmd) {
   // TODO: use shared area?
   static char line[80];
-  char c, *p, **n;
+  char c, i, *p, **n;
   cmdfun* f;
   void* state;
+  static void* arr[16];
   
+  memset(arr, 0, sizeof(arr));
+  i= 0;
   
   while(*cmd) {
+  
     // === extract one separated command
 
-    
     // skip spaces
     while(isspace((c=*cmd))) ++cmd;
     // skip |
     while((c=*cmd) == '|' && c) ++cmd;
     
-    printf("...>%s<\n", cmd);
-    // == extract program name
+    //printf("...>%s<\n", cmd);
+
+    // = extract program name
     p= line;
     // skip spaces
     while(isspace((c=*cmd))) ++cmd;
@@ -237,7 +255,7 @@ int wsystem(char* cmd) {
     n= cmdnames;
     f= (cmdfun*)commands;
     while(*n && *f) {
-      printf("  ?  %s %s\n", line, (char*)*n);
+      //printf("  ?  %s %s\n", line, (char*)*n);
       if (0==strcmp(line, (char*)*n)) goto found;
       ++n; ++f;
     }
@@ -250,21 +268,27 @@ int wsystem(char* cmd) {
 
     printf("\t[%s: ", line);
 
-    // == Extract arguments (how about intial)
+    // = Extract arguments (how about intial)
+
     p= line;
     // skip spaces
     while(isspace(*cmd)) ++cmd;
     // copy rest of command
     while((c=*cmd) && c != '|') *p++= c,++cmd;
-    *p= 0;
+    while(isspace(p[-1]==' ') && p>line) --p;
+    *++p= 0;
     
     // TODO: crash
-    state= (*f)(0, line);
+    arr[++i]= state= (*f)(0, line);
 
-    printf("%p %p \"%s\"]\n", f, state, line);
+    printf("\"%s\" %p %p]\n", line, f, state);
   }
   
-  return 0;
+  putchar('\n');
+  
+  cmdtrain *train= memdup(arr, ++i*sizeof(arr[0]));
+
+  return wsystrain(train);
 }
 
 int main(int argc, char** argv) {
@@ -276,8 +300,11 @@ int main(int argc, char** argv) {
     0,
   };
   
+  wsystrain(mock);
+  
   printf("------------ wsystem\n");
   // Error codes? How & semantics
   wsystem("pwd | terminal");
+
   return 0;
 }
