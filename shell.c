@@ -49,6 +49,8 @@ void* stalloc(unsigned int size, void* f) {
 
 #define STALLOC(strct, fun) stalloc(sizeof(strct), fun)
 
+#define SIMPLEALLOC(fun) STALLOC(simplestate,fun)
+
 typedef struct pstate { cmdfun f; char* s; } pstate;
 
 #define PSTALLOC(fun, p) (state=STALLOC(pstate, fun), state->s=p, state)
@@ -81,7 +83,7 @@ char* lstrcpy(char* line, char* s) {
 
 // generate one value
 void* pwd(simplestate* state, char* line) {
-  if (!state) return STALLOC(simplestate, pwd);
+  if (!state) return SIMPLEALLOC(pwd);
 
   // pass-through backtracking
   if (!line) return line;
@@ -161,7 +163,7 @@ void* teeterminal(simplestate* state, char* line) {
 
 // more like "tee -"
 void* terminal(simplestate* state, char* line) {
-  if (!state) return STALLOC(wcstate, wc);
+  if (!state) return STALLOC(simplestate, terminal);
   if (line==EOS) puts("*EOS*");
   else if (line) puts(line);
   else puts("*NULL*");
@@ -173,10 +175,13 @@ void* terminal(simplestate* state, char* line) {
 void wsystrain(cmdtrain *train) {
   cmdfun *fp;
   char* line= EOS;
+  cmdtrain *origtrain= train;
 
+  ++train; // skip initial 0
   while((fp=*train)) {
+    printf("\t[%d \"%s\" =>]\n", (char)(train-origtrain), line&&line!=EOS? line: "(NULL)");
     line= (*fp)(fp, line);
-    if (line) ++fp; else --fp;
+    if (line) ++train; else --train;
   }    
 }
 
