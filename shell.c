@@ -7,37 +7,15 @@
 
 #include <stdio.h>
 
+// TODO: make it a printable string?
 #define EOS ((char*)-1)
 
-char* cmdnames=
-  "iota "
-  "ls cat find "
-  "grep cut tr sed " 
-  "echo "
-  "tail head diff uniq comm "
-  "wc less sort gzip gunzip unzip "
-
-  // "xargs "
-  // "history man "
-
-  // "tar paste "
-  // "awk "  
-  // "pwd date "
-  // "clear basname dirname "
-  // "ps df top htop kill free whoami uptime uname killall "
-  // "cd rm cp mv mkdir chmod chown touch ln rmdir chgrp "
-  // "curl wget rsync scp "
-  // "ping ip ss netstat "
-  // "git "
-
-  ;
 
 typedef void* (*cmdfun)(void* state, char* line);
 
-cmdfun commands[]= {
-};
-
 typedef cmdfun* cmdtrain;
+
+
 
 typedef struct simplestate { cmdfun f; } simplestate;
 
@@ -79,6 +57,9 @@ char* lstrcpy(char* line, char* s) {
   lfree(line);
   return strdup(s);
 }
+
+
+///////////////////////////////////////////////////////////
 
 
 // generate one value
@@ -144,7 +125,7 @@ void* wc(wcstate* state, char* line) {
   while((c=*s)) {
     while(isspace(c)) c=*++s,++n;
     if (c) state->wn++;
-    while(c && !isspace(c)) c=*++s,++n;
+    while(!isspace(c) && c) c=*++s,++n;
   }
   state->cn+= n;
   
@@ -171,6 +152,43 @@ void* terminal(simplestate* state, char* line) {
   return NULL;
 }
 
+char* cmdnames[]= {
+  "pwd",
+  "grep",
+  "cat",
+  "wc",
+  "teeterminal",
+  "terminal",
+  
+  //  "ls cat find "
+  //"grep cut tr sed " 
+  //"echo "
+  //"tail head diff uniq comm "
+  //"wc less sort gzip gunzip unzip "
+
+  // "xargs "
+  // "history man "
+
+  // "tar paste "
+  // "awk "  
+  // "pwd date "
+  // "clear basname dirname "
+  // "ps df top htop kill free whoami uptime uname killall "
+  // "cd rm cp mv mkdir chmod chown touch ln rmdir chgrp "
+  // "curl wget rsync scp "
+  // "ping ip ss netstat "
+  // "git "
+
+  NULL
+};
+
+void* commands[]= {
+  pwd, grep, cat, wc, teeterminal, terminal,
+  
+};
+
+////////////////////////////////////////////////////////////
+
 
 void wsystrain(cmdtrain *train) {
   cmdfun *fp;
@@ -187,6 +205,70 @@ void wsystrain(cmdtrain *train) {
 
 
 int wsystem(char* cmd) {
+  // TODO: use shared area?
+  static char line[80];
+  char c, *p, **n;
+  cmdfun* f;
+  void* state;
+  
+  
+  while(*cmd) {
+    // === extract one separated command
+
+    
+    // skip spaces
+    while(isspace((c=*cmd))) ++cmd;
+    // skip |
+    while((c=*cmd) == '|' && c) ++cmd;
+    
+    printf("...>%s<\n", cmd);
+    // == extract program name
+    p= line;
+    // skip spaces
+    while(isspace((c=*cmd))) ++cmd;
+    // copy name
+    while((c=*cmd) && !isspace(c) && c!='|') *p++= c,++cmd;
+    *p= 0;
+
+    // done?
+    //    if (!*line) return 0;
+
+    // find
+    n= cmdnames;
+    f= (cmdfun*)commands;
+    while(*n && *f) {
+      printf("  ?  %s %s\n", line, (char*)*n);
+      if (0==strcmp(line, (char*)*n)) goto found;
+      ++n; ++f;
+    }
+
+    printf("%%Error.system: not found >%s< (%s)\n  %p %p %d %d\n",
+	   line, cmd, *n, *f, !*n, !*f);
+    return -1;
+
+  found:
+
+    printf("\t[%s: ", line);
+
+    // == Extract arguments (how about intial)
+    p= line;
+    // skip spaces
+    while(isspace(*cmd)) ++cmd;
+    // copy rest of command
+    while((c=*cmd) && c != '|') *p++= c,++cmd;
+    *p= 0;
+    
+    // TODO: crash
+    state= (*f)(0, line);
+
+    printf("%p %p \"%s\"]\n", f, state, line);
+  }
+  
+  return 0;
+}
+
+int main(int argc, char** argv) {
+  printf("------------ wsystrain\n");
   cmdtrain mock[]= {
     0,
     pwd(0, 0),
@@ -194,13 +276,8 @@ int wsystem(char* cmd) {
     0,
   };
   
+  printf("------------ wsystem\n");
   // Error codes? How & semantics
-  wsystrain(mock);
-
-  return 0;
-}
-
-int main(int argc, char** argv) {
   wsystem("pwd | terminal");
   return 0;
 }
