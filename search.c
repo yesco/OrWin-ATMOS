@@ -97,7 +97,8 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
-  // log2(fold_size)
+  // log2(sz)
+  fold_size = sz;
   fold_count = 0;
   z = BITSET_BYTES;
   while (z > fold_size) z >>= 1, fold_count++;
