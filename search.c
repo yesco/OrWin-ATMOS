@@ -11,7 +11,7 @@
 
 char idx[BITSET_BYTES];
 uint16_t fold_size;
-char fold_count;
+uint16_t fold_mask; // Fast 6502 mask: fold_size - 1
 
 uint16_t hash_trigram(char* s) {
   uint16_t h = 0;
@@ -34,20 +34,10 @@ uint16_t hash_bigram(uint16_t h1, uint16_t h2) {
   return (h ^ h2) & 0x1FFF;
 }
 
+// Clean, simple, and hyper-optimized for the 6502
 char test_bit(uint16_t h) {
-  uint16_t idx_byte = h >> 3;
-  uint16_t idx_bit = h & 7;
-  char f = fold_count;
-  uint16_t cur_size = BITSET_BYTES;
-
-  // Mirror index.c: Subtract half-size if the index falls in the upper half
-  while (f--) {
-    cur_size >>= 1;
-    if (idx_byte >= cur_size) {
-      idx_byte -= cur_size;
-    }
-  }
-  return (idx[idx_byte] & (1 << idx_bit)) ? 1 : 0;
+  uint16_t idx_byte = (h >> 3) & fold_mask;
+  return (idx[idx_byte] & (1 << (h & 7))) ? 1 : 0;
 }
 
 void pr_case(char* s, int len, char found) {
@@ -61,7 +51,7 @@ int main(int argc, char* argv[]) {
   FILE* f;
   long sz;
   int i, j;
-  uint16_t z, hits = 0, total = 0;
+  uint16_t hits = 0, total = 0;
   uint16_t whash = 0, last_whash = 0;
   char first_word = 1;
 
@@ -84,14 +74,9 @@ int main(int argc, char* argv[]) {
   }
 
   fold_size = (uint16_t)sz;
-  fold_count = 0;
-  z = BITSET_BYTES;
-  while (z > fold_size) {
-    z >>= 1;
-    fold_count++;
-  }
+  fold_mask = fold_size - 1; // Compute mask once to bypass division/modulo loops
 
-  // --- PASS 1: WORD EVALUATION & LAYOUT GENERATION ---
+  // --- PASS 1: WORD EVALUATION & STREAM GENERATION ---
   for (i = 2; i < argc; i++) {
     char* p = argv[i];
     char* wstart = p;
