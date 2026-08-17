@@ -5,6 +5,7 @@
 
 #include <string.h>
 #include <stdint.h>
+#include <ctype.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -28,21 +29,25 @@ char bitset[BITSET_BYTES];
  * Uses a rolling shift-and-add mix that compiles beautifully down
  * to raw A, X, Y register operations on a 6502.
  */
-uint hash_trigram(char* str) {
+uint hash_trigram(char* s) {
   uint h = 0;
+  char a= s[0], b= s[1], c= s[2];
     
+  // reject non \w, and single char
+  if (!isalnum(a) || !isalnum(b) || ((a|b|c)&0x80)) return 0;
+  if (!isalnum(c)) c= 0;
+
   // Process exactly 3 characters (or stop early if null-terminator hit)
-  if (*str) { h = (h << 4) ^ *str++; }
-  if (*str) { h = (h << 4) ^ *str++; }
-  if (*str) { h = (h << 4) ^ *str;   }
+  h = (tolower(a) << 4) ^ tolower(b);
+  if (c) { h = (h << 4) ^ tolower(c); }
     
   return h & 0x1FFF; // Restrict output cleanly to 13 bits (0 to 8191)
 }
 
-uint hash_unigram(char* str, unsigned char len) {
+uint hash_unigram(char* s, unsigned char len) {
   uint h = 5381;
   while (len--) {
-    h = ((h << 3) + h) ^ *str++;
+    h = ((h << 3) + h) ^ tolower(*s++);
   }
   return h & 0x1FFF;
 }
@@ -75,7 +80,7 @@ void index_string(char* text) {
     
   do {
     // tokenize word tracking spaces/punctuation boundaries
-    if (*p > ' ') { 
+    if (isalnum(*p)) { 
       // char (TODO: stop non a-z?)
       if (!wlen) wstart = p;
       wlen++;
@@ -104,7 +109,7 @@ void index_string(char* text) {
     // trigram over sliding window
     i = hash_trigram(p);
     // TODO: lookup table for 6502
-    bitset[i >> 3] |= (1 << (i & 7));
+    if (i) bitset[i >> 3] |= (1 << (i & 7));
 
     ++p;
   } while (1);
