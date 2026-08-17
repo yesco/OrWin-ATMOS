@@ -46,42 +46,6 @@ char test_bit(uint16_t h) {
   return (idx[i] & (1 << (h & 7))) ? 1 : 0;
 }
 
-void pr_case(char* s, int len, char found) {
-  int i;
-  for (i = 0; i < len; i++) {
-    putchar(found ? tolower(s[i]) : toupper(s[i]));
-  }
-}
-
-// Simple standalone function to test all trigrams in a word
-// Updates total score metrics, and prints failures into TriNot stream
-void score_word_trigrams(char* s, int len, char parent_found, uint16_t* hits, uint16_t* total) {
-  int j;
-  uint16_t thash;
-  char tok;
-
-  if (len < 3) return;
-
-  for (j = 0; j <= len - 3; j++) {
-    thash = hash_trigram(&s[j]);
-    if (thash) {
-      tok = test_bit(thash);
-      
-      // ONLY score points if the word unigram actually passed verification
-      if (parent_found) {
-        *total += FRAG_WEIGHT;
-        if (tok) *hits += FRAG_WEIGHT;
-      }
-      
-      // If a trigram is completely missing, log it in upper case
-      if (!tok) {
-        pr_case(&s[j], 3, 0);
-        putchar(' ');
-      }
-    }
-  }
-}
-
 int main(int argc, char* argv[]) {
   FILE* f;
   long sz;
@@ -120,103 +84,93 @@ int main(int argc, char* argv[]) {
     strcat(query, argv[i]);
   }
 
-  printf("Search:\t");
-  
-  // --- SINGLE PASS TRACE LOOP ---
+  // --- SINGLE PASS SCORING & INLINE MODIFICATION LOOP ---
   p = query;
   wstart = query;
   wlen = 0;
 
+  printf("TriNot:\t");
+
   while (1) {
-
     if (isalnum(*p)) {
-
       if (!wlen) wstart = p;
       wlen++;
-
     } else if (wlen > 0) {
-
       whash = hash_unigram(wstart, wlen);
       found = test_bit(whash);
 
-      // --- SELF-VERIFICATION COUNTER-COLLISION ACTION ---
-      // Walk the word's trigrams to confirm it actually exists.
-      // If ANY structural trigram fails, the unigram was a false positive!
+      // Self-verification counter-collision check
       if (found && wlen >= 3) {
         for (i = 0; i <= wlen - 3; i++) {
           thash = hash_trigram(&wstart[i]);
           if (thash && !test_bit(thash)) {
-            found = 0; // Force false positive down to 0!
+            found = 0; 
             break;
           }
         }
       }
 
+      // 1. Process Word Scoring
       total += WORD_WEIGHT;
       if (found) hits += WORD_WEIGHT;
-      
+
+      // 2. Process Sequence Scoring
       both = 0;
       if (last_whash) {
-	bothhash = hash_bigram(last_whash, whash);
-	total += SEQ_WEIGHT;
-	if (test_bit(bothhash)) { hits += SEQ_WEIGHT; both = 1; }
+        bothhash = hash_bigram(last_whash, whash);
+        total += SEQ_WEIGHT;
+        if (test_bit(bothhash)) { hits += SEQ_WEIGHT; both = 1; }
       }
-      putchar(both ? '_' : ' ');
 
-      pr_case(wstart, wlen, found);
-      
-      // Store unigram match status down to gate internal fragment accumulation
-      // This will append missing sequences into our print stream cleanly
+      // 3. Process Trigram Fragment Scoring & Print Missing Trigrams Immediately
       if (wlen >= 3) {
-        // We print a marker later, so we capture the TriNot text layout inline or below
-      }
-      
-      last_whash = found ? whash : 0;
-      wlen = 0;
-
-    }
-
-    // Test at end to terminte last item!
-    if (!*p) break;
-    p++;
-  }
-
-  // --- CLEAN TRI-NOT PRINT OUT ROW ---
-  printf("\nTriNot:\t");
-
-  p = query;
-  wstart = query;
-  wlen = 0;
-
-  while (1) {
-
-    if (isalnum(*p)) {
-
-      if (!wlen) wstart = p;
-      wlen++;
-
-    } else if (wlen > 0) {
-
-      whash = hash_unigram(wstart, wlen);
-      // Re-verify the target using the exact same isolated logic 
-      found = test_bit(whash);
-      if (found && wlen >= 3) {
         for (i = 0; i <= wlen - 3; i++) {
-          if (!test_bit(hash_trigram(&wstart[i]))) { found = 0; break; }
+          thash = hash_trigram(&wstart[i]);
+          if (thash) {
+            char tok = test_bit(thash);
+            if (found) {
+              total += FRAG_WEIGHT;
+              if (tok) hits += FRAG_WEIGHT;
+            }
+            if (!tok) {
+              // Print missing fragment into TriNot stream in UPPERCASE
+              putchar(toupper(wstart[i]));
+              putchar(toupper(wstart[i+1]));
+              putchar(toupper(wstart[i+2]));
+              putchar(' ');
+              
+              // Modify the text string window natively to uppercase
+              wstart[i]   = toupper(wstart[i]);
+              wstart[i+1] = toupper(wstart[i+1]);
+              wstart[i+2] = toupper(wstart[i+2]);
+            }
+          }
         }
       }
-      score_word_trigrams(wstart, wlen, found, &hits, &total);
-      wlen = 0;
 
+      // 4. Transform remaining untouched letters to lower or upper case
+      for (i = 0; i < wlen; i++) {
+        wstart[i] = found ? tolower(wstart[i]) : toupper(wstart[i]);
+      }
+
+      // If a bigram hit occurred, replace the trailing separator space with an underscore
+      if (both && (wstart > query)) {
+        *(wstart - 1) = '_';
+      }
+
+      last_whash = found ? whash : 0;
+      wlen = 0;
     }
 
-    // Test at end to terminte last item!
     if (!*p) break;
     p++;
   }
 
+  // --- OUTPUT INPLACE MODIFIED SEARCH RESULTS STREAM ---
+  printf("\nSearch:\t%s\n", query);
+
   pct = total ? (uint16_t)(((unsigned long)hits * 100) / total) : 0;
-  printf("\nMatch:\t%u%%\n", pct);
+  printf("Match:\t%u%%\n", pct);
 
   return 0;
 }
