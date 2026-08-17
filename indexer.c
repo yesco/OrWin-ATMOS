@@ -13,7 +13,7 @@
 // Fixed global definitions
 #define BITSET_BYTES  1024
 // % target bit-saturation threshold
-#define TARGET_DENSITY  38
+#define TARGET_DENSITY  25 // gives 25-43% (?)
 
 // TODO: assert char is unsigned
 
@@ -144,23 +144,55 @@ uint fold_index(void) {
 
   fold_count = 0;
   
-  while (z > 32) {
+  while (1) {
     bits = index_popcount(z);
     fold_density = (uint)(((unsigned long)bits * 100) / (z * 8));
+        
+    fprintf(stderr, "  fold #%d %d ones %d%% density %d bytes\n",
+	    fold_count, bits, fold_density, z);
+
     // done?
     if (fold_density >= TARGET_DENSITY) break;
-        
+
+    if (z <= 64) break;
+    
     // FOLD upper half into lower by ORing
     z>>= 1;
     for (i = 0; i < z; i++) bitset[i] |= bitset[i + z];
     ++fold_count;
   }
     
-  fprintf(stderr, "fold #%d %d%% density %d bytes\n",
-	  fold_count, fold_density, z);
-
   fold_size= z;
   return fold_count;
+}
+
+
+// append index to a (append or created file) basename.idx
+// returns: (start_offset<<8) | fold_count
+// append index to a (old or created file) basename.idx
+// returns: (start_offset<<8) | fold_count
+unsigned long append_index(char* basename) {
+  FILE* f;
+  char fn[64];
+  long pos = 0;
+
+  strcpy(fn, basename);
+  strcat(fn, ".idx");
+
+  if (!(f = fopen(fn, "a+b"))) return -1;
+  fseek(f, 0, SEEK_END);
+  pos = ftell(f);
+
+  // write out the folded bitset payload
+  if (fwrite(bitset, 1, fold_size, f) != fold_size) {
+    // TODO: on smaller platforms may write piece meal?
+    fclose(f);
+    return -1;
+  }
+
+  fclose(f);
+
+  return (pos << 8) | (fold_count & 0xFF);
 }
 
 
@@ -174,6 +206,7 @@ int main(int argc, char* argv[]) {
     char* buf= malloc(MAX);
     uint bytes, status, z, i;
     char folds;
+    unsigned long posfolds;
 
     if (argc < 2) {
       printf("%%Error: Missing argument\n");
@@ -216,6 +249,11 @@ int main(int argc, char* argv[]) {
         if ((i & 15) == 15) putchar('\n');
     }
     putchar('\n');
+
+
+    posfolds= append_index(argv[1]);
+
+    printf("\nWrote index file %s.idx posfolds: %08x\n", argv[1], posfolds);
 
     free(buf);
     
