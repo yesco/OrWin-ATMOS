@@ -85,18 +85,11 @@ void score_word_trigrams(char* s, int len, char parent_found, uint16_t* hits, ui
 int main(int argc, char* argv[]) {
   FILE* f;
   long sz;
-  int i;
-  uint16_t hits = 0, total = 0;
-  uint16_t whash = 0, last_whash = 0;
-  char first_word = 1;
-  
-  char* p;
-  char* wstart;
-  unsigned char wlen;
-  char found;
-  char both;
-  uint16_t bothhash;
-  uint16_t pct;
+  char i, j;
+  uint16_t hits = 0, total = 0, whash = 0, last_whash = 0, thash;
+  char *p, *wstart;
+  char wlen, found, both;
+  uint16_t bothhash, pct;
 
   if (argc < 3) {
     printf("Usage: search <idx_file> <word1> [word2] ...\n");
@@ -135,10 +128,14 @@ int main(int argc, char* argv[]) {
   wlen = 0;
 
   while (1) {
+
     if (isalnum(*p)) {
+
       if (!wlen) wstart = p;
       wlen++;
+
     } else if (wlen > 0) {
+
       whash = hash_unigram(wstart, wlen);
       found = test_bit(whash);
 
@@ -146,9 +143,8 @@ int main(int argc, char* argv[]) {
       // Walk the word's trigrams to confirm it actually exists.
       // If ANY structural trigram fails, the unigram was a false positive!
       if (found && wlen >= 3) {
-        int j;
-        for (j = 0; j <= wlen - 3; j++) {
-          uint16_t thash = hash_trigram(&wstart[j]);
+        for (i = 0; i <= wlen - 3; i++) {
+          thash = hash_trigram(&wstart[i]);
           if (thash && !test_bit(thash)) {
             found = 0; // Force false positive down to 0!
             break;
@@ -160,15 +156,12 @@ int main(int argc, char* argv[]) {
       if (found) hits += WORD_WEIGHT;
       
       both = 0;
-      if (!first_word) {
-        if (last_whash) {
-          bothhash = hash_bigram(last_whash, whash);
-          total += SEQ_WEIGHT;
-          if (test_bit(bothhash)) { hits += SEQ_WEIGHT; both = 1; }
-        }
-        putchar(both ? '_' : ' ');
+      if (last_whash) {
+	bothhash = hash_bigram(last_whash, whash);
+	total += SEQ_WEIGHT;
+	if (test_bit(bothhash)) { hits += SEQ_WEIGHT; both = 1; }
       }
-      first_word = 0;
+      putchar(both ? '_' : ' ');
 
       pr_case(wstart, wlen, found);
       
@@ -180,34 +173,44 @@ int main(int argc, char* argv[]) {
       
       last_whash = found ? whash : 0;
       wlen = 0;
+
     }
 
+    // Test at end to terminte last item!
     if (!*p) break;
     p++;
   }
 
   // --- CLEAN TRI-NOT PRINT OUT ROW ---
   printf("\nTriNot:\t");
+
   p = query;
   wstart = query;
   wlen = 0;
+
   while (1) {
+
     if (isalnum(*p)) {
+
       if (!wlen) wstart = p;
       wlen++;
+
     } else if (wlen > 0) {
+
       whash = hash_unigram(wstart, wlen);
       // Re-verify the target using the exact same isolated logic 
       found = test_bit(whash);
       if (found && wlen >= 3) {
-        int j;
-        for (j = 0; j <= wlen - 3; j++) {
-          if (!test_bit(hash_trigram(&wstart[j]))) { found = 0; break; }
+        for (i = 0; i <= wlen - 3; i++) {
+          if (!test_bit(hash_trigram(&wstart[i]))) { found = 0; break; }
         }
       }
       score_word_trigrams(wstart, wlen, found, &hits, &total);
       wlen = 0;
+
     }
+
+    // Test at end to terminte last item!
     if (!*p) break;
     p++;
   }
