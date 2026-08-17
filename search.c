@@ -10,6 +10,11 @@
 #define BITSET_BYTES  1024
 #define MAX_QUERY     1024
 
+// Higher numeric weight for critical full-word entities
+#define WORD_WEIGHT   32
+#define SEQ_WEIGHT    16
+#define FRAG_WEIGHT    1
+
 char idx[BITSET_BYTES];
 char query[MAX_QUERY];
 
@@ -99,7 +104,7 @@ int main(int argc, char* argv[]) {
 
   printf("Search:\t");
   
-  // --- PASS 1: SAME LOOP AS THE INDEXER ---
+  // --- PASS 1: WORD EVALUATION & STREAM GENERATION ---
   p = query;
   wstart = query;
   wlen = 0;
@@ -110,16 +115,20 @@ int main(int argc, char* argv[]) {
       wlen++;
     } else if (wlen > 0) {
       whash = hash_unigram(wstart, wlen);
-      total++;
+      
+      // Unigram gets heavily weighted
+      total += WORD_WEIGHT;
       found = test_bit(whash);
-      if (found) hits++;
+      if (found) hits += WORD_WEIGHT;
       
       both = 0;
       if (!first_word) {
         if (last_whash) {
           bothhash = hash_bigram(last_whash, whash);
-          total++;
-          if (test_bit(bothhash)) { hits++; both = 1; }
+          
+          // Bigram gets standard fragment weight
+          total += SEQ_WEIGHT;
+          if (test_bit(bothhash)) { hits += SEQ_WEIGHT; both = 1; }
         }
         putchar(both ? '_' : ' ');
       }
@@ -142,12 +151,13 @@ int main(int argc, char* argv[]) {
   while (*p) {
     thash = hash_trigram(p);
     if (thash) {
-      total++;
+      // Trigrams get standard fragment weight
+      total += FRAG_WEIGHT;
       if (!test_bit(thash)) {
         pr_case(p, 3, 0);
         putchar(' ');
       } else {
-        hits++;
+        hits += FRAG_WEIGHT;
       }
     }
     p++;
