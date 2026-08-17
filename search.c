@@ -10,7 +10,6 @@
 #define BITSET_BYTES  1024
 #define MAX_QUERY     1024
 
-// Higher numeric weight for critical full-word entities
 #define WORD_WEIGHT   32
 #define SEQ_WEIGHT    16
 #define FRAG_WEIGHT    1
@@ -19,7 +18,7 @@ char idx[BITSET_BYTES];
 char query[MAX_QUERY];
 
 uint16_t fold_size;
-uint16_t fold_mask; // Fast 6502 mask: fold_size - 1
+uint16_t fold_mask;
 
 uint16_t hash_trigram(char* s) {
   uint16_t h = 0;
@@ -42,7 +41,6 @@ uint16_t hash_bigram(uint16_t h1, uint16_t h2) {
   return (h ^ h2) & 0x1FFF;
 }
 
-// Clean, simple, and hyper-optimized for the 6502
 char test_bit(uint16_t h) {
   uint16_t i = (h >> 3) & fold_mask;
   return (idx[i] & (1 << (h & 7))) ? 1 : 0;
@@ -55,6 +53,35 @@ void pr_case(char* s, int len, char found) {
   }
 }
 
+// Simple standalone function to test all trigrams in a word
+// Updates total score metrics, and prints failures into TriNot stream
+void score_word_trigrams(char* s, int len, char parent_found, uint16_t* hits, uint16_t* total) {
+  int j;
+  uint16_t thash;
+  char tok;
+
+  if (len < 3) return;
+
+  for (j = 0; j <= len - 3; j++) {
+    thash = hash_trigram(&s[j]);
+    if (thash) {
+      tok = test_bit(thash);
+      
+      // ONLY score points if the word unigram actually passed verification
+      if (parent_found) {
+        *total += FRAG_WEIGHT;
+        if (tok) *hits += FRAG_WEIGHT;
+      }
+      
+      // If a trigram is completely missing, log it in upper case
+      if (!tok) {
+        pr_case(&s[j], 3, 0);
+        putchar(' ');
+      }
+    }
+  }
+}
+
 int main(int argc, char* argv[]) {
   FILE* f;
   long sz;
@@ -63,14 +90,12 @@ int main(int argc, char* argv[]) {
   uint16_t whash = 0, last_whash = 0;
   char first_word = 1;
   
-  // C89 Variables Hoisted to Top
   char* p;
   char* wstart;
   unsigned char wlen;
   char found;
   char both;
   uint16_t bothhash;
-  uint16_t thash;
   uint16_t pct;
 
   if (argc < 3) {
@@ -104,7 +129,7 @@ int main(int argc, char* argv[]) {
 
   printf("Search:\t");
   
-  // --- PASS 1: WORD EVALUATION & STREAM GENERATION ---
+  // --- SINGLE PASS TRACE LOOP ---
   p = query;
   wstart = query;
   wlen = 0;
@@ -115,18 +140,29 @@ int main(int argc, char* argv[]) {
       wlen++;
     } else if (wlen > 0) {
       whash = hash_unigram(wstart, wlen);
-      
-      // Unigram gets heavily weighted
-      total += WORD_WEIGHT;
       found = test_bit(whash);
+
+      // --- SELF-VERIFICATION COUNTER-COLLISION ACTION ---
+      // Walk the word's trigrams to confirm it actually exists.
+      // If ANY structural trigram fails, the unigram was a false positive!
+      if (found && wlen >= 3) {
+        int j;
+        for (j = 0; j <= wlen - 3; j++) {
+          uint16_t thash = hash_trigram(&wstart[j]);
+          if (thash && !test_bit(thash)) {
+            found = 0; // Force false positive down to 0!
+            break;
+          }
+        }
+      }
+
+      total += WORD_WEIGHT;
       if (found) hits += WORD_WEIGHT;
       
       both = 0;
       if (!first_word) {
         if (last_whash) {
           bothhash = hash_bigram(last_whash, whash);
-          
-          // Bigram gets standard fragment weight
           total += SEQ_WEIGHT;
           if (test_bit(bothhash)) { hits += SEQ_WEIGHT; both = 1; }
         }
@@ -136,7 +172,12 @@ int main(int argc, char* argv[]) {
 
       pr_case(wstart, wlen, found);
       
-      // Chain break rule: missing word cannot form bigram bridge
+      // Store unigram match status down to gate internal fragment accumulation
+      // This will append missing sequences into our print stream cleanly
+      if (wlen >= 3) {
+        // We print a marker later, so we capture the TriNot text layout inline or below
+      }
+      
       last_whash = found ? whash : 0;
       wlen = 0;
     }
@@ -145,21 +186,29 @@ int main(int argc, char* argv[]) {
     p++;
   }
 
-  // --- PASS 2: TRIGRAM EVALUATION LINE ---
+  // --- CLEAN TRI-NOT PRINT OUT ROW ---
   printf("\nTriNot:\t");
   p = query;
-  while (*p) {
-    thash = hash_trigram(p);
-    if (thash) {
-      // Trigrams get standard fragment weight
-      total += FRAG_WEIGHT;
-      if (!test_bit(thash)) {
-        pr_case(p, 3, 0);
-        putchar(' ');
-      } else {
-        hits += FRAG_WEIGHT;
+  wstart = query;
+  wlen = 0;
+  while (1) {
+    if (isalnum(*p)) {
+      if (!wlen) wstart = p;
+      wlen++;
+    } else if (wlen > 0) {
+      whash = hash_unigram(wstart, wlen);
+      // Re-verify the target using the exact same isolated logic 
+      found = test_bit(whash);
+      if (found && wlen >= 3) {
+        int j;
+        for (j = 0; j <= wlen - 3; j++) {
+          if (!test_bit(hash_trigram(&wstart[j]))) { found = 0; break; }
+        }
       }
+      score_word_trigrams(wstart, wlen, found, &hits, &total);
+      wlen = 0;
     }
+    if (!*p) break;
     p++;
   }
 
