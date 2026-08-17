@@ -36,8 +36,8 @@ uint16_t hash_bigram(uint16_t h1, uint16_t h2) {
 
 // Clean, simple, and hyper-optimized for the 6502
 char test_bit(uint16_t h) {
-  uint16_t idx_byte = (h >> 3) & fold_mask;
-  return (idx[idx_byte] & (1 << (h & 7))) ? 1 : 0;
+  uint16_t i = (h >> 3) & fold_mask;
+  return (idx[i] & (1 << (h & 7))) ? 1 : 0;
 }
 
 void pr_case(char* s, int len, char found) {
@@ -76,47 +76,51 @@ int main(int argc, char* argv[]) {
   fold_size = (uint16_t)sz;
   fold_mask = fold_size - 1; // Compute mask once to bypass division/modulo loops
 
+  printf("Search:\t");
+  
   // --- PASS 1: WORD EVALUATION & STREAM GENERATION ---
   for (i = 2; i < argc; i++) {
     char* p = argv[i];
     char* wstart = p;
     unsigned char wlen = 0;
+    char found, both;
+    uint16_t bothhash;
 
     while (1) {
       if (isalnum(*p)) {
         if (!wlen) wstart = p;
         wlen++;
-      } else {
-        if (wlen > 0) {
-          whash = hash_unigram(wstart, wlen);
-          total++;
-          char wok = test_bit(whash);
-          if (wok) hits++;
+      } else if (wlen > 0) {
+	whash = hash_unigram(wstart, wlen);
+	total++;
+	found = test_bit(whash);
+	if (found) hits++;
+	
+	both = 0;
+	if (!first_word) {
+	  if (last_whash) {
+	    bothhash = hash_bigram(last_whash, whash);
+	    total++;
+	    if (test_bit(bothhash)) { hits++; both = 1; }
+	  }
+	  putchar(both ? '_' : ' ');
+	}
+	first_word = 0;
 
-          char bok = 0;
-          if (!first_word) {
-            if (last_whash) {
-              uint16_t bhash = hash_bigram(last_whash, whash);
-              total++;
-              if (test_bit(bhash)) { hits++; bok = 1; }
-            }
-            putchar(bok ? '_' : ' ');
-          }
-          first_word = 0;
-
-          pr_case(wstart, wlen, wok);
-          last_whash = whash;
-          wlen = 0;
-        }
+	pr_case(wstart, wlen, found);
+	
+	last_whash = whash;
+	wlen = 0;
       }
+
       if (!*p) break;
+
       p++;
     }
   }
-  putchar('\n');
 
   // --- PASS 2: TRIGRAM EVALUATION LINE ---
-  printf("Trigrams: ");
+  printf("\nTriNot:\t");
   for (i = 2; i < argc; i++) {
     char* w = argv[i];
     int len = strlen(w);
@@ -127,16 +131,14 @@ int main(int argc, char* argv[]) {
           char tok = 0;
           total++;
           if (test_bit(thash)) { hits++; tok = 1; }
-          printf("[");
-          pr_case(&w[j], 3, tok);
-          printf("] ");
+          if (!tok) pr_case(&w[j], 3, tok),putchar(' ');
         }
       }
     }
   }
 
   uint16_t pct = total ? (uint16_t)(((unsigned long)hits * 100) / total) : 0;
-  printf("\nMatch: %u%%\n", pct);
+  printf("\nMatch:\t%u%%\n", pct);
 
   return 0;
 }
