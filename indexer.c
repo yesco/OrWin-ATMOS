@@ -6,6 +6,9 @@
 #include <string.h>
 #include <stdint.h>
 
+#include <stdio.h>
+#include <stdlib.h>
+
 // Fixed global definitions
 #define BITSET_BYTES  1024
 // % target bit-saturation threshold
@@ -14,7 +17,7 @@
 // TODO: assert char is unsigned
 
 // default target platform
-typedef uint16_t uint;
+//typedef uint16_t uint;
 
 // Global RAM scratchpad area
 char bitset[BITSET_BYTES];
@@ -61,7 +64,7 @@ uint hash_bigram(uint hash1, uint hash2) {
 //
 // setting positional bits in bitset
  
-void generate_raw_index(char* text) {
+void index_string(char* text) {
   char *p = text, *wstart = text;
   char wlen = 0;
   uint whash = 0, last_whash = 0;
@@ -85,7 +88,7 @@ void generate_raw_index(char* text) {
 	bitset[whash >> 3] |= (1 << (whash & 7));
                 
 	// if have previous word hash sequence!
-	if (last_word_hash) {
+	if (last_whash) {
 	  i = hash_bigram(last_whash, whash);
 	  bitset[i >> 3] |= (1 << (i & 7));
 	}
@@ -127,25 +130,90 @@ uint index_popcount(uint bytes) {
 
 // folds bitset upper OR lower till default density,
 // or stops at 32 bytes.
+uint fold_density, fold_size;
+char fold_count;
+
 uint fold_index(void) {
   uint z = BITSET_BYTES;
-  char folds = 0;
-  uint bits, density, i, half;
+  uint bits, i, half;
 
+  fold_count = 0;
+  
   while (z > 32) {
     bits = index_popcount(z);
-    density = (uint)(((unsigned long)bits * 100) / (z * 8));
+    fold_density = (uint)(((unsigned long)bits * 100) / (z * 8));
     // done?
-    if (density >= TARGET_DENSITY) break;
+    if (fold_density >= TARGET_DENSITY) break;
         
     // FOLD upper half into lower by ORing
     z>>= 1;
     for (i = 0; i < z; i++) bitset[i] |= bitset[i + z];
-    ++folds;
+    ++fold_count;
   }
     
   fprintf(stderr, "fold #%d %d%% density %d bytes\n",
-	  folds, density, z);
+	  fold_count, fold_density, z);
 
-  return folds;
+  fold_size= z;
+  return fold_count;
 }
+
+
+
+#ifndef MAIN
+
+#define MAX (16*1024)
+
+int main(int argc, char* argv[]) {
+    FILE* f;
+    char* buf= malloc(MAX);
+    uint bytes, status, z, i;
+    char folds;
+
+    if (argc < 2) {
+      printf("%%Error: Missing argument\n");
+      printf("Usage: indexer <filename>\n");
+      return 1;
+    }
+
+    if (!(f= fopen(argv[1], "rb"))) {
+        printf("%%Error: Could not open file: %s\n", argv[1]);
+        return 1;
+    }
+
+    bytes = fread(buf, 1, MAX-1, f);
+    fclose(f);
+
+    if (!bytes) {
+        printf("%%File is empty or could not be read\n");
+        return 1;
+    }
+
+    // null terminate
+    buf[bytes] = 0;
+    
+    printf("Read %u bytes from disk.\n", bytes);
+    printf("Generating virtual index...\n");
+
+    index_string(buf);
+    folds = fold_index();
+
+    // Print diagnostic system properties and the output bitstream
+    printf("\n--- INDEX COMPLETED ---\n");
+    printf("Rounds Folded:  %u\n", folds);
+    printf("Final Data Size: %u bytes\n", fold_size);
+    printf("Storage Ratio:  %u%%\n", (uint)(((unsigned long)fold_size*100) / bytes));
+    
+    printf("\nIndex Preview (Hex):\n");
+    for(i = 0; i < z; ++i) {
+        printf("%02X ", bitset[i]);
+        // Format layout cleanly into 16-byte grid rows
+        if ((i & 15) == 15) putchar('\n');
+    }
+    putchar('\n');
+
+    free(buf);
+    
+    return 0;
+}
+#endif
