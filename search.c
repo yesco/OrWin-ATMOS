@@ -8,18 +8,13 @@
 #include <stdlib.h>
 
 #define BITSET_BYTES  1024
-#define TARGET_DENSITY 25
 
-//typedef uint16_t uint;
-
-char bitset[BITSET_BYTES];
 char idx[BITSET_BYTES];
-
-uint fold_size;
+uint16_t fold_size;
 char fold_count;
 
-uint hash_trigram(char* s) {
-  uint h = 0;
+uint16_t hash_trigram(char* s) {
+  uint16_t h = 0;
   char a = s[0], b = s[1], c = s[2];
   if (!isalnum(a) || !isalnum(b) || ((a|b|c)&0x80)) return 0;
   if (!isalnum(c)) c = 0;
@@ -28,46 +23,37 @@ uint hash_trigram(char* s) {
   return h & 0x1FFF;
 }
 
-uint hash_unigram(char* s, unsigned char len) {
-  uint h = 5381;
+uint16_t hash_unigram(char* s, unsigned char len) {
+  uint16_t h = 5381;
   while (len--) h = ((h << 3) + h) ^ tolower(*s++);
   return h & 0x1FFF;
 }
 
-uint hash_bigram(uint hash1, uint hash2) {
-  uint h = (hash1 << 3) | (hash1 >> 10);
-  return (h ^ hash2) & 0x1FFF;
+uint16_t hash_bigram(uint16_t h1, uint16_t h2) {
+  uint16_t h = (h1 << 3) | (h1 >> 10);
+  return (h ^ h2) & 0x1FFF;
 }
 
-void fold_query_bit(uint h) {
-  uint idx_bit = h & 7;
-  uint idx_byte = h >> 3;
+char test_bit(uint16_t h) {
+  uint16_t idx_byte = h >> 3;
+  uint16_t idx_bit = h & 7;
   char f = fold_count;
-  while (f--) {
-    idx_byte = (idx_byte % (1024 >> (f + 1))) | (idx_byte & (1024 >> (f + 1))); 
-    // Fallback simple simulation of folding index logic 
-    // matching how positions map down on fold.
-  }
-  idx_byte = idx_byte % fold_size; 
-  bitset[idx_byte] |= (1 << idx_bit);
-}
+  uint16_t cur_size = BITSET_BYTES;
 
-char test_bit(uint h) {
-  uint idx_byte = h >> 3;
-  uint idx_bit = h & 7;
-  char f = fold_count;
-  uint cur_size = BITSET_BYTES;
+  // Mirror index.c: Subtract half-size if the index falls in the upper half
   while (f--) {
     cur_size >>= 1;
-    if (idx_byte >= cur_size) idx_byte -= cur_size;
+    if (idx_byte >= cur_size) {
+      idx_byte -= cur_size;
+    }
   }
   return (idx[idx_byte] & (1 << idx_bit)) ? 1 : 0;
 }
 
-void pr_case(char* s, char found) {
-  while (*s) {
-    putchar(found ? tolower(*s) : toupper(*s));
-    s++;
+void pr_case(char* s, int len, char found) {
+  int i;
+  for (i = 0; i < len; i++) {
+    putchar(found ? tolower(s[i]) : toupper(s[i]));
   }
 }
 
@@ -75,9 +61,9 @@ int main(int argc, char* argv[]) {
   FILE* f;
   long sz;
   int i, j;
-  uint z;
-  uint hits = 0, total = 0;
-  uint whash = 0, last_whash = 0;
+  uint16_t z, hits = 0, total = 0;
+  uint16_t whash = 0, last_whash = 0;
+  char first_word = 1;
 
   if (argc < 3) {
     printf("Usage: search <idx_file> <word1> [word2] ...\n");
@@ -89,7 +75,7 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
-  sz= fread(idx, 1, BITSET_BYTES, f);
+  sz = fread(idx, 1, BITSET_BYTES, f);
   fclose(f);
 
   if (sz > BITSET_BYTES || sz < 32) {
@@ -97,60 +83,75 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
-  // log2(sz)
-  fold_size = sz;
+  fold_size = (uint16_t)sz;
   fold_count = 0;
   z = BITSET_BYTES;
-  while (z > fold_size) z >>= 1, fold_count++;
+  while (z > fold_size) {
+    z >>= 1;
+    fold_count++;
+  }
 
+  // --- PASS 1: WORD EVALUATION & LAYOUT GENERATION ---
+  for (i = 2; i < argc; i++) {
+    char* p = argv[i];
+    char* wstart = p;
+    unsigned char wlen = 0;
+
+    while (1) {
+      if (isalnum(*p)) {
+        if (!wlen) wstart = p;
+        wlen++;
+      } else {
+        if (wlen > 0) {
+          whash = hash_unigram(wstart, wlen);
+          total++;
+          char wok = test_bit(whash);
+          if (wok) hits++;
+
+          char bok = 0;
+          if (!first_word) {
+            if (last_whash) {
+              uint16_t bhash = hash_bigram(last_whash, whash);
+              total++;
+              if (test_bit(bhash)) { hits++; bok = 1; }
+            }
+            putchar(bok ? '_' : ' ');
+          }
+          first_word = 0;
+
+          pr_case(wstart, wlen, wok);
+          last_whash = whash;
+          wlen = 0;
+        }
+      }
+      if (!*p) break;
+      p++;
+    }
+  }
+  putchar('\n');
+
+  // --- PASS 2: TRIGRAM EVALUATION LINE ---
+  printf("Trigrams: ");
   for (i = 2; i < argc; i++) {
     char* w = argv[i];
     int len = strlen(w);
-    char ok = 0;
-
-    if (len > 0) {
-      whash = hash_unigram(w, len);
-      total++;
-      if (test_bit(whash)) { hits++; ok = 1; }
-      pr_case(w, ok);
-    }
-
-    if (i > 2) {
-      putchar('_');
-      if (last_whash && len > 0) {
-        uint bhash = hash_bigram(last_whash, whash);
-        total++;
-        ok = test_bit(bhash);
-        if (ok) hits++;
-        // Print indicator linkage mapping case context
-        printf("%c", ok ? 'b' : 'B'); 
-      }
-    }
-    putchar(' ');
-
-    // Trigram evaluation within individual args
     if (len >= 3) {
       for (j = 0; j <= len - 3; j++) {
-        uint thash = hash_trigram(&w[j]);
+        uint16_t thash = hash_trigram(&w[j]);
         if (thash) {
+          char tok = 0;
           total++;
-          ok = test_bit(thash);
-          if (ok) hits++;
+          if (test_bit(thash)) { hits++; tok = 1; }
           printf("[");
-          char tmp[4];
-          strncpy(tmp, &w[j], 3);
-          tmp[3] = 0;
-          pr_case(tmp, ok);
+          pr_case(&w[j], 3, tok);
           printf("] ");
         }
       }
     }
-    last_whash = (len > 0) ? whash : 0;
   }
 
-  uint pct = total ? (uint)(((unsigned long)hits * 100) / total) : 0;
+  uint16_t pct = total ? (uint16_t)(((unsigned long)hits * 100) / total) : 0;
   printf("\nMatch: %u%%\n", pct);
 
   return 0;
 }
-
