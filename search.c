@@ -14,7 +14,7 @@ char idx[BITSET_BYTES];
 char query[MAX_QUERY];
 
 uint16_t fold_size;
-uint16_t fold_mask;
+uint16_t fold_mask; // Fast 6502 mask: fold_size - 1
 
 uint16_t hash_trigram(char* s) {
   uint16_t h = 0;
@@ -37,6 +37,7 @@ uint16_t hash_bigram(uint16_t h1, uint16_t h2) {
   return (h ^ h2) & 0x1FFF;
 }
 
+// Clean, simple, and hyper-optimized for the 6502
 char test_bit(uint16_t h) {
   uint16_t i = (h >> 3) & fold_mask;
   return (idx[i] & (1 << (h & 7))) ? 1 : 0;
@@ -52,13 +53,20 @@ void pr_case(char* s, int len, char found) {
 int main(int argc, char* argv[]) {
   FILE* f;
   long sz;
-  int i, j;
+  int i;
   uint16_t hits = 0, total = 0;
   uint16_t whash = 0, last_whash = 0;
-  
-  char *p, *wstart;
-  unsigned char wlen = 0;
   char first_word = 1;
+  
+  // C89 Variables Hoisted to Top
+  char* p;
+  char* wstart;
+  unsigned char wlen;
+  char found;
+  char both;
+  uint16_t bothhash;
+  uint16_t thash;
+  uint16_t pct;
 
   if (argc < 3) {
     printf("Usage: search <idx_file> <word1> [word2] ...\n");
@@ -81,7 +89,7 @@ int main(int argc, char* argv[]) {
   fold_size = (uint16_t)sz;
   fold_mask = fold_size - 1;
 
-  // --- RECREAT SINGLE QUERY STRING ---
+  // --- RECREATE SINGLE QUERY STRING ---
   query[0] = 0;
   for (i = 2; i < argc; i++) {
     if (strlen(query) + strlen(argv[i]) + 2 >= MAX_QUERY) break;
@@ -94,6 +102,8 @@ int main(int argc, char* argv[]) {
   // --- PASS 1: SAME LOOP AS THE INDEXER ---
   p = query;
   wstart = query;
+  wlen = 0;
+
   while (1) {
     if (isalnum(*p)) {
       if (!wlen) wstart = p;
@@ -101,13 +111,13 @@ int main(int argc, char* argv[]) {
     } else if (wlen > 0) {
       whash = hash_unigram(wstart, wlen);
       total++;
-      char found = test_bit(whash);
+      found = test_bit(whash);
       if (found) hits++;
       
-      char both = 0;
+      both = 0;
       if (!first_word) {
         if (last_whash) {
-          uint16_t bothhash = hash_bigram(last_whash, whash);
+          bothhash = hash_bigram(last_whash, whash);
           total++;
           if (test_bit(bothhash)) { hits++; both = 1; }
         }
@@ -117,7 +127,8 @@ int main(int argc, char* argv[]) {
 
       pr_case(wstart, wlen, found);
       
-      last_whash = whash;
+      // Chain break rule: missing word cannot form bigram bridge
+      last_whash = found ? whash : 0;
       wlen = 0;
     }
 
@@ -125,12 +136,11 @@ int main(int argc, char* argv[]) {
     p++;
   }
 
-  // --- PASS 2: TRIGRAMS FROM UNIFIED QUERY ---
+  // --- PASS 2: TRIGRAM EVALUATION LINE ---
   printf("\nTriNot:\t");
   p = query;
   while (*p) {
-    // Process trailing sequences safely anywhere they naturally sit
-    uint16_t thash = hash_trigram(p);
+    thash = hash_trigram(p);
     if (thash) {
       total++;
       if (!test_bit(thash)) {
@@ -143,7 +153,7 @@ int main(int argc, char* argv[]) {
     p++;
   }
 
-  uint16_t pct = total ? (uint16_t)(((unsigned long)hits * 100) / total) : 0;
+  pct = total ? (uint16_t)(((unsigned long)hits * 100) / total) : 0;
   printf("\nMatch:\t%u%%\n", pct);
 
   return 0;
