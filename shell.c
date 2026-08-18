@@ -1,7 +1,7 @@
 // OrWIN Shell pipeline execute
 
 //#define SHELLTRACE
-//#define SHELLINFO
+#define SHELLINFO
 #define SHELLTEST
 
 #include <stdlib.h>
@@ -563,6 +563,8 @@ int wsystem(char* cmd) {
     while(isspace(p[-1]) && p>line) --p;
     *p= 0;
     
+    traincleanbits<<= 1;
+
     // This calls the INIT for the command!
     // (state==0)
     arr[++i]= state= (*f)(0, line);
@@ -572,8 +574,6 @@ int wsystem(char* cmd) {
       printf("Command %s init error gave NULL!\n", cmd);
       return -1;
     }
-
-    traincleanbits<<= 1;
 
     #ifdef SHELLINFO
     printf("\"%s\" %p %p]\n", line, f, state);
@@ -591,14 +591,20 @@ int wsystem(char* cmd) {
 
   // CLEANUP
 
-#if 1
-  while((cleanbits>>= 1)) {
+ cleanup:
+
+  do {
     --i;
-    if (cleanbits & 1)
+    if (cleanbits & 1) {
+      #ifdef SHELLINFO
+      printf("\t[CLEANUP: %d %p]\n", i, train[i]);
+      #endif
       (*train[i])(train[i], CLEANUP);
-  }
-#endif
+    }
+  } while((cleanbits>>= 1));
   
+  free(train);
+
   return r;
 }
 
