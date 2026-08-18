@@ -12,12 +12,18 @@
 #include <stdio.h>
 
 // TODO: make it a printable string?
-#define EOS ((char*)-1)
+#define EOS     ((char*)1)
+#define CLEANUP	((char*)2)
+
 
 
 typedef void* (*cmdfun)(void* state, char* line);
 
 typedef cmdfun* cmdtrain;
+
+unsigned int traincleanbits;
+
+#define REQUEST_CLEANUP() (traincleanbits|=1)
 
 
 
@@ -131,11 +137,18 @@ void* cat(filestate* state, char* line) {
   if (!state) {
     state= STALLOC(filestate, cat);
     if (!state) return NULL;
+
+    REQUEST_CLEANUP();
     if ((state->fil= fopen(line, "r"))) return state;
+
     // errors
     free(state);
     return NULL; // TODO: logic?
+  } else if (line==CLEANUP) {
+    if (state->fil) fclose(state->fil);
+    return NULL;
   }
+    
 
   if (line!=EOS) lfree(line);
 
@@ -494,6 +507,7 @@ int wsystem(char* cmd) {
   
   // a train {NULL, ..., NUL} ! - simplifies logic!
   memset(arr, 0, sizeof(arr));
+  traincleanbits= 0;
   i= 0;
   
   while(*cmd) {
@@ -549,8 +563,17 @@ int wsystem(char* cmd) {
     while(isspace(p[-1]) && p>line) --p;
     *p= 0;
     
-    // TODO: crash
+    // This calls the INIT for the command!
+    // (state==0)
     arr[++i]= state= (*f)(0, line);
+
+    if (!state) {
+      // ABORT!
+      printf("Command %s init error gave NULL!\n", cmd);
+      return -1;
+    }
+
+    traincleanbits<<= 1;
 
     #ifdef SHELLINFO
     printf("\"%s\" %p %p]\n", line, f, state);
@@ -558,10 +581,25 @@ int wsystem(char* cmd) {
   }
   
   putchar('\n');
-  
+
+  // make a copy
+  // TODO: pack it in as {CLEANBITS, NULL, ...., NULL} !
+  unsigned int cleanbits= traincleanbits;
   cmdtrain *train= memdup(arr, ++i*sizeof(arr[0]));
 
-  return wsystrain(train);
+  int r= wsystrain(train);
+
+  // CLEANUP
+
+#if 1
+  while((cleanbits>>= 1)) {
+    --i;
+    if (cleanbits & 1)
+      (*train[i])(train[i], CLEANUP);
+  }
+#endif
+  
+  return r;
 }
 
 int main(int argc, char** argv) {
