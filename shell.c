@@ -592,7 +592,7 @@ int wsystem(char* cmd) {
   // make a copy
   // TODO: pack it in as {CLEANBITS, NULL, ...., NULL} !
   unsigned int cleanbits= traincleanbits;
-  cmdtrain *train= memdup(arr, ++i*sizeof(arr[0]));
+  cmdtrain *train= memdup(arr, (i+1)*sizeof(arr[0]));
 
   int r= wsystrain(train);
 
@@ -601,14 +601,20 @@ int wsystem(char* cmd) {
  cleanup:
 
   do {
-    --i;
-    if (cleanbits & 1) {
-      #ifdef SHELLINFO
-      printf("\t[**CLEANUP**: %d %p]\n", i, train[i]);
-      #endif
-      (*train[i])(train[i], CLEANUP);
+    cmdfun *f= train[i];
+    if (f) {
+      if (cleanbits & 1) {
+        #ifdef SHELLINFO
+	printf("\t[**CLEANUP**: %d %p]\n", i, train[i]);
+        #endif
+        (*f)(f, CLEANUP);
+      }
+      // remove that state
+      free(f);
     }
-  } while((cleanbits>>= 1));
+
+    cleanbits>>= 1;
+  } while(--i);
   
   free(train);
 
