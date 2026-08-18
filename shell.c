@@ -458,6 +458,51 @@ void* head(countstate* state, char* line) {
   return EOS;
 }
 
+
+void* tail(countstate* state, char* line) {
+  if (!state) {
+    state = STALLOC(countstate, tail);
+    if (!state) return NULL;
+
+    // +3 means skip 3 lines, -3 means last 3
+    state->n= 0;
+    if (*line=='+') ++line;
+    state->e= -nextInt(&line, 10);
+    //    if (state->e < -2) state->e+= 2;
+    if (state->e > 0) state->d= (int)calloc(state->e, sizeof(char*));
+    return state;
+  }
+
+  printf("\t[TAIL %d %d %d %p]\n", state->n, state->e, state->d, state->d);
+
+  // skip lines code
+  if (state->e < 0) {
+    state->e++;
+    lfree(line);
+    return NULL;
+  }
+  if (state->e == 0) return line;
+
+  // tail code (keep ring buffer)
+  char** ring= (char**)state->d;
+  // step
+  if (++state->n >= state->e) state->n= 0;
+  
+  if (line==EOS || !line) {
+    // generate output
+    if (state->e-- <= 0) return EOS; // TODO: cleanup!
+
+    line= ring[state->n];
+    ring[state->n]= NULL;
+    return line;
+  }
+  
+  // insert
+  lfree(ring[state->n]);
+  ring[state->n]= line;
+  return NULL;
+}
+
 ///////////////////////////////////////////////////
 
 
@@ -496,8 +541,9 @@ char* cmdnames[]= {
   "cat",
   "wc",
   "ls",
-  "head",
   "iota",
+  "head",
+  "tail",
 
   "teeterminal",
   "terminal",
@@ -525,7 +571,7 @@ char* cmdnames[]= {
 };
 
 void* commands[]= {
-  pwd, grep, cat, wc, ls, head, iota,
+  pwd, grep, cat, wc, ls, iota, head, tail,
   teeterminal, terminal,
   
 };
@@ -698,6 +744,11 @@ int main(int argc, char** argv) {
 
   wsystem("iota 2 22 | terminal");
   wsystem("iota 10 -10 -2 | terminal");
+
+  wsystem("iota 1 100 | tail +96 | terminal");
+
+  wsystem("iota 1 100 | tail -4 | terminal");
+	  
 
   wsystem("cat numbers.txt | head | terminal");
   wsystem("cat numbers.txt | head -3 | terminal");  
