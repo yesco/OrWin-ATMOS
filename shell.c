@@ -188,6 +188,8 @@ void* wc(wcstate* state, char* line) {
 // ls
 
 
+#ifndef NOSTACK
+
 // Returns 1 if string matches glob pattern, 0 otherwise
 int wildmatch(char* pat, char* s) {
   //printf("  -- >%s<\t>%s<\n", pat, s);
@@ -213,6 +215,35 @@ int wildmatch(char* pat, char* s) {
   }
   return !*s;
 }
+
+#else
+
+int wildmatch(char* pat, char* s) {
+  char* p_track = NULL;
+  char* s_track = NULL;
+  if (!pat) return 1;
+
+  while (*s) {
+    if (*pat == '*') {
+      while (*pat == '*') ++pat;
+      if (!*pat) return 1;
+      p_track = pat;
+      s_track = s;
+    } else if (*pat == *s) {
+      ++pat;
+      ++s;
+    } else if (p_track) {
+      pat = p_track;
+      s = ++s_track;
+    } else {
+      return 0;
+    }
+  }
+  while (*pat == '*') ++pat;
+  return !*pat;
+}
+
+#endif
 
 
 // ============================================================================
@@ -325,6 +356,38 @@ void* ls(lsstate* state, char* line) {
 
 #endif
 
+
+///////////////////////////////////////////////////
+
+typedef struct countstate {
+  cmdfun f;
+  int n;
+} countstate;
+
+void* head(countstate* state, char* line) {
+  if (!state) {
+    state = STALLOC(countstate, head);
+    if (!state) return NULL;
+
+    state->n= 10; // default
+    if (line && *line) {
+      if (*line=='-') ++line;
+      state->n= atoi(line);
+    }
+    return state;
+  }
+
+  if (!line || line==EOS) return line;
+
+  if (state->n-- > 0) return line;
+  else return EOS;
+}
+
+
+///////////////////////////////////////////////////
+
+
+
 void shprint(char* line) {
   char lastc;
   
@@ -359,6 +422,7 @@ char* cmdnames[]= {
   "cat",
   "wc",
   "ls",
+  "head",
   "teeterminal",
   "terminal",
   
@@ -385,7 +449,7 @@ char* cmdnames[]= {
 };
 
 void* commands[]= {
-  pwd, grep, cat, wc, ls, teeterminal, terminal,
+  pwd, grep, cat, wc, ls, head, teeterminal, terminal,
   
 };
 
@@ -516,6 +580,12 @@ int main(int argc, char** argv) {
   wsystem("ls | terminal");
   wsystem("ls *.c | terminal");
   wsystem("ls *.md | terminal");
+  wsystem("ls ../OrWin-ATMOS/*~ | terminal");
 
+  wsystem("cat numbers.txt | head | terminal");
+  wsystem("cat numbers.txt | head -3 | terminal");  
+
+  //wsystem("ls | head -3 | terminal");
+  
   return 0;
 }
