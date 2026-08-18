@@ -380,7 +380,10 @@ void* head(countstate* state, char* line) {
   if (!line || line==EOS) return line;
 
   if (state->n-- > 0) return line;
-  else return EOS;
+
+  // This "cuts-off" the consumer
+  lfree(line);
+  return EOS;
 }
 
 
