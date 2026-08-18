@@ -1,5 +1,9 @@
 // OrWIN Shell pipeline execute
 
+//#define SHELLTRACE
+//#define SHELLINFO
+#define SHELLTEST
+
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
@@ -68,6 +72,7 @@ char* lstrcpy(char* line, char* s) {
   return strdup(s);
 }
 
+#define lstrdup strdup
 
 ///////////////////////////////////////////////////////////
 
@@ -182,6 +187,37 @@ void* wc(wcstate* state, char* line) {
 // ============================================================================
 // ls
 
+
+// Returns 1 if string matches glob pattern, 0 otherwise
+int wildmatch(char* pat, char* s) {
+  //printf("  -- >%s<\t>%s<\n", pat, s);
+	 
+  if (!pat) return 1;
+  while(*pat) {
+    if (*pat == '*') {
+      // Multiple consecutive stars are treated as a single star
+      while (*pat == '*') ++pat;
+      if (!*pat) return 1; // Trailing star matches everything remaining
+      
+      while (*s) {
+        if (wildmatch(pat, s)) return 1;
+        ++s;
+      }
+      return 0;
+    } else if (*pat == *s) {
+      ++pat;
+      ++s;
+    } else {
+      return 0;
+    }
+  }
+  return !*s;
+}
+
+
+// ============================================================================
+// CC65 Implementation
+// ============================================================================
 #include <errno.h>
 
 #ifdef __CC65__
@@ -192,15 +228,25 @@ typedef struct lsstate {
   unsigned char dir_open;
   struct directory dir;
   struct direntry entry;
+  char* pat;
 } lsstate;
 
 void* ls(lsstate* state, char* line) {
   if (!state) {
-    char* path = (line && *line) ? line : ".";
     state = STALLOC(lsstate, ls);
     if (!state) return NULL;
     
-    if (open_dir(&state->dir, path) != 0) {
+    if (line && *line) {
+      // If it contains a wildcard or is an explicit filename, save it as a filter pattern
+      if (strchr(line, '*')) {
+	char* p= strrchr(line, '/');
+	if (p) { *p= 0; state->pat = strdup(p+1); }
+	// TODO: simplify duplication
+	else { state->pat = strdup(line); line = 0; }
+      }	else { state->pat = strdup(line); line = 0; }
+    }
+
+    if (0 != open_dir(&state->dir, (line && *line)? line: ".")) {
       state->dir_open = 1;
       return state;
     }
@@ -211,13 +257,17 @@ void* ls(lsstate* state, char* line) {
   if (line != EOS) lfree(line);
   if (!state->dir_open) return EOS;
 
-  if (read_dir(&state->dir, &state->entry) == 0) {
-    close_dir(&state->dir);
-    state->dir_open = 0;
-    return EOS;
-  }
-  // TODO: make some simple reuse
-  return strdup(state->entry.name);
+  do {
+    if (read_dir(&state->dir, &state->entry) == 0) {
+      close_dir(&state->dir);
+      state->dir_open = 0;
+      free(state->pat);
+      return EOS;
+    }
+  } while(!wildmatch(state->pat, state->entry.name));
+
+  // found a matching one
+  return lstrdup(state->entry.name);
 }
 
 #else
@@ -231,15 +281,25 @@ void* ls(lsstate* state, char* line) {
 typedef struct lsstate {
   cmdfun f;
   DIR* dir;
+  char* pat;
 } lsstate;
 
 void* ls(lsstate* state, char* line) {
   if (!state) {
-    char* path = (line && line[0] != '\0') ? line : ".";
     state = STALLOC(lsstate, ls);
     if (!state) return NULL;
 
-    state->dir = opendir(path);
+    if (line && *line) {
+      // If it contains a wildcard or is an explicit filename, save it as a filter pattern
+      if (strchr(line, '*')) {
+	char* p= strrchr(line, '/');
+	if (p) { *p= 0; state->pat = strdup(p+1); }
+	// TODO: simplify duplication
+	else { state->pat = strdup(line); line = 0; }
+      }	else { state->pat = strdup(line); line = 0; }
+    }
+
+    state->dir = opendir((line && *line)? line: ".");
     if (state->dir) return state;
     free(state);
     return NULL;
@@ -248,34 +308,47 @@ void* ls(lsstate* state, char* line) {
   if (line != EOS) lfree(line);
   if (!state->dir) return EOS;
 
-  struct dirent* de = readdir(state->dir);
-  if (!de) {
-    closedir(state->dir);
-    state->dir = NULL;
-    return EOS;
-  }
-  return strdup(de->d_name);
+  struct dirent* de;
+  do {
+    if (!(de=readdir(state->dir))) {
+      closedir(state->dir);
+      state->dir = NULL;
+      free(state->pat);
+      return EOS;
+    }
+
+  } while(!wildmatch(state->pat, de->d_name));
+
+  // found a matching one
+  return lstrdup(de->d_name);
 }
 
 #endif
 
+void shprint(char* line) {
+  char lastc;
+  
+  if (line==EOS)  puts("*EOS*");
+  else if (!line) puts("*NULL*");
+  else {
+    while(*line) putchar(lastc= *line++);
+    if (lastc != '\n') putchar('\n');
+  }
+}
 
 // more like "tee -"
 void* teeterminal(simplestate* state, char* line) {
   if (!state) return STALLOC(wcstate, wc);
-  if (line==EOS) puts("*EOS*");
-  else if (line) puts(line);
-  else puts("*NULL*");
+
+  shprint(line);
   return line;
 }
 
-// more like "tee -"
+// can only be last in chain!
 void* terminal(simplestate* state, char* line) {
   if (!state) return STALLOC(simplestate, terminal);
-  if (line==EOS) puts("*EOS*");
-  // TODO: probably lines should contain the \n...
-  else if (line) puts(line);
-  else puts("*NULL*");
+
+  shprint(line);
   // force backtracking, why different?
   return line==EOS? EOS: NULL;
 }
@@ -327,8 +400,10 @@ int wsystrain(cmdtrain *train) {
   ++train; // skip initial 0
 
   while((fp=*train)) {
+    #ifdef SHELLTRACE
     printf("\t[%d \"%s\" =>]\n", (char)(train-origtrain),
 	   !line? "(NULL)": line==EOS? "*EOS*": line);
+    #endif
     line= (*fp)(fp, line);
     if (line) ++train; else --train;
   }    
@@ -345,6 +420,10 @@ int wsystem(char* cmd) {
   cmdfun* f;
   void* state;
   static void* arr[16];
+  
+  #ifdef SHELLTEST
+  printf("\n------ wsystem: \"%s\"\n", cmd);
+  #endif
   
   // a train {NULL, ..., NUL} ! - simplifies logic!
   memset(arr, 0, sizeof(arr));
@@ -387,7 +466,9 @@ int wsystem(char* cmd) {
 
   found:
 
+    #ifdef SHELLINFO
     printf("\t[%s: ", line);
+    #endif
 
     // = Extract arguments (how about intial)
 
@@ -404,7 +485,9 @@ int wsystem(char* cmd) {
     // TODO: crash
     arr[++i]= state= (*f)(0, line);
 
+    #ifdef SHELLINFO
     printf("\"%s\" %p %p]\n", line, f, state);
+    #endif
   }
   
   putchar('\n');
@@ -425,21 +508,14 @@ int main(int argc, char** argv) {
   
   wsystrain(mock);
   
+  // Error codes? How & semantics
+
   printf("------------ wsystem: pwd | terminal\n");
-  // Error codes? How & semantics
   wsystem("pwd | terminal");
-
-  printf("------------ wsystem: cat numbers.txt | grep o | terminal\n");
-  // Error codes? How & semantics
   wsystem("cat numbers.txt | grep o | terminal");
-
-  printf("11111111\n");
-	 
   wsystem("ls | terminal");
-
-  printf("22222222\n");
-
   wsystem("ls *.c | terminal");
+  wsystem("ls *.md | terminal");
 
   return 0;
 }
