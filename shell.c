@@ -76,10 +76,10 @@ char* lstrcpy(char* line, char* s) {
 void* pwd(simplestate* state, char* line) {
   if (!state) return SIMPLEALLOC(pwd);
 
-  // pass-through backtracking
-  if (!line) return line;
+  if (!line) return EOS;
 
-  // generate a value on EOF (or any), lol
+  // generate a value on EOS (or any), lol
+  lfree(line);
   return strdup("/home/orwin");
 }
 
@@ -121,7 +121,7 @@ typedef struct filestate {
 
 void* cat(filestate* state, char* line) {
   char* ln= NULL;
-  size_t sz;
+  size_t sz= 0;
   if (!state) {
     state= STALLOC(filestate, cat);
     if ((state->fil= fopen(line, "r"))) return state;
@@ -151,7 +151,7 @@ typedef struct wcstate { cmdfun f; unsigned int ln, wn, cn; } wcstate;
 
 void* wc(wcstate* state, char* line) {
   char c, *s= line;
-  unsigned int n;
+  unsigned int n= 0;
   
   if (!state) return STALLOC(wcstate, wc);
 
@@ -261,6 +261,7 @@ int wsystem(char* cmd) {
   void* state;
   static void* arr[16];
   
+  // a train {NULL, ..., NUL} ! - simplifies logic!
   memset(arr, 0, sizeof(arr));
   i= 0;
   
