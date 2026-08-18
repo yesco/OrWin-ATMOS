@@ -79,7 +79,7 @@ void* pwd(simplestate* state, char* line) {
   if (!line) return EOS;
 
   // generate a value on EOS (or any), lol
-  lfree(line);
+  if (line!=EOS) lfree(line);
   return strdup("/home/orwin");
 }
 
@@ -104,6 +104,7 @@ typedef struct fakefilestate { cmdfun f; char** fil; } fakefilestate;
 void* cat(fakefilestate* state, char* line) {
   if (!state) {
     state= STALLOC(fakefilestate, cat);
+    if (!state) return NULL;
     state->fil= fakefile;
     return state;
   }
@@ -124,6 +125,7 @@ void* cat(filestate* state, char* line) {
   size_t sz= 0;
   if (!state) {
     state= STALLOC(filestate, cat);
+    if (!state) return NULL;
     if ((state->fil= fopen(line, "r"))) return state;
     // errors
     free(state);
@@ -176,6 +178,88 @@ void* wc(wcstate* state, char* line) {
   return lfree(line);
 }
   
+
+// ============================================================================
+// ls
+
+#include <errno.h>
+
+#ifdef __CC65__
+#include <directory.h>
+
+typedef struct lsstate {
+  cmdfun f;
+  unsigned char dir_open;
+  struct directory dir;
+  struct direntry entry;
+} lsstate;
+
+void* ls(lsstate* state, char* line) {
+  if (!state) {
+    char* path = (line && *line) ? line : ".";
+    state = STALLOC(lsstate, ls);
+    if (!state) return NULL;
+    
+    if (open_dir(&state->dir, path) != 0) {
+      state->dir_open = 1;
+      return state;
+    }
+    free(state);
+    return NULL;
+  }
+
+  if (line != EOS) lfree(line);
+  if (!state->dir_open) return EOS;
+
+  if (read_dir(&state->dir, &state->entry) == 0) {
+    close_dir(&state->dir);
+    state->dir_open = 0;
+    return EOS;
+  }
+  // TODO: make some simple reuse
+  return strdup(state->entry.name);
+}
+
+#else
+
+// ============================================================================
+// POSIX / Linux / Termux Target Implementation
+// ============================================================================
+#include <sys/types.h>
+#include <dirent.h>
+
+typedef struct lsstate {
+  cmdfun f;
+  DIR* dir;
+} lsstate;
+
+void* ls(lsstate* state, char* line) {
+  if (!state) {
+    char* path = (line && line[0] != '\0') ? line : ".";
+    state = STALLOC(lsstate, ls);
+    if (!state) return NULL;
+
+    state->dir = opendir(path);
+    if (state->dir) return state;
+    free(state);
+    return NULL;
+  }
+
+  if (line != EOS) lfree(line);
+  if (!state->dir) return EOS;
+
+  struct dirent* de = readdir(state->dir);
+  if (!de) {
+    closedir(state->dir);
+    state->dir = NULL;
+    return EOS;
+  }
+  return strdup(de->d_name);
+}
+
+#endif
+
+
 // more like "tee -"
 void* teeterminal(simplestate* state, char* line) {
   if (!state) return STALLOC(wcstate, wc);
@@ -201,6 +285,7 @@ char* cmdnames[]= {
   "grep",
   "cat",
   "wc",
+  "ls",
   "teeterminal",
   "terminal",
   
@@ -227,7 +312,7 @@ char* cmdnames[]= {
 };
 
 void* commands[]= {
-  pwd, grep, cat, wc, teeterminal, terminal,
+  pwd, grep, cat, wc, ls, teeterminal, terminal,
   
 };
 
@@ -347,6 +432,14 @@ int main(int argc, char** argv) {
   printf("------------ wsystem: cat numbers.txt | grep o | terminal\n");
   // Error codes? How & semantics
   wsystem("cat numbers.txt | grep o | terminal");
+
+  printf("11111111\n");
+	 
+  wsystem("ls | terminal");
+
+  printf("22222222\n");
+
+  wsystem("ls *.c | terminal");
 
   return 0;
 }
