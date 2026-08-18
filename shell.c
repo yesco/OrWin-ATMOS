@@ -67,7 +67,7 @@ void* memdup(void* p, unsigned int bytes) {
 
 void* lfree(char* line) {
   // TODO: keep a pool? reuse!
-  free(line);
+  if (line && line!=EOS && line!=CLEANUP) free(line);
   return NULL;
 }
 
@@ -90,7 +90,7 @@ void* pwd(simplestate* state, char* line) {
   if (!line) return EOS;
 
   // generate a value on EOS (or any), lol
-  if (line!=EOS) lfree(line);
+  lfree(line);
   return strdup("/home/orwin");
 }
 
@@ -120,7 +120,7 @@ void* cat(fakefilestate* state, char* line) {
     return state;
   }
 
-  if (line!=EOS) lfree(line);
+  lfree(line);
   return *state->fil? strdup(*state->fil++): EOS;
 }
 
@@ -150,7 +150,7 @@ void* cat(filestate* state, char* line) {
   }
     
 
-  if (line!=EOS) lfree(line);
+  lfree(line);
 
   // EOF if eof or error?
   if (EOF==getline(&ln, &sz, state->fil)) {
@@ -292,20 +292,24 @@ void* ls(lsstate* state, char* line) {
 
     if (0 != open_dir(&state->dir, (line && *line)? line: ".")) {
       state->dir_open = 1;
+      REQUEST_CLEANUP();
       return state;
     }
     free(state);
     return NULL;
   }
 
-  if (line != EOS) lfree(line);
+  lfree(line);
   if (!state->dir_open) return EOS;
 
   do {
-    if (read_dir(&state->dir, &state->entry) == 0) {
-      close_dir(&state->dir);
-      state->dir_open = 0;
-      free(state->pat);
+    if (0==read_dir(&state->dir, &state->entry)
+	|| line == CLEANUP) {
+      if (state->dir_open) {
+	close_dir(&state->dir);
+	state->dir_open = 0;
+	free(state->pat);
+      }
       return EOS;
     }
   } while(!wildmatch(state->pat, state->entry.name));
@@ -344,20 +348,23 @@ void* ls(lsstate* state, char* line) {
     }
 
     state->dir = opendir((line && *line)? line: ".");
+    REQUEST_CLEANUP();
     if (state->dir) return state;
     free(state);
     return NULL;
   }
 
-  if (line != EOS) lfree(line);
+  lfree(line);
   if (!state->dir) return EOS;
 
   struct dirent* de;
   do {
-    if (!(de=readdir(state->dir))) {
-      closedir(state->dir);
-      state->dir = NULL;
-      free(state->pat);
+    if (!(de=readdir(state->dir)) || line == CLEANUP) {
+      if (state->dir) {
+	closedir(state->dir);
+	state->dir = NULL;
+	free(state->pat);
+      }
       return EOS;
     }
 
@@ -597,7 +604,7 @@ int wsystem(char* cmd) {
     --i;
     if (cleanbits & 1) {
       #ifdef SHELLINFO
-      printf("\t[CLEANUP: %d %p]\n", i, train[i]);
+      printf("\t[**CLEANUP**: %d %p]\n", i, train[i]);
       #endif
       (*train[i])(train[i], CLEANUP);
     }
