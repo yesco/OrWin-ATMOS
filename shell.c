@@ -379,10 +379,62 @@ void* ls(lsstate* state, char* line) {
 
 ///////////////////////////////////////////////////
 
+char* nextStr(char** line, char* dflt) {
+  char *r, *p= *line;
+  if (!line || !*line) return dflt;
+  // skip spaces
+  while(isspace(*p)) ++p;
+  // r points to first non whitespace (or at end)
+  r= p;
+  // skip till end of "word"
+  while(*p && !isspace(*p)) ++p;
+  // truncate string (we either on 0 or whitespace)
+  if (*p) *p++= 0;
+  // move input pointer to rest
+  *line= p;
+  return *r? r: dflt;
+}
+
+int nextInt(char** line, int dflt) {
+  char *r= nextStr(line, NULL);
+  return (r && (isdigit(*r) || *r=='-'))
+    ? atoi(r): dflt;
+}
+
+///////////////////////////////////////////////////
+
 typedef struct countstate {
   cmdfun f;
   int n;
+  int d;
+  int e;
 } countstate;
+
+
+void* iota(countstate* state, char* line) {
+  if (!state) {
+    int x;
+    state = STALLOC(countstate, iota);
+    if (!state) return NULL;
+
+    state->n = nextInt(&line, 1);
+    state->e = nextInt(&line, 10);
+    state->d = nextInt(&line, 1);
+    return state;
+  }
+
+  lfree(line);
+  if ((state->d > 0 && state->n <= state->e) ||
+      (state->d < 0 && state->n >= state->e)) {
+    line= calloc(16,1);
+    sprintf(line, "%d", state->n);
+    state->n+= state->d;
+    return line;
+  }
+
+  return EOS;
+}
+        
 
 void* head(countstate* state, char* line) {
   if (!state) {
@@ -405,7 +457,6 @@ void* head(countstate* state, char* line) {
   lfree(line);
   return EOS;
 }
-
 
 ///////////////////////////////////////////////////
 
@@ -446,6 +497,8 @@ char* cmdnames[]= {
   "wc",
   "ls",
   "head",
+  "iota",
+
   "teeterminal",
   "terminal",
   
@@ -472,7 +525,8 @@ char* cmdnames[]= {
 };
 
 void* commands[]= {
-  pwd, grep, cat, wc, ls, head, teeterminal, terminal,
+  pwd, grep, cat, wc, ls, head, iota,
+  teeterminal, terminal,
   
 };
 
@@ -501,7 +555,7 @@ int wsystrain(cmdtrain *train) {
 
 
 int wsystem(char* cmd) {
-  // TODO: use shared area?
+  // TODO: check overflow this per command?
   static char line[80];
   char c, i, *p, **n;
   cmdfun* f;
@@ -641,6 +695,9 @@ int main(int argc, char** argv) {
   wsystem("ls *.c | terminal");
   wsystem("ls *.md | terminal");
   wsystem("ls ../OrWin-ATMOS/*~ | terminal");
+
+  wsystem("iota 2 22 | terminal");
+  wsystem("iota 10 -10 -2 | terminal");
 
   wsystem("cat numbers.txt | head | terminal");
   wsystem("cat numbers.txt | head -3 | terminal");  
