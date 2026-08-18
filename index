@@ -1,0 +1,4 @@
+clang indexer.c -o indexer.x
+
+find ../ | grep 'README.md$' | xargs -l1 ./indexer.x
+

@@ -172,5 +172,7 @@ int main(int argc, char* argv[]) {
   pct = total ? (uint16_t)(((unsigned long)hits * 100) / total) : 0;
   printf("Match:\t%u%%\n", pct);
 
-  return 0;
+  if (pct) printf("MATCH-%03d: %s\n", pct, argv[1]);
+
+  return pct? 0: 1;
 }

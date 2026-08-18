@@ -1,0 +1,13 @@
+clang search.c -o search.x
+
+# bullshit xargs:
+#find ../ | grep '.idx$' | xargs -IFIL -L1 echo ./search.x FIL "$@"
+
+find ../ -name '*.idx' -exec ./search.x {} "$@" \; | grep '^MATCH' | sort -r | sed 's/.idx$//'
+
+
+
+
+
+
+
