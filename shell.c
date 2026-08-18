@@ -95,6 +95,7 @@ void* grep(pstate* state, char* line) {
 }
 
 
+#ifdef FAKE
 // fake file
 char* fakefile[]= { "one", "two", "three", "four", "five", NULL };
 
@@ -103,18 +104,47 @@ typedef struct fakefilestate { cmdfun f; char** fil; } fakefilestate;
 void* cat(fakefilestate* state, char* line) {
   if (!state) {
     state= STALLOC(fakefilestate, cat);
-    // strdup(line)
     state->fil= fakefile;
     return state;
   }
 
-  // pass on
-  //if (!line || line==EOS) return line;
-
-  //return *state->fil? lstrcpy(line, *state->fil++): EOS;
   if (line!=EOS) lfree(line);
   return *state->fil? strdup(*state->fil++): EOS;
 }
+
+#else
+
+typedef struct filestate {
+  cmdfun f;
+  FILE* fil;
+} filestate;
+
+void* cat(filestate* state, char* line) {
+  char* ln= NULL;
+  size_t sz;
+  if (!state) {
+    state= STALLOC(filestate, cat);
+    if ((state->fil= fopen(line, "r"))) return state;
+    // errors
+    free(state);
+    return NULL; // TODO: logic?
+  }
+
+  if (line!=EOS) lfree(line);
+
+  // EOF if eof or error?
+  if (EOF==getline(&ln, &sz, state->fil)) {
+    //printf("==eof==\n");
+    free(ln);
+    fclose(state->fil); state->fil= NULL;
+    return EOS;
+  } else {
+    //printf("==line==>%s< %p\n", ln, ln);
+    // Reuse isdifficult as we haven't recorded sz?
+    return ln;
+  }
+}
+#endif
   
 
 typedef struct wcstate { cmdfun f; unsigned int ln, wn, cn; } wcstate;
@@ -159,6 +189,7 @@ void* teeterminal(simplestate* state, char* line) {
 void* terminal(simplestate* state, char* line) {
   if (!state) return STALLOC(simplestate, terminal);
   if (line==EOS) puts("*EOS*");
+  // TODO: probably lines should contain the \n...
   else if (line) puts(line);
   else puts("*NULL*");
   // force backtracking, why different?
@@ -312,9 +343,9 @@ int main(int argc, char** argv) {
   // Error codes? How & semantics
   wsystem("pwd | terminal");
 
-  printf("------------ wsystem: cat fil | grep o | terminal\n");
+  printf("------------ wsystem: cat numbers.txt | grep o | terminal\n");
   // Error codes? How & semantics
-  wsystem("cat fil | grep o | terminal");
+  wsystem("cat numbers.txt | grep o | terminal");
 
   return 0;
 }
