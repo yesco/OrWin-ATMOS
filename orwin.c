@@ -446,11 +446,14 @@ char wkbhit(char win) {
     // Capture FUNC keys Window Keys
     c^= 128;
     switch(toupper(c)) {
-    case 'P':           setfocus(wfocus-1); break;
-    case 'N': case ' ': setfocus(wfocus+1); break;
-    case 27 : case   9: setfocus(wprev);    break; // toggle 
+    case ' ':
+    case 'N': setfocus(wfocus+1); break;
+    case 'P': setfocus(wfocus-1); break;
+    case 27 : setfocus(wprev);    break; // toggle 
+
     // TODO: too easy kill, ask question!
-    case 127: case 'K': winkill(); setfocus(wfocus+1); break; // Kill
+    case 127:
+    case 'K': winkill(); setfocus(wfocus+1); break; // Kill
 
     case 13 :
     case 'R': newwin("foo", ascii_main); break; // List
