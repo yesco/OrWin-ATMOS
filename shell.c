@@ -1,7 +1,7 @@
 // OrWIN Shell pipeline execute
 
 //#define SHELLTRACE
-#define SHELLINFO
+//#define SHELLINFO
 #define SHELLTEST
 
 #include <stdlib.h>
@@ -79,6 +79,19 @@ char* lstrcpy(char* line, char* s) {
 }
 
 #define lstrdup strdup
+
+
+void shprint(char* line) {
+  char lastc;
+  
+  if (!line)         puts("*NULL*");    else
+  if (line==EOS)     puts("*EOS*");     else
+  if (line==CLEANUP) puts("*CLEANUP*"); else {
+    while(*line) putchar(lastc= *line++);
+    if (lastc != '\n') putchar('\n');
+  }
+}
+
 
 ///////////////////////////////////////////////////////////
 
@@ -406,8 +419,8 @@ int nextInt(char** line, int dflt) {
 typedef struct countstate {
   cmdfun f;
   int n;
-  int d;
   int e;
+  intptr_t d; // dual use
 } countstate;
 
 
@@ -469,54 +482,45 @@ void* tail(countstate* state, char* line) {
     if (*line=='+') ++line;
     state->e= -nextInt(&line, 10);
     //    if (state->e < -2) state->e+= 2;
-    if (state->e > 0) state->d= (int)calloc(state->e, sizeof(char*));
+    if (state->e > 0) state->d= (intptr_t)calloc(state->e, sizeof(char*));
     return state;
   }
 
-  printf("\t[TAIL %d %d %d %p]\n", state->n, state->e, state->d, state->d);
+  printf("\n\t  [TAIL %d %d %d %p]\n", state->n, state->e, (int)state->d, (void*)state->d);
 
   // skip lines code
-  if (state->e < 0) {
-    state->e++;
+  if (!state->d) {
+    if (state->e++ >= 0) return line;
     lfree(line);
     return NULL;
   }
-  if (state->e == 0) return line;
 
   // tail code (keep ring buffer)
   char** ring= (char**)state->d;
-  // step
-  if (++state->n >= state->e) state->n= 0;
-  
-  if (line==EOS || !line) {
-    // generate output
-    if (state->e-- <= 0) return EOS; // TODO: cleanup!
 
+  if (line && line != EOS) { 
+    // insert
+    if (++state->n >= state->e) state->n= 0;
+    lfree(ring[state->n]);
+    ring[state->n]= line;
+    return NULL;
+  }
+
+  // generate output
+  unsigned int start= state->n;
+  do {
+    if (++state->n >= state->e) state->n= 0;
     line= ring[state->n];
     ring[state->n]= NULL;
-    return line;
-  }
-  
-  // insert
-  lfree(ring[state->n]);
-  ring[state->n]= line;
-  return NULL;
+    if (line) return line;
+  } while (state->n != start);
+
+  return EOS;
 }
 
 ///////////////////////////////////////////////////
 
 
-
-void shprint(char* line) {
-  char lastc;
-  
-  if (line==EOS)  puts("*EOS*");
-  else if (!line) puts("*NULL*");
-  else {
-    while(*line) putchar(lastc= *line++);
-    if (lastc != '\n') putchar('\n');
-  }
-}
 
 // more like "tee -"
 void* teeterminal(simplestate* state, char* line) {
@@ -587,14 +591,23 @@ int wsystrain(cmdtrain *train) {
   ++train; // skip initial 0
 
   while((fp=*train)) {
+
     #ifdef SHELLTRACE
-    printf("\t[%d \"%s\" =>]\n", (char)(train-origtrain),
-	   !line? "(NULL)": line==EOS? "*EOS*": line);
+    printf("\t[%d \"%s\" %p]\n", (int)(long)(train-origtrain),
+	   !line? "(NULL)": line==EOS? "*EOS*": line, fp);
     #endif
+
     line= (*fp)(fp, line);
+
+    #ifdef SHELLTRACE
+    printf("\t%p >>>", line); fflush(stdout); shprint(line);
+    #endif
+
     if (line) ++train; else --train;
   }    
 
+  printf("\t[**SYSTRAIN**: DONE]\n");
+	 
   // TODO: address of last program
   return 0;
 }
@@ -614,6 +627,7 @@ int wsystem(char* cmd) {
   
   // a train {NULL, ..., NUL} ! - simplifies logic!
   memset(arr, 0, sizeof(arr));
+
   traincleanbits= 0;
   i= 0;
   
@@ -692,7 +706,13 @@ int wsystem(char* cmd) {
   // make a copy
   // TODO: pack it in as {CLEANBITS, NULL, ...., NULL} !
   unsigned int cleanbits= traincleanbits;
-  cmdtrain *train= memdup(arr, (i+1)*sizeof(arr[0]));
+
+  //putchar('\n'); for(int i=0; i<16; ++i) printf("%2d: %p\n", i, arr[i]);
+
+  cmdtrain *train= memdup(arr, (i+2)*sizeof(arr[0]));
+
+  //putchar('\n'); for(int i=0; i<16; ++i) printf("%2d: %p\n", i, train[i]);
+
 
   int r= wsystrain(train);
 
@@ -745,10 +765,12 @@ int main(int argc, char** argv) {
   wsystem("iota 2 22 | terminal");
   wsystem("iota 10 -10 -2 | terminal");
 
-  wsystem("iota 1 100 | tail +96 | terminal");
+  wsystem("iota 1 10 | tail +6 | terminal");
 
-  wsystem("iota 1 100 | tail -4 | terminal");
-	  
+  // Crash
+  wsystem("iota 1 10 | tail -3 | terminal");
+
+  //exit(0);
 
   wsystem("cat numbers.txt | head | terminal");
   wsystem("cat numbers.txt | head -3 | terminal");  
