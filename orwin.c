@@ -31,6 +31,8 @@ extern int flipflop_main(int argc, char** argv);
 extern int echo_main(int argc, char** argv);
 extern int calc_main(int argc, char** argv);
 
+extern int app_clock(void* state, char* line);
+
 #define WIN_MAX 16
 
 // Process Stack allocation sizes
@@ -134,12 +136,25 @@ typedef struct Window {
   char *p;
   char bg, fg;
 
-  char status;
-  jmp_buf start, cont;
-  char exit;
 #ifdef STATS
   unsigned int nputc;
 #endif
+
+  // TASK
+  // (TODO: separate out tasks? only 12 B overhead)
+  // (only if can have several in one window...)
+  // (or windowless backgound task)
+
+  char status;
+  char exit;
+
+  // light-weight process task
+  void* fun;
+  void* state;
+
+  // StackTask
+  jmp_buf start, cont;
+
 } Window;
 
 char nwin= 0, wfocus= 0, wcur= 0;
@@ -308,6 +323,8 @@ void wputs(char* s) {
 void wputi(int i) {
   char s[10]= {0};
   sprintf(s, "%d", i);
+  // TODO: doesn't seem to wrap perfectly, sometimes in
+  //   last change back text color column
   wputs(s);
 }
 
@@ -456,7 +473,7 @@ char wkbhit(char win) {
     case 'K': winkill(); setfocus(wfocus+1); break; // Kill
 
     case 13 :
-    case 'R': newwin("foo", ascii_main); break; // List
+    case 'R': newwin("foo", app_clock); break; // List
 
     case 'L': info(); break;
     case 'H': help(); break;
@@ -501,6 +518,11 @@ char wgetc(char win) {
 }
 
 void yield() {
+
+  // cheap tasks running inside process 0
+  if (winp->fun) return;
+  
+
   // Enable to "see" yields!
   //wputc('|');
   
@@ -614,11 +636,12 @@ char overlap(char x, char y, char w, char h) {
 
 void newwin(char* title, app main) {
   char x, y, w, h, bg, fg;
-  (void)main;
 
- again:
+  // randomize find space for window
+  // (predictable random gen, lol)
   do {
 
+    // pos,size not overlap existing
     do {
       x= (rand() % (40-3-4-2)) + 2;
       y= (rand() % (28-4-3-1)) + 1;
@@ -626,6 +649,7 @@ void newwin(char* title, app main) {
       h= (rand() % (20-y/2-3-4)) + 4;
     } while(overlap(x, y, w, h));
 
+    // colors w good contrast
     do {
       bg= rand() & 7;
       fg= rand() & 7;
@@ -635,12 +659,16 @@ void newwin(char* title, app main) {
   
   window(x, y, w, h, bg, fg);
   wstatus(-1, title);
+
+  winp->status= 1;
+  winp->fun= (void*)main;
+  // TODO: arg
+  winp->state= main(0,0);
+  
   //  wputc('('); wputi(x); wputc(','); wputi(y); wputc(')');
   //  wputi(w); wputc('x'); wputi(h);
   //  spawn(main);
   //cprintf("(%d,%d) %dx%d  ", x,y,w,h);
-  cgetc();
-  goto again;
 }
 
 // TODO: title not moved...
@@ -870,7 +898,8 @@ int main() {
 #endif // DEMO
   
 
-  ///////////////////////////////////
+
+  //////////////////////////////////////////////////////////
   // SCHEDULER!
   wcur= nwin;
   wfocus= nwin;
@@ -885,8 +914,16 @@ int main() {
   next:
     if (!--wcur) wcur= nwin;
     setwin(wcur);
-    // TODO: if no active windows will go on 
+
+    // TODO: if no active windows/task will LOOP
     if (!winp->status) goto next;
+
+    // Handle cheap tasks
+    if (winp->fun) {
+      // TODO: arg, keyevent? resize
+      (*(app)winp->fun)((int*)winp->state, 0);
+      goto next;
+    }
     
     DEB('0'+wcur);
     DKEY();
@@ -895,6 +932,8 @@ int main() {
     if (*winp->cont) longjmp(winp->cont, 1);
     else DEB('\\');
   }
+
+
 
   return 0;
 }
