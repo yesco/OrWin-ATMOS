@@ -79,3 +79,11 @@ typedef unsigned int clock_t;
 
 extern clock_t clock();
 
+extern void wscreensize(char* w, char* h);
+
+#define screensize wscreensize
+
+// From shell.c - merge, use
+#define EOS     ((char*)1)
+#define CLEANUP	((char*)2)
+

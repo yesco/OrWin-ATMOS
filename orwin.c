@@ -3,6 +3,7 @@
 #include <string.h>
 #include <conio.h>
 #include <ctype.h>
+#include <assert.h>
 
 // (- 13701 12410) = 1291 bytes code for mowin :-(
 // TODO: RESIZE crashes... 
@@ -32,7 +33,8 @@ extern int echo_main(int argc, char** argv);
 extern int calc_main(int argc, char** argv);
 
 extern int app_clock(void* state, char* line);
-
+extern int app_vi(void* state, char* line);
+		  
 #define WIN_MAX 16
 
 // Process Stack allocation sizes
@@ -170,6 +172,10 @@ void wgotoxy(char x, char y) {
   winp->c= x<winp->w? x: winp->w;
   winp->r= y<winp->h? y: winp->h;
   updatewinptr();
+}
+
+void wscreensize(char* w, char* h) {
+  *w= winp->w; *h= winp->h;
 }
 
 void wclreol() {
@@ -663,7 +669,9 @@ void newwin(char* title, app main) {
   winp->status= 1;
   winp->fun= (void*)main;
   // TODO: arg
-  winp->state= main(0,0);
+  // TODO: it really shouldn't be this type... lol
+  assert(sizeof(void*)==sizeof(int));
+  winp->state= (void*)main(0,0);
   
   //  wputc('('); wputi(x); wputc(','); wputi(y); wputc(')');
   //  wputi(w); wputc('x'); wputi(h);
