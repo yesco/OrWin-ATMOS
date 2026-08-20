@@ -625,11 +625,11 @@ void spawn(app main) {
 char overlap(char x, char y, char w, char h) {
   int i, j;
 
-  if (x<2 || x+w >= 38) return 1;
+  if (x<2 || x+w >= 37) return 1;
   if (y<1 || y+h >= 28) return 1;
   
-  for(j= y-1; j<y+h+2; ++j)
-    for(i= x-2; i<x+w+3; ++i)
+  for(j= y-2; j<y+h+4; ++j)
+    for(i= x-3; i<x+w+5; ++i)
       if (*SCREENXY(i, j)!=126) return 1;
   return 0;
 }
@@ -643,8 +643,8 @@ void newwin(char* title, app main) {
 
     // pos,size not overlap existing
     do {
-      x= (rand() % (40-3-4-2)) + 2;
-      y= (rand() % (28-4-3-1)) + 1;
+      x= (rand() % (40-3-4-2)) + 3;
+      y= (rand() % (28-4-3-1)) + 2;
       w= (rand() % (30-x/2-3-3)) + 3;
       h= (rand() % (20-y/2-3-4)) + 4;
     } while(overlap(x, y, w, h));
@@ -803,7 +803,7 @@ int main() {
   // KBRPT - keyboard repeat rate
   *(char*)0x24f= 2;
   // KBDLY - keyboard delay before repeat
-  *(char*)0x24e= 3;
+  *(char*)0x24e= 4;
   
   // cursor(0); // doesn't work
   // status location is at #26A.
