@@ -15,29 +15,32 @@ and multitasking environment for the ORIC ATMOS.
 ## Goals
 
 - Simple, low effort window system
-- Compile + run several C program together
+- Compile + run several C program together sharing stack
+- Cheap coopertive tasks, basically event-driven
 - Mimic several (fixed size/position) ORIC text screens
-- A process is a window!
+- A process/task is a window (for now)
 - FUNCT-key for control
-- YIELD(); (TODO: Pre-emptying multitasking)
+- YIELD();
 
-- Override: <tt>putc puts puti clrscr clreol gotoxy</tt>
-- Minimal API: <tt>window setwin wstatus</tt>
-- Terminal Special Characters: \n (\r \t \h) inc:0-7 paper:16-23 inverse|128
-- Wraparound instead of scroll (optional scroll)
+- Override: `putc puts puti clrscr clreol gotoxy`
+- Minimal API: `window setwin wstatus`
+- Terminal Special Characters: `\n` (`\r \t \h`) inc:`0-7` paper:`16-23` inverse:`|128`
+- Wraparound instead of scroll (fast!)
 
-- VT100/52 compat
+- TODO: VT100/52 compat
 
-- Simple Emacs-style editor
-- Simple script/interactive programming language, maybe minipanda
-- Simple telnet
+- Simple VI+Emacs-style editor
+- TODO: 
+- TODO: Simple script/interactive programming language, maybe minipanda
+- TODO: integrate w LOCI storage device, and oric "native" `DSK`
+- Simple telnet using LOCI/usb-web devices
 
 
 ## Non-Goals
 
 - No Overlapping terminals
-- No Movable terminal
-- No Graphics, at least for now, or make it All graphics!
+- (No Movable terminal)
+- No Graphics, at least for now
 - No separate binaries
 - No generic relocation
 - No for pre-exising programs
@@ -55,10 +58,138 @@ Last window: FUNCT-ESC FUNCT-TAB
 
 Kill window: FUNCT-K   FUNCT-DEL
 List window: FUNCT-L
-Run new app: FUNCT-R   FUNCT-RETURN (TODO: type name)
+Run new app: FUNCT-R   FUNCT-RETURN
 ```
 
-TODO: List/Run
+## OrWin terminal codes
+
+An OrWin window/terminal `putchar` the following codes:
+- `BS (8) - backspace (non-rubout)
+- `TAB \t (9)' - tab to next n*8
+- `CRLF \n` (10) (CTRL-J) - newline
+- `CTRL-K (11)` - TODO: ??
+- `CTRL-L (12)` - `clrscr`
+- `CR CTRL-M (13)` - cursor to column 0
+- `CTRL-N (14)` - `clreol`
+- `DEL (127)` - TODO: rubout
+- `ESC (27)` - TODO: ??
+- `ARROWKEYS (8-11 TODO: change)` - TODO: also make input
+
+- `INK 0-7`: change ink color of text printed
+- `BG 16-23`: change background color
+
+At newline, or line-wrap the next line is *cleared*.
+
+At end of the screen, it rolls around to the first line,
+this is much smoother, but possibly, unusual. LOL
+
+The ORIC-atttributes are special as they cease effect at
+the end of the line and are reset. Then typically, screens
+have a column of paper color and then a column of ink seting
+if for every line.
+
+This is in contradition with most terminals/ANSI/vt100
+where, changing forground or background changes the rest
+of written text.
+
+In case of OrWin we take a step in the ANSI direction.
+Changing ink changes the ink for that screen for each
+new line printed and thus remember by that window.
+This has the effect that `clrscr` will use that color,
+as well as `clreol`. The same holds for background color.
+
+A possible TODO: (when wrapping, the whole line changes
+to new forground/background color.)
+
+
+## Apps
+
+We generally call everything executing, APPs.
+In practice, it can be:
+- a stack task
+- an cooperative handler
+
+So call yield() once in a while during heavy processing.
+Like in sorting. The guideline would be to time
+it to every 2-4 ms!
+
+TODO: there is a macro that will yield if needed
+and it's cheap to call frequently.
+
+
+### StackTasks ("Processes")
+
+As the ORIC ATMOS doesn't have a real pre-emptive
+tasking, even one can use interrupts to get close,
+the cost of sharing/dividing/copying the stack is
+not negliable. Therefore, we have struck the
+compromise of alowing 3 mostly unmodified "unixy"
+style apps run with their own stacks. This may be
+fragile. The  beauty is that as long as they call
+system routines like `kbhit getc putc puts (putz)`
+the system will multi-task nicelly. However,
+a crash is a crash and if you run a long time
+without explicitly calling `yield();` the system
+is locked and other processes are waiting.
+
+
+### Tasks
+
+Tasks are meant to be cheaper to process and you
+can in principle have an unlimited number--limited
+only by memory and window space!
+
+They will not automatically yield, for now, instead
+the run by the main program loop/scheduler, potentialy
+with slightly more stack space, if there are fewer
+"StackTask".
+
+Instead, they work more like functions called by
+the idle loop, or an app generic event-handler.
+
+The implementation is a simple function:
+
+```
+typedef struct APP {
+  int calls;	
+} APP;
+
+void* hello_app(APP* app, char* event) {
+  if (!app) return calloc(sizeof(APP), 1);
+
+  app->calls++;
+  puti(app->calls); putchar(' ');
+
+  return 0;
+}
+```
+
+There apps can request to get keyboard key
+events, and will be called when appropriate.
+
+
+### Events
+
+The following events can be received:
+- `NULL (0)` - a request for next item (ignore: return 0)
+- `EOS (1)` - end of input stream (for like unix processes)
+- `RESIZE (2)` - user resized screen, redraw if you can
+- `IDLE (3)` - idle tick
+- `CLEANUP (255)` - program+window is getting KILLED, cleanup/deallocate extra memory, not state though)
+
+- `KEY0-127 ($100-$1ff)` - i.e. `getc()+0x100`
+
+- `IDLE`
+- TODO: `TICK`
+
+
+The return values returned by a "loop" task:
+- `NULL` - request for more input
+- TODO: `WAITKEY` - call back when a key is availble
+- TODO: `SLEEP0-15ds` - 1-16 ds (deco 1/10th seconds) wakeup request
+- TODO: `SLEEP1-240s` - 1s to 4 minutes wakeup request
+
+
 
 ## Building
 

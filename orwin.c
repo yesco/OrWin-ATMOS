@@ -208,33 +208,61 @@ char wputc(char c) {
 #endif
   
   switch(c) {
+
+  case KEYLEFT: 
   case 8: if (winp->c) winp->c--;  // CTRL-H = \b - BS - ^h
     else  if (winp->r) winp->r--,winp->c= winp->w;
     updatewinptr();
     goto done;
-  // Tab 8 forward
+  // (9) Tab 8 forward
   case '\t': if ((winp->c= ((winp->c + 8) & 0xf8)) > winp->w) {
       c=10; break; } else updatewinptr(); goto done;
   case 10: break;             // CTRL-J = \n - see below
+  // TODO: wclreol
   case 11: goto done;         // CTRL-K
+
   case 12: wclrscr(); break;  // CTRL-L
   case 13: winp->c= 0; break; // CTRL-M = \r = CR
+
+  // ASCII: ShiftOut (SO) - ALT font set - ORIC?
   case 14: wclreol(); break;  // CTRL-N
+  // ASCII: SHiftIn (SI) - Normal char set - ORIC?
+  // (key unix: FLUSH0 togggle ignore output) - ORIC has it!
   case 15: goto done;         // CTRL-O
 
   // Graphical/Text-Mode switches
-  case 24: case 25: case 26:
-  case 28: case 29: case 30: case 31:
+  case 24: break; // CTRL-X  CANcel (*ix: cancel input, emacs: ...)
+  case 25: break; // CTRL-Y (EM end medium)  (*ix: delay suspend?)
+  case 26: break; // CTRL-Z (SUB substitute) (cp/m: EOF, linux: suspend)
 
   // All other codes are oric attributes (color/blink)
+  // https://notes.burke.libbey.me/ansi-escape-codes/
+
   case 27: break; // ESC, TODO: understood by puts maybe
     //case 0...7:  winf->fg= c; break;   // 0-7   : inc
     //case 16...23: winp->bg= c; break; // 16-23 : paper
 
+  // Hazeltine:   CTRL-Y rawX rawY
+  // vt100:       ESC [ 2 J - clear screen
+  // emacs,shell:  CTRL-K ill till end of line
+    
+  case KEYRIGHT: winp->p++; break; // will reach column++
+  case KEYDOWN:  if (winp->r++ +1 >= winp->h) winp->r= 0;          break;
+  case KEYUP:    if (winp->r--    >= winp->h) winp->r= win->h-1;   break;
+
+  // TODO: repeat char
+  // vt100:     char ESC [ 70 b                   printf "=\e[79b\n"
+  // tektronic: ESC ~ [count] [char]
+  // heathkit:  CTRL-R [count+$1F] [char]
+  // AppleII:   0x01 [Count Byte] [Character Byte]    
+    
   default:
+    *winp->p++= c;
+
+    // INK or BG color
+    c&= 0x7f;
     if (c<24) if (c<8) winp->fg= c; else winp->bg= c;
 
-    *winp->p++= c;
   }
 
   // newline / line wrap?
@@ -443,7 +471,7 @@ char wkey= 0;
 // non-blocking
 // (win=0 to not yield here as its called fom yield)
 char wkbhit(char win) {
-  char c, k;
+  char c, k, s;
   
   if (wkey && wfocus==win) return wkey;
   if (!kbhit()) {
@@ -451,19 +479,33 @@ char wkbhit(char win) {
     return 0;
   }
   
-  c= cgetc(); k= *(char*)0x209;
+  c= cgetc(); k= *(char*)0x209; s= *(char*)0x208;
 
   // debug print key
   // ORIC ATMOS: ROM magical shift key $209
   // $38 - no key
   // $a2 - CTRL key
-  // $a4 - left shift
+  // $a4 - SHIFT left
   // $a5 - FUNCT key
-  // $a7 - right shift
-  sprintf(SCREENXY(30,27), "[%d %x] ", c, k);
+  // $a7 - SHIFT right
+  sprintf(SCREENXY(40-3*3+1-2,27), "[%02x %02x %02x]", c, k, s);
+
+  // remap ARROW KEYS: 8-11 to 28-31
+  if (((c & 0b01111100) == 0) &&
+      (s==0xac || s==0xbc || s==0xb4 || s==0x9c))
+    c+= 28-8;
+  // NOTE: CTRL ARROW not reflected in code
+
+  // TODO: CTRL-M and RETURN are ambigous,
+  // but RETURN probably should stay at 13, lol
+  //if (c==13 && k==0xa2) c== ???
+
+  // TODO: move this to main process
+
+
 
   // FUNCT || CTRL & ARROWKEY
-  if (c&128 || (k==0xa2 && c>=8 && c<=11)) {
+  if (c&128 || (k==0xa2 && c>=28 && c<=31)) {
     //cprintf("  #%d '%c' ", c, c&0x7f);
     wdecorate();
     // Capture FUNC keys Window Keys

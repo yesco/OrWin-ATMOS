@@ -70,14 +70,24 @@ extern char wcur;
 extern char wkbhit(char win);
 extern char wgetc(char win);
 
+// Remapped ARROW KEYS
+#define KEYLEFT  28
+#define KEYRIGHT 29
+#define KEYDOWN  30
+#define KEYUP    31
+
 #define kbhit wkbhit(wcur)
 #undef getc
 #define getc() wgetc(wcur)
+
+
 
 #define CLOCKS_PER_SEC 100
 typedef unsigned int clock_t;
 
 extern clock_t clock();
+
+
 
 extern void wscreensize(char* w, char* h);
 
@@ -85,5 +95,16 @@ extern void wscreensize(char* w, char* h);
 
 // From shell.c - merge, use
 #define EOS     ((char*)1)
-#define CLEANUP	((char*)2)
+#define RESIZE  ((char*)2) // TODO: not sent yet
+#define IDLE    ((char*)3)
 
+#define CLEANUP	((char*)255)
+
+
+#define KEYEVENT(line) ((*(char)(line>>8))==1)
+#define KEY(line) ((char)(int)line)
+
+// request by process
+#define WAITKEY ((char*)0x100)
+
+#define SLEEP(seconds) ((char*)(0x200|((seconds)&0xff)))
