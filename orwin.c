@@ -34,7 +34,9 @@ extern int calc_main(int argc, char** argv);
 
 extern int app_clock(void* state, char* line);
 extern int app_vi(void* state, char* line);
-		  
+extern int app_snow(void* state, char* line);
+
+
 #define WIN_MAX 16
 
 // Process Stack allocation sizes
@@ -462,6 +464,7 @@ void help() {
 }
 
 void newwin(char* title, app main);
+
 void mowin(signed char dx, signed char dy, signed char dw, signed char dh);
 
 char wkey= 0;
@@ -522,6 +525,7 @@ char wkbhit(char win) {
 
     case 13 :
     case 'R': newwin("foo", app_clock); break; // List
+    case 'S': newwin("Snow", app_snow); break; // List
 
     case 'L': info(); break;
     case 'H': help(); break;
@@ -668,6 +672,15 @@ void spawn(app main) {
     longjmp(orwinnext, (int)main);
 }
 
+void task(app fun) {
+  winp->status= 1;
+  winp->fun= (void*)fun;
+  // TODO: arg
+  // TODO: it really shouldn't be this type... lol
+  winp->state= (void*)fun(0,0);
+}
+
+
 #define IS_BAD_CONTRAST(fg, bg) ((0xB1 >> ((fg) ^ (bg))) & 1)
 
 char overlap(char x, char y, char w, char h) {
@@ -708,17 +721,8 @@ void newwin(char* title, app main) {
   window(x, y, w, h, bg, fg);
   wstatus(-1, title);
 
-  winp->status= 1;
-  winp->fun= (void*)main;
-  // TODO: arg
-  // TODO: it really shouldn't be this type... lol
-  assert(sizeof(void*)==sizeof(int));
-  winp->state= (void*)main(0,0);
-  
-  //  wputc('('); wputi(x); wputc(','); wputi(y); wputc(')');
-  //  wputi(w); wputc('x'); wputi(h);
+  task(main);
   //  spawn(main);
-  //cprintf("(%d,%d) %dx%d  ", x,y,w,h);
 }
 
 // TODO: title not moved...
@@ -850,6 +854,8 @@ void mowin(signed char dx, signed char dy, signed char dw, signed char dh) {
 int main() {
   int i= 0, j= 0, z= 0;
 
+  assert(sizeof(void*)==sizeof(int));
+
   // KBRPT - keyboard repeat rate
   *(char*)0x24f= 2;
   // KBDLY - keyboard delay before repeat
@@ -888,6 +894,7 @@ int main() {
 #define ECHO
 #define ASCII2
 //#define CALC
+#define SNOW
   
 #ifdef DEMO
   // OK
@@ -947,8 +954,13 @@ int main() {
 
 #endif // DEMO
   
+#ifdef SNOW
+  window(39-16-2, 4, 16, 10, red, yellow);
+  wstatus(-1, "Snow");
+  task(app_snow);
+#endif
 
-
+  
   //////////////////////////////////////////////////////////
   // SCHEDULER!
   wcur= nwin;
