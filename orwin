@@ -1,3 +1,29 @@
+name=orwin
+
+# This has been adopted to build the "orwin.tap"
+# and include and register:
+# - app-PROG.c functions names PROG_app()
+# - *.c        funcitons named PROG_bin()
+
+# generate list of functions
+
+rm -f apps_*.ext apps_*.reg
+
+ls -1 app_*.c | sed 's/.c$//' | xargs -I{} sh -c 'echo "extern int {}();" > apps_{}.ext'
+ls -1 app_*.c | sed 's/.c$//' | sed 's/^app_//' | xargs -I{} sh -c 'echo "{\"{}\", app_{}},"    > apps_{}.reg'
+
+ls -l apps_*.*
+
+cat apps_*.ext > apps.ext
+cat apps_*.reg > apps.reg
+
+echo
+echo
+grep -in . apps.*
+echo
+echo
+
+
 # Create an ORIC ATMOS .tap-file
 # 1. compile
 # 2. filter errors and format for emacs to understand
@@ -13,8 +39,7 @@ OPTS=" -DPROGSIZE "
 
 echo "unix> ./tap $*"
 
-name=$1
-shift
+<shift
 
 rm $name.tap  2>/dev/null
 rm $name.o    2>/dev/null
@@ -25,11 +50,11 @@ rm fil
 # TODO: linker -D __AUTORUN__=$C7
 
 # orig (opts)
-#( cl65 -r -Oirs $* $OPTS '-D__AUTORUN__=$C7' -t atmos $name.c app-*.c -o $name.tap -vm -m $name.map 2>&1 | sed 's/(\([0-9]\+\))/:\1/g' ) || (echo "??????????????? FAILED ???????????"; exit 72)
-( cl65 -r -Oirs -C atmos.cfg $* $OPTS '-D__AUTORUN__=$C7' -t atmos $name.c app-*.c -o $name.tap -vm -m $name.map 2>&1 | sed 's/(\([0-9]\+\))/:\1/g' ) || (echo "??????????????? FAILED ???????????"; exit 72)
+#( cl65 -r -Oirs $* $OPTS '-D__AUTORUN__=$C7' -t atmos $name.c app-*.c app_*.c -o $name.tap -vm -m $name.map 2>&1 | sed 's/(\([0-9]\+\))/:\1/g' ) || (echo "??????????????? FAILED ???????????"; exit 72)
+( cl65 -r -Oirs -C atmos.cfg $* $OPTS '-D__AUTORUN__=$C7' -t atmos $name.c app-*.c app_*.c -o $name.tap -vm -m $name.map 2>&1 | sed 's/(\([0-9]\+\))/:\1/g' ) || (echo "??????????????? FAILED ???????????"; exit 72)
 
 # opt for size?
-#( cl65 -O $* $OPTS '-D__AUTORUN__=$C7' -t atmos $name.c app-*.c -o $name.tap -vm -m $name.map 2>&1 | sed 's/(\([0-9]\+\))/:\1/g' ) || (echo "??????????????? FAILED ???????????"; exit 72)
+#( cl65 -O $* $OPTS '-D__AUTORUN__=$C7' -t atmos $name.c app-*.c app_*.c -o $name.tap -vm -m $name.map 2>&1 | sed 's/(\([0-9]\+\))/:\1/g' ) || (echo "??????????????? FAILED ???????????"; exit 72)
 
 # local static vars
 #( cl65 -r -Cl -Os $* $OPTS '-D__AUTORUN__=$C7' -t atmos $name.c app-*.c -o $name.tap -vm -m $name.map 2>&1 | sed 's/(\([0-9]\+\))/:\1/g' ) || (echo "??????????????? FAILED ???????????"; exit 72)
@@ -39,7 +64,7 @@ echo "--gen .s--"
 #rm $name.s
 #cc65 -r -Oirs $OPTS -T $name.c 2>/dev/null
 
-cl65 -r -t atmos -Os $OPTS -S -T $name.c app-*.c
+cl65 -r -t atmos -Os $OPTS -S -T $name.c app-*.c app_*.c
 
 ls -l $name.s
 

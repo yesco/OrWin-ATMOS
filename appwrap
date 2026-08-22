@@ -15,7 +15,7 @@ ca65 $1_wrapped.s -o app-$1.o
 
 echo "extern int $1_main();" > app-$1.ext
 echo "{\"$1\", $1_main},"    > app-$1.reg
-
+  
 echo
 ls -l *-$1.[sor]*
 

@@ -32,9 +32,17 @@ extern int flipflop_main(int argc, char** argv);
 extern int echo_main(int argc, char** argv);
 extern int calc_main(int argc, char** argv);
 
-extern int app_clock(void* state, char* line);
-extern int app_vi(void* state, char* line);
-extern int app_snow(void* state, char* line);
+#include "apps.ext"
+
+struct apps {
+  char* name;
+  void* main;
+} apps[] = {
+
+#include "apps.reg"
+
+  {0, 0}
+};
 
 
 #define WIN_MAX 16
@@ -463,6 +471,7 @@ void help() {
   memcpy(TEXTSCREEN, tmp, sizeof(tmp));
 }
 
+void apprun();
 void newwin(char* title, app main);
 
 void mowin(signed char dx, signed char dy, signed char dw, signed char dh);
@@ -524,9 +533,11 @@ char wkbhit(char win) {
     case 'K': winkill(); setfocus(wfocus+1); break; // Kill
 
     case 13 :
-    case 'R': newwin("foo", app_clock); break; // List
-    case 'S': newwin("Snow", app_snow); break; // List
+    case 'R': apprun(); break; // List
+    //case 'S': apprun(); break; // Shell or thats CTRL-ENTER
 
+     // TODO: case 'M': maximize & minimize
+  
     case 'L': info(); break;
     case 'H': help(); break;
 
@@ -693,6 +704,20 @@ char overlap(char x, char y, char w, char h) {
     for(i= x-3; i<x+w+5; ++i)
       if (*SCREENXY(i, j)!=126) return 1;
   return 0;
+}
+
+// Pick app to run
+void apprun() {
+  struct apps *p= apps;
+
+  clrscr();
+  cprintf("\n\r---APPS--\n\r");
+  while(p->name) {
+    cprintf("- %04X: %-20s\n\r", p->main, p->name);
+    ++p;
+  }
+  cprintf("\n\r");
+  cgetc();
 }
 
 void newwin(char* title, app main) {
@@ -894,7 +919,7 @@ int main() {
 #define ECHO
 #define ASCII2
 //#define CALC
-#define SNOW
+//#define SNOW
   
 #ifdef DEMO
   // OK

@@ -120,7 +120,7 @@ void vortex(char* p) {
 
 // memory corruption...
 void rolling(char* p) {
-  char r, b, m, f;
+  char r, m, f;
   do {
     f = 0;
     /* Scan from row 6 up to 0, checking the row directly below (r + 1) */
@@ -143,7 +143,7 @@ void waitms(long w) {
 }
 
 void snow(char* p) {
-  char b, m, f;
+  char m, f;
   signed char r; /* MUST be signed so r >= 0 can turn false when r becomes -1 */
   do {
     f = 0;
@@ -208,14 +208,13 @@ void snowpile(char* p) {
   } while (f);
 }
   
-void* app_snow(APP* app, char* line) {
+extern void* app_snow(APP* app, char* line) {
   static char first= 1;
   static char m= 0;
-  char c, b, i, *p;
+  char c, *p;
   (void)line;
 
   if (!app) return calloc(sizeof(APP), 1);
-
 
   if (first) {
     first= 0;
