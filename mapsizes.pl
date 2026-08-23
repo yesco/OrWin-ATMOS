@@ -12,28 +12,47 @@ while(<>) {
 &doit();
 
 print "\n";
-
 $code= $ro= $bss= $data= $zero= 0;
 $name= "SUMMARY";
-$code= $codesum;
-$data= $datasum;
+$code= $orwincode;
+$data= $orwindata;
 $_= "SUMMARY.o";
+&doit();
+
+print "\n";
+$code= $ro= $bss= $data= $zero= 0;
+$name= "CC65";
+$code= $cc65code;
+$data= $cc65data;
+$_= "CC65.o";
 &doit();
 
 
 sub doit {
-    if (m:^([-_\w]+.o):) {
-	$newname= $1;
+    $orwin= (m:^([-_\w]+.o):);
+    $cc65 = (m:/:); 
+
+    if ($orwin || $cc65) {
+	$newname= $orwin? $1: "CC65";
 	if ($name) {
 	    $ddd= $ro + $bss + $data + $zero;
 	    if ($code || $ddd) {
-		printf("%5d %5d %-28s (ro:$ro bss:$bss data:$data zp:$zero)\n",
-		       $code, $ddd, $name);
-		$codesum+= $code;
-		$datasum+= $ddd;
+		if ($orwin) {
+		    printf("%5d %5d %-28s (ro:$ro bss:$bss data:$data zp:$zero)\n",
+			   $code, $ddd, $name);
+		    $orwincode+= $code;
+		    $orwindata+= $ddd;
+		} else {
+		    $cc65code+= $code;
+		    $cc65data+= $ddd;
+		}
 	    }
 	}
 	$name= $newname;
 	$code= $ro= $bss= $data= $zero= 0;
+    } else {
+#	print "%%$_";
+#	$cc65code+= $code;
+#L	$cc65data+= $ddd;
     }
 }

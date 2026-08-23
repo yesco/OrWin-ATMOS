@@ -760,10 +760,10 @@ void apprun() {
   clrscr();
   printf("\n---APPS--\n");
   while(p->name) {
-    printf("%-8s (%04X ", p->name, p->main);
+    printf("%-10s$%04X", p->name, p->main);
     last= p->main;
     ++p;
-    printf("%4d)\n", (char*)p->main - last);
+    printf("%5d\n", (char*)p->main - last);
   }
   printf("\n");
 
