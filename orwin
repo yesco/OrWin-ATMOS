@@ -63,7 +63,15 @@ rm fil
 
 # orig (opts)
 #( cl65 -r -Oirs $* $OPTS '-D__AUTORUN__=$C7' -t atmos $name.c app-*.c app_*.c -o $name.tap -vm -m $name.map 2>&1 | sed 's/(\([0-9]\+\))/:\1/g' ) || (echo "??????????????? FAILED ???????????"; exit 72)
+
+# need to run twice to use updated apps.regs
 ( cl65 -r -Oirs -C atmos.cfg $* $OPTS '-D__AUTORUN__=$C7' -t atmos $name.c app-*.c app_*.c -o $name.tap -vm -m $name.map 2>&1 | sed 's/(\([0-9]\+\))/:\1/g' ) || (echo "??????????????? FAILED ???????????"; exit 72)
+perl mapsizes.pl < orwin.map | tee orwin.reg
+( cl65 -r -Oirs -C atmos.cfg $* $OPTS '-D__AUTORUN__=$C7' -t atmos $name.c app-*.c app_*.c -o $name.tap -vm -m $name.map 2>&1 | sed 's/(\([0-9]\+\))/:\1/g' ) || (echo "??????????????? FAILED ???????????"; exit 72)
+
+echo
+cat orwin.reg
+echo
 
 # opt for size?
 #( cl65 -O $* $OPTS '-D__AUTORUN__=$C7' -t atmos $name.c app-*.c app_*.c -o $name.tap -vm -m $name.map 2>&1 | sed 's/(\([0-9]\+\))/:\1/g' ) || (echo "??????????????? FAILED ???????????"; exit 72)
@@ -101,7 +109,6 @@ echo "NAME: $nam"
 
 cat $name.tap | sed '1 s/^\(.......\)./\1\xc7/' > fil ; cp fil ORIC/$nam.tap ; hexdump -C ORIC/$nam.tap | head -1 ; hexdump -C ORIC/$nam.tap | head -1 ; ls -l $name.tap ORIC/$nam.tap
 
-perl mapsizes.pl < orwin.map
 echo
 ls -l $name.tap
 

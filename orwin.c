@@ -42,21 +42,24 @@ extern int calc_main(int argc, char** argv);
 
 #include "apps.ext"
 
+typedef unsigned int uint;
+
 void start(){}
 
-extern void after();
+// Dummies
+
+void* orwin() {}
+void* SUMMARY() {}
+void* CC65() {}
 
 struct apps {
   char* name;
   void* main;
+  uint size;
 } apps[] = {
 
-  {"\x7f""start", start},
-
-#include "apps.reg"
-
-  //{"\x7f""main", main},
-  {"\x7f""after", after},
+  //#include "apps.reg"
+  #include "orwin.reg"
 
   {0, 0}
 };
@@ -185,7 +188,7 @@ typedef struct Window {
 
 char nwin= 0, wfocus= 0, wcur= 0;
 Window win[WIN_MAX]= {
-  { 39-20, 3, 20, 28-3,
+  { 39-15, 3, 14, 28-3,
     0, 0,
     NULL,
     black, white,
@@ -327,7 +330,7 @@ char wputc(char c) {
     if (winp->r++ +1 >= winp->h) winp->r= 0;
 
     // yield at new line (minimize jitter/zig)
-    if (wcur)
+    //if (wcur)
       yield();
 
     p= updatewinptr();
@@ -626,10 +629,11 @@ char wgetc(char win) {
 }
 
 void yield() {
+  // TODO: maybe cuause problems with stack procs?
+  if (!wcur) return;
 
   // cheap tasks running inside process 0
   if (winp->fun) return;
-  
 
   // Enable to "see" yields!
   //wputc('|');
@@ -753,17 +757,15 @@ char overlap(char x, char y, char w, char h) {
 
 // Pick app to run
 void apprun() {
-  char w= wcur, *last= 0;
+  char w= wcur;
   struct apps *p= apps;
 
   setwin(0);
   clrscr();
   printf("\n---APPS--\n");
   while(p->name) {
-    printf("%-10s$%04X", p->name, p->main);
-    last= p->main;
+    printf("%-9s%5d\n", p->name, p->size);
     ++p;
-    printf("%5d\n", (char*)p->main - last);
   }
   printf("\n");
 
@@ -965,12 +967,12 @@ int main() {
   // make it "pseudo task"
   win[0].status= -1;
 
-#define DEMO
-#define TIMER
+  //#define DEMO
+  //#define TIMER
 //#define ATMOS
 //#define FISH
-#define ECHO
-#define ASCII2
+//#define ECHO
+//#define ASCII2
 //#define CALC
 //#define SNOW
   
@@ -1009,10 +1011,10 @@ int main() {
   spawn(calc_main);
 #endif
 
-#ifdef ASCII2
+#ifdef ASCII
   window( 2, 22, 14,  5, cyan,  red);
   wstatus(-1, "ASCII");
-  spawn(ascii_main);
+  task(ascii_main);
 #endif
   
 #ifdef ATMOS
@@ -1025,11 +1027,13 @@ int main() {
   
 #else
 
+#ifdef ASCII
   // TODO: need at least one because allocations
   window(30,  5,  6,  5, blue, white);
   wstatus(-1, "ASCII");
   spawn(ascii_main);
-
+#endif
+  
 #endif // DEMO
   
 #ifdef SNOW
@@ -1038,6 +1042,13 @@ int main() {
   task(app_snow);
 #endif
 
+  window(2, 4, 15, 8, blue, white);
+  wstatus(-1, "ASCII");
+  task(app_ascii);
+  
+  window(5, 18, 8, 5, green, black);
+  wstatus(-1, "ASCII");
+  task(app_ascii);
   
   //////////////////////////////////////////////////////////
   // SCHEDULER!
@@ -1052,7 +1063,10 @@ int main() {
 
     // move next app
   next:
+    wkbhit(0);
+
     if (!--wcur) wcur= nwin;
+    
     setwin(wcur);
 
     // TODO: if no active windows/task will LOOP
@@ -1185,6 +1199,4 @@ void info() {
   free(save);
 #endif
 }
-
-void after(){}
 

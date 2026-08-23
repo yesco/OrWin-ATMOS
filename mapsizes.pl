@@ -38,10 +38,21 @@ sub doit {
 	    $ddd= $ro + $bss + $data + $zero;
 	    if ($code || $ddd) {
 		if ($orwin) {
-		    printf("%5d %5d %-28s (ro:$ro bss:$bss data:$data zp:$zero)\n",
-			   $code, $ddd, $name);
+		    print STDERR sprintf(
+			"%5d %5d %-28s (ro:$ro bss:$bss data:$data zp:$zero)\n",
+			$code, $ddd, $name);
 		    $orwincode+= $code;
 		    $orwindata+= $ddd;
+
+		    $name =~ s/\.o//;
+		    $app  = $name;
+		    $app  =~ s/app-/_/;
+		    $app  =~ s/app_//;
+
+		    $name =~ s/^app-(\w+)/$1_main/;
+		    print STDOUT sprintf(
+			"{ \"%s\", %s, %d },\n",
+			$app, $name, $code+$ddd);
 		} else {
 		    $cc65code+= $code;
 		    $cc65data+= $ddd;
