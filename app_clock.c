@@ -20,8 +20,8 @@ void* app_clock(APP* state, char* line) {
     char tmp[16];
 
     if (0) {
-      sprintf(tmp, "\r%02d:%02d.%02d", h, m, s);
-      putz(tmp);
+      //      sprintf(tmp, "\r%02d:%02d.%02d", h, m, s);
+      //putz(tmp);
     } else {
       // TODO: doesnt do right!
       //putchar('\r'); puti(s);

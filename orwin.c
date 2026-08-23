@@ -42,21 +42,21 @@ extern int calc_main(int argc, char** argv);
 
 #include "apps.ext"
 
-void startorwin(){}
+void start(){}
 
-extern void aftermain();
+extern void after();
 
 struct apps {
   char* name;
   void* main;
 } apps[] = {
 
-  {"\x7f""startorwin", startorwin},
+  {"\x7f""start", start},
 
 #include "apps.reg"
 
   //{"\x7f""main", main},
-  {"\x7f""aftermain", aftermain},
+  {"\x7f""after", after},
 
   {0, 0}
 };
@@ -760,9 +760,10 @@ void apprun() {
   clrscr();
   printf("\n---APPS--\n");
   while(p->name) {
-    printf("%04X %4d %s\n", p->main, (char*)p->main - last, p->name);
+    printf("%-8s (%04X ", p->name, p->main);
     last= p->main;
     ++p;
+    printf("%4d)\n", (char*)p->main - last);
   }
   printf("\n");
 
@@ -1185,5 +1186,5 @@ void info() {
 #endif
 }
 
-void aftermain(){}
+void after(){}
 

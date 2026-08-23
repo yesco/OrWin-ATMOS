@@ -71,7 +71,7 @@ echo "--gen .s--"
 #rm $name.s
 #cc65 -r -Oirs $OPTS -T $name.c 2>/dev/null
 
-cl65 -r -t atmos -Os $OPTS -S -T $name.c app-*.c app_*.c
+#cl65 -r -t atmos -Os $OPTS -S -T $name.c app-*.c app_*.c
 
 ls -l $name.s
 
@@ -95,4 +95,8 @@ nam=$(basename $name)
 echo "NAME: $nam"
 
 cat $name.tap | sed '1 s/^\(.......\)./\1\xc7/' > fil ; cp fil ORIC/$nam.tap ; hexdump -C ORIC/$nam.tap | head -1 ; hexdump -C ORIC/$nam.tap | head -1 ; ls -l $name.tap ORIC/$nam.tap
+
+perl mapsizes.pl < orwin.map
+echo
+ls -l $name.tap
 
