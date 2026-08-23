@@ -65,7 +65,7 @@ void* memdup(void* p, unsigned int bytes) {
 #endif
 
 
-void* lfree(char* line) {
+char* lfree(char* line) {
   // TODO: keep a pool? reuse!
   if (line && line!=EOS && line!=CLEANUP) free(line);
   return NULL;
@@ -115,6 +115,7 @@ void* grep(pstate* state, char* line) {
   if (!line || line==EOS) return line;
 
   // match one line
+  //  return strstr(line, state->s)? line: lfree(line);
   return strstr(line, state->s)? line: lfree(line);
 }
 
@@ -166,7 +167,13 @@ void* cat(filestate* state, char* line) {
   lfree(line);
 
   // EOF if eof or error?
+#ifdef __CC65__
+  // TODO: fix: thisis unsafe
+  ln= calloc(81,1);
+  if (NULL!=fgets(ln, sz, state->fil)) {
+#else
   if (EOF==getline(&ln, &sz, state->fil)) {
+#endif
     //printf("==eof==\n");
     free(ln);
     fclose(state->fil); state->fil= NULL;
@@ -272,12 +279,14 @@ int wildmatch(char* pat, char* s) {
 #endif
 
 
+#ifndef __ATMOS__
 // ============================================================================
 // CC65 Implementation
 // ============================================================================
 #include <errno.h>
 
 #ifdef __CC65__
+// TODO: no have on atmos...
 #include <directory.h>
 
 typedef struct lsstate {
@@ -387,7 +396,23 @@ void* ls(lsstate* state, char* line) {
   return lstrdup(de->d_name);
 }
 
-#endif
+#endif //
+
+#else
+// NO HAVE FILES ON ATMOS
+
+int open(char* path, int flags, int mode) { return 0; }
+int close(int fd) { return 0; }
+
+
+typedef struct lsstate { int x; } lsstate;
+ 
+void* ls(lsstate* state, char* line) {
+  // TODO: implement and use LOCI
+  return 0;
+}  
+
+#endif // __ATMOS__
 
 
 ///////////////////////////////////////////////////
@@ -416,6 +441,10 @@ int nextInt(char** line, int dflt) {
 
 ///////////////////////////////////////////////////
 
+#ifdef __CC65__
+  typedef int intptr_t;
+#endif
+
 typedef struct countstate {
   cmdfun f;
   int n;
@@ -426,8 +455,7 @@ typedef struct countstate {
 
 void* iota(countstate* state, char* line) {
   if (!state) {
-    int x;
-    state = STALLOC(countstate, iota);
+      state = STALLOC(countstate, iota);
     if (!state) return NULL;
 
     state->n = nextInt(&line, 1);
@@ -473,6 +501,9 @@ void* head(countstate* state, char* line) {
 
 
 void* tail(countstate* state, char* line) {
+  unsigned int start;
+  char** ring;
+  
   if (!state) {
     state = STALLOC(countstate, tail);
     if (!state) return NULL;
@@ -496,7 +527,7 @@ void* tail(countstate* state, char* line) {
   }
 
   // tail code (keep ring buffer)
-  char** ring= (char**)state->d;
+  ring= (char**)state->d;
 
   if (line && line != EOS) { 
     // insert
@@ -507,7 +538,7 @@ void* tail(countstate* state, char* line) {
   }
 
   // generate output
-  unsigned int start= state->n;
+  start= state->n;
   do {
     if (++state->n >= state->e) state->n= 0;
     line= ring[state->n];
@@ -620,6 +651,9 @@ int wsystem(char* cmd) {
   cmdfun* f;
   void* state;
   static void* arr[16];
+  unsigned int cleanbits;
+  cmdtrain *train;
+  int r;
   
   #ifdef SHELLTEST
   printf("\n------ wsystem: \"%s\"\n", cmd);
@@ -705,16 +739,16 @@ int wsystem(char* cmd) {
 
   // make a copy
   // TODO: pack it in as {CLEANBITS, NULL, ...., NULL} !
-  unsigned int cleanbits= traincleanbits;
+  cleanbits= traincleanbits;
 
   //putchar('\n'); for(int i=0; i<16; ++i) printf("%2d: %p\n", i, arr[i]);
 
-  cmdtrain *train= memdup(arr, (i+2)*sizeof(arr[0]));
+  train= memdup(arr, (i+2)*sizeof(arr[0]));
 
   //putchar('\n'); for(int i=0; i<16; ++i) printf("%2d: %p\n", i, train[i]);
 
 
-  int r= wsystrain(train);
+  r= wsystrain(train);
 
   // CLEANUP
 
@@ -741,14 +775,17 @@ int wsystem(char* cmd) {
   return r;
 }
 
+#ifdef MAIN
+ 
 int main(int argc, char** argv) {
-  printf("------------ wsystrain: pwd | terminal\n");
   cmdtrain mock[]= {
     0,
     pwd(0, 0),
     terminal(0, 0),
     0,
   };
+
+  printf("------------ wsystrain: pwd | terminal\n");
   
   wsystrain(mock);
   
@@ -779,3 +816,5 @@ int main(int argc, char** argv) {
   
   return 0;
 }
+
+#endif // MAIN

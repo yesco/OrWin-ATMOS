@@ -48,6 +48,7 @@ void start(){}
 
 // Dummies
 
+void* shell() {} // TODO: make it an app!
 void* orwin() {}
 void* SUMMARY() {}
 void* CC65() {}
