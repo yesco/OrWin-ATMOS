@@ -5,6 +5,14 @@
 #include <ctype.h>
 #include <assert.h>
 
+
+//char wputc(char);
+
+//int putchar(int c) { wputc(c); return c; }
+
+#include "orwin.h"
+
+
 // (- 13701 12410) = 1291 bytes code for mowin :-(
 // TODO: RESIZE crashes... 
 #define MOWIN 
@@ -34,12 +42,21 @@ extern int calc_main(int argc, char** argv);
 
 #include "apps.ext"
 
+void startorwin(){}
+
+extern void aftermain();
+
 struct apps {
   char* name;
   void* main;
 } apps[] = {
 
+  {"\x7f""startorwin", startorwin},
+
 #include "apps.reg"
+
+  //{"\x7f""main", main},
+  {"\x7f""aftermain", aftermain},
 
   {0, 0}
 };
@@ -97,9 +114,6 @@ typedef int (*app)();
   #define DEB(c) 
   #define DKEY() 
 #endif
-
-
-#include "orwin.h"
 
 
 // TODO: make my own interrupt timer!
@@ -170,13 +184,42 @@ typedef struct Window {
 } Window;
 
 char nwin= 0, wfocus= 0, wcur= 0;
-Window win[WIN_MAX];
+Window win[WIN_MAX]= {
+  { 39-20, 3, 20, 28-3,
+    0, 0,
+    NULL,
+    black, white,
+#ifdef STATS
+    0,
+#endif
+    0, 0,
+    0, 0}
+};
+
 Window* winp= 0;
 
 
 char* updatewinptr() {
   return winp->p= SCREENXY(winp->x + winp->c, winp->y + winp->r);
 }
+
+int write(int fd, char* buf, size_t count) {
+  int n= count;
+  char c;
+
+#if 1
+  while(n--) wputc(*buf++);;
+#else
+  while(n--) {
+    c= *buf++;
+    if ((c&0x7f) >= 32)
+      *winp->p++= c;
+  }
+#endif
+  
+  return count;
+}
+
 
 void wgotoxy(char x, char y) {
   winp->c= x<winp->w? x: winp->w;
@@ -284,7 +327,8 @@ char wputc(char c) {
     if (winp->r++ +1 >= winp->h) winp->r= 0;
 
     // yield at new line (minimize jitter/zig)
-    yield();
+    if (wcur)
+      yield();
 
     p= updatewinptr();
 
@@ -298,6 +342,7 @@ char wputc(char c) {
  done:
   // TODO: somehow here yield() crashes!
 
+  //if (wcur)
   // not clear why higher value crawsh more easy?
   //if ((wtime^HITIME) & 0b1000000) yield();
   if ((wtime^HITIME) & 0b1000000) yield();
@@ -708,16 +753,21 @@ char overlap(char x, char y, char w, char h) {
 
 // Pick app to run
 void apprun() {
+  char w= wcur, *last= 0;
   struct apps *p= apps;
 
+  setwin(0);
   clrscr();
-  cprintf("\n\r---APPS--\n\r");
+  printf("\n---APPS--\n");
   while(p->name) {
-    cprintf("- %04X: %-20s\n\r", p->main, p->name);
+    printf("%04X %4d %s\n", p->main, (char*)p->main - last, p->name);
+    last= p->main;
     ++p;
   }
-  cprintf("\n\r");
+  printf("\n");
+
   cgetc();
+  setwin(w);
 }
 
 void newwin(char* title, app main) {
@@ -905,8 +955,10 @@ int main() {
   strncpy(SCREENXY(34, 1), "\x0a""0rWin", 6);
   strncpy(SCREENXY(34, 2),      " ATMOS", 6);
 
-  memset(win, 0, sizeof(win));
+  //memset(win, 0, sizeof(win));
 
+  updatewinptr();
+  
   // initlize multitasker!
   spawn_alloc(SPAWN_REC);
   // make it "pseudo task"
@@ -1132,3 +1184,6 @@ void info() {
   free(save);
 #endif
 }
+
+void aftermain(){}
+

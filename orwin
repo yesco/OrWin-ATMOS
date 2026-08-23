@@ -5,17 +5,24 @@ name=orwin
 # - app-PROG.c functions names PROG_app()
 # - *.c        funcitons named PROG_bin()
 
-# generate list of functions
+# generate list of programs
+
+# - app_PRG
 
 rm -f apps_*.ext apps_*.reg
-
 ls -1 app_*.c | sed 's/.c$//' | xargs -I{} sh -c 'echo "extern int {}();" > apps_{}.ext'
 ls -1 app_*.c | sed 's/.c$//' | sed 's/^app_//' | xargs -I{} sh -c 'echo "{\"{}\", app_{}},"    > apps_{}.reg'
-
 ls -l apps_*.*
 
-cat apps_*.ext > apps.ext
-cat apps_*.reg > apps.reg
+# - PRG_main (stackers)
+
+rm -f apps-*.ext apps-*.reg
+ls -1 app-*.c | sed 's/.c$//' | sed 's/^app-//' | xargs -I{} sh -c 'echo "extern int {}_main();" > apps-{}.ext'
+ls -1 app-*.c | sed 's/.c$//' | sed 's/^app-//' | xargs -I{} sh -c 'echo "{\"_{}\", {}_main},"   > apps_{}.reg'
+ls -l apps_*.*
+
+cat apps_*.ext apps-*.ext | sort > apps.ext
+cat apps_*.reg apps-*.reg | sort > apps.reg
 
 echo
 echo
@@ -39,7 +46,7 @@ OPTS=" -DPROGSIZE "
 
 echo "unix> ./tap $*"
 
-<shift
+#<shift
 
 rm $name.tap  2>/dev/null
 rm $name.o    2>/dev/null
