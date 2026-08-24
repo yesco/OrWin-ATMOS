@@ -20,21 +20,25 @@ typedef struct ByteStore {
   // probably do striped!
   word  num[64];
   char* str[64];
+  char  nix;
   char  idx[0];
 } ByteStore;
 
-ByteStore bs;
+
+ByteStore *bs;
+
+ByteStore* NewBS(char n) {
+  ByteStore* bs= calloc(sizeof(ByteStore) + n*sizeof(word), 1);
+  if (!bs) return bs;
+  bs->str[0]= (char*)&bs->num; // LOL, 2 zeroes!
+  bs->str[63]= (char*)-1; // EOS
+  return bs;
+}
+
 
 char gcbs() {
   // TODO: implment!
   return 0;
-}
-
-void InitBS(char n) {
-  assert(!n);
-  bzero(&bs, sizeof(ByteStore) + 2*n);
-  bs.str[0]= (char*)&bs.num; // LOL, 2 zeroes!
-  bs.str[63]= (char*)-1; // EOS
 }
 
 
@@ -45,9 +49,8 @@ char Num(word v) {
   else {
     char i= 0;
     while(++i <= 63) {
-      //printf("--%d %d %d\n", i, v, bs.num[i]);
-      if (bs.num[i]<=128 || bs.num[i]==v) {
-	bs.num[i]= v; return i | 128;
+      if (bs->num[i]<=128 || bs->num[i]==v) {
+	bs->num[i]= v; return i | 128;
       }
     }
     // no free SLOT!
@@ -62,9 +65,9 @@ char Num(word v) {
 word num(unsigned char i) {
   // If given a str, returns string address!
 #ifdef __CC65__
-  return i<128? i: bs.num[i^128];
+  return i<128? i: bs->num[i^128];
 #else
-  return i<128? i: i==255? -1: bs.num[i^128];
+  return i<128? i: i==255? -1: bs->num[i^128];
 #endif  
 }
 
@@ -76,9 +79,8 @@ char Str(char* s) {
   else {
     char i= 0;
     while(++i <= 63) {
-      //printf("--%d %p >%s<\n", i, bs.str[i], bs.str[i]);
       // TODO: find same string? - nah!
-      if (!bs.str[i]) { bs.str[i]= s; return i | STRBASE; }
+      if (!bs->str[i]) { bs->str[i]= s; return i | STRBASE; }
     }
     // no free SLOT!
     errno= EXFULL;
@@ -88,7 +90,7 @@ char Str(char* s) {
 }
 
 char* str(char i) {
-  return i<STRBASE? 0: bs.str[i & 63];
+  return i<STRBASE? 0: bs->str[i & 63];
 }
 
 int main() {
@@ -96,7 +98,7 @@ int main() {
   long v, vv;
   char *s, *ss, line[80];
 
-  InitBS(0);
+  bs= NewBS(64);
   
   for(v=-1; v<1024; ++v) {
     i= Num(v); vv= num(i);
