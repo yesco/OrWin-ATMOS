@@ -64,19 +64,40 @@ Run new app: FUNCT-R   FUNCT-RETURN
 ## OrWin terminal codes
 
 An OrWin window/terminal `putchar` the following codes:
+- `INK 0-7`: change ink color of text printed
 - `BS (8) - backspace (non-rubout)
 - `TAB \t (9)' - tab to next n*8
-- `CRLF \n` (10) (CTRL-J) - newline
-- `CTRL-K (11)` - TODO: ??
+- `CRLF \n (10) (CTRL-J)` - newline (with clreol!)
+- `CRLF \n (11)` - newline (no clreol, maybe DO: scroll!)
 - `CTRL-L (12)` - `clrscr`
 - `CR CTRL-M (13)` - cursor to column 0
 - `CTRL-N (14)` - `clreol`
-- `DEL (127)` - TODO: rubout
-- `ESC (27)` - TODO: ??
-- `ARROWKEYS (8-11 TODO: change)` - TODO: also make input
-
-- `INK 0-7`: change ink color of text printed
+- `CTRL-O (15)` - TODO: ???
 - `BG 16-23`: change background color
+- `ESC (27)` - TODO: ??
+- `KEYLEFT KEYRIGHT KEYDOWN KEYUP (28-31!)`
+- `DEL (127)` - rubout!
+
+**HIBIT SET:**
+- `0-7`: byte as is (inverted ink attribute)
+- `8`
+- `9`
+- `10`
+- `11`
+- `12`
+- `13`
+- `14`
+- `15`
+- `16-23`: byte as is (inverted paper atttribute)
+- `24``
+- `25`
+- `26`
+- `27`
+- `28`
+- `29`
+- `30`
+- `31`
+- ALL OTHER PRINTABLE CHARS: byte as is (inverted)
 
 At newline, or line-wrap the next line is *cleared*.
 
@@ -100,6 +121,8 @@ as well as `clreol`. The same holds for background color.
 
 A possible TODO: (when wrapping, the whole line changes
 to new forground/background color.)
+
+TODO: vt52 vt100 cursor gotoxy
 
 
 ## Apps

@@ -189,7 +189,7 @@ typedef struct Window {
 
 char nwin= 0, wfocus= 0, wcur= 0;
 Window win[WIN_MAX]= {
-  { 39-15, 3, 15, 28-3,
+  { 40-15, 3, 15, 28-3,
     0, 0,
     NULL,
     black, white,
@@ -279,6 +279,29 @@ char* winptr() {
   return winp->p;
 }
 
+
+// doesn't scroll, just wraps around, no wclreol()
+void nlpure() {
+  winp->c= 0;
+  if (++winp->r >= winp->h) winp->r= 0;
+  updatewinptr();
+
+  // set current (new) colors
+  winp->p[-2]= BG | winp->bg;
+  winp->p[-1]=      winp->fg;
+}
+
+void clnl() {
+  wclreol();
+  nlpure();
+}
+
+// doesn't scroll, just wraps around, DOES wclreol()
+void nl() {
+  nlpure();
+  wclreol();
+}
+
 // minimal terminal codes
 // Free codes: 11, 14; 24,25,26, 28,29,30,31
 char wputc(char c) {
@@ -288,6 +311,7 @@ char wputc(char c) {
   
   switch(c) {
 
+  case 127: wputc(8); wputc(' '); // fall-through
   case KEYLEFT: 
   case 8: if (winp->c) winp->c--;  // CTRL-H = \b - BS - ^h
     else  if (winp->r) winp->r--,winp->c= winp->w;
@@ -296,15 +320,15 @@ char wputc(char c) {
   // (9) Tab 8 forward
   case '\t': if ((winp->c= ((winp->c + 8) & 0xf8)) > winp->w) {
       c=10; break; } else updatewinptr(); goto done;
-  case 10: break;             // CTRL-J = \n - see below
-  // TODO: wclreol
-  case 11: goto done;         // CTRL-K
+  case 10: nl(); goto done;      // CTRL-J = \n & wclreol()
+  case 11: nlpure(); goto done;   // CTRL-K = \n but NO wclreol!
 
-  case 12: wclrscr(); break;  // CTRL-L
-  case 13: winp->c= 0; break; // CTRL-M = \r = CR
+  case 12: wclrscr(); break;     // CTRL-L = clrscr()
+  case 13: winp->c= 0; break;    // CTRL-M = \r = CR
 
   // ASCII: ShiftOut (SO) - ALT font set - ORIC?
   case 14: wclreol(); break;  // CTRL-N
+
   // ASCII: SHiftIn (SI) - Normal char set - ORIC?
   // (key unix: FLUSH0 togggle ignore output) - ORIC has it!
   case 15: goto done;         // CTRL-O
@@ -334,7 +358,11 @@ char wputc(char c) {
   // tektronic: ESC ~ [count] [char]
   // heathkit:  CTRL-R [count+$1F] [char]
   // AppleII:   0x01 [Count Byte] [Character Byte]    
-    
+
+  // (Ultra-Compact):VT52 uses fixed-length,
+  // binary-byte coordinate sequences, good for8-bit machine
+  // ESC Y [Row+32] [Col+32]
+																																																																									  
   default:
     *winp->p++= c;
 
@@ -379,18 +407,6 @@ char wputc(char c) {
   //if ((wtime^HITIME) & 0b10) yield(); // every 1.5 char
   //if ((wtime^HITIME) & 0b1) yield(); // every 1.5 char
   return c;
-}
-
-void nl() {
-  winp->c= 0;
-  if (++winp->r >= winp->h) winp->r= 0;
-  updatewinptr();
-
-  // set current (new) colors
-  winp->p[-2]= BG | winp->bg;
-  winp->p[-1]=      winp->fg;
-
-  wclreol();
 }
 
 // TODO: is it bettter than write optimized?
@@ -791,23 +807,81 @@ char overlap(char x, char y, char w, char h) {
   return 0;
 }
 
+char cursorgetc() {
+  char c;
+  togglecursor();
+  c= cgetc();
+  togglecursor();
+  return c;
+}
+
 // Pick app to run
 void apprun() {
-  char w= wcur;
-  struct apps *p= apps;
+  // TODO: common buff somewhere
+  char line[40]= {0};
+  char i= 0, w= wcur;
+  struct apps *p, *found;
+  char c, *spc;
+
+  // flush
+  // TODO: remove, FUNC-R getting an r!
+  while(kbhit()) getc();
 
   setwin(0);
-  gotoxy(0,0);
-  nl(); nl();
 
-  while(p->name) {
-    wputs(p->name); // 7 cs !!! (printf 55 cs!)
-    //wputc('\t'); wputi(p->size); // +19cs
-    ++p;
+  do {
+    putchar(white);
+    gotoxy(0, 0);
+    nl(); clnl();
+
+    // -- list matches
+    spc= strchr(line, ' ');
+    if (spc) *spc= 0;
+    p= apps; found= NULL;
+    while(p->name) {
+
+      if (strstr(p->name, line)) {
+	putchar(green);
+	if (!found) found= p;
+      }
+      else putchar(white);
+
+      wputz(p->name); // 7 cs !!! (printf 55 cs!)
+      //wputc('\t'); wputi(p->size); // +19cs
+      putchar(white);
+      //' TODO: nl makes it flickr because of wclreol
+      clnl();
+
+      ++p;
+    }
+    clnl();
+    if (spc) *spc= ' ';
+
+    // -- get user input
+    putchar('>');
+    putchar(found? green: white);
+    putz(line); wclreol();
+    c= cursorgetc();
+    if (c==13 || c==27) break;
+
+    // process input
+    if (c==127 || c==8) {
+      if (!i) continue;
+      line[--i]= 0; putchar(127); continue;
+    } 
+
+    if (i>= 20) continue;
+    // TODO: some bug where print one char outside of window!
+    line[i++]= c;
+    putchar(c);
+
+  } while(1);
+
+  if (c == 13) {
+    printf("\nCHOOSEN: >%s<\n", line);
+    // TODO: launch
   }
-  nl();
 
-  cgetc();
   setwin(w);
 }
 
