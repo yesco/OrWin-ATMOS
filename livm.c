@@ -11,6 +11,8 @@
 #include <stdlib.h>
 #include <strings.h>
 #include <stdint.h>
+#include <errno.h>
+#include <assert.h>
 
 typedef uint16_t word;
 
@@ -29,6 +31,7 @@ char gcbs() {
 }
 
 void InitBS(char n) {
+  assert(!n);
   bzero(&bs, sizeof(ByteStore) + 2*n);
   bs.str[0]= (char*)&bs.num; // LOL, 2 zeroes!
   bs.str[63]= (char*)-1; // EOS
@@ -48,7 +51,7 @@ char Num(word v) {
       }
     }
     // no free SLOT!
-    printf("%% %d\n", v);
+    errno= EXFULL;
     if (!gcbs()) { perror("BS: Nums exhausted"); return 0; }
     return Num(v);
   }
@@ -78,6 +81,7 @@ char Str(char* s) {
       if (!bs.str[i]) { bs.str[i]= s; return i | STRBASE; }
     }
     // no free SLOT!
+    errno= EXFULL;
     if (!gcbs()) { perror("BS: Strs exhausted"); return 0; }
     return Str(s);
   }
@@ -92,13 +96,23 @@ int main() {
   long v, vv;
   char *s, *ss, line[80];
 
+  InitBS(0);
+  
   for(v=-1; v<1024; ++v) {
     i= Num(v); vv= num(i);
-    printf("Num(%5lu) => %3d : %5lu -- %s\n", v, i, vv, v==vv? "OK": "FAIL");
+    printf("Num(%5lu) => %3d : %5lu -- %s\n",
+	   v, i, vv, v==vv? "OK": "FAIL");
   }
 
-  while(fgets(line, sizeof(line), stdin)) {
-    i= Str(line); ss= str(i);
-    printf("Str(\"%s\") => %3d : \"%s\" -- %s\n", line, i, ss, !strcmp(line,ss)? "OK": "FAIL");
-  }
+  do {
+    // last line will get null
+    s= fgets(line, sizeof(line), stdin);
+#if 0
+    printf("%s", s);
+#else
+    i= Str(s); ss= str(i);
+    printf("Str(\"%s\") => %3d : \"%s\" -- %s\n",
+	   s?s:"(NULL)", i, ss?ss:"(NULL)", (s && ss && !strcmp(s,ss)) || s==ss? "OK": "FAIL");
+#endif
+  } while(s);
 }
