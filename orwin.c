@@ -5,6 +5,15 @@
 #include <ctype.h>
 #include <assert.h>
 
+// Preferred Window Layout
+
+#define NHORIZWIN  3
+#define NVERTWIN 3
+#define WMAX ((40-NHORIZWIN*6) / NHORIZWIN -1)
+#define HMAX ((28-NVERTWIN*4) / NVERTWIN -1)
+
+// TODO: magenta on blue - not sood good
+#define IS_BAD_CONTRAST(fg, bg) ((0xB1 >> ((fg) ^ (bg))) & 1)
 
 //char wputc(char);
 
@@ -380,10 +389,6 @@ char wputc(char c) {
     // overflow rows?
     if (winp->r++ +1 >= winp->h) winp->r= 0;
 
-    // yield at new line (minimize jitter/zig)
-    //if (wcur)
-      yield();
-
     p= updatewinptr();
 
     // set current (new) colors
@@ -394,12 +399,12 @@ char wputc(char c) {
   }
 
  done:
-  // TODO: somehow here yield() crashes!
-
   //if (wcur)
   // not clear why higher value crawsh more easy?
   //if ((wtime^HITIME) & 0b1000000) yield();
-  if ((wtime^HITIME) & 0b1000000) yield();
+
+  //  if ((wtime^HITIME) & 0b1000000) yield();
+
   //if ((wtime^HITIME) & 0b10000) yield();
   // 4th bit => 0..4095us
   //if ((wtime^HITIME) & 0b1000) yield();
@@ -411,11 +416,11 @@ char wputc(char c) {
 
 // TODO: is it bettter than write optimized?
 
+// TODO: remove all!
+
 #ifndef OPTPUTZ
 void wputz(char* s) {
   write(1, s, strlen(s));
-  // good time to release, minimic terminal avoid jitter
-  yield();
 }
 #else
 void wputz(char* s) {
@@ -433,7 +438,7 @@ void wputz(char* s) {
     if ((k & 0x7f) < 32) break;
 
     //    if ((wtime^HITIME) & 0b1000000) yield(); // feels chunky
-    if (!--n) yield();
+    //if (!--n) yield();
 
     // just put it there
     *++p= k;
@@ -455,7 +460,7 @@ void wputz(char* s) {
   if (k) { wputc(k); ++s; goto restart; }
 
   // good time to release, minimic terminal avoid jitter
-  yield();
+  //yield();
 }
 #endif
 
@@ -545,10 +550,35 @@ char newwin() {
   winp= win+ ++nwin;
 }
 
+char overlap(char x, char y, char w, char h) {
+  int i, j;
+
+  if (x<1 || x+w >= 36) return 1;
+  if (y<1 || y+h >= 25) return 1;
+  
+  for(j= y-2; j<y+h+4; ++j)
+    for(i= x-3; i<x+w+5; ++i)
+      if (*SCREENXY(i, j) != 126) return 1;
+
+  return 0;
+}
+
 // TODO: title+= bar?
 char window(char x, char y, char w, char h, char bg, char fg) {
+  char o;
+  // placer
+  if (x == 255 || y == 255) {
+    x= 3; y= 2;
+    while((o=overlap(x, y, w, h)) && y<27-h-2) {
+      // doesn't work
+      //gotoxy(28, 27); printf("(%2d %2d)", x, y);
+      if (++x + w + 4 > 39) { ++y; x= 3; }
+    }
+    if (o) return -1;
+  }
   winp->x= x;
   winp->y= y;
+
   winp->w= w;
   winp->h= h;
   winp->bg= BG | bg;
@@ -577,6 +607,7 @@ void apprun();
 void randnewwin(char* title, app main);
 
 void mowin(signed char dx, signed char dy, signed char dw, signed char dh);
+void task(app fun);
 
 char wkey= 0;
 
@@ -588,10 +619,7 @@ char wkbhit(char win) {
   char c, k, s;
   
   if (wkey && wfocus==win) return wkey;
-  if (!kbhit()) {
-    if (win) yield();
-    return 0;
-  }
+  if (!kbhit()) return 0;
   
   c= cgetc(); k= *(char*)0x209; s= *(char*)0x208;
 
@@ -608,20 +636,18 @@ char wkbhit(char win) {
   if (((c & 0b01111100) == 0) &&
       (s==0xac || s==0xbc || s==0xb4 || s==0x9c))
     c+= 28-8;
+
   // NOTE: CTRL ARROW not reflected in code
 
   // TODO: CTRL-M and RETURN are ambigous,
   // but RETURN probably should stay at 13, lol
   //if (c==13 && k==0xa2) c== ???
 
-  // TODO: move this to main process
-
-
-
   // FUNCT || CTRL & ARROWKEY
   if (c&128 || (k==0xa2 && c>=28 && c<=31)) {
     //cprintf("  #%d '%c' ", c, c&0x7f);
     wdecorate();
+
     // Capture FUNC keys Window Keys
     c^= 128;
     switch(toupper(c)) {
@@ -636,9 +662,20 @@ char wkbhit(char win) {
 
     case 13 :
     case 'R': apprun(); break; // List
-    //case 'S': apprun(); break; // Shell or thats CTRL-ENTER
+    case 'S': { char bg, fg;
+      // pick colors w good contrast
+      do {
+	bg= rand() & 7;
+	fg= rand() & 7;
+      } while(IS_BAD_CONTRAST(fg, bg));
+    
+      task(app_ascii);
+      window(-1, -1, WMAX, HMAX, bg, fg);
+      wstatus(-1, "foo");
+      break;
+    }
 
-     // TODO: case 'M': maximize & minimize
+    // TODO: case 'M': maximize & minimize
   
     case 'L': info(); break;
     case 'H': help(); break;
@@ -656,7 +693,7 @@ char wkbhit(char win) {
     case 0x8b: mowin(0,0,0,-1); break;
 #endif // MOWIN
 
-    default:  if (isdigit(c))     setfocus(c-'0');
+    default:  if (isdigit(c)) setfocus(c-'0');
     }
     wdecorate();
     return 0;
@@ -668,53 +705,20 @@ char wkbhit(char win) {
 }
 
 // blocking per app, but will yield
+
+// TODO: don't allow to be called!
+
 char wgetc(char win) {
   char c;
   
   while(1) {
-    // TODO: suspend and wake up
-    while(!wkbhit(win)) yield();
+    while(!wkbhit(win));
     if (wkey && wfocus==win) {
       c= wkey;
       wkey= 0;
       return c;
     }
   }
-}
-
-void yield() {
-  // TODO: maybe cuause problems with stack procs?
-  if (!wcur) return;
-
-  // cheap tasks running inside process 0
-  if (winp->fun) return;
-
-  // Enable to "see" yields!
-  //wputc('|');
-  
-  DEB('?');
-
-  // Handle keyboard, if there are no keyboard apps
-  if (kbhit()) wkbhit(0);
-  
-  // snapshot hi byte
-  wtime= HITIME;
-  
-  // it returns non-zero when we come back to app!
-  // TODO: it seems to expect cursor to always
-  //   be overwritten, what if gotoxy?
-  if (wfocus==wcur) togglecursor();
-  if (setjmp(winp->cont)) {
-    // and we're back
-    if (wfocus==wcur) togglecursor();
-    return;
-  }
-
-  // if 0 then we're in OrWin scheduler!
-  DEB('/');
-  DKEY();
-
-  longjmp(orwinjmp, 1);
 }
 
 // basically recurses doing stack allocations
@@ -792,21 +796,6 @@ void task(app fun) {
   winp->status= 1;
   winp->fun= (void*)fun;
   winp->state= (void*)fun(0, 0); // TODO: arg (template)
-}
-
-// TODO: magenta on blue - not sood good
-#define IS_BAD_CONTRAST(fg, bg) ((0xB1 >> ((fg) ^ (bg))) & 1)
-
-char overlap(char x, char y, char w, char h) {
-  int i, j;
-
-  if (x<2 || x+w >= 37) return 1;
-  if (y<1 || y+h >= 28) return 1;
-  
-  for(j= y-2; j<y+h+4; ++j)
-    for(i= x-3; i<x+w+5; ++i)
-      if (*SCREENXY(i, j)!=126) return 1;
-  return 0;
 }
 
 char cursorgetc() {
@@ -922,22 +911,14 @@ void apprun() {
     if (wcur == w) {
       char bg, fg;
 
-      #define NHORIZWIN  3
-      #define NVERTWIN 3
-      #define W ((40-NHORIZWIN*4) / NHORIZWIN)
-      #define H ((28-NVERTWIN*2) / NVERTWIN)
-
       // pick colors w good contrast
       do {
 	bg= rand() & 7;
 	fg= rand() & 7;
       } while(IS_BAD_CONTRAST(fg, bg));
     
-      window(20, 15, W, H, bg, fg);
+      window(-1, -1, WMAX, HMAX, bg, fg);
       wstatus(-1, found->name);
-
-      #undef W
-      #undef H
     }
 
   }  else {
@@ -945,6 +926,7 @@ void apprun() {
   }
 }
 
+#if 0
 void randwin(char* title, app main) {
   char x, y, w, h, bg, fg;
 
@@ -974,6 +956,8 @@ void randwin(char* title, app main) {
   task(main);
   //  spawn(main);
 }
+#endif
+
 
 // TODO: title not moved...
 // TODO: colors messed up...
@@ -1214,15 +1198,14 @@ int main() {
   task(app_snow);
 #endif
 
-  // DEFUALT TASKS
-
+  // Need one to make it run!
   task(app_ascii);
-  window(2, 4, 15, 8, blue, white);
+  window(2, 1, 5, 5, blue, white);
   wstatus(-1, "ASCII");
   
-  task(app_ascii);
-  window(5, 18, 8, 5, green, black);
-  wstatus(-1, "ASCII");
+  //  task(app_ascii);
+  //  window(5, 18, 8, 5, green, black);
+  //  wstatus(-1, "ASCII");
   
   //////////////////////////////////////////////////////////
   // SCHEDULER!
@@ -1248,7 +1231,6 @@ int main() {
 
     // Handle cheap tasks
     if (winp->fun) {
-      // TODO: arg, keyevent? resize
       (*(app)winp->fun)((int*)winp->state, 0);
       goto next;
     }
