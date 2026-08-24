@@ -794,7 +794,7 @@ void task(app fun) {
   winp->state= (void*)fun(0, 0); // TODO: arg (template)
 }
 
-
+// TODO: magenta on blue - not sood good
 #define IS_BAD_CONTRAST(fg, bg) ((0xB1 >> ((fg) ^ (bg))) & 1)
 
 char overlap(char x, char y, char w, char h) {
@@ -817,6 +817,27 @@ char cursorgetc() {
   return c;
 }
 
+char* savewin() {
+  char h= winp->h, w= winp->w + 3;
+  char *p= malloc(w * h), *r= p;
+  char *s= SCREENXY(winp->x - 2, winp->y);
+  while(h--) {
+    memmove(p, s, w);
+    p+= 40; s+= 40;
+  }
+  return r;
+}
+
+void loadwin(char* p) {
+  char h= winp->h, w= winp->w + 3, *r= p;
+  char *s= SCREENXY(winp->x - 2, winp->y);
+  while(h--) {
+    memmove(s, p, w);
+    p+= 40; s+= 40;
+  }
+  free(r);
+}
+
 // Pick app to run
 //
 // TODO: generalize the picker and move out
@@ -825,18 +846,21 @@ void apprun() {
   char line[40]= {0};
   char i= 0, w= wcur;
   struct apps *p, *found;
-  char c, *spc;
+  char c, k, *spc, *tmp;
 
   // flush
   // TODO: remove, FUNC-R getting an r!
   while(kbhit()) getc();
 
   setwin(0);
+  tmp= savewin();
 
   do {
     putchar(white);
     gotoxy(0, 0);
-    nl(); clnl();
+    nl();
+    puts("Start APP");
+    //clnl();
 
     // -- list matches
     spc= strchr(line, ' ');
@@ -866,8 +890,10 @@ void apprun() {
     putchar('>');
     putchar(found? green: white);
     putz(line); wclreol();
-    c= cursorgetc();
-    if (c==13 || c==27) break;
+
+    c= cursorgetc(); k= *(char*)0x209; // TODO: abstract
+
+    if (c==13 || c==27 || k==0xa5) break; // RET ESC FUNC
 
     // process input
     if (c==127 || c==8) {
@@ -882,6 +908,7 @@ void apprun() {
 
   } while(1);
 
+  loadwin(tmp);
   setwin(w);
 
   if (c == 13 && found) {
