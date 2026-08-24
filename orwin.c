@@ -9,8 +9,8 @@
 
 #define NHORIZWIN  3
 #define NVERTWIN 3
-#define WMAX ((40-NHORIZWIN*6) / NHORIZWIN -1)
-#define HMAX ((28-NVERTWIN*4) / NVERTWIN -1)
+#define WMAX ((40-NHORIZWIN*6) / NHORIZWIN)
+#define HMAX ((28-NVERTWIN*4) / NVERTWIN)
 
 // TODO: magenta on blue - not sood good
 #define IS_BAD_CONTRAST(fg, bg) ((0xB1 >> ((fg) ^ (bg))) & 1)
@@ -553,11 +553,11 @@ char newwin() {
 char overlap(char x, char y, char w, char h) {
   int i, j;
 
-  if (x<1 || x+w >= 36) return 1;
-  if (y<1 || y+h >= 25) return 1;
+  if (x<2 || x+w >= 40-4) return 1;
+  if (y<1 || y+h >= 28-2) return 1;
   
-  for(j= y-2; j<y+h+4; ++j)
-    for(i= x-3; i<x+w+5; ++i)
+  for(j= y-1; j<y+h+3; ++j)
+    for(i= x-2; i<x+w+3; ++i)
       if (*SCREENXY(i, j) != 126) return 1;
 
   return 0;
@@ -1110,9 +1110,9 @@ int main() {
   fill(0, 0, SCREENCOLS, SCREENROWS, 126);
 
   // Print logo in Right-Hand Corner
-  strncpy(SCREENXY(34, 0), "\x0a""0rWin", 6);
-  strncpy(SCREENXY(34, 1), "\x0a""0rWin", 6);
-  strncpy(SCREENXY(34, 2),      " ATMOS", 6);
+  strncpy(SCREENXY(34, 24), "\x0a""0rWin", 6);
+  strncpy(SCREENXY(34, 25), "\x0a""0rWin", 6);
+  strncpy(SCREENXY(34, 26),      " ATMOS", 6);
 
   //memset(win, 0, sizeof(win));
 
