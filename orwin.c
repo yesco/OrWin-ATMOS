@@ -55,7 +55,7 @@ void* CC65() {}
 
 struct apps {
   char* name;
-  void* main;
+  void* fun;
   uint size;
 } apps[] = {
 
@@ -539,12 +539,14 @@ void windraw(Window* w) {
   fill(w->x + w->w +1, w->y, 1, w->h, white);
 }
 
+char newwin() {
+  // TODO: reuse empty entries
+  if (nwin==WIN_MAX) return 0;
+  winp= win+ ++nwin;
+}
+
 // TODO: title+= bar?
 char window(char x, char y, char w, char h, char bg, char fg) {
-  if (nwin==WIN_MAX) return 0;
-  
-  // TODO: so 0 is full screen...
-  winp= win+ ++nwin;
   winp->x= x;
   winp->y= y;
   winp->w= w;
@@ -572,7 +574,7 @@ void help() {
 }
 
 void apprun();
-void newwin(char* title, app main);
+void randnewwin(char* title, app main);
 
 void mowin(signed char dx, signed char dy, signed char dw, signed char dh);
 
@@ -785,11 +787,11 @@ void spawn(app main) {
 }
 
 void task(app fun) {
+  newwin();
+
   winp->status= 1;
   winp->fun= (void*)fun;
-  // TODO: arg
-  // TODO: it really shouldn't be this type... lol
-  winp->state= (void*)fun(0,0);
+  winp->state= (void*)fun(0, 0); // TODO: arg (template)
 }
 
 
@@ -816,6 +818,8 @@ char cursorgetc() {
 }
 
 // Pick app to run
+//
+// TODO: generalize the picker and move out
 void apprun() {
   // TODO: common buff somewhere
   char line[40]= {0};
@@ -848,6 +852,7 @@ void apprun() {
 
       wputz(p->name); // 7 cs !!! (printf 55 cs!)
       //wputc('\t'); wputi(p->size); // +19cs
+
       putchar(white);
       //' TODO: nl makes it flickr because of wclreol
       clnl();
@@ -877,15 +882,43 @@ void apprun() {
 
   } while(1);
 
-  if (c == 13) {
-    printf("\nCHOOSEN: >%s<\n", line);
-    // TODO: launch
-  }
-
   setwin(w);
+
+  if (c == 13 && found) {
+    //  printf("\nCHOOSEN: >%s<\n", line);
+
+    // launch!
+    task(found->fun);
+    //cprintf("\n\n\n\n\n[WIN.%d: %p %p]", wcur, winp->state, winp->fun);
+
+    // if it didn't open a window
+    if (wcur == w) {
+      char bg, fg;
+
+      #define NHORIZWIN  3
+      #define NVERTWIN 3
+      #define W ((40-NHORIZWIN*4) / NHORIZWIN)
+      #define H ((28-NVERTWIN*2) / NVERTWIN)
+
+      // pick colors w good contrast
+      do {
+	bg= rand() & 7;
+	fg= rand() & 7;
+      } while(IS_BAD_CONTRAST(fg, bg));
+    
+      window(20, 15, W, H, bg, fg);
+      wstatus(-1, found->name);
+
+      #undef W
+      #undef H
+    }
+
+  }  else {
+    setwin(w);
+  }
 }
 
-void newwin(char* title, app main) {
+void randwin(char* title, app main) {
   char x, y, w, h, bg, fg;
 
   // randomize find space for window
@@ -1154,13 +1187,15 @@ int main() {
   task(app_snow);
 #endif
 
+  // DEFUALT TASKS
+
+  task(app_ascii);
   window(2, 4, 15, 8, blue, white);
   wstatus(-1, "ASCII");
-  task(app_ascii);
   
+  task(app_ascii);
   window(5, 18, 8, 5, green, black);
   wstatus(-1, "ASCII");
-  task(app_ascii);
   
   //////////////////////////////////////////////////////////
   // SCHEDULER!

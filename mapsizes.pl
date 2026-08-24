@@ -50,9 +50,11 @@ sub doit {
 		    $app  =~ s/app_//;
 
 		    $name =~ s/^app-(\w+)/$1_main/;
-		    print STDOUT sprintf(
-			"{ \"%s\", %s, %d },\n",
-			$app, $name, $code+$ddd);
+		    if ($app =~ /^(_|CC65|SUMMARY)/ ) {} else {
+			print STDOUT sprintf(
+			    "{ \"%s\", %s, %d },\n",
+			    $app, $name, $code+$ddd);
+		    }
 		} else {
 		    $cc65code+= $code;
 		    $cc65data+= $ddd;
