@@ -9,7 +9,8 @@
 
 #define NHORIZWIN  3
 #define NVERTWIN 3
-#define WMAX ((40-NHORIZWIN*6) / NHORIZWIN)
+
+#define WMAX ((40-NHORIZWIN*5) / NHORIZWIN -1)
 #define HMAX ((28-NVERTWIN*4) / NVERTWIN)
 
 // TODO: magenta on blue - not sood good
@@ -553,11 +554,11 @@ char newwin() {
 char overlap(char x, char y, char w, char h) {
   int i, j;
 
-  if (x<2 || x+w >= 40-4) return 1;
-  if (y<1 || y+h >= 28-2) return 1;
+  if (x<2 || x+w >= 41) return 1;
+  if (y<1 || y+h >= 28) return 1;
   
-  for(j= y-1; j<y+h+3; ++j)
-    for(i= x-2; i<x+w+3; ++i)
+  for(j= y-1; j<y+h+1; ++j)
+    for(i= x-2; i<x+w+2; ++i)
       if (*SCREENXY(i, j) != 126) return 1;
 
   return 0;
@@ -568,11 +569,11 @@ char window(char x, char y, char w, char h, char bg, char fg) {
   char o;
   // placer
   if (x == 255 || y == 255) {
-    x= 3; y= 2;
-    while((o=overlap(x, y, w, h)) && y<27-h-2) {
+    x= 2; y= 1;
+    while((o=overlap(x, y, w, h)) && y<29-h) {
       // doesn't work
       //gotoxy(28, 27); printf("(%2d %2d)", x, y);
-      if (++x + w + 4 > 39) { ++y; x= 3; }
+      if (++x + w + 4 > 39) { ++y; x= 2; }
     }
     if (o) return -1;
   }
