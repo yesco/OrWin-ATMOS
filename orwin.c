@@ -152,10 +152,10 @@ jmp_buf orwinnext;
 
 void fill(char x, char y, char w, char h, char c) {
   char* p= SCREENXY(x, y);
-  for(; h; --h) {
-    // TODO: is memset faster?
-    for(x= w; x; --x) *p=c,++p;
-    p+= 40-w;
+  // strided
+  while(h--) {
+    memset(p, c, w);
+    p+= 40;
   }
 }
 
@@ -189,7 +189,7 @@ typedef struct Window {
 
 char nwin= 0, wfocus= 0, wcur= 0;
 Window win[WIN_MAX]= {
-  { 39-15, 3, 14, 28-3,
+  { 39-15, 3, 15, 28-3,
     0, 0,
     NULL,
     black, white,
@@ -207,19 +207,26 @@ char* updatewinptr() {
   return winp->p= SCREENXY(winp->x + winp->c, winp->y + winp->r);
 }
 
-int write(int fd, char* buf, size_t count) {
-  int n= count;
-  char c;
+#undef putchar
+int putchar(int c) { return wputc(c); }
 
-#if 1
-  while(n--) wputc(*buf++);;
-#else
+// 2x-10x faster not calling putchar for every char!
+int write(int fd, char* buf, size_t count) {
+  static uint n;
+  static char c, left, *b, *p;
+
+  n= count;
+  b= buf; p= winp->p - 1; left= winp->w - winp->c;
+
+  --b;
   while(n--) {
-    c= *buf++;
-    if ((c&0x7f) >= 32)
-      *winp->p++= c;
+    if ((c= *++b) < 32 || !--left) {
+      winp->p= p+1; putchar(c); p= win->p - 1; left= winp->w - winp->c;
+    } else {
+      *++p= c;
+    }
   }
-#endif
+  winp->p= p+1;
   
   return count;
 }
@@ -236,21 +243,36 @@ void wscreensize(char* w, char* h) {
 }
 
 void wclreol() {
-  fill(winp->x + winp->c, winp->y + winp->r, winp->w - winp->c + 1, 1, winp->bg);
+  memset(winp->p, ' ', winp->w - winp->c);
 }
 
 void wclrscr() {
-  fill(winp->x, winp->y, winp->w, winp->h, 32);
+  char b= winp->bg | BG, f= winp->fg;
+  char h, *p;
+
+  fill(winp->x, winp->y, winp->w, h= winp->h, 32);
   // reset cursor position
-  winp->r= 0;
-  winp->c= 0;
+  winp->c= winp->r= 0;
   updatewinptr();
+
+// TODO: not good because SHADOW requires FILL
+#if 0
+  // set paper and ink
+  p= winp->p - 2;
+  ++h;
+  while(--h) {
+    *p= b; p[1]= f;
+    p+= 40;
+  }
+#else
+  // TODO: just make simple loop!
   
   // background color
   fill(winp->x-2, winp->y, winp->w+4, winp->h, BG | winp->bg);
 
   // set text color
   fill(winp->x-1, winp->y, 1, winp->h, winp->fg);
+#endif
 }
 
 char* winptr() {
@@ -359,11 +381,23 @@ char wputc(char c) {
   return c;
 }
 
-void nl() { putchar('\n'); }
+void nl() {
+  winp->c= 0;
+  if (++winp->r >= winp->h) winp->r= 0;
+  updatewinptr();
+
+  // set current (new) colors
+  winp->p[-2]= BG | winp->bg;
+  winp->p[-1]=      winp->fg;
+
+  wclreol();
+}
+
+// TODO: is it bettter than write optimized?
 
 #ifndef OPTPUTZ
 void wputz(char* s) {
-  while(*s) wputc(*s++);
+  write(1, s, strlen(s));
   // good time to release, minimic terminal avoid jitter
   yield();
 }
@@ -410,7 +444,8 @@ void wputz(char* s) {
 #endif
 
 void wputs(char* s) {
-  wputz(s); nl();
+  write(1, s, strlen(s));
+  nl();
 }
 
 void wputi(int i) {
@@ -762,13 +797,15 @@ void apprun() {
   struct apps *p= apps;
 
   setwin(0);
-  clrscr();
-  printf("\n---APPS--\n");
+  gotoxy(0,0);
+  nl(); nl();
+
   while(p->name) {
-    printf("%-9s%5d\n", p->name, p->size);
+    wputs(p->name); // 7 cs !!! (printf 55 cs!)
+    //wputc('\t'); wputi(p->size); // +19cs
     ++p;
   }
-  printf("\n");
+  nl();
 
   cgetc();
   setwin(w);
