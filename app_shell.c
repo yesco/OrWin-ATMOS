@@ -15,16 +15,20 @@ void* app_shell(APP* app, char* line) {
     if (!app) return 0;
     
     // TODO: remove testing
-    if (!line) line= "iota 1 10 | tail -5 | head -2 | terminal";
+    if (!line) line= "iota 1 10|tail -5|head -2|terminal";
 
     app->line= strdup(line);
 
-    window(-1, -1, 20-6, 11, black, green);
+    window(-1, -1, 20-6, 11, green, black);
     wstatus(-1, "Shell");
     
-    putchar(green); putz("/home/atmos> ");
-    putchar(white); puts(line);
+    putchar('>');
+    putchar(blue);
+    puts(line);
+    putchar(black);
     system(line);
+
+    putchar('>');
 
     return app;
 
@@ -32,9 +36,13 @@ void* app_shell(APP* app, char* line) {
     return 0;
 
   // have a new line!
-  putchar(green); putz("> "); putchar(white); puts(line);
-
+  putchar('>');
+  putchar(blue);
+  puts(line);
+  putchar(black);
   system(line);
-  
+
+  putchar('>');
+
   return 0;
 }
