@@ -897,9 +897,8 @@ void apprun() {
   do {
     putchar(white);
     gotoxy(0, 0);
-    //nl();
+    putcraw(8);
     puts("\nStart APP\n");
-    //clnl();
 
     // -- list matches
     spc= strchr(line, ' ');
@@ -913,6 +912,8 @@ void apprun() {
       }
       else putchar(white);
 
+      putcraw(8);
+      
       wputz(p->name); // 7 cs !!! (printf 55 cs!)
       //wputc('\t'); wputi(p->size); // +19cs
 
@@ -926,6 +927,7 @@ void apprun() {
     if (spc) *spc= ' ';
 
     // -- get user input
+    putcraw(8);
     putchar('>');
     putchar(found? green: white);
     putz(line); wclreol();
@@ -1138,6 +1140,7 @@ int main() {
 
   assert(sizeof(void*)==sizeof(int));
 
+  memcpy(CHARDEF('_'), SPARKDEFS, 8);
   memcpy(ALTSET+(32+64)*8, SPARKDEFS, sizeof(SPARKDEFS));
 	 
   // KBRPT - keyboard repeat rate

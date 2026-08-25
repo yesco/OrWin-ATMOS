@@ -14,29 +14,35 @@ typedef struct APP {
   char sel, *def;
 } APP;
 
-void draw(char *def) {
+void draw(char x, char *def) {
   int r, c;
 
-  clrscr();
+  //clrscr();
+  printf("%c $%02x %d\n", x, x, x);
   for(r=0; r<8; ++r) {
     char v= def[r];
+    nl(); putchar(white); putchar(BG | black);
     for(c=0; c<6; ++c) {
-      putchar( (v & 0b100000)? 127: 32);
+      putcraw( (v & 0b100000)? 127: 32);
       v<<= 1;
     }
-    nl();
+    putchar(BG | yellow);
   }
 }
 
 void* app_charedit(APP* app, char* line) {
   if (!app) {
-    window(-1, -1, 8, 10, white, black);
-    wstatus(-1, "Char Editor");
+    char c;
+    // TODO: reduce by one once attributes OPT at beginning line
+    window(-1, -1, 9, 11, yellow, black);
+    wstatus(-1, "Char Edit");
     
-    app->sel= isdigit(*line)? atoi(line): *line;
-    app->def= CHARDEF(app->sel);
+    c= isdigit(*line)? atoi(line): *line;
+    if ((c & 0x7f) < 32) c= '`'; // copyright - useless!?
+    app->sel= c;
+    app->def= CHARDEF(c);
 
-    draw(app->def);
+    draw(c, app->def);
 
     return calloc(sizeof(APP), 1);
   }

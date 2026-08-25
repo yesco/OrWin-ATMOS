@@ -11,9 +11,10 @@ void* app_charset(APP* app, char* line) {
   if (!app) {
     int c;
 
-    window(-1, -1, 18, 13, green, black);
-    wstatus(-1, "Charset Editor");
+    window(-1, -1, 18, 11, green, black);
+    wstatus(-1, "Charset (edit)");
     
+    gotoxy(0, 0);
     for(c= 0; c<256; ++c) {
       if ((c & 0x7f) < 32) continue;
       // beginning of line
