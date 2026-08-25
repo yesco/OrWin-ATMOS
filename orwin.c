@@ -22,7 +22,37 @@
 
 #include "orwin.h"
 
+#define HSPARKS "\x20\xe0\xe1\xe2\xe3\xe4\xe5\xe6\xdf"
+#define VSPARKS "\x20\xe7\xe8\xe9\xea\xeb\xdf"
 
+// Maybe can be used to draw graphs
+// TODO: or arrows (remember needs ALTMODE prefix)
+#define GRAPHX          "\xec"
+#define GRAPHHORIZTICKS "\xed"
+#define GRAPHCHROSS     "\xee"
+#define GRAPHVERTICKS   "\xef"
+
+#define SPARKDEFS \
+  "\0\0\0\0\0\0\0\x3f" \
+  "\0\0\0\0\0\0\x3f\x3f" \
+  "\0\0\0\0\0\x3f\x3f\x3f" \
+  "\0\0\0\0\x3f\x3f\x3f\x3f" \
+  "\0\0\0\x3f\x3f\x3f\x3f\x3f" \
+  "\0\0\x3f\x3f\x3f\x3f\x3f\x3f" \
+  "\0\x3f\x3f\x3f\x3f\x3f\x3f\x3f" \
+\
+  "\x20\x20\x20\x20\x20\x20\x20\x20" \
+  "\x30\x30\x30\x30\x30\x30\x30\x30" \
+  "\x38\x38\x38\x38\x38\x38\x38\x38" \
+  "\x3b\x3b\x3b\x3b\x3b\x3b\x3b\x3b" \
+  "\x3d\x3d\x3d\x3d\x3d\x3d\x3d\x3d" \
+\
+  "\x00\x21\x12\x0c\x0c\x12\x21\x00" \
+  "\x38\x20\x20\x20\x38\x20\x20\x20" \
+  "\x20\x20\x20\x20\x20\x20\x20\x3f" \
+  "\x00\x00\x00\x00\x00\x20\x20\x3f"
+
+  
 // (- 13701 12410) = 1291 bytes code for mowin :-(
 // TODO: RESIZE crashes... 
 #define MOWIN 
@@ -41,14 +71,6 @@
 #define MAXPUTZ 128
 
 // TODO: see apprun.c !
-
-extern int counter_main(int argc, char** argv);
-extern int timer_main(int argc, char** argv);
-extern int ascii_main(int argc, char** argv);
-extern int atmos_main(int argc, char** argv);
-extern int flipflop_main(int argc, char** argv);
-extern int echo_main(int argc, char** argv);
-extern int calc_main(int argc, char** argv);
 
 #include "apps.ext"
 
@@ -147,6 +169,12 @@ clock_t clock() {
 
 jmp_buf orwinjmp;
 jmp_buf orwinnext;
+
+// TODO: make an "oric.h"
+
+#define CHARSET    ((char*)0xB400) // $B400-B7FF
+#define CHARDEF(C) ((char*)CHARSET+(C)*8)
+#define ALTSET     ((char*)0xB800) // $B800-BB7F
 
 #define TEXTSCREEN ((char*)0xBB80) // $BB80-BF3F
 #define SCREENROWS 28
@@ -318,6 +346,12 @@ void nl() {
   wclreol();
 }
 
+char putcraw(char c) {
+  *winp->p= c;
+  wputc(KEYRIGHT);
+  return c;
+}
+
 // minimal terminal codes
 // Free codes: 11, 14; 24,25,26, 28,29,30,31
 char wputc(char c) {
@@ -371,8 +405,8 @@ char wputc(char c) {
   // emacs,shell:  CTRL-K ill till end of line
     
   case KEYRIGHT: winp->p++; break; // will reach column++
-  case KEYDOWN:  if (winp->r++ +1 >= winp->h) winp->r= 0;          break;
-  case KEYUP:    if (winp->r--    >= winp->h) winp->r= win->h-1;   break;
+  case KEYDOWN:  if (++winp->r >= winp->h) winp->r= 0;          break;
+  case KEYUP:    if (winp->r-- >= winp->h) winp->r= win->h-1;   break;
 
   // TODO: repeat char
   // vt100:     char ESC [ 70 b                   printf "=\e[79b\n"
@@ -1104,6 +1138,8 @@ int main() {
 
   assert(sizeof(void*)==sizeof(int));
 
+  memcpy(ALTSET+(32+64)*8, SPARKDEFS, sizeof(SPARKDEFS));
+	 
   // KBRPT - keyboard repeat rate
   *(char*)0x24f= 2;
   // KBDLY - keyboard delay before repeat
@@ -1123,11 +1159,16 @@ int main() {
   // clear background to "gray" checkerboard
   fill(0, 0, SCREENCOLS, SCREENROWS, 126);
 
+  // Print logo in Upper Status Line
+  strncpy(SCREENXY(0, 0), "0rWIN ATMOS                                     ", 40);
+
+  #if 0
   // Print logo in Right-Hand Corner
   strncpy(SCREENXY(34, 24), "\x0a""0rWin", 6);
   strncpy(SCREENXY(34, 25), "\x0a""0rWin", 6);
   strncpy(SCREENXY(34, 26),      " ATMOS", 6);
 
+  // Print logo sideways right side
   strncpy(SCREENXY(38, 0), "\x0a""0", 2);
   strncpy(SCREENXY(38, 1), "\x0a""0", 2);
   strncpy(SCREENXY(38, 2), "\x0a""r", 2);
@@ -1146,6 +1187,7 @@ int main() {
   strncpy(SCREENXY(38,14), " m", 2);
   strncpy(SCREENXY(38,15), " o", 2);
   strncpy(SCREENXY(38,16), " s", 2);
+  #endif
 
   //memset(win, 0, sizeof(win));
 
@@ -1233,7 +1275,7 @@ int main() {
 
   // Need one to make it run!
   start(app_ascii);
-  window(2, 1, 5, 5, blue, white);
+  window(2, 3, 5, 3, blue, white);
   wstatus(-1, "ASCII");
   
   //  start(app_ascii);
@@ -1245,7 +1287,7 @@ int main() {
   wcur= nwin;
   wfocus= nwin;
 
-  wdecorate();
+  wdecorate(); // what?
 
   // make us always come back here!
   while(setjmp(orwinjmp)!=42) {
@@ -1270,10 +1312,6 @@ int main() {
     
     DEB('0'+wcur);
     DKEY();
-    
-    // TODO: how can I use it as a test value, LOL
-    if (*winp->cont) longjmp(winp->cont, 1);
-    else DEB('\\');
   }
 
 

@@ -43,10 +43,14 @@
 
 
 extern char wputc(char);
+extern char putcraw(char);
 extern void wputi(int);
 extern void nl();
+extern void clnl();
+extern void nlpure();
 extern void wputz(char*);
 extern void wputs(char*);
+
 extern char* winptr();
 
 extern void wgotoxy(char x, char y);
