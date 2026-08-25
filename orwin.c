@@ -5,6 +5,23 @@
 #include <ctype.h>
 #include <assert.h>
 
+/* Sizes
+
+ORWIN:  9508
+APPS :  8412
+DATA :  1797
+MISC :  3888 other apps older app-( stackers
+CC65 :  6208
+CCDAT:   428
+------------
+TAP  : 30241 (- 30241 9508 8412 1797 6208 428) 3888
+
+(- (+ 21942 1672) 9508 8412 1797 6208) -2311
+
+
+*/
+
+
 // Preferred Window Layout
 
 #define NHORIZWIN  3
@@ -15,10 +32,6 @@
 
 // TODO: magenta on blue - not sood good
 #define IS_BAD_CONTRAST(fg, bg) ((0xB1 >> ((fg) ^ (bg))) & 1)
-
-//char wputc(char);
-
-//int putchar(int c) { wputc(c); return c; }
 
 #include "orwin.h"
 
@@ -226,7 +239,8 @@ typedef struct Window {
 
 } Window;
 
-char nwin= 0, wfocus= 0, wcur= 0;
+char nwin= 0, wfocus= 0, wcur= 0, wnext, wret;
+
 Window win[WIN_MAX]= {
   { 40-15, 3, 14, 28-3,
     0, 0,
@@ -437,6 +451,17 @@ char wputc(char c) {
   // binary-byte coordinate sequences, good for8-bit machine
   // ESC Y [Row+32] [Col+32]
 																																																																									  
+  // HIBIT - TODO: to allow for easy (no need use putcraw()!
+  //
+  // Oric Serial Attribute Codes (8 to 15)
+  // Values from 8 to 15 control text modifiers like character sets,
+  // height, and blinking on the Oric screen
+  // -  8: Standard character set (single height,steady
+  // -  9: Alternate character set (teletext/semi-graphics)
+  // - 10: Double size standard character set
+  // - 11: Double size alternate character set
+  // - 12–15: Blinking variants and combinations of double size/charset options
+  
   default:
     if (c==*BLACK) c= black; // it's really 0 but...
     
@@ -622,17 +647,22 @@ char newwin() {
   setwin(++nwin);
 }
 
-char start(app fun) {
+char startline(app fun, char* line) {
   if (!newwin()) return 0;
 
   winp->status= 1;
-  winp->fun= (void*)fun;
-  winp->state= (void*)fun(0, 0); // TODO: arg (template)
+  // TODO: glue it together?
+  winp->fun=   (void*)fun;
+  winp->state= (void*)fun(0, line); // TODO: arg (template)
+
   return wcur;
 }
 
+char start(app fun) { return startline(fun, NULL); }
 
 
+// This used to be conservative requring gray in bigger area around
+// now, just make sure it's all gray.
 char overlap(char x, char y, char w, char h) {
   int i, j;
 
@@ -817,68 +847,6 @@ char wgetc(char win) {
   }
 }
 
-// basically recurses doing stack allocations
-// at end marks it in orwinnext, longjmp there
-// with app main to call! It'll push ahead.
-void spawn_alloc(char n) {
-  //  unsigned int safe= 0x54FE; // check for overflow
-  char dummy[SPAWN_STEP]= {0};
-
-  DEB('.');
-
-  //  memset(dummy, n, SPAWN_STEP);
-  //  dummy[0]= 0;
-  
-  if (--n) spawn_alloc(n + dummy[0]);
-  else {
-    app main;
-    // arrived at end of allocated stack
-    DEB('!');
-    //cprintf("@%u\r\n", &dummy);
-    DEB('\n');
-    DKEY();
-
-    // mark current stack pointer as next allocation
-    main= (void*)setjmp(orwinnext);
-    if (!main) {
-
-      // we've allocated the next spawn stack chunk
-      return;
-
-    } else {
-
-      // make the stack reusable
-      memcpy(winp->start, orwinnext, sizeof(orwinnext));
-      
-      // we got a function address to call (an app main)
-
-      // alloate space for this process by moving orwinnext forward (for next allocation)
-      spawn_alloc(SPAWN_REC);
-
-      // clear rest of unused stack
-      // clean the stack so can measure usage
-      {
-	char ss= winp->start[2];
-	char so=    orwinjmp[2];
-	char d= ss-so;
-      
-	memset((char*)0x100, 0, ss-1);
-      }
-
-      // run & exit
-      winp->exit= main(-1, NULL);
-      // TODO: reuse allocation winp->cont
-  
-      DEB('*');
-      DKEY();
-
-      // go back to scheduler
-      longjmp(orwinjmp, 1);
-    }
-  } 
-
-  n= 0; // make memory "clean"
-}
 
 char cursorgetc() {
   char c;
@@ -1165,7 +1133,61 @@ void mowin(signed char dx, signed char dy, signed char dw, signed char dh) {
 }
 #endif // MOWIN
 
-// TODO: apps
+
+
+//////////////////////////////////////////////////////////
+// SCHEDULER!
+
+void scheduler() {
+  wcur= nwin;
+  wfocus= nwin;
+
+  wdecorate(); // what?
+
+  // make us always come back here!
+  while(setjmp(orwinjmp)!=42) {
+    DEB('^');
+
+    // move to next app
+  next:
+
+    // every time we check if there is a KEY
+    // if so: we route it directly to the wfocus window!
+    // and this is prioritized as highly interactive app!
+    //
+    // TODO: winp->ret == WAITKEY
+    while(wkbhit(0)) {
+      // restore same window to be FAIR and NO starvation!
+      wnext= wcur;
+
+      // TODO: this is duplicated code - merge!
+      
+      // app can actually call kbhit() and getc()!
+      setwin(wfocus);
+      wret= (*(app)winp->fun)((int*)winp->state, (char*)(wkey + 0x100));
+      
+      wkey= 0;
+      setwin(wnext);
+    }
+
+    if (!--wcur) wcur= nwin;
+    setwin(wcur); // inlinee ?
+
+    // TODO: if no active windows/task will LOOP
+    if (!winp->status) goto next;
+
+    // - Handle cheap tasks
+    wret= (*(app)winp->fun)((int*)winp->state, 0);
+
+    // TODO: returned event maybe is exit code, or wait request
+    // if (wret) winp->ret= wret;
+
+    goto next;
+    
+    DEB('0'+wcur);
+    DKEY();
+  }
+}
 
 int main() {
   int i= 0, j= 0, z= 0;
@@ -1228,13 +1250,11 @@ int main() {
 
   updatewinptr();
   
-  // initlize multitasker!
-  spawn_alloc(SPAWN_REC);
-  // make it "pseudo task"
   win[0].status= -1;
 
-  //#define DEMO
-  //#define TIMER
+// TODO: RWRITE TO BE APPS
+  
+//#define TIMER
 //#define ATMOS
 //#define FISH
 //#define ECHO
@@ -1316,43 +1336,14 @@ int main() {
   //  start(app_ascii);
   //  window(5, 18, 8, 5, green, black);
   //  wstatus(-1, "ASCII");
-  
-  //////////////////////////////////////////////////////////
-  // SCHEDULER!
-  wcur= nwin;
-  wfocus= nwin;
-
-  wdecorate(); // what?
-
-  // make us always come back here!
-  while(setjmp(orwinjmp)!=42) {
-    DEB('^');
-
-    // move next app
-  next:
-    wkbhit(0);
-
-    if (!--wcur) wcur= nwin;
-    
-    setwin(wcur);
-
-    // TODO: if no active windows/task will LOOP
-    if (!winp->status) goto next;
-
-    // Handle cheap tasks
-    if (winp->fun) {
-      (*(app)winp->fun)((int*)winp->state, 0);
-      goto next;
-    }
-    
-    DEB('0'+wcur);
-    DKEY();
-  }
 
 
+
+  scheduler();
 
   return 0;
 }
+
 
 void cput1h(char x) { x&= 0xf; cputc(x + (x<10? '0': 'A'-10)); }
 void cput2h(char x) { cput1h(x>>4); cput1h(x); }
