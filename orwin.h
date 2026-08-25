@@ -9,8 +9,20 @@
 
 #define BG      16
 
+#define NL       "\n"   // 10 \x0a
+#define NLPURE   "\x0b" // 11 \x0b
+
+#define CLRSCR   "\x0c"
+#define CR       "\x0d"
+#define CLREOL   "\x0e"
+#define RPT      "\x0f"
+
+
+#define HOME     "\x8c" // 'CLRSCR
+#define CLNL     "\x8a" // 'NL
+
 // text colours
-#define BLACK    "\x0"
+#define BLACK    "\xff" // \x0 would terminate the string...
 #define RED      "\x1"
 #define GREEN    "\x2"
 #define YELLOW   "\x3"
@@ -81,6 +93,7 @@ extern char wgetc(char win);
 #define getc() wgetc(wcur)
 
 
+//#include <types.h>
 
 #define CLOCKS_PER_SEC 100
 typedef unsigned int clock_t;

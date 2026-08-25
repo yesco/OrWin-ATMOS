@@ -218,6 +218,8 @@ char* updatewinptr() {
 }
 
 #undef putchar
+// inefficient, but should do the job
+// TODO: rename wputc?
 int putchar(int c) { return wputc(c); }
 
 // 2x-10x faster not calling putchar for every char!
@@ -253,7 +255,7 @@ void wscreensize(char* w, char* h) {
 }
 
 void wclreol() {
-  memset(winp->p, ' ', winp->w - winp->c);
+  memset(winp->p, ' ', winp->w - winp->c + 1);
 }
 
 void wclrscr() {
@@ -333,15 +335,20 @@ char wputc(char c) {
   case 10: nl(); goto done;      // CTRL-J = \n & wclreol()
   case 11: nlpure(); goto done;   // CTRL-K = \n but NO wclreol!
 
-  case 12: wclrscr(); break;     // CTRL-L = clrscr()
-  case 13: winp->c= 0; break;    // CTRL-M = \r = CR
+  case 12: wclrscr(); goto done;     // CTRL-L = CLRSCR
+  case 13: winp->c= 0; updatewinptr(); goto done; // CTRL-M = \r = CR
 
   // ASCII: ShiftOut (SO) - ALT font set - ORIC?
-  case 14: wclreol(); break;  // CTRL-N
+  case 14: wclreol(); goto done;  // CTRL-N CLREOL
 
   // ASCII: SHiftIn (SI) - Normal char set - ORIC?
   // (key unix: FLUSH0 togggle ignore output) - ORIC has it!
   case 15: goto done;         // CTRL-O
+
+  // HIBIT SET
+  case 128+12: gotoxy(0,0); goto done; // HOME
+  case 128+13: clnl();      goto done; // CLNL
+
 
   // Graphical/Text-Mode switches
   case 24: break; // CTRL-X  CANcel (*ix: cancel input, emacs: ...)
@@ -374,9 +381,11 @@ char wputc(char c) {
   // ESC Y [Row+32] [Col+32]
 																																																																									  
   default:
+    if (c==*BLACK) c= black; // it's really 0 but...
+    
     *winp->p++= c;
 
-    // INK or BG color
+    // change INK or BG color for future
     c&= 0x7f;
     if (c<24) if (c<8) winp->fg= c; else winp->bg= c;
 
@@ -848,8 +857,8 @@ void apprun() {
   do {
     putchar(white);
     gotoxy(0, 0);
-    nl();
-    puts("Start APP");
+    //nl();
+    puts("\nStart APP\n");
     //clnl();
 
     // -- list matches
@@ -1094,7 +1103,7 @@ int main() {
   // KBRPT - keyboard repeat rate
   *(char*)0x24f= 2;
   // KBDLY - keyboard delay before repeat
-  *(char*)0x24e= 4;
+  *(char*)0x24e= 6;
   
   // cursor(0); // doesn't work
   // status location is at #26A.
@@ -1114,6 +1123,25 @@ int main() {
   strncpy(SCREENXY(34, 24), "\x0a""0rWin", 6);
   strncpy(SCREENXY(34, 25), "\x0a""0rWin", 6);
   strncpy(SCREENXY(34, 26),      " ATMOS", 6);
+
+  strncpy(SCREENXY(38, 0), "\x0a""0", 2);
+  strncpy(SCREENXY(38, 1), "\x0a""0", 2);
+  strncpy(SCREENXY(38, 2), "\x0a""r", 2);
+  strncpy(SCREENXY(38, 3), "\x0a""r", 2);
+  strncpy(SCREENXY(38, 4), "\x0a""W", 2);
+  strncpy(SCREENXY(38, 5), "\x0a""W", 2);
+  strncpy(SCREENXY(38, 6), "\x0a""I", 2);
+  strncpy(SCREENXY(38, 7), "\x0a""I", 2);
+  strncpy(SCREENXY(38, 8), "\x0a""N", 2);
+  strncpy(SCREENXY(38, 9), "\x0a""N", 2);
+  strncpy(SCREENXY(38,10), "\x0a""/", 2);
+  strncpy(SCREENXY(38,11), "\x0a""/", 2);
+
+  strncpy(SCREENXY(38,12), " A", 2);
+  strncpy(SCREENXY(38,13), " t", 2);
+  strncpy(SCREENXY(38,14), " m", 2);
+  strncpy(SCREENXY(38,15), " o", 2);
+  strncpy(SCREENXY(38,16), " s", 2);
 
   //memset(win, 0, sizeof(win));
 
