@@ -54,8 +54,6 @@ extern int calc_main(int argc, char** argv);
 
 typedef unsigned int uint;
 
-void start(){}
-
 // Dummies
 
 void* shell() {} // TODO: make it an app!
@@ -199,7 +197,7 @@ typedef struct Window {
 
 char nwin= 0, wfocus= 0, wcur= 0;
 Window win[WIN_MAX]= {
-  { 40-15, 3, 15, 28-3,
+  { 40-15, 3, 14, 28-3,
     0, 0,
     NULL,
     black, white,
@@ -255,6 +253,7 @@ void wscreensize(char* w, char* h) {
 }
 
 void wclreol() {
+  // TODO: +1 clears last pos in ASCII, why?
   memset(winp->p, ' ', winp->w - winp->c + 1);
 }
 
@@ -262,18 +261,23 @@ void wclrscr() {
   char b= winp->bg | BG, f= winp->fg;
   char h, *p;
 
-  fill(winp->x, winp->y, winp->w, h= winp->h, 32);
+  // off by one
+  fill(winp->x, winp->y, winp->w, h= winp->h, 'x');
   // reset cursor position
   winp->c= winp->r= 0;
   updatewinptr();
 
 // TODO: not good because SHADOW requires FILL
+// Also, some off by two or 1 error on right
+// side, as it clears rows it expands background
 #if 0
   // set paper and ink
   p= winp->p - 2;
   ++h;
   while(--h) {
     *p= b; p[1]= f;
+    // no effect?
+    //p[winp->w]= white
     p+= 40;
   }
 #else
@@ -535,12 +539,6 @@ char togglecursor() {
   return !(*winp->p^= 128);
 }
 
-void setwin(char w) {
-  // TODO: set curwin?
-  winp= win+w;
-  wcur= w;
-}
-
 void windraw(Window* w) {
   // header (white block)
   fill(w->x-2, w->y-1, w->w+4, 1, 127);
@@ -554,11 +552,28 @@ void windraw(Window* w) {
   fill(w->x + w->w +1, w->y, 1, w->h, white);
 }
 
+void setwin(char w) {
+  // TODO: set curwin?
+  winp= win+w;
+  wcur= w;
+}
+
 char newwin() {
   // TODO: reuse empty entries
   if (nwin==WIN_MAX) return 0;
-  winp= win+ ++nwin;
+  setwin(++nwin);
 }
+
+char start(app fun) {
+  if (!newwin()) return 0;
+
+  winp->status= 1;
+  winp->fun= (void*)fun;
+  winp->state= (void*)fun(0, 0); // TODO: arg (template)
+  return wcur;
+}
+
+
 
 char overlap(char x, char y, char w, char h) {
   int i, j;
@@ -576,6 +591,10 @@ char overlap(char x, char y, char w, char h) {
 // TODO: title+= bar?
 char window(char x, char y, char w, char h, char bg, char fg) {
   char o;
+
+  // already drawn/configure
+  if (winp->w) return wcur;
+  
   // placer
   if (x == 255 || y == 255) {
     x= 2; y= 1;
@@ -672,6 +691,7 @@ char wkbhit(char win) {
 
     case 13 :
     case 'R': apprun(); break; // List
+    case 'I': start(app_heap); break; 
     case 'S': { char bg, fg;
       // pick colors w good contrast
       do {
@@ -679,9 +699,9 @@ char wkbhit(char win) {
 	fg= rand() & 7;
       } while(IS_BAD_CONTRAST(fg, bg));
     
-      task(app_ascii);
+      start(app_ascii);
       window(-1, -1, WMAX, HMAX, bg, fg);
-      wstatus(-1, "foo");
+      wstatus(-1, "Foo");
       break;
     }
 
@@ -794,20 +814,6 @@ void spawn_alloc(char n) {
   n= 0; // make memory "clean"
 }
 
-// TODO: parameters
-void spawn(app main) {
-  if (!setjmp(orwinjmp))
-    longjmp(orwinnext, (int)main);
-}
-
-void task(app fun) {
-  newwin();
-
-  winp->status= 1;
-  winp->fun= (void*)fun;
-  winp->state= (void*)fun(0, 0); // TODO: arg (template)
-}
-
 char cursorgetc() {
   char c;
   togglecursor();
@@ -914,11 +920,12 @@ void apprun() {
     //  printf("\nCHOOSEN: >%s<\n", line);
 
     // launch!
-    task(found->fun);
+    start(found->fun);
+
     //cprintf("\n\n\n\n\n[WIN.%d: %p %p]", wcur, winp->state, winp->fun);
 
     // if it didn't open a window
-    if (wcur == w) {
+    if (!winp->w) {
       char bg, fg;
 
       // pick colors w good contrast
@@ -930,9 +937,6 @@ void apprun() {
       window(-1, -1, WMAX, HMAX, bg, fg);
       wstatus(-1, found->name);
     }
-
-  }  else {
-    setwin(w);
   }
 }
 
@@ -1199,7 +1203,7 @@ int main() {
 #ifdef ASCII
   window( 2, 22, 14,  5, cyan,  red);
   wstatus(-1, "ASCII");
-  task(ascii_main);
+  start(ascii_main);
 #endif
   
 #ifdef ATMOS
@@ -1222,17 +1226,17 @@ int main() {
 #endif // DEMO
   
 #ifdef SNOW
+  start(app_snow);
   window(39-16-2, 4, 16, 10, red, yellow);
   wstatus(-1, "Snow");
-  task(app_snow);
 #endif
 
   // Need one to make it run!
-  task(app_ascii);
+  start(app_ascii);
   window(2, 1, 5, 5, blue, white);
   wstatus(-1, "ASCII");
   
-  //  task(app_ascii);
+  //  start(app_ascii);
   //  window(5, 18, 8, 5, green, black);
   //  wstatus(-1, "ASCII");
   

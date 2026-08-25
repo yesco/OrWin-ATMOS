@@ -20,8 +20,12 @@ typedef struct APP {
 void redraw(APP* state) {
   int i, x = 0, y = 0, pos= state->pos;
   char w, h, *buf= state->buf;
+
   screensize(&w, &h);
+
+  // TODO: causes flickr, because of attrib
   clrscr();
+
   // TODO: use while(*p)
   for (i = 0; i < state->b_len; ++i) {
     if (i == pos) { state->cx = x; state->cy = y; }
@@ -34,9 +38,12 @@ void redraw(APP* state) {
       if (y >= h - 1) break;
     }
   }
+
   if (pos == state->b_len) { state->cx = x; state->cy = y; }
   gotoxy(0, h - 1);
-  printf("%-15s Pos:%d/%d", state->ins ? "-- INSERT --" : "-- COMMAND --", state->pos, state->b_len);
+  // TODO: goes bad, if toolong...
+  printf("--- vi abcdefg");
+  //printf("%-15s Pos:%d/%d", state->ins ? "-- INSERT --" : "-- COMMAND --", state->pos, state->b_len);
   gotoxy(state->cx, state->cy);
 }
 
@@ -61,10 +68,13 @@ void* app_vi(APP* state, char* line) {
   if (!state) {
     // TODO: combine into one
     state= calloc(sizeof(APP), 1);
+    if (!state) return 0;
     state->buf= calloc(BUF_SIZE, 1);
+    strcpy(state->buf, "Text\n  to\nedIt,");
     return state;
   } else if (line == CLEANUP) {
     free(state->buf); state->buf= 0;
+    return 0;
   }
   
   buf= state->buf;
@@ -73,7 +83,8 @@ void* app_vi(APP* state, char* line) {
   
   if (!buf) return 0;
 		     
-  c = cgetc();
+  c= 0;
+  //  c = cgetc();
   if (state->ins) {
     if (c == 27) { state->ins = 0; if (pos > 0 && buf[pos-1] != '\n') pos--; }
     else if (c == 8 || c == 127) {

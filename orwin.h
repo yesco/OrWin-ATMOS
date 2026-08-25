@@ -57,6 +57,8 @@ extern void wstatus(signed char, char*);
 extern char togglecursor();
 extern void setfocus(signed char);
 
+char window(char x, char y, char w, char h, char bg, char fg);
+
 #undef putchar
 #define putchar wputc
 #define puti wputi
