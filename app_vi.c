@@ -66,12 +66,14 @@ void* app_vi(APP* state, char* line) {
   int pos, b_len;
 
   if (!state) {
+
     // TODO: combine into one
     state= calloc(sizeof(APP), 1);
     if (!state) return 0;
     state->buf= calloc(BUF_SIZE, 1);
     strcpy(state->buf, "Text\n  to\nedIt,");
     return state;
+
   } else if (line == CLEANUP) {
     free(state->buf); state->buf= 0;
     return 0;
@@ -81,10 +83,11 @@ void* app_vi(APP* state, char* line) {
   pos= state->pos;
   b_len= state->b_len;
   
-  if (!buf) return 0;
+  if (!buf) return WAITKEY;
 		     
-  c= 0;
-  //  c = cgetc();
+  c = getc();
+  if (!c) return WAITKEY;
+  
   if (state->ins) {
     if (c == 27) { state->ins = 0; if (pos > 0 && buf[pos-1] != '\n') pos--; }
     else if (c == 8 || c == 127) {
@@ -108,7 +111,7 @@ void* app_vi(APP* state, char* line) {
 	b_len -= (end - start); pos = start; state->last = 0;
       }
       goto update;
-    } else if (c == 'q') { clrscr(); return 0; } // TODO: exit
+    } else if (c == 'q') { clrscr(); return WAITKEY; } // TODO: exit
 
     state->last = 0;
   }
@@ -119,5 +122,5 @@ void* app_vi(APP* state, char* line) {
 
   redraw(state);
     
-  return 0;
+  return WAITKEY;
 }

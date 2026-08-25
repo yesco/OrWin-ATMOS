@@ -831,21 +831,18 @@ char wkbhit(char win) {
   return wkey && wfocus==win;
 }
 
-// blocking per app, but will yield
-
-// TODO: don't allow to be called!
-
+// Actually non-blocking
+// will return 0 if no key
 char wgetc(char win) {
   char c;
   
-  while(1) {
-    while(!wkbhit(win));
-    if (wkey && wfocus==win) {
-      c= wkey;
-      wkey= 0;
-      return c;
-    }
+  if (wkbhit(win) && wkey && wfocus==win) {
+    c= wkey;
+    wkey= 0;
+    return c;
   }
+  // Nah, not yours and/or not in focus
+  return wkey= 0;
 }
 
 
