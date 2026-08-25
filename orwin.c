@@ -229,6 +229,7 @@ typedef struct Window {
 
   char status;
   char exit;
+  char* ret;
 
   // light-weight process task
   void* fun;
@@ -1144,7 +1145,7 @@ void scheduler() {
 
   wdecorate(); // what?
 
-  // make us always come back here!
+  // TODO: error catchingg...
   while(setjmp(orwinjmp)!=42) {
     DEB('^');
 
@@ -1156,7 +1157,7 @@ void scheduler() {
     // and this is prioritized as highly interactive app!
     //
     // TODO: winp->ret == WAITKEY
-    while(wkbhit(0)) {
+    while(wkbhit(0) || wkey) {
       // restore same window to be FAIR and NO starvation!
       wnext= wcur;
 
@@ -1174,13 +1175,13 @@ void scheduler() {
     setwin(wcur); // inlinee ?
 
     // TODO: if no active windows/task will LOOP
+    // TODO: use winp->ret in clever wait when SLEEPING
     if (!winp->status) goto next;
 
     // - Handle cheap tasks
-    wret= (*(app)winp->fun)((int*)winp->state, 0);
-
-    // TODO: returned event maybe is exit code, or wait request
-    // if (wret) winp->ret= wret;
+    // (if WAITing for key has to have focus)
+    if (winp->ret != WAITKEY) 
+      winp->ret= wret= (*(app)winp->fun)((int*)winp->state, 0);
 
     goto next;
     
