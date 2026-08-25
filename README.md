@@ -59,6 +59,10 @@ Last window: FUNCT-ESC FUNCT-TAB
 Kill window: FUNCT-K   FUNCT-DEL
 List window: FUNCT-L
 Run new app: FUNCT-R   FUNCT-RETURN
+
+Terminal   : FUNCT-T
+
+Info       : FUNCT-I
 ```
 
 ## OrWin terminal codes

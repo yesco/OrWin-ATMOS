@@ -19,10 +19,11 @@ void* app_shell(APP* app, char* line) {
 
     app->line= strdup(line);
 
-    window(-1, -1, 25, 10, black, green);
+    window(-1, -1, 20-6, 11, black, green);
     wstatus(-1, "Shell");
     
-    putchar(green); putz("> "); puts(line); putchar(white);
+    putchar(green); putz("/home/atmos> ");
+    putchar(white); puts(line);
     system(line);
 
     return app;
@@ -31,7 +32,8 @@ void* app_shell(APP* app, char* line) {
     return 0;
 
   // have a new line!
-  putchar(green); putz("> "); puts(line); putchar(white);
+  putchar(green); putz("> "); putchar(white); puts(line);
+
   system(line);
   
   return 0;

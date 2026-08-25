@@ -84,9 +84,14 @@ char* lstrcpy(char* line, char* s) {
 void shprint(char* line) {
   char lastc;
   
+#ifdef SHELLTRACE
   if (!line)         puts("*NULL*");    else
   if (line==EOS)     puts("*EOS*");     else
   if (line==CLEANUP) puts("*CLEANUP*"); else {
+#else
+  if (line <= EVENTS) return;
+  else {
+#endif
     while(*line) putchar(lastc= *line++);
     if (lastc != '\n') putchar('\n');
   }

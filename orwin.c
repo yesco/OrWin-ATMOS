@@ -646,7 +646,16 @@ char overlap(char x, char y, char w, char h) {
   return 0;
 }
 
-// TODO: title+= bar?
+// Open a window already created
+//
+// X  Y  == -1 (255): automatic placement
+// FG BG == -1 (255): automatic "good contrast" colors
+// W  == -1: TODO: automatic size
+//
+// Note: (can only be called once)
+
+// TODO: if given exact coordinates, doesn't check...
+
 char window(char x, char y, char w, char h, char bg, char fg) {
   char o;
 
@@ -668,6 +677,15 @@ char window(char x, char y, char w, char h, char bg, char fg) {
 
   winp->w= w;
   winp->h= h;
+
+  if (bg==255 | fg==255) {
+    // pick colors w "good contrast"
+    do {
+      bg= rand() & 7;
+      fg= rand() & 7;
+    } while(IS_BAD_CONTRAST(fg, bg));
+  }
+  
   winp->bg= BG | bg;
   winp->fg= fg;
   winp->exit= 0;
@@ -750,18 +768,8 @@ char wkbhit(char win) {
     case 13 :
     case 'R': apprun(); break; // List
     case 'I': start(app_heap); break; 
-    case 'S': { char bg, fg;
-      // pick colors w good contrast
-      do {
-	bg= rand() & 7;
-	fg= rand() & 7;
-      } while(IS_BAD_CONTRAST(fg, bg));
-    
-      start(app_ascii);
-      window(-1, -1, WMAX, HMAX, bg, fg);
-      wstatus(-1, "Foo");
-      break;
-    }
+    case 'S':
+    case 'T': start(app_shell); break; // Terminal
 
     // TODO: case 'M': maximize & minimize
   
