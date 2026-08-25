@@ -67,7 +67,10 @@
 
 // optimized version
 // TODO: make putz default and putc call it?
+
+// TODO: wclreol doesn't know position
 #define OPTPUTZ
+
 #define MAXPUTZ 128
 
 // TODO: see apprun.c !
@@ -249,16 +252,29 @@ char* updatewinptr() {
 int putchar(int c) { return wputc(c); }
 
 // 2x-10x faster not calling putchar for every char!
+
+// TODO: I think buggy!
 int write(int fd, char* buf, size_t count) {
+
+#ifndef WRITE
+
+  char n= count;
+  while(n--) putchar(*buf++);
+  return count;
+}
+
+#else
+
   static uint n;
-  static char c, left, *b, *p;
+  static char c, *b, *p;
+  static signed char left;
 
   n= count;
   b= buf; p= winp->p - 1; left= winp->w - winp->c;
 
   --b;
   while(n--) {
-    if ((c= *++b) < 32 || !--left) {
+    if (((c= *++b) & 0x7f) < 32 || --left < 0) {
       winp->p= p+1; putchar(c); p= win->p - 1; left= winp->w - winp->c;
     } else {
       *++p= c;
@@ -268,6 +284,9 @@ int write(int fd, char* buf, size_t count) {
   
   return count;
 }
+
+#endif
+
 
 
 void wgotoxy(char x, char y) {
@@ -467,10 +486,15 @@ char wputc(char c) {
 // TODO: remove all!
 
 #ifndef OPTPUTZ
+
 void wputz(char* s) {
   write(1, s, strlen(s));
 }
+
 #else
+
+// Clever but old, should be using write!
+
 void wputz(char* s) {
   char n, c, r, *p, k, w= winp->w, h= winp->h;
 #ifdef STATS

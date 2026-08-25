@@ -117,8 +117,9 @@ extern void wscreensize(char* w, char* h);
 #define RESIZE  ((char*)2) // TODO: not sent yet
 #define IDLE    ((char*)3)
 
-#define CLEANUP	((char*)255)
+#define CLEANUP	((char*)0x4fe)
 
+#define EVENTS  ((char*)0x4ff)
 
 #define KEYEVENT(line) ((*(char)(line>>8))==1)
 #define KEY(line) ((char)(int)line)

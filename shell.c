@@ -2,7 +2,7 @@
 
 //#define SHELLTRACE
 //#define SHELLINFO
-#define SHELLTEST
+//#define SHELLTEST
 
 #include <stdlib.h>
 #include <string.h>
@@ -13,7 +13,7 @@
 
 // TODO: make it a printable string?
 #define EOS     ((char*)1)
-#define CLEANUP	((char*)2)
+#define CLEANUP	((char*)0x4fe)
 
 
 
@@ -517,8 +517,10 @@ void* tail(countstate* state, char* line) {
     return state;
   }
 
+  #ifdef SHELLTRACE
   printf("\n\t  [TAIL %d %d %d %p]\n", state->n, state->e, (int)state->d, (void*)state->d);
-
+  #endif
+  
   // skip lines code
   if (!state->d) {
     if (state->e++ >= 0) return line;
@@ -632,13 +634,16 @@ int wsystrain(cmdtrain *train) {
 
     #ifdef SHELLTRACE
     printf("\t%p >>>", line); fflush(stdout); shprint(line);
+
     #endif
 
     if (line) ++train; else --train;
   }    
 
+  #ifdef SHELLTRACE
   printf("\t[**SYSTRAIN**: DONE]\n");
-	 
+  #endif
+  
   // TODO: address of last program
   return 0;
 }
@@ -654,6 +659,8 @@ int wsystem(char* cmd) {
   unsigned int cleanbits;
   cmdtrain *train;
   int r;
+  
+  if (!cmd) return -1;
   
   #ifdef SHELLTEST
   printf("\n------ wsystem: \"%s\"\n", cmd);
@@ -774,6 +781,9 @@ int wsystem(char* cmd) {
 
   return r;
 }
+
+#define system wsystem
+
 
 #ifdef MAIN
  
