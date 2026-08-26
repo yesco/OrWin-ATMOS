@@ -9,6 +9,20 @@ typedef struct APP {
   char* line;
 } APP;
 
+void prompt() {
+  // TODO: buggy write!!!
+  //puts(RED "$" BLUE);
+  putchar(red);
+  putchar('$');
+  putchar(blue);
+}
+
+void run(char* line) {
+  prompt(); puts(line);
+  putchar(black);
+  system(line);
+}
+
 void* app_shell(APP* app, char* line) {
   if (!app) {
     app= calloc(sizeof(APP), 1);
@@ -22,27 +36,18 @@ void* app_shell(APP* app, char* line) {
     window(-1, -1, 20-6, 11, green, black);
     wstatus(-1, "Shell");
     
-    putchar('>');
-    putchar(blue);
-    puts(line);
-    putchar(black);
-    system(line);
-
-    putchar('>');
+    run(line);
 
     return app;
 
   } else if (line <= EVENTS)
     return WAITKEY;
 
-  // have a new line!
-  putchar('>');
-  putchar(blue);
-  puts(line);
-  putchar(black);
-  system(line);
 
-  putchar('>');
+  // have a new line!
+
+  run(line);
+  prompt();
 
   return WAITKEY;
 }

@@ -92,12 +92,12 @@ TAP  : 30241 (- 30241 9508 8412 1797 6208 428) 3888
 
 typedef unsigned int uint;
 
-// Dummies
+// Dummies, these are never called, satiesfy orwin.reg
 
-void* shell() {} // TODO: make it an app!
-void* orwin() {}
-void* SUMMARY() {}
-void* CC65() {}
+#define shell 0
+#define orwin 0
+#define SUMMARY 0
+#define CC65 0
 
 struct apps {
   char* name;
@@ -167,7 +167,7 @@ typedef int (*app)();
 
 
 // TODO: make my own interrupt timer!
-#define HITIME (*(unsigned char*)0x305)
+#define HITIME (*(volatile unsigned char*)0x305)
 
 // hi byte of timer at yield
 char wtime= 0;
@@ -175,7 +175,7 @@ char wtime= 0;
 clock_t clock() {
   // ORIC TIMER 100 interrupts/s,
   // TODO: make clock_t bigger and handle wraparound
-  return ~*(unsigned int*)0x276;
+  return ~*(volatile unsigned int*)0x276;
 }
 
 
@@ -189,13 +189,13 @@ jmp_buf orwinnext;
 // TODO: make an "oric.h"
 
 #define CHARSET    ((char*)0xB400) // $B400-B7FF
-#define CHARDEF(C) ((char*)CHARSET+(C)*8)
+#define CHARDEF(C) ((char*)(CHARSET+(C)*8))
 #define ALTSET     ((char*)0xB800) // $B800-BB7F
 
 #define TEXTSCREEN ((char*)0xBB80) // $BB80-BF3F
 #define SCREENROWS 28
-
 #define SCREENCOLS 40
+
 #define SCREENSIZE (SCREENROWS*SCREENCOLS)
 #define SCREENLAST (TEXTSCREEN+SCREENSIZE-1)
 
@@ -207,7 +207,7 @@ void fill(char x, char y, char w, char h, char c) {
   // strided
   while(h--) {
     memset(p, c, w);
-    p+= 40;
+    p+= SCREENCOLS;
   }
 }
 
@@ -243,7 +243,7 @@ typedef struct Window {
 char nwin= 0, wfocus= 0, wcur= 0, wnext, *wret;
 
 Window win[WIN_MAX]= {
-  { 40-15, 3, 14, 28-3,
+  { SCREENCOLS-15, 3, 14, SCREENROWS-3,
     0, 0,
     NULL,
     black, white,
@@ -289,8 +289,10 @@ int write(int fd, char* buf, size_t count) {
 
   --b;
   while(n--) {
-    if (((c= *++b) & 0x7f) < 32 || --left < 0) {
-      winp->p= p+1; putchar(c); p= win->p - 1; left= winp->w - winp->c;
+    if (left-- < 0 || ((c= *++b) & 0x7f) < 32) {
+      winp->p= p; ++n; winp->c= winp->w - left;
+      putchar(c);
+      p= winp->p - 1; left= winp->w - winp->c;
     } else {
       *++p= c;
     }
@@ -340,7 +342,7 @@ void wclrscr() {
     *p= b; p[1]= f;
     // no effect?
     //p[winp->w]= white
-    p+= 40;
+    p+= SCREENCOLS;
   }
 #else
   // TODO: just make simple loop!
@@ -576,7 +578,7 @@ void wputi(int i) {
 }
 
 void wstatus(signed char c, char* s) {
-  char* p= winp->y * 40 + winp->x + c + TEXTSCREEN - 40;
+  char* p= winp->y * SCREENCOLS+ winp->x + c + TEXTSCREEN - SCREENCOLS;
   char w= winp->w + 2 + 1;
   //char xor= winp->bg&7==7?0 :128; // if white back
   char xor= 128;
@@ -589,7 +591,7 @@ void wstatus(signed char c, char* s) {
 void wdecorate() {
   Window* w= win+wfocus;
   // Invert header (make it black if focused)
-  char* p= w->y * 40 + w->x + TEXTSCREEN - 40 -2;
+  char* p= w->y * SCREENCOLS + w->x + TEXTSCREEN - SCREENCOLS -2;
   char i;
   for(i= w->w+4; i--; ) p[i]^= 128;
 }
@@ -766,7 +768,7 @@ char wkbhit(char win) {
   // $a4 - SHIFT left
   // $a5 - FUNCT key
   // $a7 - SHIFT right
-  sprintf(SCREENXY(40-3*3+1-2,27), "[%02x %02x %02x]", c, k, s);
+  sprintf(SCREENXY(SCREENCOLS-3*3+1-2,SCREENROWS-1), "[%02x %02x %02x]", c, k, s);
 
   // remap ARROW KEYS: 8-11 to 28-31
   if (((c & 0b01111100) == 0) &&
@@ -860,7 +862,7 @@ char* savewin() {
   char *s= SCREENXY(winp->x - 2, winp->y);
   while(h--) {
     memmove(p, s, w);
-    p+= 40; s+= 40;
+    p+= w; s+= SCREENCOLS;
   }
   return r;
 }
@@ -870,7 +872,7 @@ void loadwin(char* p) {
   char *s= SCREENXY(winp->x - 2, winp->y);
   while(h--) {
     memmove(s, p, w);
-    p+= 40; s+= 40;
+    p+= w; s+= SCREENCOLS;
   }
   free(r);
 }
@@ -1206,7 +1208,7 @@ void scheduler() {
     // (if WAITing for key has to have focus)
     if (winp->ret != WAITKEY) {
       ///cputc('.');
-      cputc('0'+wcur);
+      //cputc('0'+wcur);
 
       run= clock();
       winp->ret= wret= (*(app)winp->fun)((int*)winp->state, 0);
