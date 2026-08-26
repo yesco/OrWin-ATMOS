@@ -443,6 +443,8 @@ char wputc(char c) {
   // vt100:       ESC [ 2 J - clear screen
   // emacs,shell:  CTRL-K ill till end of line
     
+    // TODO: doesNOT do right! ... LOL
+
   case KEYRIGHT: winp->p++; break; // will reach column++
   case KEYDOWN:  if (++winp->r >= winp->h) winp->r= 0;          break;
   case KEYUP:    if (winp->r-- >= winp->h) winp->r= win->h-1;   break;

@@ -1,5 +1,12 @@
 // OrWIN Shell pipeline execute
 
+// TODO:
+// - uniq
+// - sort (-u)
+// - freq or huniq
+// - bc
+// - datamash qsv vsv
+
 //#define SHELLTRACE
 //#define SHELLINFO
 //#define SHELLTEST
