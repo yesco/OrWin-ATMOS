@@ -240,7 +240,7 @@ typedef struct Window {
 
 } Window;
 
-char nwin= 0, wfocus= 0, wcur= 0, wnext, wret;
+char nwin= 0, wfocus= 0, wcur= 0, wnext, *wret;
 
 Window win[WIN_MAX]= {
   { 40-15, 3, 14, 28-3,
@@ -1137,6 +1137,12 @@ void mowin(signed char dx, signed char dy, signed char dw, signed char dh) {
 // SCHEDULER!
 
 void scheduler() {
+  static clock_t latency, lastlatency;
+  static clock_t run, runsum, timesum;
+  static clock_t rounds, lastupdate;
+  
+  rounds= timesum= runsum= 0;
+  
   wcur= nwin;
   wfocus= nwin;
 
@@ -1162,13 +1168,34 @@ void scheduler() {
       
       // app can actually call kbhit() and getc()!
       setwin(wfocus);
-      wret= (*(app)winp->fun)((int*)winp->state, (char*)(wkey + 0x100));
+
+      //cputc('!');
+      run= clock();
+      winp->ret= wret= (*(app)winp->fun)((int*)winp->state, (char*)(wkey + 0x100));
+      run= clock()-run;
+      runsum+= (run<<3) + 1;
       
       wkey= 0;
       setwin(wnext);
     }
 
-    if (!--wcur) wcur= nwin;
+    if (!--wcur) {
+      clock_t now= clock();
+      latency= now-lastlatency;
+      lastlatency= now;
+      ++rounds;
+      timesum+= (latency<<3) +1;
+      if (now-lastupdate > 100) {
+	#undef gotoxy
+	gotoxy(11, 0);
+	cprintf("%3u %5u/%5u %2u%%      ", latency, runsum, timesum,
+		(int)(runsum*100L/timesum) );
+	lastupdate= now;
+	// Rolling average (?)
+	if (timesum>16384) runsum/=32,timesum/=32;
+      }
+      wcur= nwin;
+    }
     setwin(wcur); // inlinee ?
 
     // TODO: if no active windows/task will LOOP
@@ -1177,8 +1204,15 @@ void scheduler() {
 
     // - Handle cheap tasks
     // (if WAITing for key has to have focus)
-    if (winp->ret != WAITKEY) 
+    if (winp->ret != WAITKEY) {
+      ///cputc('.');
+      cputc('0'+wcur);
+
+      run= clock();
       winp->ret= wret= (*(app)winp->fun)((int*)winp->state, 0);
+      run= clock()-run;
+      runsum+= (run<<3) + 1;
+    }
 
     goto next;
     

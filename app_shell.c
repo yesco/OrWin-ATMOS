@@ -33,7 +33,7 @@ void* app_shell(APP* app, char* line) {
     return app;
 
   } else if (line <= EVENTS)
-    return 0;
+    return WAITKEY;
 
   // have a new line!
   putchar('>');
@@ -44,5 +44,5 @@ void* app_shell(APP* app, char* line) {
 
   putchar('>');
 
-  return 0;
+  return WAITKEY;
 }
