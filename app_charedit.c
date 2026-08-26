@@ -11,43 +11,66 @@
 
 
 typedef struct APP {
-  char sel, *def;
+  char x, y, c, *def;
 } APP;
 
-void draw(char x, char *def) {
+void draw(APP* app) {
   int r, c;
 
-  //clrscr();
-  printf("%c $%02x %d\n\n", x, x, x);
+  gotoxy(0,0);
+  printf("%c $%02x %d\n", app->c, app->c, app->c);
+  printf(" (%d, %d)", app->x, app->y);
+  nl();
   for(r=0; r<8; ++r) {
-    char v= def[r];
+    char v= app->def[r];
     putchar(black); putchar(BG|yellow);
-    for(c=0; c<6; ++c) {
-      putchar((v & 0b100000)? BG|white: BG|black);
+    for(c=5; c>=0; --c) {
+      if (c == app->x && r == app->y)
+	putcraw((v & 0b100000)? BG|red: BG|yellow);
+      else
+	putcraw((v & 0b100000)? BG|black: BG|white);
       v<<= 1;
     }
-    putchar(BG|yellow); nl();
+    putchar(BG|yellow); clnl();
   }
 }
 
 void* app_charedit(APP* app, char* line) {
+  char c;
+
   if (!app) {
-    char c;
     // TODO: reduce by one once attributes OPT at beginning line
-    window(-1, -1, 8, 11, yellow, black);
+    window(-1, -1, 10, 11, yellow, black);
     wstatus(-1, "Char Edit");
     
     c= isdigit(*line)? atoi(line): *line;
     if ((c & 0x7f) < 32) c= '`'; // copyright - useless!?
-    app->sel= c;
+
+    app= calloc(sizeof(APP), 1);
+    app->c= c;
     app->def= CHARDEF(c);
 
-    draw(c, app->def);
+    draw(app);
 
-    return calloc(sizeof(APP), 1);
+    return app;
   }
   
-  // TODO: make edit with cursor keys
+  // move around with arrow keys, space to toggle
+  // TODO: takes some code, can generalize?
+  //   can have a general cursor movement passthrough
+  //   through putchar, other keys filterred.
+  switch((c= getc())) {
+  case 0: break; // no key
+  case KEYLEFT : if (app->x > 0) --app->x; break;
+  case KEYRIGHT: if (app->x < 5) ++app->x; break;
+  case KEYDOWN : if (app->y < 7) ++app->y; break;
+  case KEYUP   : if (app->y > 0) --app->y; break;
+  case ' '     : app->def[app->y]^= 1 << app->x; break;
+  // TODO: undo
+  }
+
+  draw(app);
+  printf("%d %02x", c, c);
   
-  return 0;
+  return WAITKEY;
 }

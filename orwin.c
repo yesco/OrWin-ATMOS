@@ -751,6 +751,37 @@ char wkey= 0;
 
 #undef kbhit
 
+char mygetc() {
+  char o= cgetc(), k= *(char*)0x209, s= *(char*)0x208, c= o;
+
+  // ORIC ATMOS: ROM magical shift key $209
+  // $38 - no key
+  // $a2 - CTRL key
+  // $a4 - SHIFT left
+  // $a5 - FUNCT key
+  // $a7 - SHIFT right
+
+  // remap ARROW KEYS: 8-11 to 28-31
+  if (s==0xac || s==0xbc || s==0xb4 || s==0x9c) { // arrow key codes
+    // CTRL -> 88..8b (original range + 128)
+    if (k!=0xa2)  c+= 28-8; else c|= 128;
+  }
+  
+  // CTRL keys "stunts" some bits put in range 0-31
+  if (k==0xa2) c&= 0b10011111;
+
+  // TODO: CTRL-M and RETURN are ambigous,
+  // but RETURN probably should stay at 13, lol
+
+  if (c==13 && k==0xa2) c== 11; // nlpure()
+
+  // Set hi-bit if alt key
+  if (k==0xa5) c|= 128;
+  sprintf(SCREENXY(SCREENCOLS-3*4+1-2,SCREENROWS-1), "[%02x %02x %02x %02x]", c, o, k, s);
+
+  return c;
+}
+
 // non-blocking
 // (win=0 to not yield here as its called fom yield)
 char wkbhit(char win) {
@@ -759,30 +790,10 @@ char wkbhit(char win) {
   if (wkey && wfocus==win) return wkey;
   if (!kbhit()) return 0;
   
-  c= cgetc(); k= *(char*)0x209; s= *(char*)0x208;
-
-  // debug print key
-  // ORIC ATMOS: ROM magical shift key $209
-  // $38 - no key
-  // $a2 - CTRL key
-  // $a4 - SHIFT left
-  // $a5 - FUNCT key
-  // $a7 - SHIFT right
-  sprintf(SCREENXY(SCREENCOLS-3*3+1-2,SCREENROWS-1), "[%02x %02x %02x]", c, k, s);
-
-  // remap ARROW KEYS: 8-11 to 28-31
-  if (((c & 0b01111100) == 0) &&
-      (s==0xac || s==0xbc || s==0xb4 || s==0x9c))
-    c+= 28-8;
-
-  // NOTE: CTRL ARROW not reflected in code
-
-  // TODO: CTRL-M and RETURN are ambigous,
-  // but RETURN probably should stay at 13, lol
-  //if (c==13 && k==0xa2) c== ???
+  c= mygetc();
 
   // FUNCT || CTRL & ARROWKEY
-  if (c&128 || (k==0xa2 && c>=28 && c<=31)) {
+  if (c&128) {
     //cprintf("  #%d '%c' ", c, c&0x7f);
     wdecorate();
 
