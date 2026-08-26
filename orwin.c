@@ -824,12 +824,13 @@ char wkbhit(char win) {
 
 #ifdef MOWIN
     // moving using FUNCT & ARROWKEYS
-    case 0x08: mowin(-1,0,0,0); break;
-    case 0x09: mowin(+1,0,0,0); break;
-    case 0x0a: mowin(0,+1,0,0); break;
-    case 0x0b: mowin(0,-1,0,0); break;
+    case KEYLEFT : mowin(-1,0,0,0); break;
+    case KEYRIGHT: mowin(+1,0,0,0); break;
+    case KEYDOWN : mowin(0,+1,0,0); break;
+    case KEYUP   : mowin(0,-1,0,0); break;
     // resizing using CTRL & ARROWKYS
-    case 0x88: mowin(0,0,+1,0); break;
+    // (TODO : numeric combo?)
+    case 0x98: mowin(0,0,+1,0); break;
     case 0x89: mowin(0,0,-1,0); break;
     case 0x8a: mowin(0,0,0,+1); break;
     case 0x8b: mowin(0,0,0,-1); break;
@@ -1033,63 +1034,71 @@ void mowin(signed char dx, signed char dy, signed char dw, signed char dh) {
 #ifdef OPTMOV
   // MOVING only smoothly
   if (!dw && !dh) {
-    // Idea, cut a +1 on all sides cutout from screen and just MOVE that
-    // if not gray when expanding or moving there then, then abort
-    char i, *t, *p, W= w+4+2+1, H= h+2+2;
-    char *tmp, *s= SCREENXY(x-3, y-2);
+    char i, *t, *p, W = w + 4 + 2 + 1, H = h + 2 + 2;
+    char *tmp, *s = SCREENXY(x - 3, y - 2);
 
-    // make sure to have 1 line of gray around!
-    if (x+dx < 3) return;
-    if (x+w+dx >= 40-3) return;
+    // Bounds checking
+    if (x + dx < 3) return;
+    if (x + w + dx >= 40 - 3) return;
+    if (y + dy < 2) return;
+    if (y + h + dy >= 28 - 1) return;
 
-    if (y+dy < 2) return;
-    if (y+h+dy >= 28-1) return;
-
-    // non-overlap, or directly adjacent
-    // (make sure have gray line at edge)
-    // TODO: too much code ! ?
+    // Collision/Edge detection
     if (dy) {
-      tmp= s + (dy<0? -40: 40*H);
-      for(i= W; i--;)
-	if (tmp[i] != 126) return;
+      tmp = s + (dy < 0 ? -SCREENCOLS : SCREENCOLS * H);
+      for (i = W; i--;) if (tmp[i] != 126) return;
     } else {
-      tmp= s + (dx<0? -1: W);
-      for(i= H; i--;) {
-	if (*tmp != 126) return;
-	tmp+= 40;
+      tmp = s + (dx < 0 ? -1 : W);
+      for (i = H; i--;) {
+        if (*tmp != 126) return;
+        tmp += SCREENCOLS;
       }
     }
       
-    // let's copy part to mvoe
-    tmp= malloc(W*H);
+    // Allocate temporary buffer
+    tmp = malloc(W * H);
     if (!tmp) return;
 
-    // copy from screen to tmp (strided)
-    p= s; t= tmp;
-    for(i= H; i--;) {
+    // 1. Copy original state from screen to tmp
+    p = s; t = tmp;
+    for (i = H; i--;) {
       memcpy(t, p, W);
-      p+= 40; t+= W;
+      p += SCREENCOLS; 
+      t += W;
     }
 
-    // calculate new pos to read from
-    t= tmp - dx;
-    if (dy<0) t+= W;
+    // 2. Update window coordinates
+    wf->x += dx; 
+    wf->y += dy;
 
-    // copy back from tmp to screen (strided)
-    p= s;
-    if (dy>0) p+= 40;
-
-    for(i= H; --i;) {
-      memcpy(p, t, W+dx);
-      p+= 40; t+= W;
+    // 3. Copy back from tmp to the NEW screen position
+    p = SCREENXY(wf->x - 3, wf->y - 2); 
+    t = tmp;
+    for (i = H; i--;) {
+      memcpy(p, t, W);
+      p += SCREENCOLS; 
+      t += W;
     }
 
-    // update it
-    wf->x+= dx; wf->y+= dy;
-    
+    // 4. Clean up only the exposed trailing edge left behind
+    if (dy < 0) {
+      // Clear bottom row that was left exposed
+      fill(x - 3, y - 2 + H - 1, W, 1, 126);
+    } else if (dy > 0) {
+      // Clear top row that was left exposed
+      fill(x - 3, y - 2, W, 1, 126);
+    } else if (dx < 0) {
+      // Clear right column that was left exposed
+      fill(x - 3 + W - 1, y - 2, 1, H, 126);
+    } else if (dx > 0) {
+      // Clear left column that was left exposed
+      fill(x - 3, y - 2, 1, H, 126);
+    }
+
     free(tmp);
   } else
 #endif
+
   // TODO: RESIZE crashes!
   // Resize by capture text, undraw, and redraw
   {

@@ -61,8 +61,9 @@ void* app_charedit(APP* app, char* line) {
   //   through putchar, other keys filterred.
   switch((c= getc())) {
   case 0: break; // no key
-  case KEYLEFT : if (app->x > 0) --app->x; break;
-  case KEYRIGHT: if (app->x < 5) ++app->x; break;
+    // LEFT and RIGHT seems  swapped because bit pos!
+  case KEYRIGHT: if (app->x > 0) --app->x; break;
+  case KEYLEFT : if (app->x < 5) ++app->x; break;
   case KEYDOWN : if (app->y < 7) ++app->y; break;
   case KEYUP   : if (app->y > 0) --app->y; break;
   case ' '     : app->def[app->y]^= 1 << app->x; break;

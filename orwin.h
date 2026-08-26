@@ -89,8 +89,8 @@ extern char wkbhit(char win);
 extern char wgetc(char win);
 
 // Remapped ARROW KEYS
-#define KEYRIGHT 28
-#define KEYLEFT  29
+#define KEYLEFT  28
+#define KEYRIGHT 29
 #define KEYDOWN  30
 #define KEYUP    31
 
