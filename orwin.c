@@ -391,6 +391,9 @@ char putcraw(char c) {
 // minimal terminal codes
 // Free codes: 11, 14; 24,25,26, 28,29,30,31
 char wputc(char c) {
+  // HACK! (might "bleed across windows if not conseq)
+  static char lastcolor;
+      
 #ifdef STATS
   ++winp->nputc;
 #endif
@@ -467,13 +470,22 @@ char wputc(char c) {
   
   default:
     if (c==*BLACK) c= black; // it's really 0 but...
+    // change INK or BG color for future, like ANSI!
+    if (c<24) {
+      if (c<8) {
+	// inkk - use line attribute
+	winp->fg= c & 0x7f;
+	if (!winp->c) { lastcolor= winp->p[-1]= c; goto done; }
+      } else if (c>=16) {
+	// paper - use line attribute
+	winp->bg= c & 0x7f;
+	if (!winp->c && lastcolor > 24)
+	  { lastcolor= winp->p[-2]= c & 0x7f; goto done; }
+      }
+      // or fall-through use a position on screen
+    } else lastcolor= 255;
     
     *winp->p++= c;
-
-    // change INK or BG color for future
-    c&= 0x7f;
-    if (c<24) if (c<8) winp->fg= c; else winp->bg= c;
-
   }
 
   // newline / line wrap?
@@ -494,18 +506,6 @@ char wputc(char c) {
   }
 
  done:
-  //if (wcur)
-  // not clear why higher value crawsh more easy?
-  //if ((wtime^HITIME) & 0b1000000) yield();
-
-  //  if ((wtime^HITIME) & 0b1000000) yield();
-
-  //if ((wtime^HITIME) & 0b10000) yield();
-  // 4th bit => 0..4095us
-  //if ((wtime^HITIME) & 0b1000) yield();
-  //if ((wtime^HITIME) & 0b100) yield(); // every 3 chars
-  //if ((wtime^HITIME) & 0b10) yield(); // every 1.5 char
-  //if ((wtime^HITIME) & 0b1) yield(); // every 1.5 char
   return c;
 }
 

@@ -18,15 +18,15 @@ void draw(char x, char *def) {
   int r, c;
 
   //clrscr();
-  printf("%c $%02x %d\n", x, x, x);
+  printf("%c $%02x %d\n\n", x, x, x);
   for(r=0; r<8; ++r) {
     char v= def[r];
-    nl(); putchar(white); putchar(BG | black);
+    putchar(black); putchar(BG|yellow);
     for(c=0; c<6; ++c) {
-      putcraw( (v & 0b100000)? 127: 32);
+      putchar((v & 0b100000)? BG|white: BG|black);
       v<<= 1;
     }
-    putchar(BG | yellow);
+    putchar(BG|yellow); nl();
   }
 }
 
@@ -34,7 +34,7 @@ void* app_charedit(APP* app, char* line) {
   if (!app) {
     char c;
     // TODO: reduce by one once attributes OPT at beginning line
-    window(-1, -1, 9, 11, yellow, black);
+    window(-1, -1, 8, 11, yellow, black);
     wstatus(-1, "Char Edit");
     
     c= isdigit(*line)? atoi(line): *line;
