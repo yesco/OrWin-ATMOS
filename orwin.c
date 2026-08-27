@@ -1068,7 +1068,7 @@ void mowin(signed char dx, signed char dy, signed char dw, signed char dh) {
     if (x + dx < 3) return;
     if (x + w + dx >= SCREENCOLS - 3) return;
     if (y + dy < 2) return;
-    if (y + h + dy >= SCREENROWS - 2) return;
+    if (y + h + dy >= SCREENROWS - 1) return;
 
     // Collision/Edge detection
     // TODO: tmp should be adjustested up and left?
