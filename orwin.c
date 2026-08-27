@@ -3,7 +3,10 @@
 #include <string.h>
 #include <conio.h>
 #include <ctype.h>
+
 #include <assert.h>
+// LOL, doesn/t suppress  thew warning, lol
+//#define STATIC_ASSERT(COND, MSG) typedef char static_assertion_##MSG[(COND) ? 1 : -1]
 
 /* Sizes
 
@@ -229,7 +232,7 @@ typedef struct Window {
 
   char status;
   char exit;
-  char* ret;
+  char* ret; // TODO: should be using status?
 
   // light-weight process task
   void* fun;
@@ -270,12 +273,12 @@ int putchar(int c) { return wputc(c); }
 
 // TODO: I think buggy!
 int write(int fd, char* buf, size_t count) {
-
 #ifndef WRITE
 
   char n= count;
   while(n--) putchar(*buf++);
   return count;
+  (void)fd;
 }
 
 #else
@@ -323,7 +326,7 @@ void wclreol() {
 
 void wclrscr() {
   char b= winp->bg | BG, f= winp->fg;
-  char h, *p;
+  char h;
 
   // off by one
   fill(winp->x, winp->y, winp->w, h= winp->h, 'x');
@@ -335,6 +338,7 @@ void wclrscr() {
 // Also, some off by two or 1 error on right
 // side, as it clears rows it expands background
 #if 0
+  { char* p;
   // set paper and ink
   p= winp->p - 2;
   ++h;
@@ -343,6 +347,7 @@ void wclrscr() {
     // no effect?
     //p[winp->w]= white
     p+= SCREENCOLS;
+  }
   }
 #else
   // TODO: just make simple loop!
@@ -601,14 +606,17 @@ void wdecorate() {
 char wprev= 1;
 
 void setfocus(signed char new) {
+  char n= 0;
   //cputc('#');
   //cputc('0'+new);
+  if (wfocus) wdecorate(); // show not active
  next:
   wprev= wfocus;
   wfocus= new;
   if (new > nwin) wfocus= 1;
   if (new <= 0)   wfocus= nwin;
-  // TODO: eteral loop/block if no actives
+  if (wfocus) wdecorate(); // show active
+  if (++n > WIN_MAX) return; // make sure not hang!
   if (!win[wfocus].status) { new= wfocus+1; goto next; }
 }
 
@@ -671,13 +679,23 @@ char start(app fun) { return startline(fun, NULL); }
 char overlap(char x, char y, char w, char h) {
   int i, j;
 
+#ifdef MOWIN
+  if (x<3 || x+w >= SCREENCOLS-5) return 1;
+  //  if (y<3 || y+h >= SCREENROWS-1) return 1;
+  if (y<3) return 1;
+  
+  for(j= y-2; j<y+h; ++j)
+    for(i= x-3; i<x+w+4; ++i)
+      if (*SCREENXY(i, j) != 126) return 1;
+#else
+  // wrong?
   if (x<2 || x+w >= 41) return 1;
   if (y<1 || y+h >= 28) return 1;
   
   for(j= y-1; j<y+h+1; ++j)
     for(i= x-2; i<x+w+2; ++i)
       if (*SCREENXY(i, j) != 126) return 1;
-
+#endif
   return 0;
 }
 
@@ -787,21 +805,22 @@ char mygetc() {
 // non-blocking
 // (win=0 to not yield here as its called fom yield)
 char wkbhit(char win) {
-  char c, k, s;
+  char c;
   
+ again:
   if (wkey && wfocus==win) return wkey;
   if (!kbhit()) return 0;
   
+  // TODO: hmm, hsould be using getc?
   c= mygetc();
 
   // FUNCT || CTRL & ARROWKEY
   if (c&128) {
     //cprintf("  #%d '%c' ", c, c&0x7f);
-    wdecorate();
 
     // Capture FUNC keys Window Keys
     c^= 128;
-    switch(toupper(c)) {
+    switch((c= toupper(c))) {
     case ' ':
     case 'N': setfocus(wfocus+1); break;
     case 'P': setfocus(wfocus-1); break;
@@ -824,21 +843,22 @@ char wkbhit(char win) {
 
 #ifdef MOWIN
     // moving using FUNCT & ARROWKEYS
-    case KEYLEFT : mowin(-1,0,0,0); break;
-    case KEYRIGHT: mowin(+1,0,0,0); break;
-    case KEYDOWN : mowin(0,+1,0,0); break;
-    case KEYUP   : mowin(0,-1,0,0); break;
+    case KEYLEFT : mowin(-1,0,0,0); goto again;
+    case KEYRIGHT: mowin(+1,0,0,0); goto again;
+    case KEYDOWN : mowin(0,+1,0,0); goto again;
+    case KEYUP   : mowin(0,-1,0,0); goto again;
     // resizing using CTRL & ARROWKYS
     // (TODO : numeric combo?)
-    case 0x98: mowin(0,0,+1,0); break;
-    case 0x89: mowin(0,0,-1,0); break;
-    case 0x8a: mowin(0,0,0,+1); break;
-    case 0x8b: mowin(0,0,0,-1); break;
+    case 0x98: mowin(0,0,+1,0); goto again;
+    case 0x89: mowin(0,0,-1,0); goto again;
+    case 0x8a: mowin(0,0,0,+1); goto again;
+    case 0x8b: mowin(0,0,0,-1); goto again;
 #endif // MOWIN
 
-    default:  if (isdigit(c)) setfocus(c-'0');
+    default: if (isdigit(c) || isalpha(c) && c<='F')
+	setfocus(c - (isdigit(c)? '0': 'A'+10));
     }
-    wdecorate();
+
     return 0;
   }
 
@@ -1034,16 +1054,17 @@ void mowin(signed char dx, signed char dy, signed char dw, signed char dh) {
 #ifdef OPTMOV
   // MOVING only smoothly
   if (!dw && !dh) {
-    char i, *t, *p, W = w + 4 + 2 + 1, H = h + 2 + 2;
+    char i, *t, *p, W = w + (4 + 2 + 1)+1, H = h + (2 + 2)+1;
     char *tmp, *s = SCREENXY(x - 3, y - 2);
 
     // Bounds checking
     if (x + dx < 3) return;
-    if (x + w + dx >= 40 - 3) return;
+    if (x + w + dx >= SCREENCOLS - 3) return;
     if (y + dy < 2) return;
-    if (y + h + dy >= 28 - 1) return;
+    if (y + h + dy >= SCREENROWS - 2) return;
 
     // Collision/Edge detection
+    // TODO: tmp should be adjustested up and left?
     if (dy) {
       tmp = s + (dy < 0 ? -SCREENCOLS : SCREENCOLS * H);
       for (i = W; i--;) if (tmp[i] != 126) return;
@@ -1068,11 +1089,11 @@ void mowin(signed char dx, signed char dy, signed char dw, signed char dh) {
     }
 
     // 2. Update window coordinates
-    wf->x += dx; 
+    wf->x += dx;
     wf->y += dy;
 
     // 3. Copy back from tmp to the NEW screen position
-    p = SCREENXY(wf->x - 3, wf->y - 2); 
+    p = SCREENXY(wf->x - 3, wf->y - 2);
     t = tmp;
     for (i = H; i--;) {
       memcpy(p, t, W);
@@ -1162,12 +1183,11 @@ void mowin(signed char dx, signed char dy, signed char dw, signed char dh) {
 
 void scheduler() {
   static clock_t latency, lastlatency;
-  static clock_t run, runsum, timesum;
+  static clock_t run, runsum, runprocs, timesum;
   static clock_t rounds, lastupdate;
   
-  rounds= timesum= runsum= 0;
+  runprocs= rounds= timesum= runsum= 0;
   
-  wcur= nwin;
   wfocus= nwin;
 
   wdecorate(); // what?
@@ -1195,14 +1215,16 @@ void scheduler() {
 
       //cputc('!');
       run= clock();
-      winp->ret= wret= (*(app)winp->fun)((int*)winp->state, (char*)(wkey + 0x100));
+      winp->ret= wret= (char*)(*(app)winp->fun)((int)winp->state, (char*)(wkey + 0x100));
       run= clock()-run;
       runsum+= (run<<3) + 1;
+      ++runprocs;
       
       wkey= 0;
       setwin(wnext);
     }
 
+    // TODO: move out, or make it an APP!
     if (!--wcur) {
       clock_t now= clock();
       latency= now-lastlatency;
@@ -1211,10 +1233,14 @@ void scheduler() {
       timesum+= (latency<<3) +1;
       if (now-lastupdate > 100) {
 	#undef gotoxy
-	gotoxy(11, 0);
-	cprintf("%3u %5u/%5u %2u%%      ", latency, runsum, timesum,
-		(int)(runsum*100L/timesum) );
+	gotoxy(10, 0);
+	cprintf("%3u %3d/s %2u%%  %5u/%5u ",
+		latency, (int)(runprocs*100L/(now-lastupdate)),
+		(int)(runsum*100L/timesum),
+		runsum, timesum );
+		
 	lastupdate= now;
+	runprocs= 0;
 	// Rolling average (?)
 	if (timesum>16384) runsum/=32,timesum/=32;
       }
@@ -1233,9 +1259,10 @@ void scheduler() {
       //cputc('0'+wcur);
 
       run= clock();
-      winp->ret= wret= (*(app)winp->fun)((int*)winp->state, 0);
+      winp->ret= wret= (char*)(*(app)winp->fun)((int)winp->state, 0);
       run= clock()-run;
       runsum+= (run<<3) + 1;
+      ++runprocs;
     }
 
     goto next;
@@ -1248,7 +1275,8 @@ void scheduler() {
 int main() {
   int i= 0, j= 0, z= 0;
 
-  assert(sizeof(void*)==sizeof(int));
+  // needed for OrWIN on cc65, assumption and used extensivly
+  //assert(sizeof(void*)==sizeof(int));
 
   memcpy(CHARDEF('_'), SPARKDEFS, 8);
   memcpy(ALTSET+(32+64)*8, SPARKDEFS, sizeof(SPARKDEFS));
@@ -1273,7 +1301,7 @@ int main() {
   fill(0, 0, SCREENCOLS, SCREENROWS, 126);
 
   // Print logo in Upper Status Line
-  strncpy(SCREENXY(0, 0), "0rWIN ATMOS                                     ", 40);
+  strncpy(SCREENXY(0, 0), "0rWIN/ATMOS                                     ", 40);
 
   #if 0
   // Print logo in Right-Hand Corner
@@ -1386,8 +1414,11 @@ int main() {
 
   // Need one to make it run!
   start(app_ascii);
-  window(2, 3, 5, 3, blue, white);
+  window(-1, -1, 5, 3, blue, white);
   wstatus(-1, "ASCII");
+  
+  start(app_charset);
+  setwin(1);
   
   //  start(app_ascii);
   //  window(5, 18, 8, 5, green, black);

@@ -28,4 +28,5 @@ void* app_charset(APP* app, char* line) {
   }
   
   return 0;
+  (void)line;
 }

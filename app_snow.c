@@ -120,7 +120,8 @@ void vortex(char* p) {
 
 // memory corruption...
 void rolling(char* p) {
-  char r, m, f;
+  char m, f;
+  signed char r;
   do {
     f = 0;
     /* Scan from row 6 up to 0, checking the row directly below (r + 1) */

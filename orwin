@@ -14,7 +14,7 @@ rm -f apps_*.ext apps_*.reg
 ls -1 app_*.c | sed 's/.c$//' | sed 's/^app_//' | xargs -I{} sh -c 'echo "extern int app_{}();" > apps_{}.ext'
 ls -1 app_*.c | sed 's/.c$//' | sed 's/^app_//' | xargs -I{} sh -c 'echo "{\"{}\", app_{}},"    > apps_{}.reg'
 
-ls -l apps_*.*
+#ls -l apps_*.*
 
 # - PRG_main (stackers)
 
@@ -22,18 +22,14 @@ rm -f apps-*.ext apps-*.reg
 ls -1 app-*.c | sed 's/.c$//' | sed 's/app-//' | xargs -I{} sh -c 'echo "extern int {}_main();" > apps-{}.ext'
 ls -1 app-*.c | sed 's/.c$//' | sed 's/app-//' | xargs -I{} sh -c 'echo "{\"_{}\", {}_main},"   > apps-{}.reg'
 
-ls -l apps_*.*
+#ls -l apps_*.*
 
 echo
 
 cat apps_*.ext apps-*.ext | sort > apps.ext
 cat apps_*.reg apps-*.reg | sort > apps.reg
 
-echo
-echo
-grep -in . apps.*
-echo
-echo
+#(echo; echo; grep -in . apps.*; echo; echo)
 
 
 # Create an ORIC ATMOS .tap-file
@@ -66,7 +62,10 @@ rm fil
 
 # need to run twice to use updated apps.regs
 ( cl65 -r -Oirs -C atmos.cfg $* $OPTS '-D__AUTORUN__=$C7' -t atmos $name.c app_*.c -o $name.tap -vm -m $name.map 2>&1 | sed 's/(\([0-9]\+\))/:\1/g' ) || (echo "??????????????? FAILED ???????????"; exit 72)
-perl mapsizes.pl < orwin.map | tee orwin.reg
+echo
+perl mapsizes.pl < orwin.map > orwin.reg
+#cat orwin.reg
+echo
 ( cl65 -r -Oirs -C atmos.cfg $* $OPTS '-D__AUTORUN__=$C7' -t atmos $name.c app_*.c -o $name.tap -vm -m $name.map 2>&1 | sed 's/(\([0-9]\+\))/:\1/g' ) || (echo "??????????????? FAILED ???????????"; exit 72)
 
 echo

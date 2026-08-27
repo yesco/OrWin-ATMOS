@@ -13,4 +13,5 @@ void* app_ascii(APP* app, char* line) {
   putchar((app->c++ % 96)+32);
 
   return 0;
+  (void)line;
 }

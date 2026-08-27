@@ -16,18 +16,19 @@ void* app_clock(APP* state, char* line) {
   
   // print dots if second not change
   if (s == state->slast) putchar('.');
-  else {
-    char tmp[16];
+  else
 
-    if (0) {
-      //      sprintf(tmp, "\r%02d:%02d.%02d", h, m, s);
+#if 0
+    { char tmp[16];
+   //      sprintf(tmp, "\r%02d:%02d.%02d", h, m, s);
       //putz(tmp);
-    } else {
+#else
+    { 
       // TODO: doesnt do right!
       //putchar('\r'); puti(s);
 
       putchar('\n'); puti(s);
-    }
+#endif
 
     state->slast= s;
   }

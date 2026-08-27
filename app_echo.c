@@ -26,4 +26,5 @@ void* app_echo(APP* app, char* line) {
   }
 
   return WAITKEY;
+  (void)app;
 }

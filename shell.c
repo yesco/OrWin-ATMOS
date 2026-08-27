@@ -413,8 +413,8 @@ void* ls(lsstate* state, char* line) {
 #else
 // NO HAVE FILES ON ATMOS
 
-int open(char* path, int flags, int mode) { return 0; }
-int close(int fd) { return 0; }
+int open(char* path, int flags, int mode) { return 0; (void)path; (void)flags; (void)mode; }
+int close(int fd) { return 0; (void) fd; }
 
 
 typedef struct lsstate { int x; } lsstate;
@@ -422,6 +422,7 @@ typedef struct lsstate { int x; } lsstate;
 void* ls(lsstate* state, char* line) {
   // TODO: implement and use LOCI
   return 0;
+  (void)state; (void)line;
 }  
 
 #endif // __ATMOS__
@@ -771,7 +772,7 @@ int wsystem(char* cmd) {
 
   // CLEANUP
 
- cleanup:
+  // cleanup:
 
   do {
     cmdfun *f= train[i];

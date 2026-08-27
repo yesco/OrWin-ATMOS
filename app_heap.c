@@ -55,4 +55,5 @@ void* app_heap(APP* app, char* line) {
   putz(buf);
 
   return 0;
+  (void)line;
 }
