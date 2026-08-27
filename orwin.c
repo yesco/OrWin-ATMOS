@@ -49,6 +49,10 @@ TAP  : 30241 (- 30241 9508 8412 1797 6208 428) 3888
 
 #define VSPARKS "\x20\xeb\xec\xed\xee\xef\xdf"
 
+//  "\0\0\0\0\0\x3f\x3f\x3f" \ // TODO: already 32+3*16
+
+//  "\0\0\0\x3f\x3f\x3f\x3f\x3f" \ // TODO: 96-3
+
 
 #define SPARKDEFS \
   "\0\0\0\0\0\0\0\x3f" \
