@@ -1061,7 +1061,7 @@ void mowin(signed char dx, signed char dy, signed char dw, signed char dh) {
 #ifdef OPTMOV
   // MOVING only smoothly
   if (!dw && !dh) {
-    char i, *t, *p, W = w + (4 + 2 + 1)+1, H = h + (2 + 2)+1;
+    char i, *t, *p, W = w + (4 + 2 + 1)+1, H = h + 2 + 2;
     char *tmp, *s = SCREENXY(x - 3, y - 2);
 
     // Bounds checking
