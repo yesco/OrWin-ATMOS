@@ -581,6 +581,8 @@ void* terminal(simplestate* state, char* line) {
   if (!state) return STALLOC(simplestate, terminal);
 
   shprint(line);
+  lfree(line);
+  
   // force backtracking, why different?
   return line==EOS? EOS: NULL;
 }

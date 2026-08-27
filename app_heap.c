@@ -38,6 +38,13 @@ typedef struct APP {
   char c;
 } APP;
 
+void* last_heaporg;
+void* last_heapptr;
+void* last_heapend;
+
+struct freelist* last_heapfirst;
+struct FREELIST* last_heaplast;
+
 void* app_heap(APP* app, char* line) {
   freelist* p;
   freelist* start;
@@ -49,6 +56,14 @@ void* app_heap(APP* app, char* line) {
     return calloc(sizeof(APP), 1);
   } else if (app<EVENTS) return 0;
   
+  // check if any change
+  if (last_heaporg==_heaporg &&
+      last_heapptr==_heapptr &&
+      last_heapend==_heapptr &&
+      last_heapfirst==_heapfirst &&
+      last_heaplast ==_heaplast) return 0;
+
+  // update scan
   printf(HOME "o%04X p%04X e%04X m%04X a%04X\n"
 	 , _heaporg, _heapptr, _heapend
 	 , _heapmaxavail(), _heapmemavail()
@@ -67,6 +82,15 @@ void* app_heap(APP* app, char* line) {
   }
   printf("\n# %u  ", n);
 
-  return WAITKEY;
+  // update
+  last_heaporg= _heaporg;
+  last_heapptr= _heapptr;
+  last_heapend= _heapptr;
+
+  last_heapfirst= _heapfirst;
+  last_heaplast = _heaplast;
+
+  return 0;
+  
   (void)line;
 }

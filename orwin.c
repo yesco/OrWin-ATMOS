@@ -639,9 +639,12 @@ void winerase(Window* w) {
 void winkill() {
   Window* w= win+wfocus;
   w->status= 0;
+  free(w->state);
+  //TODO: lfree(w->ret);
   winerase(w);
   setwin(wfocus);
   wdecorate();
+
 }
 
 // returns old state

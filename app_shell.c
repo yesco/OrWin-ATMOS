@@ -38,7 +38,6 @@ void* app_shell(APP* app, char* line) {
 
     window(-1, -1, 20-6, 10, green, black);
     wstatus(-1, "Shell");
-    
     run(line);
 
     return app;
@@ -50,6 +49,8 @@ void* app_shell(APP* app, char* line) {
   // have a new line!
 
   run(line);
+  lfree(line);
+  
   prompt();
 
   return WAITKEY;
