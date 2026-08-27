@@ -29,11 +29,14 @@ void* app_shell(APP* app, char* line) {
     if (!app) return 0;
     
     // TODO: remove testing
-    if (!line) line= "iota 1 10|tail -5|head -2|terminal";
+    //    if (!line) line= "iota 1 10|tail -5|head -2|terminal";
+    if (!line)
+      //      line= "iota 1 1000|grep 0|grep 7|terminal";
+      line= "iota 1 1000|grep 7|terminal";
 
     app->line= strdup(line);
 
-    window(-1, -1, 20-6, 11, green, black);
+    window(-1, -1, 20-6, 10, green, black);
     wstatus(-1, "Shell");
     
     run(line);
