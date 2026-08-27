@@ -1250,7 +1250,7 @@ void scheduler() {
       timesum+= (latency<<3) +1;
       if (now-lastupdate > 100) {
 	#undef gotoxy
-	gotoxy(0, 0); cprintf("                ");
+	gotoxy(0, 0); cprintf("           ");
 	gotoxy(11, 0);
 	cprintf(" %u#%u %3d/s %2u%% %5u/%5u ",
 		latency, rounds, (int)(runprocs*100L/(now-lastupdate)),

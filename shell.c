@@ -631,7 +631,7 @@ void* commands[]= {
 ////////////////////////////////////////////////////////////
 
 
-int wsystrain(cmdtrain *train) {
+int wsystrain(cmdtrain* train) {
   cmdfun *fp;
   char* line= EOS;
   cmdtrain *origtrain= train;
@@ -664,13 +664,34 @@ int wsystrain(cmdtrain *train) {
 }
 
 
+ void shellcleanup(cmdtrain* train, int n, unsigned int cleanbits) {
+  // CLEANUP
+  do {
+    cmdfun *f= train[n];
+    if (f) {
+      if (cleanbits & 1) {
+        #ifdef SHELLINFO
+	printf("\t[**CLEANUP**: %d %p]\n", n, train[n]);
+        #endif
+        (*f)(f, CLEANUP);
+      }
+      // remove that state
+      free(f);
+    }
+
+    cleanbits>>= 1;
+  } while(--n);
+  
+  free(train);
+}
+
 int wsystem(char* cmd) {
   // TODO: check overflow this per command?
   static char line[80];
   char c, i, *p, **n;
   cmdfun* f;
   void* state;
-  static void* arr[16];
+  void* arr[16];
   unsigned int cleanbits;
   cmdtrain *train;
   int r;
@@ -769,30 +790,8 @@ int wsystem(char* cmd) {
 
   //putchar('\n'); for(int i=0; i<16; ++i) printf("%2d: %p\n", i, train[i]);
 
-
   r= wsystrain(train);
-
-  // CLEANUP
-
-  // cleanup:
-
-  do {
-    cmdfun *f= train[i];
-    if (f) {
-      if (cleanbits & 1) {
-        #ifdef SHELLINFO
-	printf("\t[**CLEANUP**: %d %p]\n", i, train[i]);
-        #endif
-        (*f)(f, CLEANUP);
-      }
-      // remove that state
-      free(f);
-    }
-
-    cleanbits>>= 1;
-  } while(--i);
-  
-  free(train);
+  shellcleanup(train, i, cleanbits);
 
   return r;
 }

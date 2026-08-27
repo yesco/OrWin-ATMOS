@@ -11,7 +11,7 @@ typedef struct APP {
 void* app_echo(APP* app, char* line) {
   char c;
   
-  if (!line) return calloc(sizeof(APP), 1);
+  if (!app) return calloc(sizeof(APP), 1);
     
   c= getc();
 

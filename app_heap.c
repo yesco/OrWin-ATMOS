@@ -26,7 +26,7 @@ extern void* _heapptr;
 extern void* _heapend;
 
 extern struct freelist* _heapfirst;
-extern struct FREELIST* _heaplast;
+extern struct freelist* _heaplast;
 
 typedef struct freelist {
   unsigned int     size;
@@ -43,13 +43,52 @@ void* last_heapptr;
 void* last_heapend;
 
 struct freelist* last_heapfirst;
-struct FREELIST* last_heaplast;
+struct freelist* last_heaplast;
+
+
+int isfree(void* a) {
+  struct freelist* f = _heapfirst;
+  while (f) {
+    if (f == a) return 1;
+    f = f->next; // could loop forever"
+  }
+  return 0;
+}
+
+void dumpheap(char all) {
+  char* m = (char*)_heaporg;
+  struct freelist* p = (struct freelist*)_heapfirst;
+  unsigned int n = 0, f = 0, sz;
+
+  if (all < 2) {
+    while (p) {
+      ++f;
+      printf("%04X:%u ", (unsigned int)p, p->size);
+      if (p->size > 2048) { printf("Unprobable size..."); break; }
+      p = p->next;
+      if (p == (struct freelist*)_heapfirst) {
+	printf("LOOP: %04X...", (unsigned int)p); break; }
+    }
+    printf("\n#free %u\n", f);
+  }
+
+  if (!all) return;
+  
+  f= 0;
+  while (m < _heapptr) {
+    sz = *(unsigned int*)m;
+    if (sz == 0 || sz > 4096) break;
+    if (isfree(m)) {
+      printf("%u ", sz); ++f;
+    } else {
+      printf("[%u] ", sz); ++n;
+    }
+    m += sz;
+  }
+  printf("\n#free %u allocs: %u   ", f, n);
+}
 
 void* app_heap(APP* app, char* line) {
-  freelist* p;
-  freelist* start;
-  int n= 0;
-  
   if (!app) {
     window(2, 16, 32, 10, yellow, black);
     wstatus(-1, "Heap Viewer");
@@ -69,18 +108,7 @@ void* app_heap(APP* app, char* line) {
 	 , _heapmaxavail(), _heapmemavail()
 	 );
 
-  // Cast the internal heap pointer to your freelist structure
-  start= p= (freelist*)_heapfirst;
-
-  while(p) {
-    ++n;
-    printf("%04X:%u ", p, p->size);
-    if (p->size > 2048) { printf("Unprobable size..."); break; }
-    p= p->next;
-    if (p == start) { printf("LOOP: %04X...", p); break; }
-			   
-  }
-  printf("\n# %u  ", n);
+  dumpheap(2);
 
   // update
   last_heaporg= _heaporg;

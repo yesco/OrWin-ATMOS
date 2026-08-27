@@ -6,7 +6,8 @@
 #include "shell.c"
 
 typedef struct APP {
-  char* line;
+  //char* line;
+  char dummy;
 } APP;
 
 void prompt() {
@@ -34,7 +35,7 @@ void* app_shell(APP* app, char* line) {
       //      line= "iota 1 1000|grep 0|grep 7|terminal";
       line= "iota 1 1000|grep 7|terminal";
 
-    app->line= strdup(line);
+    //app->line= strdup(line);
 
     window(-1, -1, 20-6, 10, green, black);
     wstatus(-1, "Shell");
