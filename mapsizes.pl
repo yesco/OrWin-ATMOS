@@ -39,7 +39,7 @@ sub doit {
 	    if ($code || $ddd) {
 		if ($orwin) {
 		    print STDERR sprintf(
-			"%5d %5d %-28s (ro:$ro bss:$bss data:$data zp:$zero)\n",
+			"%5d %5d %-18s (ro:$ro bss:$bss data:$data zp:$zero)\n",
 			$code, $ddd, $name);
 		    $orwincode+= $code;
 		    $orwindata+= $ddd;

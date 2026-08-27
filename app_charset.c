@@ -27,6 +27,6 @@ void* app_charset(APP* app, char* line) {
     return calloc(sizeof(APP), 1);
   }
   
-  return 0;
+  return WAITKEY;
   (void)line;
 }

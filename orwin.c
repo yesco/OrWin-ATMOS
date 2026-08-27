@@ -618,12 +618,15 @@ void setfocus(signed char new) {
   //cputc('0'+new);
   if (wfocus) wdecorate(); // show not active
  next:
+
+  // TODO: confusing?
+  
   wprev= wfocus;
   wfocus= new;
   if (new > nwin) wfocus= 1;
   if (new <= 0)   wfocus= nwin;
   if (wfocus) wdecorate(); // show active
-  if (++n > WIN_MAX) return; // make sure not hang!
+  if (n++ > WIN_MAX) return; // make sure not hang!
   if (!win[wfocus].status) { new= wfocus+1; goto next; }
 }
 
@@ -631,10 +634,14 @@ void winerase(Window* w) {
   fill(w->x-2, w->y-1, w->w+5, w->h+3, 126);
 }
 
+ void setwin(char);
+
 void winkill() {
   Window* w= win+wfocus;
-  winerase(w);
   w->status= 0;
+  winerase(w);
+  setwin(wfocus);
+  wdecorate();
 }
 
 // returns old state
@@ -1240,16 +1247,17 @@ void scheduler() {
       timesum+= (latency<<3) +1;
       if (now-lastupdate > 100) {
 	#undef gotoxy
-	gotoxy(10, 0);
-	cprintf("%3u %3d/s %2u%%  %5u/%5u ",
-		latency, (int)(runprocs*100L/(now-lastupdate)),
+	gotoxy(0, 0); cprintf("                ");
+	gotoxy(11, 0);
+	cprintf(" %u#%u %3d/s %2u%% %5u/%5u ",
+		latency, rounds, (int)(runprocs*100L/(now-lastupdate)),
 		(int)(runsum*100L/timesum),
 		runsum, timesum );
 		
 	lastupdate= now;
-	runprocs= 0;
+	rounds= runprocs= 0;
 	// Rolling average (?)
-	if (timesum>16384) runsum/=32,timesum/=32;
+	if (timesum > 4096) runsum/=4,timesum/=4;
       }
       wcur= nwin;
     }
@@ -1264,7 +1272,7 @@ void scheduler() {
     if (winp->ret != WAITKEY) {
       ///cputc('.');
       //cputc('0'+wcur);
-
+      *SCREENXY(wcur,0)= '0'+wcur;
       run= clock();
       winp->ret= wret= (char*)(*(app)winp->fun)((int)winp->state, 0);
       run= clock()-run;

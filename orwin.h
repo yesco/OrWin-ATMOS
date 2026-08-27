@@ -128,6 +128,6 @@ extern void wscreensize(char* w, char* h);
 #define SLEEP(seconds) ((char*)(0x200|((seconds)&0xff)))
 
 // in app: if (line <= EVENTS) return line;
-#define EVENTS  ((char*)0x4ff)
+#define EVENTS  ((void*)0x4ff)
 
 
