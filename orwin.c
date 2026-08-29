@@ -1204,6 +1204,8 @@ void mowin(signed char dx, signed char dy, signed char dw, signed char dh) {
 size_t _heapmemavail(void);
 size_t _heapmaxavail(void);
 
+unsigned int heapstart;
+
 void scheduler() {
   static clock_t latency, lastlatency;
   static clock_t run, runsum, runprocs, timesum;
@@ -1262,14 +1264,15 @@ void scheduler() {
           #undef gotoxy
 	  gotoxy(11, 0);
 	  cprintf("%2u#%3u%4d/s %2u%%"
-		  "%4d/%4d"
+		  " %2d%%%5d"
 		  "%4c"
 
 		  , latency, rounds
 		  , (int)(runprocs*100L/(now-lastupdate))
 		  , (int)(runsum*100L/timesum)
 		  
-		  , _heapmaxavail(), _heapmemavail()
+		  , (int)(100L*_heapmemavail()/heapstart)
+		  , _heapmemavail()
 		  
 		  , ' '
 		  );
@@ -1295,7 +1298,7 @@ void scheduler() {
     if (winp->ret != WAITKEY) {
       ///cputc('.');
       //cputc('0'+wcur);
-      *SCREENXY(39-wcur,0)= '0'+wcur;
+      *SCREENXY(40-wcur,0)= '0'+wcur;
       run= clock();
       winp->ret= wret= (char*)(*(app)winp->fun)((int)winp->state, 0);
       //      winp->ticks+= (run= clock()-run+1);
@@ -1315,6 +1318,8 @@ void scheduler() {
 int main() {
   int i= 0, j= 0, z= 0;
 
+  heapstart= _heapmemavail();
+  
   // needed for OrWIN on cc65, assumption and used extensivly
   //assert(sizeof(void*)==sizeof(int));
 
