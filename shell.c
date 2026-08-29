@@ -34,7 +34,7 @@ unsigned int traincleanbits;
 
 
 
-typedef struct simplestate { cmdfun f; } simplestate;
+typedef struct simplestate { cmdfun f; int i; } simplestate;
 
 void* stalloc(unsigned int size, void* f) {
   simplestate* state= calloc(size, 1);
@@ -564,6 +564,71 @@ void* tail(countstate* state, char* line) {
   return EOS;
 }
 
+
+
+///////////////////////////////////////////////////
+
+/// ~/GIT/OrWin-ATMOS $ ps -aux
+// USER       PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
+// u0_a230   5252  0.5  2.8 18907508 223924 ?     S<l   1970 172:30 com.termu
+// u0_a230   5667  0.0  0.0 10826768 900 pts/0    Ss+   1970   0:01 /data/dat
+// u0_a230   6599  0.0  0.0 10909212 4372 pts/1   Ss    1970   0:23 /data/dat
+// u0_a230   6670  0.0  0.0 10843152 1684
+
+char* wstate(char* ret) {
+  if (ret==WAITKEY) return "KEY";
+  //if (SLEEP(ret)) return "SLP"; // TODO:
+  return "RUN";
+}
+ 
+
+#include <cc65.h> // for udiv32by16r16
+ 
+void* ps(simplestate* state, char* line) {
+  char s, p, ln[40];
+  long packed_result;
+  Window *w;
+  unsigned int m;
+  
+  if (!state) return STALLOC(simplestate, ps);
+
+  if (state->i++ == 0)
+    return strdup(
+//----------------------------------------
+ " PID %C #M  SZ  ST  TIME CMD");
+//4203 27 33 437 KEY 27:30 foobar -a"
+
+  w= 0;
+  p= state->i - 1;
+  while(p < nwin+1) {
+    w= win + p;
+    if (w->status) break;
+    w= 0; ++p;
+  }
+
+  state->i= p + 1;
+  if (!w) return EOS;
+  
+  // A single assembly loop calculates both values simultaneously
+  packed_result = udiv32by16r16(w->ticks, 60*CLOCKS_PER_SEC);
+
+  // Extract the pieces from the 32-bit packed register
+  s = (unsigned int)(packed_result & 0xFFFF);
+  m = (unsigned int)(packed_result >> 16);
+
+  snprintf(ln, sizeof(ln), "42%02d %2d %2d%4d %.3s%3d:%02d %s",
+	   p,
+
+	   w->cpu, w->nalloc, // == w->mem,
+	   -1, //w->abytes,
+	   wstate(w->ret),
+	   s, m,
+	   wname(p) );
+  return strdup(ln);
+  (void)line;
+}
+
+
 ///////////////////////////////////////////////////
 
 
@@ -588,17 +653,9 @@ void* terminal(simplestate* state, char* line) {
 }
 
 char* cmdnames[]= {
-  "pwd",
-  "grep",
-  "cat",
-  "wc",
-  "ls",
-  "iota",
-  "head",
-  "tail",
-
-  "teeterminal",
-  "terminal",
+  "pwd", "grep", "cat", "wc", "ls", "iota", "head", "tail",
+  "ps",
+  "teeterminal", "terminal",
   
   //  "ls cat find "
   //"grep cut tr sed " 
@@ -624,6 +681,7 @@ char* cmdnames[]= {
 
 void* commands[]= {
   pwd, grep, cat, wc, ls, iota, head, tail,
+  ps,
   teeterminal, terminal,
   
 };

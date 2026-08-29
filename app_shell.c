@@ -29,23 +29,25 @@ void* app_shell(APP* app, char* line) {
     app= calloc(sizeof(APP), 1);
     if (!app) return 0;
     
+    // TODO: remove -c
+    // TODO: otherwise is supposed to be script file to run!
+    
     // TODO: remove testing
     //    if (!line) line= "iota 1 10|tail -5|head -2|terminal";
     if (!line)
-      //      line= "iota 1 1000|grep 0|grep 7|terminal";
+      //line= "iota 1 1000|grep 0|grep 7|terminal";
       line= "iota 1 1000|grep 7|terminal";
 
-    //app->line= strdup(line);
+    // doesn/t do antyhing if already defined
+    //    window(-1, -1, 20-6, 10, green, black);
+    wstatus(-1, line? line: "Shell");
 
-    window(-1, -1, 20-6, 10, green, black);
-    wstatus(-1, "Shell");
     run(line);
 
     return app;
 
   } else if (line <= EVENTS)
     return WAITKEY;
-
 
   // have a new line!
 

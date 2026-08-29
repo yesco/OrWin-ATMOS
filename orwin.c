@@ -82,12 +82,6 @@ TAP  : 30241 (- 30241 9508 8412 1797 6208 428) 3888
 // (- 14332 12410) = 1922, (- 1922 1291) = 631 bytes more
 #define OPTMOV
 
-// (- 11136 10883) = 256 bytes
-#define INFO
-
-// Enable to get some stats (#putc)
-#define STATS
-
 // optimized version
 // TODO: make putz default and putc call it?
 
@@ -120,9 +114,6 @@ struct apps {
 
   {0, 0}
 };
-
-
-#define WIN_MAX 16
 
 // Process Stack allocation sizes
 // ==============================
@@ -191,10 +182,7 @@ clock_t clock() {
 
 
 //////////////----------------------------------------
-#define HELP "FUNCT-3 spc Prev Next List Run Kill"
-
-jmp_buf orwinjmp;
-jmp_buf orwinnext;
+#define HELP "FUNCT-3 Prev spc Next List Run Kill Shll"
 
 // TODO: make an "oric.h"
 
@@ -222,34 +210,6 @@ void fill(char x, char y, char w, char h, char c) {
 }
 
 
-typedef struct Window {
-  char x, y, w, h;
-  char r, c;
-  char *p;
-  char bg, fg;
-
-#ifdef STATS
-  unsigned int nputc;
-#endif
-
-  // TASK
-  // (TODO: separate out tasks? only 12 B overhead)
-  // (only if can have several in one window...)
-  // (or windowless backgound task)
-
-  char status;
-  char exit;
-  char* ret; // TODO: should be using status?
-
-  // light-weight process task
-  void* fun;
-  void* state;
-
-  // StackTask
-  jmp_buf start, cont;
-
-} Window;
-
 char nwin= 0, wfocus= 0, wcur= 0, wnext, *wret;
 
 Window win[WIN_MAX]= {
@@ -257,14 +217,47 @@ Window win[WIN_MAX]= {
     0, 0,
     NULL,
     black, white,
-#ifdef STATS
     0,
-#endif
     0, 0,
     0, 0}
 };
 
 Window* winp= 0;
+
+
+char* wname(char winid) {
+  void* fun= win[winid].fun;
+  struct apps* p= apps;
+  
+  while(p && (p->fun != fun)) ++p;
+
+  return p? p->name: 0;
+}
+
+
+
+////////////////////////////////////////////////////////////
+// Heap stuff
+
+void* walloc(size_t z) {
+  ++winp->nalloc;
+  return malloc(z);
+}
+
+void* wcalloc(size_t z, size_t n) {
+  ++winp->nalloc;
+  return calloc(z, n);
+}
+
+void* wrealloc(void* p, size_t z) {
+  if (z && !p) winp->abytes++;
+  return realloc(p, z);
+}
+
+void wfree(void* p) {
+  --winp->nalloc;
+  free(p);
+}
 
 
 char* updatewinptr() {
@@ -406,9 +399,7 @@ char wputc(char c) {
   // HACK! (might "bleed across windows if not conseq)
   static char lastcolor;
       
-#ifdef STATS
   ++winp->nputc;
-#endif
   
   switch(c) {
 
@@ -539,9 +530,7 @@ void wputz(char* s) {
 
 void wputz(char* s) {
   char n, c, r, *p, k, w= winp->w, h= winp->h;
-#ifdef STATS
   unsigned int nputc= winp->nputc;
-#endif
 
  restart:
   n= MAXPUTZ; c= winp->c, r= winp->r, p= winp->p - 1;
@@ -556,9 +545,7 @@ void wputz(char* s) {
 
     // just put it there
     *++p= k;
-#ifdef STATS
     ++nputc;
-#endif
     if (c++ >= w) {
       winp->c= c= 0;
       winp->r= r= (++r >= h)? 0: r;
@@ -567,9 +554,7 @@ void wputz(char* s) {
   }
   
   winp->c= c; winp->p= p+1;
-#ifdef STATS
   winp->nputc= nputc;
-#endif
 	       
   if (k) { wputc(k); ++s; goto restart; }
 
@@ -607,16 +592,22 @@ void wdecorate() {
   // Invert header (make it black if focused)
   char* p= w->y * SCREENCOLS + w->x + TEXTSCREEN - SCREENCOLS -2;
   char i;
+
+  if (!w->status) return;
+
   for(i= w->w+4; i--; ) p[i]^= 128;
 }
 
 char wprev= 1;
+
+void setwin(char);
 
 void setfocus(signed char new) {
   char n= 0;
   //cputc('#');
   //cputc('0'+new);
   if (wfocus) wdecorate(); // show not active
+
  next:
 
   // TODO: confusing?
@@ -625,16 +616,15 @@ void setfocus(signed char new) {
   wfocus= new;
   if (new > nwin) wfocus= 1;
   if (new <= 0)   wfocus= nwin;
-  if (wfocus) wdecorate(); // show active
   if (n++ > WIN_MAX) return; // make sure not hang!
   if (!win[wfocus].status) { new= wfocus+1; goto next; }
+
+  if (wfocus) wdecorate(); // show active
 }
 
 void winerase(Window* w) {
   fill(w->x-2, w->y-1, w->w+5, w->h+3, 126);
 }
-
- void setwin(char);
 
 void winkill() {
   Window* w= win+wfocus;
@@ -642,9 +632,7 @@ void winkill() {
   free(w->state);
   //TODO: lfree(w->ret);
   winerase(w);
-  setwin(wfocus);
-  wdecorate();
-
+  setfocus(wfocus);
 }
 
 // returns old state
@@ -675,13 +663,13 @@ char newwin() {
   // TODO: reuse empty entries
   if (nwin==WIN_MAX) return 0;
   setwin(++nwin);
+  setfocus(nwin);
 }
 
 char startline(app fun, char* line) {
-  if (!newwin()) return 0;
-
   winp->status= 1;
-  // TODO: glue it together?
+
+  // TODO: glue it together? (like the train)
   winp->fun=   (void*)fun;
   winp->state= (void*)fun(0, line); // TODO: arg (template)
 
@@ -768,8 +756,6 @@ char window(char x, char y, char w, char h, char bg, char fg) {
 }
 
 
-void info();
-
 void help() {
   char tmp[40];
   memcpy(tmp, TEXTSCREEN, sizeof(tmp));
@@ -851,11 +837,20 @@ char wkbhit(char win) {
     case 'R': apprun(); break; // List
     case 'I': start(app_heap); break; 
     case 'S':
-    case 'T': start(app_shell); break; // Terminal
+    case 'T': { // Shell/Terminal
+      newwin();
+      window(1, -1, 20-7, 10, green, black);
+      start(app_shell);
+      break; }
 
     // TODO: case 'M': maximize & minimize
   
-    case 'L': info(); break;
+    case 'L': { // ps
+      newwin();
+      // TODO: terminal overrides, hardcodes black...
+      window(3, 17, 40-7, 10, yellow, black);
+      startline(app_shell, "ps|terminal");
+      break; }
     case 'H': help(); break;
 
 #ifdef MOWIN
@@ -1007,7 +1002,8 @@ void apprun() {
     //  printf("\nCHOOSEN: >%s<\n", line);
 
     // launch!
-    start(found->fun);
+    newwin();
+    startline(found->fun, spc? spc+1: 0);
 
     //cprintf("\n\n\n\n\n[WIN.%d: %p %p]", wcur, winp->state, winp->fun);
 
@@ -1021,8 +1017,10 @@ void apprun() {
 	fg= rand() & 7;
       } while(IS_BAD_CONTRAST(fg, bg));
     
+      // default tileable window size
       window(-1, -1, WMAX, HMAX, bg, fg);
       wstatus(-1, found->name);
+      wdecorate();
     }
   }
 }
@@ -1202,15 +1200,15 @@ void scheduler() {
   static clock_t latency, lastlatency;
   static clock_t run, runsum, runprocs, timesum;
   static clock_t rounds, lastupdate;
-  
+
   runprocs= rounds= timesum= runsum= 0;
   
-  wfocus= nwin;
-
-  wdecorate(); // what?
+  wdecorate();
+  setfocus(nwin);
 
   // TODO: error catchingg...
-  while(setjmp(orwinjmp)!=42) {
+  //  while(setjmp(orwinjmp)!=42) {
+  while(1) {
     DEB('^');
 
     // move to next app
@@ -1233,7 +1231,8 @@ void scheduler() {
       //cputc('!');
       run= clock();
       winp->ret= wret= (char*)(*(app)winp->fun)((int)winp->state, (char*)(wkey + 0x100));
-      run= clock()-run;
+      win->ticks+= run= clock()-run;
+      win->cpu= run*rounds;
       runsum+= (run<<3) + 1;
       ++runprocs;
       
@@ -1250,12 +1249,13 @@ void scheduler() {
       timesum+= (latency<<3) +1;
       if (now-lastupdate > 100) {
 	#undef gotoxy
-	gotoxy(0, 0); cprintf("           ");
 	gotoxy(11, 0);
-	cprintf(" %u#%u %3d/s %2u%% %5u/%5u ",
-		latency, rounds, (int)(runprocs*100L/(now-lastupdate)),
-		(int)(runsum*100L/timesum),
-		runsum, timesum );
+	cprintf("%3u#%3u%4d/s %2u%%%12c"
+		, latency, rounds
+		, (int)(runprocs*100L/(now-lastupdate))
+		, (int)(runsum*100L/timesum)
+		, ' '
+		);
 		
 	lastupdate= now;
 	rounds= runprocs= 0;
@@ -1275,10 +1275,11 @@ void scheduler() {
     if (winp->ret != WAITKEY) {
       ///cputc('.');
       //cputc('0'+wcur);
-      *SCREENXY(wcur,0)= '0'+wcur;
+      *SCREENXY(39-wcur,0)= '0'+wcur;
       run= clock();
       winp->ret= wret= (char*)(*(app)winp->fun)((int)winp->state, 0);
-      run= clock()-run;
+      win->ticks+= run= clock()-run;
+      win->cpu= run*rounds; // TODO: bad estimate
       runsum+= (run<<3) + 1;
       ++runprocs;
     }
@@ -1430,18 +1431,13 @@ int main() {
   wstatus(-1, "Snow");
 #endif
 
-  // Need one to make it run!
-  start(app_ascii);
+  newwin();
   window(-1, -1, 5, 3, blue, white);
+  start(app_ascii);
   wstatus(-1, "ASCII");
   
+  newwin();
   start(app_charset);
-  setwin(1);
-  
-  //  start(app_ascii);
-  //  window(5, 18, 8, 5, green, black);
-  //  wstatus(-1, "ASCII");
-
 
 
   scheduler();
@@ -1470,91 +1466,3 @@ char* printbuf(char* j) {
   cputd((((unsigned int)j[3])<<8) | j[4]);
   return r;
 }
-
-void info() {
-#ifdef INFO
-  char i, s, *save= malloc(SCREENSIZE), *r, *p;
-  unsigned int j;
-  Window* w= win;
-
-  if (!save) return;
-  memcpy(save, TEXTSCREEN, SCREENSIZE);
-
-#undef clrscr
-  clrscr();
-
-  for(i= 0; i<=nwin; ++i,++w) {
-    cputc('\r'); cputc('\n');
-    cput2h(i);
-    cputc(i==wfocus? '!': i==wcur? '=': ' ');
-    cput2h(w->status);
-    cspc(); cput2h(w->exit);
-    s= w->start[2];
-
-#ifdef DEBUG
-    p= r= printbuf((char*)&w->start);
-    printbuf((char*)&w->cont);
-#else
-    cspc(); cput2h(s);
-    cputc('-'); cput2h(w->cont[2]);
-    p= r= (char*)*(unsigned*)&w->start;
-#endif
-
-    if (w->status) {
-      // data stack
-      char slnz= s, *lastnonzero= p;
-#ifdef DEBUG
-      cputc('\r'); cputc('\n'); cputc('=');
-#endif
-      for(j=0; j<BYTES; ++j)
-	if (*--p) {
-	  lastnonzero= p;
-	  //cput2h(*p);
-	}
-	else
-	  // cputc('.')
-	  ;
-      cspc(); cputc('S'); cputc(':'); cputd(r-lastnonzero);
-      cputc('/'); cputd(BYTES);
-
-      // R 6502 HardWare stack (page 1)
-#if 0
-      // print whole stack
-      s= 255;
-      p= (char*)0x200;
-      for(j=256; --j; )
-	if (*--p) {
-	  slnz= j;
-	  cput2h(*p);
-	}
-	else
-	  cputc('.')
-	  ;
-      cgetc();
-#else
-      p= (char*)(0x100+s);
-      for(j=s; j>s-SPAWN_REC*2+1; --j)
-	if (*--p) {
-	  slnz= j;
-	  //cput2h(*p);
-	}
-	else
-	  //cputc('.')
-	  ;
-#endif
-      cspc(); cputc('R'); cputc(':'); cputd(s-slnz);
-      cputc('/'); cputd(2*SPAWN_REC);
-    }
-
-#ifdef STATS
-    cspc(); cputc('#'); cputd(w->nputc);
-#endif     
-
-  }
-  cgetc();
-
-  memcpy(TEXTSCREEN, save, SCREENSIZE);
-  free(save);
-#endif
-}
-

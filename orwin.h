@@ -1,3 +1,11 @@
+// Config
+
+#define WIN_MAX 16
+
+// Screen printing atributes
+// - putchar(red);
+// - printf(RED "warning:" WHITE "cucumber" BGGREEN "OK");
+
 #define black    0
 #define red      1
 #define green    2
@@ -73,18 +81,6 @@ char window(char x, char y, char w, char h, char bg, char fg);
 #define clreol wclreol
 #define gotoxy wgotoxy
 
-
-#include <setjmp.h>
-
-extern void yield();
-
-extern jmp_buf orwinjmp;
-
-#define YIELD() yield()
-
-
-extern char wcur;
-
 extern char wkbhit(char win);
 extern char wgetc(char win);
 
@@ -130,4 +126,55 @@ extern void wscreensize(char* w, char* h);
 // in app: if (line <= EVENTS) return line;
 #define EVENTS  ((void*)0x4ff)
 
+// Memory Allocations
+
+#ifdef TRACKALLOC
+
+#define malloc walloc
+#define calloc wcalloc
+#define realloc wrealloc
+#define free wfree
+
+#endif // TRACKALLOC
+
+
+////////////////////////////////////////////////////////////
+// Internals - Don't use unless have to (ps)
+
+typedef struct Window {
+  char x, y, w, h;
+  char r, c;
+  char *p;
+  char bg, fg;
+
+  unsigned int nputc;
+  
+  // TASK
+  // (TODO: separate out tasks? only 12 B overhead)
+  // (only if can have several in one window...)
+  // (or windowless backgound task)
+
+  char status;
+  char exit;
+  char* ret; // TODO: should be using status?
+
+  // light-weight process task
+  void* fun;
+  void* state;
+
+  unsigned int nalloc;
+  unsigned int abytes;
+
+  unsigned long ticks;
+  char cpu; // % cpu used last "round"
+
+} Window;
+
+extern Window win[WIN_MAX];
+
+extern char wcur;
+extern char wfocus;
+extern char nwin;
+
+extern char* wname(char winid);
 
