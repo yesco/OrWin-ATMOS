@@ -61,6 +61,7 @@ rm fil
 #( cl65 -r -Oirs $* $OPTS '-D__AUTORUN__=$C7' -t atmos $name.c app-*.c app_*.c -o $name.tap -vm -m $name.map 2>&1 | sed 's/(\([0-9]\+\))/:\1/g' ) || (echo "??????????????? FAILED ???????????"; exit 72)
 
 # need to run twice to use updated apps.regs
+
 ( cl65 -r -Oirs -C atmos.cfg $* $OPTS '-D__AUTORUN__=$C7' -t atmos $name.c app_*.c -o $name.tap -vm -m $name.map 2>&1 | sed 's/(\([0-9]\+\))/:\1/g' ) || (echo "??????????????? FAILED ???????????"; exit 72)
 echo
 perl mapsizes.pl < orwin.map > orwin.reg
