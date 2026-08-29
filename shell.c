@@ -11,6 +11,8 @@
 //#define SHELLINFO
 //#define SHELLTEST
 
+#define MAX_TRAIN 16
+
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
@@ -123,11 +125,11 @@ char* lstrdup(char* s) {
   char slen= strlen(s), *line;
   if (slen <= relen && relen) {
     // reuse
-    line= reuse; reuse= relen= 0;
+    line= reuse; reuse= NULL; relen= 0;
     return strcpy(line, s);
   } else {
     // need bigger
-    free(reuse); reuse= relen= 0;
+    free(reuse); reuse= NULL; relen= 0;
     //printf("[ALLOCATE]"); // no bug?
     return strdup(s);
   }
@@ -742,7 +744,7 @@ void* commands[]= {
 ////////////////////////////////////////////////////////////
 
 
-int wsystrain(cmdtrain* train) {
+int wrunsystrain(cmdtrain* train) {
   cmdfun *fp;
   char* line= EOS;
   cmdtrain *origtrain= train;
@@ -796,18 +798,22 @@ int wsystrain(cmdtrain* train) {
   free(train);
 }
 
-int wsystem(char* cmd) {
+ cmdtrain* wsysparse(char* cmd, char* pi, unsigned int *bitsout) {
   // TODO: check overflow this per command?
-  static char line[80];
+  char *line;
+
   char c, i, *p, **n;
   cmdfun* f;
   void* state;
-  void* arr[16];
+
+  void* arr[MAX_TRAIN + 2 + 2]; // 2 head, 2 NULL
   unsigned int cleanbits;
   cmdtrain *train;
-  int r;
   
-  if (!cmd) return -1;
+  if (!cmd) return NULL;
+
+  // make copy so we can chop it up!
+  line= strdup(cmd);
   
   #ifdef SHELLTEST
   printf("\n------ wsystem: \"%s\"\n", cmd);
@@ -820,14 +826,11 @@ int wsystem(char* cmd) {
   i= 0;
   
   while(*cmd) {
-  
     // === extract one separated command
-
     // skip spaces
     while(isspace((c=*cmd))) ++cmd;
     // skip |
     while((c=*cmd) == '|' && c) ++cmd;
-    
     //printf("...>%s<\n", cmd);
 
     // = extract program name
@@ -841,7 +844,8 @@ int wsystem(char* cmd) {
     // done?
     //    if (!*line) return 0;
 
-    // find
+    // = find command fun
+    // TODO: move to function
     n= cmdnames;
     f= (cmdfun*)commands;
     while(*n && *f) {
@@ -850,24 +854,22 @@ int wsystem(char* cmd) {
       ++n; ++f;
     }
 
+    // TODO: how to handle error stderr?
     printf("%%Error.system: not found >%s< (%s)\n  %p %p %d %d\n",
 	   line, cmd, *n, *f, !*n, !*f);
-    return -1;
+    return NULL;
 
   found:
-
     #ifdef SHELLINFO
     printf("\t[%s: ", line);
     #endif
 
     // = Extract arguments (how about intial)
-
     p= line;
     // skip spaces
     while(isspace(*cmd)) ++cmd;
     // copy rest of arguments
     while((c=*cmd) && c != '|') *p++= c,++cmd;
-
     // remove trailing spaces
     while(isspace(p[-1]) && p>line) --p;
     *p= 0;
@@ -879,9 +881,9 @@ int wsystem(char* cmd) {
     arr[++i]= state= (*f)(0, line);
 
     if (!state) {
-      // ABORT!
+      // TODO: ABORT stderr?
       printf("Command %s init error gave NULL!\n", cmd);
-      return -1;
+      return NULL;
     }
 
     #ifdef SHELLINFO
@@ -901,11 +903,30 @@ int wsystem(char* cmd) {
 
   //putchar('\n'); for(int i=0; i<16; ++i) printf("%2d: %p\n", i, train[i]);
 
-  r= wsystrain(train);
-  shellcleanup(train, i, cleanbits);
+  *pi= i; *bitsout= traincleanbits;
+  return train;
+}
 
+
+int wsystem(char* command) {
+  char* cmd= strdup(command); // for dstructive chopping
+  char i;
+  unsigned int cleanbits= 0;
+  cmdtrain* train= wsysparse(cmd, &i, &cleanbits);
+  int r;
+  
+  free(cmd);
+
+  // TODO: what error is appropriate?
+  if (!train) return -1;
+    
+  r= wrunsystrain(train);
+
+  shellcleanup(train, i, cleanbits);
   return r;
 }
+
+
 
 #define system wsystem
 
