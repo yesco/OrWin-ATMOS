@@ -90,11 +90,11 @@ void dumpheap(char all) {
 
 void* app_heap(APP* app, char* line) {
   if (!app) {
-    window(2, 16, 32, 10, yellow, black);
+    window(3, 17, 32, 10, yellow, black);
     wstatus(-1, "Heap Viewer");
     return calloc(sizeof(APP), 1);
   } else if (app<EVENTS) return 0;
-  
+
   // check if any change
   if (last_heaporg==_heaporg &&
       last_heapptr==_heapptr &&

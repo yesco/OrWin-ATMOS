@@ -601,7 +601,7 @@ void* ps(simplestate* state, char* line) {
   w= 0;
   p= state->i - 1;
   while(p < nwin+1) {
-    w= win + p;
+    w= wins + p;
     if (w->status) break;
     w= 0; ++p;
   }
@@ -610,20 +610,21 @@ void* ps(simplestate* state, char* line) {
   if (!w) return EOS;
   
   // A single assembly loop calculates both values simultaneously
-  packed_result = udiv32by16r16(w->ticks, 60*CLOCKS_PER_SEC);
+  packed_result = udiv32by16r16(w->ticks/CLOCKS_PER_SEC, 60);
 
   // Extract the pieces from the 32-bit packed register
-  s = (unsigned int)(packed_result & 0xFFFF);
-  m = (unsigned int)(packed_result >> 16);
+  m = (unsigned int)(packed_result & 0xFFFF);
+  s = (unsigned int)(packed_result >> 16);
 
-  snprintf(ln, sizeof(ln), "42%02d %2d %2d%4d %.3s%3d:%02d %s",
-	   p,
+  snprintf(ln, sizeof(ln), "42%02d %2d %2d%4d %.3s%3d:%02d %s"
+	   , p
 
-	   w->cpu, w->nalloc, // == w->mem,
-	   -1, //w->abytes,
-	   wstate(w->ret),
-	   s, m,
-	   wname(p) );
+	   , w->cpu, w->nalloc // == w->mem,
+	   , -1 //w->abytes,
+	   , wstate(w->ret)
+	   , m, s
+	   , wname(p)
+	   );
   return strdup(ln);
   (void)line;
 }

@@ -212,7 +212,7 @@ void fill(char x, char y, char w, char h, char c) {
 
 char nwin= 0, wfocus= 0, wcur= 0, wnext, *wret;
 
-Window win[WIN_MAX]= {
+Window wins[WIN_MAX]= {
   { SCREENCOLS-15, 3, 14, SCREENROWS-3,
     0, 0,
     NULL,
@@ -222,11 +222,11 @@ Window win[WIN_MAX]= {
     0, 0}
 };
 
-Window* winp= 0;
+Window* winp= wins;
 
 
 char* wname(char winid) {
-  void* fun= win[winid].fun;
+  void* fun= wins[winid].fun;
   struct apps* p= apps;
   
   while(p && (p->fun != fun)) ++p;
@@ -239,6 +239,11 @@ char* wname(char winid) {
 ////////////////////////////////////////////////////////////
 // Heap stuff
 
+#undef malloc
+#undef calloc
+#undef realloc
+#undef free
+
 void* walloc(size_t z) {
   ++winp->nalloc;
   return malloc(z);
@@ -250,7 +255,7 @@ void* wcalloc(size_t z, size_t n) {
 }
 
 void* wrealloc(void* p, size_t z) {
-  if (z && !p) winp->abytes++;
+  if (z && !p) ++winp->nalloc;
   return realloc(p, z);
 }
 
@@ -450,7 +455,7 @@ char wputc(char c) {
 
   case KEYRIGHT: winp->p++; break; // will reach column++
   case KEYDOWN:  if (++winp->r >= winp->h) winp->r= 0;          break;
-  case KEYUP:    if (winp->r-- >= winp->h) winp->r= win->h-1;   break;
+  case KEYUP:    if (winp->r-- >= winp->h) winp->r= winp->h-1;   break;
 
   // TODO: repeat char
   // vt100:     char ESC [ 70 b                   printf "=\e[79b\n"
@@ -588,7 +593,7 @@ void wstatus(signed char c, char* s) {
 	     
 // (un)decorate wfocus
 void wdecorate() {
-  Window* w= win+wfocus;
+  Window* w= wins + wfocus;
   // Invert header (make it black if focused)
   char* p= w->y * SCREENCOLS + w->x + TEXTSCREEN - SCREENCOLS -2;
   char i;
@@ -617,7 +622,7 @@ void setfocus(signed char new) {
   if (new > nwin) wfocus= 1;
   if (new <= 0)   wfocus= nwin;
   if (n++ > WIN_MAX) return; // make sure not hang!
-  if (!win[wfocus].status) { new= wfocus+1; goto next; }
+  if (!wins[wfocus].status) { new= wfocus+1; goto next; }
 
   if (wfocus) wdecorate(); // show active
 }
@@ -627,7 +632,7 @@ void winerase(Window* w) {
 }
 
 void winkill() {
-  Window* w= win+wfocus;
+  Window* w= wins + wfocus;
   w->status= 0;
   free(w->state);
   //TODO: lfree(w->ret);
@@ -655,7 +660,7 @@ void windraw(Window* w) {
 
 void setwin(char w) {
   // TODO: set curwin?
-  winp= win+w;
+  winp= wins + w;
   wcur= w;
 }
 
@@ -835,7 +840,7 @@ char wkbhit(char win) {
 
     case 13 :
     case 'R': apprun(); break; // List
-    case 'I': start(app_heap); break; 
+    case 'I': newwin(); start(app_heap); break; 
     case 'S':
     case 'T': { // Shell/Terminal
       newwin();
@@ -1063,7 +1068,7 @@ void randwin(char* title, app main) {
 //   (because rewrite doesnpt restore fb bg only r c)
 #ifdef MOWIN
 void mowin(signed char dx, signed char dy, signed char dw, signed char dh) {
-  Window* wf= win+wfocus;
+  Window* wf= wins + wfocus;
   char x= wf->x, y= wf->y, w= wf->w, h= wf->h, b= wf->bg, f= wf->fg;
 
 #ifdef OPTMOV
@@ -1161,13 +1166,13 @@ void mowin(signed char dx, signed char dy, signed char dw, signed char dh) {
     if (overlap(wf->x+dx, wf->y+dy, wf->w+dw, wf->h+dh)) {
       windraw(wf); return;
     } else {
-      char iw= winp-win;
+      char iw= winp - wins;
     
       wf->x+= dx; wf->y+= dy; wf->w+= dw; wf->h+= dh;
       i= wf->c; j= wf->r;
 
       // Pretend to be in wfocus
-      setwin(wf-win);
+      setwin(wf - wins);
       updatewinptr();
 
       // Draw new pusition + text
@@ -1195,6 +1200,9 @@ void mowin(signed char dx, signed char dy, signed char dw, signed char dh) {
 
 //////////////////////////////////////////////////////////
 // SCHEDULER!
+
+size_t _heapmemavail(void);
+size_t _heapmaxavail(void);
 
 void scheduler() {
   static clock_t latency, lastlatency;
@@ -1231,8 +1239,9 @@ void scheduler() {
       //cputc('!');
       run= clock();
       winp->ret= wret= (char*)(*(app)winp->fun)((int)winp->state, (char*)(wkey + 0x100));
-      win->ticks+= run= clock()-run;
-      win->cpu= run*rounds;
+      //      winp->ticks+= (run= clock()-run+1);
+      winp->ticks+= run= clock()-run;
+      winp->cpu= run*rounds;
       runsum+= (run<<3) + 1;
       ++runprocs;
       
@@ -1248,19 +1257,30 @@ void scheduler() {
       ++rounds;
       timesum+= (latency<<3) +1;
       if (now-lastupdate > 100) {
-	#undef gotoxy
-	gotoxy(11, 0);
-	cprintf("%3u#%3u%4d/s %2u%%%12c"
-		, latency, rounds
-		, (int)(runprocs*100L/(now-lastupdate))
-		, (int)(runsum*100L/timesum)
-		, ' '
-		);
-		
+	// No display if was in menu
+	if (latency < 100) {
+          #undef gotoxy
+	  gotoxy(11, 0);
+	  cprintf("%2u#%3u%4d/s %2u%%"
+		  "%4d/%4d"
+		  "%4c"
+
+		  , latency, rounds
+		  , (int)(runprocs*100L/(now-lastupdate))
+		  , (int)(runsum*100L/timesum)
+		  
+		  , _heapmaxavail(), _heapmemavail()
+		  
+		  , ' '
+		  );
+	}
+	
 	lastupdate= now;
 	rounds= runprocs= 0;
+
 	// Rolling average (?)
 	if (timesum > 4096) runsum/=4,timesum/=4;
+
       }
       wcur= nwin;
     }
@@ -1278,8 +1298,9 @@ void scheduler() {
       *SCREENXY(39-wcur,0)= '0'+wcur;
       run= clock();
       winp->ret= wret= (char*)(*(app)winp->fun)((int)winp->state, 0);
-      win->ticks+= run= clock()-run;
-      win->cpu= run*rounds; // TODO: bad estimate
+      //      winp->ticks+= (run= clock()-run+1);
+      winp->ticks+= run= clock()-run;
+      winp->cpu= run*rounds; // TODO: bad estimate
       runsum+= (run<<3) + 1;
       ++runprocs;
     }
@@ -1353,7 +1374,7 @@ int main() {
 
   updatewinptr();
   
-  win[0].status= -1;
+  wins[0].status= -1;
 
 // TODO: RWRITE TO BE APPS
   

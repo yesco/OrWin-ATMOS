@@ -128,15 +128,16 @@ extern void wscreensize(char* w, char* h);
 
 // Memory Allocations
 
-#ifdef TRACKALLOC
+extern void* walloc(size_t z);
+extern void* wcalloc(size_t z, size_t n);
+extern void* wrealloc(void* p, size_t z);
+extern void  wfree(void* p);
+
 
 #define malloc walloc
 #define calloc wcalloc
 #define realloc wrealloc
 #define free wfree
-
-#endif // TRACKALLOC
-
 
 ////////////////////////////////////////////////////////////
 // Internals - Don't use unless have to (ps)
@@ -170,7 +171,7 @@ typedef struct Window {
 
 } Window;
 
-extern Window win[WIN_MAX];
+extern Window wins[WIN_MAX];
 
 extern char wcur;
 extern char wfocus;
