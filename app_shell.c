@@ -8,6 +8,7 @@
 typedef struct APP {
   char*        line;
   cmdtrain*    train;
+  cmdtrain*    loco;
   unsigned int cleanbits;
   char         n;
 } APP;
@@ -24,13 +25,18 @@ void run(APP* app, char* cmd) {
   prompt(); puts(cmd); // we own the string!
   putchar(black);
   
+  app->line= EOS;
   app->train= wsysparse(cmd, &app->n, &app->cleanbits);
+  // move past NULL
+  app->loco= app->train + 1;
   free(cmd);
 
+#if 0
   // TODO: remove
-  wrunsystrain(app->train);
+  wrunsystrain(app->loco);
   shellcleanup(app->train, app->n, app->cleanbits);
   app->train= 0;
+#endif
 }
 
 void* app_shell(APP* app, char* line) {
@@ -110,20 +116,36 @@ void* app_shell(APP* app, char* line) {
 
     return app;
 
-  } else if (line <= EVENTS)
-    return WAITKEY;
+  } //else if (line <= EVENTS)
+  //return WAITKEY;
 
   // TODO: do we have a new line!
   //   need to save?
   
   // running command
   if (app->train) {
-    app->line= wtrainstep(&app->train, app->line);
+    //  14s wsystem()
+    // ~22s one step per call here
+    char n= 1; // ~22s
+    //char n= 10; // ~16s 
+    //char n= 100; // ~14w
+
+    // TODO: make it run 2-4 ms, then YIELD
+    // TODO: since it's in FOREGROUND, should get MORE cycles!
+
+    do {
+      app->line= wtrainstep(&app->loco, app->line);
+    } while(--n && app->line != EOS);
+
+    // TODO: also crashes if run a second time+
+    //   but works w several at the ssame time!
 
     // finshed?
     if (app->line == EOS) {
+      //putz("[EOS]");
       shellcleanup(app->train, app->n, app->cleanbits);
       free(app->train); app->train= 0;
+      //putz("[/EOS]");
       return EOS;
     }
 
