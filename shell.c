@@ -743,6 +743,15 @@ void* commands[]= {
 
 ////////////////////////////////////////////////////////////
 
+char* wtrainstep(cmdtrain** train, char* line) {
+  cmdfun *fp;
+  
+  if (!(fp=**train)) return EOS;
+  line= (*fp)(fp, line);
+  if (line) ++*train; else --*train;
+
+  return line;
+}
 
 int wrunsystrain(cmdtrain* train) {
   cmdfun *fp;
@@ -751,26 +760,37 @@ int wrunsystrain(cmdtrain* train) {
 
   ++train; // skip initial 0
 
+#ifndef SHELLTRACE
+  // Beatifully simple!
+  
+#if 1
+  do {
+    line= wtrainstep(&train, line);
+  } while(line!=EOS);
+#else
   while((fp=*train)) {
+    line= (*fp)(fp, line);
+    if (line) ++train; else --train;
+  }    
+#endif
 
-    #ifdef SHELLTRACE
+#else
+
+  // SHELLTRACE
+  while((fp=*train)) {
     printf("\t[%d \"%s\" %p]\n", (int)(long)(train-origtrain),
 	   !line? "(NULL)": line==EOS? "*EOS*": line, fp);
-    #endif
 
     line= (*fp)(fp, line);
 
-    #ifdef SHELLTRACE
     printf("\t%p >>>", line); fflush(stdout); shprint(line);
-
-    #endif
 
     if (line) ++train; else --train;
   }    
 
-  #ifdef SHELLTRACE
   printf("\t[**SYSTRAIN**: DONE]\n");
-  #endif
+#endif // SHELLRTRACE
+
   
   // TODO: address of last program
   return 0;
