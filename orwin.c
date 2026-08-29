@@ -4,9 +4,9 @@
 #include <conio.h>
 #include <ctype.h>
 
-#include <assert.h>
-// LOL, doesn/t suppress  thew warning, lol
-//#define STATIC_ASSERT(COND, MSG) typedef char static_assertion_##MSG[(COND) ? 1 : -1]
+//#include <assert.h>
+
+//#ifdef DEBUGKEY
 
 /* Sizes
 
@@ -33,26 +33,15 @@ TAP  : 30241 (- 30241 9508 8412 1797 6208 428) 3888
 #define WMAX ((40-NHORIZWIN*5) / NHORIZWIN -1)
 #define HMAX ((28-NVERTWIN*4) / NVERTWIN)
 
+
+
 // TODO: magenta on blue - not sood good
 #define IS_BAD_CONTRAST(fg, bg) ((0xB1 >> ((fg) ^ (bg))) & 1)
 
 #include "orwin.h"
 
-#define HSPARKS "\x20\xe0\xe1\xe2\xe3\xe4\xe5\xe6\xdf"
-
-// Maybe can be used to draw graphs
-// TODO: or arrows (remember needs ALTMODE prefix)
-#define GRAPHX          "\xe7"
-#define GRAPHHORIZTICKS "\xe8"
-#define GRAPHCHROSS     "\xe9"
-#define GRAPHVERTICKS   "\xea"
-
-#define VSPARKS "\x20\xeb\xec\xed\xee\xef\xdf"
-
 //  "\0\0\0\0\0\x3f\x3f\x3f" \ // TODO: already 32+3*16
-
 //  "\0\0\0\x3f\x3f\x3f\x3f\x3f" \ // TODO: 96-3
-
 
 #define SPARKDEFS \
   "\0\0\0\0\0\0\0\x3f" \
@@ -76,10 +65,7 @@ TAP  : 30241 (- 30241 9508 8412 1797 6208 428) 3888
 
 
   
-// (- 13701 12410) = 1291 bytes code for mowin :-(
-// TODO: RESIZE crashes... 
 #define MOWIN 
-// (- 14332 12410) = 1922, (- 1922 1291) = 631 bytes more
 #define OPTMOV
 
 // optimized version
@@ -87,8 +73,6 @@ TAP  : 30241 (- 30241 9508 8412 1797 6208 428) 3888
 
 // TODO: wclreol doesn't know position
 #define OPTPUTZ
-
-#define MAXPUTZ 128
 
 // TODO: see apprun.c !
 
@@ -519,6 +503,7 @@ char wputc(char c) {
   return c;
 }
 
+
 // TODO: is it bettter than write optimized?
 
 // TODO: remove all!
@@ -534,11 +519,11 @@ void wputz(char* s) {
 // Clever but old, should be using write!
 
 void wputz(char* s) {
-  char n, c, r, *p, k, w= winp->w, h= winp->h;
+  char c, r, *p, k, w= winp->w, h= winp->h;
   unsigned int nputc= winp->nputc;
 
  restart:
-  n= MAXPUTZ; c= winp->c, r= winp->r, p= winp->p - 1;
+  c= winp->c, r= winp->r, p= winp->p - 1;
   --s;
 
   while((k= *++s)) {
@@ -581,6 +566,15 @@ void wputi(int i) {
   wputs(s);
 }
 
+//TODO: use instead of printf?
+//
+//void cput1h(char x) { x&= 0xf; cputc(x + (x<10? '0': 'A'-10)); }
+//void cput2h(char x) { cput1h(x>>4); cput1h(x); }
+//void cput4h(unsigned int x) { cput2h(x>>8); cput2h(x&0xff); }
+//void cputd(unsigned int d) { if (d>=10) cputd(d/10); cputc('0'+(d % 10)); }
+//
+//void cspc() { cputc(' '); }
+
 void wstatus(signed char c, char* s) {
   char* p= winp->y * SCREENCOLS+ winp->x + c + TEXTSCREEN - SCREENCOLS;
   char w= winp->w + 2 + 1;
@@ -591,7 +585,7 @@ void wstatus(signed char c, char* s) {
   p[w-1]= ('0' | 128) + nwin;
 }
 	     
-// (un)decorate wfocus
+// (un)decorate wfocus (toggle hi-bit)
 void wdecorate() {
   Window* w= wins + wfocus;
   // Invert header (make it black if focused)
@@ -603,9 +597,13 @@ void wdecorate() {
   for(i= w->w+4; i--; ) p[i]^= 128;
 }
 
-char wprev= 1;
+void setwin(char w) {
+  // TODO: set curwin?
+  winp= wins + w;
+  wcur= w;
+}
 
-void setwin(char);
+char wprev= 1;
 
 void setfocus(signed char new) {
   char n= 0;
@@ -627,17 +625,29 @@ void setfocus(signed char new) {
   if (wfocus) wdecorate(); // show active
 }
 
+char newwin() {
+  // TODO: reuse empty entries
+  if (nwin==WIN_MAX) return 0;
+  setwin(++nwin);
+  setfocus(nwin);
+}
+
+
+
 void winerase(Window* w) {
   fill(w->x-2, w->y-1, w->w+5, w->h+3, 126);
 }
 
 void winkill() {
   Window* w= wins + wfocus;
-  w->status= 0;
+
   free(w->state);
   //TODO: lfree(w->ret);
+
   winerase(w);
-  setfocus(wfocus);
+  bzero(w, sizeof(*w));
+  
+  setfocus(wfocus); // goes next
 }
 
 // returns old state
@@ -658,51 +668,42 @@ void windraw(Window* w) {
   fill(w->x + w->w +1, w->y, 1, w->h, white);
 }
 
-void setwin(char w) {
-  // TODO: set curwin?
-  winp= wins + w;
-  wcur= w;
-}
-
-char newwin() {
-  // TODO: reuse empty entries
-  if (nwin==WIN_MAX) return 0;
-  setwin(++nwin);
-  setfocus(nwin);
-}
 
 
+// Statistics for IDLE %CPU %MEM
 
 static clock_t latency, lastlatency;
 static clock_t run, runsum, runprocs, timesum;
 static clock_t rounds, lastupdate;
 
-// 195 B saved
+// Run and accumulate time/ticks/statistics
 void dorun(char* line) {
   run= clock();
+
   winp->ret= wret= (char*)(*(app)winp->fun)((int)winp->state, line);
-  //      winp->ticks+= (run= clock()-run+1);
+
   winp->ticks+= run= clock()-run;
   winp->cpu= run*rounds;
   runsum+= (run<<3) + 1;
   ++runprocs;
 }
 
-char startline(app fun, char* line) {
+// start/exec process w parameters (line) in current window
+//
+// TODO: possibly rename "exec".
+// 
+void startline(app fun, char* line) {
   winp->status= 1;
 
-  // TODO: glue it together? (like the train)
   winp->fun=   (void*)fun;
-  //  winp->state= (void*)fun(0, line); // TODO: arg (template)
-
   dorun(line);
+  
+  // TODO: glue (fun,state) together? (like the train)
   winp->state= winp->ret;
   winp->ret= 0;
-  
-  return wcur;
 }
 
-char start(app fun) { return startline(fun, NULL); }
+void start(app fun) { startline(fun, 0); }
 
 
 // This used to be conservative requring gray in bigger area around
@@ -730,16 +731,23 @@ char overlap(char x, char y, char w, char h) {
   return 0;
 }
 
-// Open a window already created
+
+// Draw a window in current process/window slot
+//
+// If draw before start()/startline() then it
+// overrides the default that the app may use
+// by it's own call to window()!
 //
 // X  Y  == -1 (255): automatic placement
 // FG BG == -1 (255): automatic "good contrast" colors
-// W  == -1: TODO: automatic size
+// W     == -1: TODO: automatic size
 //
 // Note: (can only be called once)
 
-// TODO: if given exact coordinates, doesn't check...
-
+// TODO: currently, if given exact coordinates, doesn't check...
+//   possibly, it could save what's under and not allow switching
+//   until have free area == becomes modal, or can be minimized
+//
 char window(char x, char y, char w, char h, char bg, char fg) {
   char o;
 
@@ -800,15 +808,18 @@ char wkey= 0;
 
 #undef kbhit
 
+// Remapping arrow keys w FUNCT and CTRL
+// 
 char mygetc() {
-  char o= cgetc(), k= *(char*)0x209, s= *(char*)0x208, c= o;
+  // 209: Keyshifts, s= ScanCodes
+  char orig= cgetc(), k= *(char*)0x209, s= *(char*)0x208, c= orig;
 
   // ORIC ATMOS: ROM magical shift key $209
-  // $38 - no key
-  // $a2 - CTRL key
-  // $a4 - SHIFT left
-  // $a5 - FUNCT key
-  // $a7 - SHIFT right
+  #define NOKEY     0x38
+  #define CTRLKEY   0xa2
+  #define LSHIFTKEY 0xa4
+  #define FUNCTKEY  0xa5
+  #define RSHIFTKEY 0xa7
 
   // remap ARROW KEYS: 8-11 to 28-31
   if (s==0xac || s==0xbc || s==0xb4 || s==0x9c) { // arrow key codes
@@ -826,13 +837,16 @@ char mygetc() {
 
   // Set hi-bit if alt key
   if (k==0xa5) c|= 128;
-  sprintf(SCREENXY(SCREENCOLS-3*4+1-2,SCREENROWS-1), "[%02x %02x %02x %02x]", c, o, k, s);
+
+  #ifdef DEBUGKEY
+  sprintf(SCREENXY(SCREENCOLS-3*4+1-2,SCREENROWS-1),
+	  "[%02x %02x %02x %02x]", c, orig, k, s);
+  #endif
 
   return c;
 }
 
-// non-blocking
-// (win=0 to not yield here as its called fom yield)
+// non-blocking test if key hit for the given winnumber
 char wkbhit(char win) {
   char c;
   
@@ -840,14 +854,11 @@ char wkbhit(char win) {
   if (wkey && wfocus==win) return wkey;
   if (!kbhit()) return 0;
   
-  // TODO: hmm, hsould be using getc?
   c= mygetc();
 
-  // FUNCT || CTRL & ARROWKEY
+  // == FUNCT || CTRL & ARROWKEYS!
   if (c&128) {
-    //cprintf("  #%d '%c' ", c, c&0x7f);
-
-    // Capture FUNC keys Window Keys
+    // Capture FUNCT keys Window Keys
     c^= 128;
     switch((c= toupper(c))) {
     case ' ':
@@ -1479,24 +1490,3 @@ int main() {
   return 0;
 }
 
-
-void cput1h(char x) { x&= 0xf; cputc(x + (x<10? '0': 'A'-10)); }
-void cput2h(char x) { cput1h(x>>4); cput1h(x); }
-void cput4h(unsigned int x) { cput2h(x>>8); cput2h(x&0xff); }
-
-void cputd(unsigned int d) { if (d>=10) cputd(d/10); cputc('0'+(d % 10)); }
-
-void cspc() { cputc(' '); }
-
-
-// returns
-char* printbuf(char* j) {
-  char *r= (char*)*(unsigned int*)j;;
-  cspc();
-  cputd(j[2]);
-  cputc('-');
-  cputd((unsigned int)r);
-  cputc(':');
-  cputd((((unsigned int)j[3])<<8) | j[4]);
-  return r;
-}

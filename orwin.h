@@ -17,6 +17,8 @@
 
 #define BG      16
 
+
+
 #define NL       "\n"   // 10 \x0a
 #define NLPURE   "\x0b" // 11 \x0b
 
@@ -48,6 +50,18 @@
 #define BGMAGENTA  "\x15"
 #define BGCYAN     "\x16"
 #define BGWHITE    "\x17"
+
+
+#define HSPARKS "\x20\xe0\xe1\xe2\xe3\xe4\xe5\xe6\xdf"
+
+// Maybe can be used to draw graphs
+// TODO: or arrows (remember needs ALTMODE prefix)
+#define GRAPHX          "\xe7"
+#define GRAPHHORIZTICKS "\xe8"
+#define GRAPHCHROSS     "\xe9"
+#define GRAPHVERTICKS   "\xea"
+
+#define VSPARKS "\x20\xeb\xec\xed\xee\xef\xdf"
 
 
 extern char wputc(char);

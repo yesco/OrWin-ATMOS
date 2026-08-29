@@ -65,7 +65,67 @@ Terminal   : FUNCT-T
 Info       : FUNCT-I
 ```
 
+## OrWin Key Code getc() remap
+
+OrWin uses CTRL and FUNCT in combination with the ARROW keys.
+It seems newer version of CC65 has mapped FUNCT (ALT) to the
+high-bit, which is a nice addition.
+
+However, the default ORIC ATMOS BASIC ROM (used by CC65),
+is still mapping ARROW keys to ASCII: 8-11 which means
+you can distinguish CTRL-H, CTRL-I, CTRL-J, CTRL-K from
+the arrow keys.
+
+OrWin maps keys as follows:
+
+```
+CTRL-A ... CTRL-Z : ASCII 1-26
+RETURN            : ASCII 13
+KEYLEFT           : 28
+KEYRIGHT          : 29
+KEYDOWN           : 30
+KEYUP             : 31
+
+A                 : 65
+...
+a                 : 97
+...
+
+DEL               : ASCII 127
+
+> 128 ::: HI-BIT SET (typially FUNCT)
+
+FUNCT + SHIFT + A : 128+65 == 'A' | 128
+FUNCT + A         : 128+97 == 'a' | 128
+
+FUNCT + LEFTKEY   : 128+LEFTKEY == LEFTKEY | 128
+        ...
+
+In addition:
+
+CTRL + LEFTKEY    : 128+8 == CTRL+LEFTKEY-20, LOL
+       ...
+
+```
+
+Generally, the keys print printed (like plain ARROWKEYS)
+will move accordingly, like "normal ORIC", modulo bugs.
+
+
 ## OrWin terminal codes
+
+OrWin takes the Unix interpretation of most special
+ASCII control codes when printed, however, we *blend*
+them with the ink codes as they "fit"!
+
+You can simply use:
+```
+// single putchar calls
+putchar(green); putchar(white|BG); puts("Hello");
+
+// or more simply by concatentation gives speed:
+puts(GREEN BGWHITE "Hello!");
+```
 
 An OrWin window/terminal `putchar` the following codes:
 - `INK 0-7`: change ink color of text printed
@@ -77,19 +137,23 @@ An OrWin window/terminal `putchar` the following codes:
 - `CR CTRL-M (13)` - cursor to column 0
 - `CTRL-N (14)` - `clreol`
 - `CTRL-O (15)` - TODO: ???
-- `BG 16-23`: change background color
-- `ESC (27)` - TODO: ??
-- `KEYLEFT KEYRIGHT KEYDOWN KEYUP (28-31!)`
+- `BG 16-23` - change background color
+- `CTRL-X` - (TODO: CANcel: cancel/erase line?)
+- `CTRL-Y` - (TODO: EM: End of Medium: yank/paste buffer/repeat?)
+- `CTRL-Z` - (TODO: SUBstitute: useless padding) 
+- `ESC (27)` - TODO: quote next char, or VT100
+ - TODO: ??
+- `KEYLEFT KEYRIGHT KEYDOWN KEYUP (28-31!)` will move the cursor!
 - `DEL (127)` - rubout!
 
 **HIBIT SET:**
 - `0-7`: byte as is (inverted ink attribute)
-- `8`
-- `9`
-- `10`
+- `8`;
+- `9`:
+- `10`:
 - `11`
-- `12`
-- `13`
+- `12`: HOME: gotoxy(0,0);
+- `13`: CLNL: clreol(); nl();
 - `14`
 - `15`
 - `16-23`: byte as is (inverted paper atttribute)
@@ -102,6 +166,8 @@ An OrWin window/terminal `putchar` the following codes:
 - `30`
 - `31`
 - ALL OTHER PRINTABLE CHARS: byte as is (inverted)
+- `127`: INK 0: WHITE ink (attributte 0 but can
+'t be inside a C-string!)
 
 At newline, or line-wrap the next line is *cleared*.
 
