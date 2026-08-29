@@ -6,8 +6,10 @@
 #include "shell.c"
 
 typedef struct APP {
-  //char* line;
-  char dummy;
+  char*        line;
+  cmdtrain*    train;
+  unsigned int cleanbits;
+  char         n;
 } APP;
 
 void prompt() {
@@ -18,10 +20,17 @@ void prompt() {
   putchar(blue);
 }
 
-void run(char* line) {
-  prompt(); puts(line);
+void run(APP* app, char* cmd) {
+  prompt(); puts(cmd); // we own the string!
   putchar(black);
-  system(line);
+  
+  app->train= wsysparse(cmd, &app->n, &app->cleanbits);
+  free(cmd);
+
+  // TODO: remove
+  wrunsystrain(app->train);
+  shellcleanup(app->train, app->n, app->cleanbits);
+  app->train= 0;
 }
 
 void* app_shell(APP* app, char* line) {
@@ -97,19 +106,36 @@ void* app_shell(APP* app, char* line) {
     //    window(-1, -1, 20-6, 10, green, black);
     wstatus(-1, line? line: "Shell");
 
-    run(line);
+    run(app, strdup(line));
 
     return app;
 
   } else if (line <= EVENTS)
     return WAITKEY;
 
-  // have a new line!
-
-  run(line);
-  lfree(line);
+  // TODO: do we have a new line!
+  //   need to save?
   
+  // running command
+  if (app->train) {
+    app->line= wtrainstep(&app->train, app->line);
+
+    // finshed?
+    if (app->line == EOS) {
+      shellcleanup(app->train, app->n, app->cleanbits);
+      free(app->train); app->train= 0;
+      return EOS;
+    }
+
+    // TODO: this isn't correct, as we may want to receive the
+    //   output lines... LOL
+
+    // CALLAGAIN
+    return 0;
+  }
+
   prompt();
+  // TODO: read from script/stdin"
 
   return WAITKEY;
 }
