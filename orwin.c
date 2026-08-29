@@ -229,12 +229,12 @@ char* wname(char winid) {
 #undef free
 
 void* walloc(size_t z) {
-  ++winp->nalloc;
+  if (z) ++winp->nalloc;
   return malloc(z);
 }
 
 void* wcalloc(size_t z, size_t n) {
-  ++winp->nalloc;
+  if (z && n) ++winp->nalloc;
   return calloc(z, n);
 }
 
@@ -244,7 +244,7 @@ void* wrealloc(void* p, size_t z) {
 }
 
 void wfree(void* p) {
-  --winp->nalloc;
+  if (p) --winp->nalloc;
   free(p);
 }
 

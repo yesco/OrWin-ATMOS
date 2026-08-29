@@ -72,21 +72,72 @@ void* memdup(void* p, unsigned int bytes) {
 #endif
 
 
+////////////////////////////////////////////////////////////
+// line reuse
+
+#if 0
+
+// 
+
+// 14s iota ... 
+
 char* lfree(char* line) {
-  // TODO: keep a pool? reuse!
-  if (line && line!=EOS && line!=CLEANUP) free(line);
-  return NULL;
+  if (line > EVENTS) free(line);
+  return 0;
 }
 
-char* lstrcpy(char* line, char* s) {
-  if (line && s && strlen(s) <= strlen(line))
-    return strcpy(line, s);
-  lfree(line);
+char* lstrdup(char* s) {
   return strdup(s);
 }
 
-#define lstrdup strdup
+#else
 
+// 31710 bytes using clever reuse
+// 31556 bytes - just wrappers
+// (- 31710 31556) = 154 bytes (/ 14 13.0) = 8% faster???
+
+char relen=0, *reuse= 0;
+
+// 13s iota ... ONLY SAVES 1s? barely worth the effort!!!
+// 10 should be according to CHEAPEST: in app_shell.c
+
+// save s if bigger
+// Always return 0, reassign var you passed in!
+char* lfree(char* line) {
+  char len;
+
+  if (line <= EVENTS) return 0;
+  
+  len= strlen(line);
+  if (!reuse || len > relen) {
+    // it's bigger
+    free(reuse);
+    reuse= line; relen= len;
+  }
+  return 0;
+}
+
+// copy s
+// TODO: make it taken len!
+char* lstrdup(char* s) {
+  char slen= strlen(s), *line;
+  if (slen <= relen && relen) {
+    // reuse
+    line= reuse; reuse= relen= 0;
+    return strcpy(line, s);
+  } else {
+    // need bigger
+    free(reuse); reuse= relen= 0;
+    //printf("[ALLOCATE]"); // no bug?
+    return strdup(s);
+  }
+}
+
+#endif
+
+
+////////////////////////////////////////////////////////////
+// printing
 
 void shprint(char* line) {
   char lastc;
@@ -104,11 +155,9 @@ void shprint(char* line) {
   }
 }
 
-
 ///////////////////////////////////////////////////////////
+// unix "commands"
 
-
-// generate one value
 void* pwd(simplestate* state, char* line) {
   if (!state) return SIMPLEALLOC(pwd);
 
@@ -126,11 +175,8 @@ void* grep(pstate* state, char* line) {
   // pass-through backtracking
   if (!line || line==EOS) return line;
 
-  // match one line
-  //  return strstr(line, state->s)? line: lfree(line);
   return strstr(line, state->s)? line: lfree(line);
 }
-
 
 #ifdef FAKE
 // fake file
@@ -160,6 +206,7 @@ typedef struct filestate {
 void* cat(filestate* state, char* line) {
   char* ln= NULL;
   size_t sz= 0;
+
   if (!state) {
     state= STALLOC(filestate, cat);
     if (!state) return NULL;
@@ -174,7 +221,6 @@ void* cat(filestate* state, char* line) {
     if (state->fil) fclose(state->fil);
     return NULL;
   }
-    
 
   lfree(line);
 
@@ -187,7 +233,7 @@ void* cat(filestate* state, char* line) {
   if (EOF==getline(&ln, &sz, state->fil)) {
 #endif
     //printf("==eof==\n");
-    free(ln);
+    lfree(ln);
     fclose(state->fil); state->fil= NULL;
     return EOS;
   } else {
@@ -231,7 +277,6 @@ void* wc(wcstate* state, char* line) {
 
 // ============================================================================
 // ls
-
 
 #ifndef NOSTACK
 
@@ -429,6 +474,11 @@ void* ls(lsstate* state, char* line) {
 
 
 ///////////////////////////////////////////////////
+// line space delimited parameter choppers
+// If none: returns the DeFauLT value!
+//
+// NOTE: they modify the incoming line
+// NOTE: if you need to keep the string do strdup!
 
 char* nextStr(char** line, char* dflt) {
   char *r, *p= *line;
@@ -465,7 +515,6 @@ typedef struct countstate {
   intptr_t d; // dual use
 } countstate;
 
-
 void* iota(countstate* state, char* line) {
   if (!state) {
       state = STALLOC(countstate, iota);
@@ -480,16 +529,16 @@ void* iota(countstate* state, char* line) {
   lfree(line);
   if ((state->d > 0 && state->n <= state->e) ||
       (state->d < 0 && state->n >= state->e)) {
-    line= calloc(16,1);
-    sprintf(line, "%d", state->n);
+    char s[10];
+    // TODO: use returned length:
+    sprintf(s, "%d", state->n);
     state->n+= state->d;
-    return line;
+    return lstrdup(s);
   }
 
   return EOS;
 }
         
-
 void* head(countstate* state, char* line) {
   if (!state) {
     state = STALLOC(countstate, head);
@@ -511,7 +560,6 @@ void* head(countstate* state, char* line) {
   lfree(line);
   return EOS;
 }
-
 
 void* tail(countstate* state, char* line) {
   unsigned int start;
@@ -625,7 +673,11 @@ void* ps(simplestate* state, char* line) {
 	   , m, s
 	   , wname(p)
 	   );
-  return strdup(ln);
+
+  // enable if disable shprint, lol
+  //puts(ln); return 0;
+    
+  return lstrdup(ln);
   (void)line;
 }
 
