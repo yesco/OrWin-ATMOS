@@ -671,13 +671,34 @@ char newwin() {
   setfocus(nwin);
 }
 
+
+
+static clock_t latency, lastlatency;
+static clock_t run, runsum, runprocs, timesum;
+static clock_t rounds, lastupdate;
+
+// 195 B saved
+void dorun(char* line) {
+  run= clock();
+  winp->ret= wret= (char*)(*(app)winp->fun)((int)winp->state, line);
+  //      winp->ticks+= (run= clock()-run+1);
+  winp->ticks+= run= clock()-run;
+  winp->cpu= run*rounds;
+  runsum+= (run<<3) + 1;
+  ++runprocs;
+}
+
 char startline(app fun, char* line) {
   winp->status= 1;
 
   // TODO: glue it together? (like the train)
   winp->fun=   (void*)fun;
-  winp->state= (void*)fun(0, line); // TODO: arg (template)
+  //  winp->state= (void*)fun(0, line); // TODO: arg (template)
 
+  dorun(line);
+  winp->state= winp->ret;
+  winp->ret= 0;
+  
   return wcur;
 }
 
@@ -1207,10 +1228,6 @@ size_t _heapmaxavail(void);
 unsigned int heapstart;
 
 void scheduler() {
-  static clock_t latency, lastlatency;
-  static clock_t run, runsum, runprocs, timesum;
-  static clock_t rounds, lastupdate;
-
   runprocs= rounds= timesum= runsum= 0;
   
   wdecorate();
@@ -1235,17 +1252,13 @@ void scheduler() {
 
       // TODO: this is duplicated code - merge!
       
+      // 32145
+
       // app can actually call kbhit() and getc()!
       setwin(wfocus);
 
       //cputc('!');
-      run= clock();
-      winp->ret= wret= (char*)(*(app)winp->fun)((int)winp->state, (char*)(wkey + 0x100));
-      //      winp->ticks+= (run= clock()-run+1);
-      winp->ticks+= run= clock()-run;
-      winp->cpu= run*rounds;
-      runsum+= (run<<3) + 1;
-      ++runprocs;
+      dorun((char*)(wkey + 0x100));
       
       wkey= 0;
       setwin(wnext);
@@ -1299,13 +1312,8 @@ void scheduler() {
       ///cputc('.');
       //cputc('0'+wcur);
       *SCREENXY(40-wcur,0)= '0'+wcur;
-      run= clock();
-      winp->ret= wret= (char*)(*(app)winp->fun)((int)winp->state, 0);
-      //      winp->ticks+= (run= clock()-run+1);
-      winp->ticks+= run= clock()-run;
-      winp->cpu= run*rounds; // TODO: bad estimate
-      runsum+= (run<<3) + 1;
-      ++runprocs;
+
+      dorun(0);
     }
 
     goto next;
