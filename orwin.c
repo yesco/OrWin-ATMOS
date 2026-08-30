@@ -576,7 +576,7 @@ void wstatus(signed char c, char* s) {
   char w= winp->w + 2 + 1;
   //char xor= winp->bg&7==7?0 :128; // if white back
   char xor= 128;
-  while(*s && w--) *p++= *s++ ^ xor;
+  while(*s && --w) *p++= *s++ ^ xor;
 
   p[w-1]= ('0' | 128) + nwin;
 }
