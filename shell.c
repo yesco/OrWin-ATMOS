@@ -21,8 +21,9 @@
 #include <stdio.h>
 
 // TODO: make it a printable string?
-#define EOS     ((char*)1)
 #define CLEANUP	((char*)0x4fe)
+
+#define EOS     ((char*)0x500)
 
 
 
@@ -802,6 +803,7 @@ int wrunsystrain(cmdtrain* train) {
   do {
     cmdfun *f= train[n];
     if (f) {
+      //' TODO: simplify - just send leanup to all!
       if (cleanbits & 1) {
         #ifdef SHELLINFO
 	printf("\t[**CLEANUP**: %d %p]\n", n, train[n]);

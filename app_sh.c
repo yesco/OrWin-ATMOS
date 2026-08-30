@@ -6,11 +6,15 @@
 #include "shell.c"
 
 typedef struct APP {
+  char*        origcmd;
+
+  // TODO: make it's own control struct runtrain
   char*        line;
   cmdtrain*    train;
-  cmdtrain*    loco;
-  unsigned int cleanbits;
   char         n;
+  unsigned int cleanbits;
+
+  cmdtrain*    loco;
 } APP;
 
 void prompt() {
@@ -22,21 +26,14 @@ void prompt() {
 }
 
 void run(APP* app, char* cmd) {
-  prompt(); puts(cmd); // we own the string!
+  prompt(); puts(cmd);
   putchar(black);
   
-  app->line= EOS;
   app->train= wsysparse(cmd, &app->n, &app->cleanbits);
-  // move past NULL
-  app->loco= app->train + 1;
-  free(cmd);
 
-#if 0
-  // TODO: remove
-  wrunsystrain(app->loco);
-  shellcleanup(app->train, app->n, app->cleanbits);
-  app->train= 0;
-#endif
+  // start: move past NULL
+  app->loco= app->train + 1;
+  app->line= EOS;
 }
 
 void* app_sh(APP* app, char* line) {
@@ -58,7 +55,7 @@ void* app_sh(APP* app, char* line) {
       //   ??? no savings!
       // 11s - reuse but no print (print: 2s)
 
-      line= "iota 1 1000|grep 7|terminal";
+      wins[wcur].args= line= strdup("iota 1 1000|grep 7|terminal");
 #else
 
 #if 0      
@@ -110,14 +107,26 @@ void* app_sh(APP* app, char* line) {
 
     // doesn/t do antyhing if already defined
     //    window(-1, -1, 20-6, 10, green, black);
+    // TODO: or is it a terminal? LOL
     wstatus(-1, line? line: "Shell");
 
-    run(app, strdup(line));
+    // may not need store!
+    // TODO: it's winp->args!!!!
+    app->origcmd= strdup(line);
+    run(app, line); // consumed!
 
     return app;
 
-  } //else if (line <= EVENTS)
-  //return WAITKEY;
+  } else if (line == CLEANUP) {
+    // TODO: currently leaks as no cleanup is sent!
+    free(app->origcmd); free(app->line); free(app->train);
+  }
+#if 0
+  else if (KEYEVENT(line))
+    ;
+  else if (line < EOS)
+    return WAITKEY;
+#endif
 
   // TODO: do we have a new line!
   //   need to save?
@@ -146,10 +155,8 @@ void* app_sh(APP* app, char* line) {
 
     // finshed?
     if (app->line == EOS) {
-      //putz("[EOS]");
       shellcleanup(app->train, app->n, app->cleanbits);
-      free(app->train); app->train= 0;
-      //putz("[/EOS]");
+      app->train= 0;
       return EOS;
     }
 
@@ -160,8 +167,19 @@ void* app_sh(APP* app, char* line) {
     return 0;
   }
 
+  if (!KEYEVENT(line)) return WAITKEY;
+  
+  if (app->origcmd) {
+    // we had command line -c argument
+    // RERUN on every keypress!
+    clrscr();
+    run(app, app->origcmd);
+    return 0;
+  }
+  
+  // script input
   prompt();
-  // TODO: read from script/stdin"
+  
 
   return WAITKEY;
 }

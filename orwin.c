@@ -637,6 +637,10 @@ void winerase(Window* w) {
 void winkill() {
   Window* w= wins + wfocus;
 
+  // TODO: make all safe
+  // dorun(CLEANUP);
+  
+  // merge state w ret+
   free(w->state);
   free(w->args);
   lfree(w->ret);

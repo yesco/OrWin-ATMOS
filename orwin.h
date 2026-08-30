@@ -138,22 +138,23 @@ extern void wscreensize(char* w, char* h);
 #define screensize wscreensize
 
 // Some from shell.c - merge!
-#define EOS     ((char*)1)
 #define RESIZE  ((char*)2)       // TODO: not sent yet
 #define IDLE    ((char*)3)
 #define TICK    ((char*)4)
 
 #define CLEANUP	((char*)0x4fe)
 
-#define KEYEVENT(line) ((*(char)(line>>8))==1)
+#define KEYEVENT(line) (1==((int)line)>>8)
 #define KEY(line) ((char)(unsigned int)line)
 
 // request by process
+// define 1-27? as exitcodes, or signal handlers?
 #define WAITKEY ((char*)0x100)
 #define SLEEP(seconds) ((char*)(0x200|((seconds)&0xff)))
 
 // in app: if (line <= EVENTS) return line;
-#define EVENTS  ((void*)0x4ff)
+#define EVENTS  ((void*)0x500)
+#define EOS     ((char*)0x500)
 
 // Memory Allocations
 
