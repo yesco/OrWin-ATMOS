@@ -150,10 +150,6 @@ typedef int (*app)();
   #define DKEY() 
 #endif
 
-
-// TODO: make my own interrupt timer!
-#define HITIME (*(volatile unsigned char*)0x305)
-
 // hi byte of timer at yield
 char wtime= 0;
 
@@ -642,7 +638,8 @@ void winkill() {
   Window* w= wins + wfocus;
 
   free(w->state);
-  //TODO: lfree(w->ret);
+  free(w->args);
+  lfree(w->ret);
 
   winerase(w);
   bzero(w, sizeof(*w));
@@ -680,6 +677,7 @@ static clock_t rounds, lastupdate;
 void dorun(char* line) {
   run= clock();
 
+  wtime= HITIME;
   winp->ret= wret= (char*)(*(app)winp->fun)((int)winp->state, line);
 
   winp->ticks+= run= clock()-run;
@@ -694,7 +692,8 @@ void dorun(char* line) {
 // 
 void startline(app fun, char* line) {
   winp->status= 1;
-
+  winp->args= strdup(line);
+  
   winp->fun=   (void*)fun;
   dorun(line);
   
@@ -877,7 +876,7 @@ char wkbhit(char win) {
     case 'T': { // Shell/Terminal
       newwin();
       window(1, -1, 20-7, 10, green, black);
-      start(app_shell);
+      start(app_sh);
       break; }
 
     // TODO: case 'M': maximize & minimize
@@ -886,7 +885,7 @@ char wkbhit(char win) {
       newwin();
       // TODO: terminal overrides, hardcodes black...
       window(3, 17, 40-7, 10, yellow, black);
-      startline(app_shell, "ps|terminal");
+      startline(app_sh, "ps|terminal");
       break; }
     case 'H': help(); break;
 

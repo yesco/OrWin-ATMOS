@@ -39,7 +39,7 @@ void run(APP* app, char* cmd) {
 #endif
 }
 
-void* app_shell(APP* app, char* line) {
+void* app_sh(APP* app, char* line) {
   if (!app) {
     app= calloc(sizeof(APP), 1);
     if (!app) return 0;
@@ -126,16 +126,20 @@ void* app_shell(APP* app, char* line) {
   if (app->train) {
     //  14s wsystem()
     // ~22s one step per call here
-    char n= 1; // ~22s
-    //char n= 10; // ~16s 
+    //char n= 1; // ~22s
+    char n= 10; // ~16s 
     //char n= 100; // ~14w
 
     // TODO: make it run 2-4 ms, then YIELD
     // TODO: since it's in FOREGROUND, should get MORE cycles!
 
+    n= 0;
     do {
       app->line= wtrainstep(&app->loco, app->line);
-    } while(--n && app->line != EOS);
+      //} while(--n && app->line != EOS);
+      ++n;
+    } while(KEEPRUNNING && app->line != EOS);
+    //    putchar('0'+n);
 
     // TODO: also crashes if run a second time+
     //   but works w several at the ssame time!

@@ -635,7 +635,7 @@ char* wstate(char* ret) {
 #include <cc65.h> // for udiv32by16r16
  
 void* ps(simplestate* state, char* line) {
-  char s, p, ln[40];
+  char s, p, ln[60]; // ... shell args...
   long packed_result;
   Window *w;
   unsigned int m;
@@ -666,14 +666,14 @@ void* ps(simplestate* state, char* line) {
   m = (unsigned int)(packed_result & 0xFFFF);
   s = (unsigned int)(packed_result >> 16);
 
-  snprintf(ln, sizeof(ln), "42%02d %2d %2d%4d %.3s%3d:%02d %s"
+  snprintf(ln, sizeof(ln), "42%02d %2d %2d%4d %.3s%3d:%02d %s %s"
 	   , p
 
 	   , w->cpu, w->nalloc // == w->mem,
 	   , -1 //w->abytes,
 	   , wstate(w->ret)
 	   , m, s
-	   , wname(p)
+	   , wname(p), w->args
 	   );
 
   // enable if disable shprint, lol

@@ -83,6 +83,21 @@ extern void wstatus(signed char, char*);
 extern char togglecursor();
 extern void setfocus(signed char);
 
+extern char wtime;
+
+#define HITIME (*(volatile unsigned char*)0x305)
+
+// true if you *should* leave
+//#define KEEPRUNNING ((wtime^HITIME) & 0b1)
+//#define KEEPRUNNING ((wtime^HITIME) & 0b10)
+//#define KEEPRUNNING ((wtime^HITIME) & 0b100)
+//#define KEEPRUNNING ((wtime^HITIME) & 0b1000) // 2-3cs
+//#define KEEPRUNNING ((wtime^HITIME) & 0b10000)
+//#define KEEPRUNNING ((wtime^HITIME) & 0b100000)
+#define KEEPRUNNING ((wtime^HITIME) & 0b1000000)
+//#define KEEPRUNNING ((wtime^HITIME) & 0b10000000)
+
+
 char window(char x, char y, char w, char h, char bg, char fg);
 
 #undef putchar
@@ -147,6 +162,7 @@ extern void* wcalloc(size_t z, size_t n);
 extern void* wrealloc(void* p, size_t z);
 extern void  wfree(void* p);
 
+extern char* lfree(char* line);
 
 #define malloc walloc
 #define calloc wcalloc
@@ -177,6 +193,9 @@ typedef struct Window {
   void* fun;
   void* state;
 
+  char* args;
+
+  // stats
   unsigned int nalloc;
   unsigned int abytes;
 
