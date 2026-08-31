@@ -1,0 +1,1 @@
+clang oaq.c && ./a.out | less
