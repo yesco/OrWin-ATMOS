@@ -24,7 +24,7 @@
 
 FILE* aof= 0;
 
-int qputsn(char* s, size_t len, FILE* f) {
+int qputsn(char* s, int len, FILE* f) {
   int n= 0; char c;
 
   if (!s) return fputs("(NULL)", f);
@@ -36,13 +36,11 @@ int qputsn(char* s, size_t len, FILE* f) {
   case '\t': n+= fputs("\\t", f);  goto next;
   case '"' : n+= fputs("\\\"", f); goto next;
   default  :
-    if (n<32 || n>126)
+    if (c<32 || c>126)
       n+= fprintf(f, "\\x%02x", c);
     else
       n+= fputc(c, f);
-    goto next;
-  case 0   :
-    if (len<0 || !--len) break; else goto next;
+    if (len>0 && --len) goto next;
   }
 
   n+= fputc('"', f);
@@ -69,12 +67,254 @@ char* writesector(char* buff, unsigned int n) {
 }
 
 
+// ENTRY:
+//   <keycollen> <prefixlen+1> <coloffset> keycolrest...
+//   <timestamp>
+//   <datalen> <data> 0
+//
+// TODO: <keycollen> ???
+
+// keycollen: is total expanded key column length expanded, incl 0 0
+// prefixlen: how many bytes to take from previous keycol
+// coloffset: which bytes in expanded is columnoffset
+// keycolrest: and add these bytes to it to form the current
+// 0: added to make it "printable" (if only text data)
+// NOTE: keycol reconstituted is: KEY 0 COL
+// NOTE2: COL is always ending with 0:
+// COL: 0       : no column name, 0 length
+//      -128    : explicit column name string of length n including 0
+//      128-255 : column number
+
+// timestamp: monotonically increasing number (32 bits, or runlen encoded)
+//
+// col(len):
+//   - len < 128: is length of column name string (max 64?)
+//   - 'len (>128): is column number
+// column: len bytes
+// 0: terminated with a redundant zero
+//
+// datalen:
+// 
+
+char* LEB128(char* s, long v) {
+  while(v >= 128) {
+    *s++= (v & 127) | 128;
+    v>>= 7;
+  }
+  *s++= v;
+  return s;
+}
+
+char* unLEB128(char* s, long *v) {
+  char c;
+  if ((c= *s) < 128) {
+    *v|= c;
+    return s+1;
+  } else {
+    *v|= c & 127;
+    *v<<= 7;
+    return unLEB128(s+1, v);
+  }
+}
+
+
+// reverse LEB128 encoding (big endian)
+char* BEL128(char* s, unsigned long v) {
+  if (v >= 128) {
+    *s= 128;
+    s= BEL128(s, v >> 7);
+  }
+
+  *s^= v;
+  return s+1;
+}
+
+char* unBEL128(char* s, long *v) {
+  static char c;
+  *v= 0;
+  while((c= *s++) >= 128) {
+    *v|= c & 127;
+    *v<<= 7;
+  }
+  *v|= c;
+  return s;
+}
+
+union oaq_type {
+  char          c;
+  unsigned int  w;
+  signed   int  i;
+  unsigned long u;
+  signed   long l;
+  char          arr[4];
+  struct b {
+    char first;
+    char second;
+    char third;
+    char fourth;
+  } b;
+} oaq_val;
+
+char* OAQ(char* s, unsigned int w) {
+  if (w < 0x80) { *s= w; return s+1; }
+  oaq_val.w= w;
+  // TODO: or is it < 0xf80 ???
+  if (oaq_val.b.second+1 < 0b11111001) {
+    s[0]= oaq_val.b.second | 0x80;
+    s[1]= oaq_val.b.first;
+    return s+2;
+  } else {
+    s[0]= 0b11111000;
+    // LOL, reverse, direct extract
+    s[1]= oaq_val.b.first;
+    s[2]= oaq_val.b.second;
+    return s+3;
+  }
+}
+
+char* LOAQ(char* s, unsigned int l) {
+  if (l < 0xffff) return OAQ(s, l);
+  { char i, n= 1;
+    oaq_val.l= l;
+    for(i=3; i--; )
+      if ((s[n]= oaq_val.arr[i]) || n > 1) ++n;
+
+    s[0]= 0b11111000 + n - 3; // -3 I think... lol
+    return s + n - 1;
+  }
+}
+
+char* QAO(char* s, unsigned int *w) {
+  char c= *s++;
+  if (c < 0x80) { *w= c; return s; }
+  // hi-bit set
+  if (c+1 < 0b11111001) {
+    *w= ((c ^ 0x80)  << 8) | *s++;
+    return s;
+  } else {
+    *w= *(unsigned int*)s; // LOL
+    return s+2;
+  }
+}
+
+char* QAOL(char* s, unsigned long *l) {
+  char c= *s++;
+  //  if (c < 0x80) { *w= c; return s; }
+  // hi-bit set
+  l= 0;
+  if (c+1 < 0b11111001) return QAO(s, (unsigned int*)l);
+  // generic loop
+  { char n= 0;
+    oaq_val.l= 0;
+    c-= 0b1111000 - 2;
+    while(c--)
+      oaq_val.arr[n++]= *s++;
+    return s;
+  }
+}
+
+// RUNLENGTH encoding of time:
+//   0-127: itself
+//   hival (preval << 7) | (hival & 0x7f)
+// (terminates before next byte < 128)
+//
+// OR USES LEB129
+// minimal bytes keylen prefixlen 0 collen 0 datalen 0
+
+// extracts: a long from a pointer to char* pointer by moving it forward:
+//   char* s= ...
+//   long val= JSK128(&s);
+//   // s is advanced to the next byte to process
+//
+long unJSK128(char* *s) {
+  static char c; static long v;
+  if ((c= *(*s)++) < 128) return c;
+  v= c ^ 128;
+  while((c= *++*s) >= 128) {
+    v= (v<<7) + c ^ 128;
+  }
+  return v;
+}
+
+/*
+  // AX= ptr to next byte
+  unJSK128:
+    sta ptr
+    stx ptr+1
+    ldy #0
+    ldX #0
+
+    lda (ptr),y
+    inc ptr
+    bne :+
+    inc ptr+1
+  :
+    bpl ret
+
+    and #127
+
+  loop:
+    
+
+
+  ret:
+    rts
+ */
+
+
+#define MAX_KEYS (256 / 9) // 28
+
+
+// simplest hack
+// TODO: make dynamic/growing?
+typedef struct OAFSpage {
+  char n;
+
+  // ordered keys
+  char* keys[MAX_KEYS];
+  char* data[MAX_KEYS];
+} OAFSpage;
+
 int main(int argc, char** argv) {
+  // test encoding
+  #if 0
+  // specific number 3,4,5 in 128 lol
+  char s[10];
+  memset(s, 0x00, sizeof(s));
+  long z= 0;
+  z<<=7; z+= 3;
+  z<<=7; z+= 4;
+  z<<=7; z+= 5;
+  char* pe= BEL128(s, z);
+  long w;
+  char* pd= unBEL128(s, &w);
+  printf("%8ld: %ld %ld %ld === %s\n", i, pe-s, pd-s, w, w==i? "OK": "---FAIL---");
+  printf("\tEN: "); qputsn(s, pe-s, stdout); nl();
+  return 0;
+  #endif
+    
+  for(long i=0; i<666666; i+= i<1024? 1: 1024) {
+    char s[10];
+    memset(s, 0xff, sizeof(s));
+    //char* pe= LEB128(s, i);
+    //char* pe= BEL128(s, i);
+    char* pe= OAQ(s, i);
+    long l;
+    unsigned w;
+    //w= 0; // TODO: remove
+    //char* pd= unLEB128(s, &w);
+    //char* pd= unBEL128(s, &w);
+    char* pd= QAO(s, &w);
+    printf("%8ld: %ld %ld %ld === %s\n", i, pe-s, pd-s, w, w==i? "OK": "---FAIL---");
+    printf("\tEN: "); qputsn(s, pe-s, stdout); nl();
+  }
+  return 0;
+  
   assert(argc);
   aof= fopen(argv[1], "rw+");
   assert(aof);
 
-  char* s= readsector(0, 0);
+  char* xs= readsector(0, 0);
 
   fclose(aof);
   return 0;
