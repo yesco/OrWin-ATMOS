@@ -506,10 +506,9 @@ char* OAQ(char* s, uint16_t w) {
     s[1]= oaq_val.b.first;
     return s+2;
   } else {
-    s[0]= 0b1111000 | 0x80;
-    // LOL, reverse, direct extract
-    s[1]= oaq_val.b.first;
-    s[2]= oaq_val.b.second;
+    s[0]= 0b01111000 | 0x80;
+    s[1]= oaq_val.b.second;
+    s[2]= oaq_val.b.first;
     return s+3;
   }
 }
@@ -518,7 +517,7 @@ char* LOAQ(char* s, uint32_t l) {
   if (l < 0xffff) return OAQ(s, l);
   { char i, n= 1;
     oaq_val.l= l;
-    // start encoding first non-zero byte
+    // start encoding first non-zero bigher byte
     for(i=3; i--; )
       if ((s[n]= oaq_val.arr[i]) || n > 1) ++n;
 
@@ -535,8 +534,11 @@ char* QAO(char* s, uint16_t *w) {
     *w= ((~c? c ^ 0x80: c) << 8) | *s++;
     return s;
   } else {
-    *w= *(unsigned int*)s; // LOL
-    return s+2;
+    char n= c - 0b11111000; // 0 ==> 2, we need 2,
+    c= *s++;
+    *w= (c << 8) | *s++;
+    // gobble up rest of n bytes
+    return s + 2 + n;
   }
 }
 
@@ -546,17 +548,20 @@ char* QAOL(char* s, uint32_t *l) {
   // hi-bit set
   l= 0;
   if (c+1 < 0b11111001) return QAO(s, (uint16_t*)l);
-  // generic loop
+  // generic loop, place higher bytes at destination
   { char n= 0;
     oaq_val.l= 0;
     c-= 0b1111000 - 2;
     while(c--)
-      oaq_val.arr[n++]= *s++;
+      oaq_val.arr[3 - n++]= *s++;
     return s;
   }
 }
 
 // RUNLENGTH encoding of time:
+
+// working???
+
 //   0-127: itself
 //   hival (preval << 7) | (hival & 0x7f)
 // (terminates before next byte < 128)
