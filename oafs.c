@@ -208,7 +208,7 @@ char* QAOL(char* s, uint32_t *l) {
   //  if (c < 0x80) { *w= c; return s; }
   // hi-bit set
   l= 0;
-  if (c+1 < 0b11111001) return QAO(s, (unsigned int*)l);
+  if (c+1 < 0b11111001) return QAO(s, (uint32_t*)l);
   // generic loop
   { char n= 0;
     oaq_val.l= 0;
@@ -294,24 +294,28 @@ int main(int argc, char** argv) {
   char* pe= BEL128(s, z);
   long w;
   char* pd= unBEL128(s, &w);
-  printf("%8ld: %ld %ld %ld === %s\n", i, pe-s, pd-s, w, w==i? "OK": "---FAIL---");
+  printf("%8ld: %ld %ld %ld === %s\n", i, pe-s, pd-s, (long)w, w==i? "OK": "---FAIL---");
   printf("\tEN: "); qputsn(s, pe-s, stdout); nl();
   return 0;
   #endif
     
-  for(long i=-512; i<666666; i+= i<1024? 1: 1024) {
+  // 32 BIT
+  // for(long i=-512; i<666666; i+= i<1024 || (i>65200 && i<65536+100)? 1: 1024) {
+
+  // 16 BIT
+  for(long i=-512; i<32768; i+= (i<1024 || i>31700)? 1: 1024) {
     char s[10];
     memset(s, 0xff, sizeof(s));
     //char* pe= LEB128(s, i);
     //char* pe= BEL128(s, i);
     char* pe= OAQ(s, i);
-    long l;
-    unsigned w;
+    uint32_t l;
+    int16_t w;
     //w= 0; // TODO: remove
     //char* pd= unLEB128(s, &w);
     //char* pd= unBEL128(s, &w);
     char* pd= QAO(s, &w);
-    printf("%8ld: %ld %ld %ld === %s\n", i, pe-s, pd-s, w, w==i? "OK": "---FAIL---");
+    printf("%9ld: %ld %ld %9ld === %s", i, pe-s, pd-s, (long)w, w==i? "   OK     ": "---FAIL---");
     printf("\tEN: "); qputsn(s, pe-s, stdout); nl();
   }
   return 0;
