@@ -314,6 +314,26 @@ Legend
 
   Read the consensus rules at the [Bitcoin Developer Transaction  Reference](https://developer.bitcoin.org/reference/transactions.html). [2,13, 14]
 
+## Byte efficieny
+
+Compare with sqllite varint (orderable) encoding:
+
+=======================================
+Bytes  OAQ Max   Digits | SQLite   Max 
+=======================================
+1        127      2.1   |   2.3    240
+2      30719      4.4   |   3.3   2287
+3      65535      4.8   |   4.9  67823
+
+4      16.7M      7.2   |   7.2
+5      4.2G       9.6   |   9.6
+6      1.0T      12.0   |  12.0
+7      281.4T    14.4   |  14.4
+8      72.0P     16.8   |  16.8
+9      18.4E     19.3   |  19.2
+=======================================
+
+
 
 ```
 [1] [https://news.ycombinator.com](https://news.ycombinator.com/item?id=40426666)
@@ -332,8 +352,112 @@ Legend
 [14] [https://developer.bitcoin.org](https://developer.bitcoin.org/reference/transactions.html)
 ```
 
+# TODO: reading of other variants
+
+- https://lobste.rs/s/qvoe7a/vu128_efficient_variable_length
+
+
+BINARY ORDERABLE:
+
+- https://sqlite.org/src4/doc/trunk/www/varint.wiki
+
+Bytes  Max Value       Digits
+1	  240     	 2.3
+2	 2287		 3.3
+3	67823		 4.8
+4	224-1		 7.2
+5	232-1		 9.6
+6	240-1		12.0
+7	248-1		14.4
+8	256-1		16.8
+9	264-1		19.2
+
+
+
+
+
+# Gemini generated asm for orderable:
+
+"untested"
+
+```
+; =============================================================================
+; OAQ_BINARY_ORDERABLE_DECODE
+; Input:  Y = Index into STREAM_PTR
+; Output: VALUE_0..VALUE_3 populated in native Little-Endian 6502 format.
+; =============================================================================
+OAQ_SORT_DECODE:
+    ; Clear output destination registers
+    LDA #$00
+    STA VALUE_0
+    STA VALUE_1
+    STA VALUE_2
+    STA VALUE_3
+
+    LDA (STREAM_PTR), Y    ; Read first byte
+    BPL .Tier0_Single      ; 0 to 127 -> Fast exit
+
+    CMP #$F8               
+    BCC .Tier1_Packed      ; If < 0xF8, it's our 14.9-bit positive layout
+    BEQ .Escape_3Byte      ; 0xF8 = 16-bit big-endian fallback
+    CMP #$FF               
+    BEQ .Small_Negative    ; 0xFF = 16-bit small negative number
+    RTS
+
+; -----------------------------------------------------------------------------
+; TIER 0: 1 Byte (0 to 127) -> Orderable
+; -----------------------------------------------------------------------------
+.Tier0_Single:
+    STA VALUE_0
+    INY
+    RTS
+
+; -----------------------------------------------------------------------------
+; TIER 1: 2 Bytes Positive (128 to 30,719) -> Orderable
+; -----------------------------------------------------------------------------
+.Tier1_Packed:
+    AND #$7F               
+    STA VALUE_1            ; High byte lands first in stream
+    INY
+    LDA (STREAM_PTR), Y    ; Low byte lands second
+    STA VALUE_0
+    INY
+    RTS
+
+; -----------------------------------------------------------------------------
+; ESCAPE 3-BYTE: 16-bit Unsigned/Negative Overflow (65,535 max)
+; Stream format: [0xF8] [High Byte] [Low Byte] -> Perfectly Orderable!
+; -----------------------------------------------------------------------------
+.Escape_3Byte:
+    INY                    ; Skip past 0xF8 marker
+    LDA (STREAM_PTR), Y    ; Read High Byte first from stream
+    STA VALUE_1            ; Store in Little-Endian High slot
+    INY
+    LDA (STREAM_PTR), Y    ; Read Low Byte second from stream
+    STA VALUE_0            ; Store in Little-Endian Low slot
+    INY
+    RTS
+
+; -----------------------------------------------------------------------------
+; SMALL NEGATIVE: 2 Bytes (-1 to -256) -> Triggered by 0xFF prefix
+; -----------------------------------------------------------------------------
+.Small_Negative:
+    INY                    
+    LDA (STREAM_PTR), Y    ; Read raw negative low byte
+    STA VALUE_0
+    LDA #$FF               ; Sign-extend upper registers
+    STA VALUE_1
+    STA VALUE_2
+    STA VALUE_3
+    INY
+    RTS
+```
 
 */
+
+
+
+
 
 
 
@@ -529,20 +653,33 @@ int main(int argc, char** argv) {
   // for(long i=-512; i<666666; i+= i<1024 || (i>65200 && i<65536+100)? 1: 1024) {
 
   // 16 BIT
-  for(long i=-512; i<32768; i+= (i<1024 || i>=29696)? 1: 1024) {
+  char last[10]= {0};
+  //  for(long i=-512; i<32768; i+= (i<1024 || i>=29696)? 1: 1024) {
+  for(long i=-512; i<65536; i+= (i<1024 || i>=29696)? 1: 1024) {
     char s[10];
+
     memset(s, 0xff, sizeof(s));
     //char* pe= LEB128(s, i);
     //char* pe= BEL128(s, i);
     char* pe= OAQ(s, i);
+
     uint32_t l;
     int16_t w;
     //w= 0; // TODO: remove
     //char* pd= unLEB128(s, &w);
     //char* pd= unBEL128(s, &w);
     char* pd= QAO(s, (uint16_t*)&w);
-    printf("%9ld: %ld %ld %9ld === %s", i, pe-s, pd-s, (long)w, w==i? "   OK     ": "---FAIL---");
+
+    int r= memcmp(last, s, sizeof(last));
+    
+    printf("%9ld: %ld %ld %9ld === %s .... %s"
+	   , i, pe-s, pd-s, (long)w
+	   , w==i? "   OK     ": "---FAIL---"
+	   , r<0? " LESS THAN ": r==0? "---ERROR:eq---": "---ERROR:gt---"
+	   );
     printf("\tEN: "); qputsn(s, pe-s, stdout); nl();
+
+    memcpy(last, s, sizeof(last));
   }
   return 0;
 }
