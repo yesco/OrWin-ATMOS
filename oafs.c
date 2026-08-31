@@ -20,6 +20,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <assert.h>
 
 FILE* aof= 0;
@@ -140,12 +141,16 @@ char* unBEL128(char* s, long *v) {
   return s;
 }
 
+// Assumption SMALL_ENDIAN 6502/ARM
+// TODO: make it independent
 union oaq_type {
-  char          c;
-  unsigned int  w;
-  signed   int  i;
-  unsigned long u;
-  signed   long l;
+  // TODO: rename for bits
+  unsigned char c;
+  uint16_t      w;
+  int16_t       i;
+  uint32_t      u;
+  int32_t       l;
+
   char          arr[4];
   struct b {
     char first;
@@ -155,16 +160,16 @@ union oaq_type {
   } b;
 } oaq_val;
 
-char* OAQ(char* s, unsigned int w) {
+char* OAQ(char* s, uint16_t w) {
   if (w < 0x80) { *s= w; return s+1; }
   oaq_val.w= w;
   // TODO: or is it < 0xf80 ???
-  if (oaq_val.b.second+1 < 0b11111001) {
+  if (oaq_val.b.second+1 < 0b01111001) {
     s[0]= oaq_val.b.second | 0x80;
     s[1]= oaq_val.b.first;
     return s+2;
   } else {
-    s[0]= 0b11111000;
+    s[0]= 0b1111000 | 0x80;
     // LOL, reverse, direct extract
     s[1]= oaq_val.b.first;
     s[2]= oaq_val.b.second;
@@ -172,10 +177,11 @@ char* OAQ(char* s, unsigned int w) {
   }
 }
 
-char* LOAQ(char* s, unsigned int l) {
+char* LOAQ(char* s, uint32_t l) {
   if (l < 0xffff) return OAQ(s, l);
   { char i, n= 1;
     oaq_val.l= l;
+    // start encoding first non-zero byte
     for(i=3; i--; )
       if ((s[n]= oaq_val.arr[i]) || n > 1) ++n;
 
@@ -184,12 +190,12 @@ char* LOAQ(char* s, unsigned int l) {
   }
 }
 
-char* QAO(char* s, unsigned int *w) {
+char* QAO(char* s, uint16_t *w) {
   char c= *s++;
   if (c < 0x80) { *w= c; return s; }
   // hi-bit set
   if (c+1 < 0b11111001) {
-    *w= ((c ^ 0x80)  << 8) | *s++;
+    *w= ((~c? c ^ 0x80: c) << 8) | *s++;
     return s;
   } else {
     *w= *(unsigned int*)s; // LOL
@@ -197,7 +203,7 @@ char* QAO(char* s, unsigned int *w) {
   }
 }
 
-char* QAOL(char* s, unsigned long *l) {
+char* QAOL(char* s, uint32_t *l) {
   char c= *s++;
   //  if (c < 0x80) { *w= c; return s; }
   // hi-bit set
@@ -293,7 +299,7 @@ int main(int argc, char** argv) {
   return 0;
   #endif
     
-  for(long i=0; i<666666; i+= i<1024? 1: 1024) {
+  for(long i=-512; i<666666; i+= i<1024? 1: 1024) {
     char s[10];
     memset(s, 0xff, sizeof(s));
     //char* pe= LEB128(s, i);
