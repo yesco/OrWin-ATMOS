@@ -11,6 +11,7 @@ print("Generating uniform.bin...")
 with open("uniform.bin", "wb") as f:
     for _ in range(NUM_INTEGERS):
         val = random.randint(0, 65535)
+#        val = random.randint(0, 0xffffffff)
         f.write(struct.pack("<I", val))
 
 # -----------------------------------------------------------------------------
@@ -23,7 +24,8 @@ with open("clustered.bin", "wb") as f:
     while count < NUM_INTEGERS:
         cluster_size = random.randint(10, 500)
         # Prevent runaway overflow past 32-bit ceiling
-        if current_val > 4000000000:
+#        if current_val > 4000000000:
+        if current_val > 65535-30:
             current_val = 10
             
         for _ in range(cluster_size):
@@ -46,7 +48,10 @@ with open("zipfian.bin", "wb") as f:
         # Generates a heavy concentration near 0-127 with a long, sparse tail
         val = int(math.pow(1.0 - u, -1.0 / 0.5)) - 1
         if val < 0: val = 0
-        if val > 1000000: val = 1000000  # Clamp upper limit
+
+#        if val > 1000000: val = 1000000  # Clamp upper limit
+        if val > 65535: val = 65535
+
         f.write(struct.pack("<I", val))
 
 print("Done! Three raw binary source data files created with pure Python.")
