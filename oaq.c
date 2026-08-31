@@ -354,6 +354,8 @@ Bytes  OAQ Max   Digits | SQLite   Max
 
 # TODO: reading of other variants
 
+Nice comparisions...
+
 - https://lobste.rs/s/qvoe7a/vu128_efficient_variable_length
 
 
@@ -452,6 +454,21 @@ OAQ_SORT_DECODE:
     INY
     RTS
 ```
+
+testdata:
+
+= https://github.com/powturbo/TurboPFor-Integer-Compression
+
+
+- https://www.google.com/url?sa=i&source=web&rct=j&url=https://github.com/lemire/SIMDCompressionAndIntersection&ved=2ahUKEwiK7_aC0MuWAxUr-DgGHT4iJnEQy_kOegYIAAgJEAE&opi=89978449&cd&psig=AOvVaw0uKb_WB49pvF7KQ8oPLPoT&ust=1788291744937000
+
+
+https://github.com/fast-pack/SIMDCompressionAndIntersection
+
+./allandsofdata
+
+
+
 
 */
 
