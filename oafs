@@ -1,1 +1,1 @@
-clang oafs.c && ./a.out fil.oafs | less 
+clang oafs.c && ./a.out fil.oafs # | less 

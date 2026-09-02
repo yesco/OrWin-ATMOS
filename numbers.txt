@@ -10,7 +10,7 @@ nine
 ten
 eleven
 twelve
-thrirteen
+thirteen
 fourteen
 fifteen
 sixteen
