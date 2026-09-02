@@ -949,6 +949,7 @@ long unJSK128(char* *s) {
     rts
  */
 
+#ifndef MAIN
 
 // TODO: replace and use the oafs: fputqsnw function instead
 //   or maybe here just a byte/hex print %x lol w &
@@ -1032,3 +1033,5 @@ int main(int argc, char** argv) {
   }
   return 0;
 }
+
+#endif // MAIN

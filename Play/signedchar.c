@@ -1,4 +1,4 @@
-#include <stdio.h>
+x#include <stdio.h>
 
 int main(void) {
   char x= -1;

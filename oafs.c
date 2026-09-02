@@ -75,6 +75,8 @@ would allow ls to parse the blocks of the index:
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <strings.h>
+
 #include <assert.h>
 
 FILE* aof= 0;
@@ -143,11 +145,95 @@ char* writesector(char* buff, unsigned int n) {
 
 #endif
 
+#define MAIN
 
-// ENTRY:
-//   <skipoffset> <typedatalen> <timestamp>
-//   <dataoffset> <prefixlen+1> <coloffset> ...keysuffix
+#include "oaq.c"
+
+
+struct OAFSentry {
+  char     skipoff;
+  char     deleted;
+  char     prefixlen;
+  char     coloff;
+  char     dataoff;
+  char     dlen;
+  // OAQ encoded
+  uint16_t typedatalen;
+  uint32_t timestamp;
+  char     klen;
+  char*    key;
+  char*    data;
+} OAFSentry;
+
+
+// Returns: 0 if fail
+char OAFSparseentry(char* page, char o) { 
+  char r, klen, *p;
+
+  if (!(r= p[o])) return r; // END
+
+  // copy fixed
+  bzero(&OAFSentry, sizeof(OAFSentry));
+  memcpy(&OAFSentry, page + o, 6);
+
+  //if (e->dlen >= 128) p= QOA(page+5, &e->typedatalen); else p= page+6;
+  p= QAO(page + o + 5, &OAFSentry.typedatalen);
+  p= QAOL(p, &OAFSentry.timestamp);
+
+  // calc key length from redundant info (expensive)
+  OAFSentry.klen= OAFSentry.skipoff - OAFSentry.dataoff - (p-page);
+  OAFSentry.key = p;
+
+  if (OAFSentry.dlen >= 0x80) OAFSentry.dlen= 0; // it's a typeflag, lookup len
+  OAFSentry.data= page + OAFSentry.dataoff;
+
+  return r;
+}
+
+
+struct OAFSheader {
+  char     mark1; // '$'+128
+  char     mark2; // 'I'+128 for Index
+  uint16_t nextsector; // (* 2 80 19) = 3040 max
+} OAFSheader;
+  
+char OAFSparsepage(char* page) {
+  char i= sizeof(OAFSheader);
+
+  memcpy(&OAFSheader, page, sizeof(OAFSheader));
+
+  while(i) {
+    char o= i;
+    i= OAFSparseentry(page, i);
+    printf("  %3u o%1u d%3u p%3u c%3u d%3u L%3u  ",
+	   o,
+	   OAFSentry.skipoff, OAFSentry.deleted, OAFSentry.prefixlen,
+	   OAFSentry.coloff, OAFSentry.dataoff, OAFSentry.dlen);
+    // TODO: l and u lol x
+    printf("  ts%x kL%3u > %s : tL%3u = %s\n",
+	   OAFSentry.timestamp, OAFSentry.klen, OAFSentry.key,
+	   OAFSentry.typedatalen, OAFSentry.data);
+  }
+
+  return 0;
+}
+
+// --- ENTRY:
+//
+// @skipoffset:
+//   <skipoffset> <deleted> <prefixlen> <coloffset> <dataoffset>
+//        1 B        1 B        1 B         1 B         1 B
+//   <typedatalen> <timestamp>
+//       OAQ          OAQ
+//
+//(@key:)
+//   ...keysuffix...
+// @coloffset:
+//   ...keysuffix
+//
+// @dataoffset:
 //   <data>
+//
 //
 // skipoffset: page index location of next record, 0 indicates END
 // dataoffset: offset (and end) of key data
@@ -178,6 +264,123 @@ char* writesector(char* buff, unsigned int n) {
 //
 // 1) datalen:
 // 
+
+
+#define MAX_KEYS (256 / 11) // 24
+
+
+// simplest hack
+// TODO: make dynamic/growing?
+
+// TODO: this is more like a buffer...
+//   maybe used then to update many pages?
+typedef struct OAFSpage {
+  char     n;
+  char     maxklen;
+  char     totklen;
+  char     totdlen;
+
+  // ordered keys
+  char     klen[MAX_KEYS];
+  char*    keys[MAX_KEYS];
+
+  uint32_t ts  [MAX_KEYS];
+  char     type[MAX_KEYS];
+
+  char     dlen[MAX_KEYS];
+  char*    data[MAX_KEYS];
+} OAFSpage;
+
+// For now only one page, lol
+OAFSpage FSpage;
+
+
+OAFSpage* FSinsert
+(char klen, char* key,
+ uint32_t ts, char type,
+ char dlen, char* data) {
+
+  // TODO: handle overflow
+  assert(FSpage.n < MAX_KEYS);
+    
+  // simple insert sort
+  // not even worth doing binary search?
+  char i= 0, len, l= klen;
+  while(i < FSpage.n) {
+    len= FSpage.klen[i];
+    if (len < klen) l= len;
+    if (memcmp(key, FSpage.keys[i], l) <= 0) break;
+    ++i;
+  }
+  // insert at i location
+  // TODO: irritating, use array of struct?
+  int z= FSpage.n-i;
+  memmove(FSpage.klen + i + 1, FSpage.klen + i, sizeof(FSpage.klen[i])*z);
+  memmove(FSpage.keys + i + 1, FSpage.keys + i, sizeof(FSpage.keys[i])*z);
+  memmove(FSpage.ts   + i + 1, FSpage.ts   + i, sizeof(FSpage.ts  [i])*z);
+  memmove(FSpage.type + i + 1, FSpage.type + i, sizeof(FSpage.type[i])*z);
+  memmove(FSpage.dlen + i + 1, FSpage.dlen + i, sizeof(FSpage.dlen[i])*z);
+  memmove(FSpage.data + i + 1, FSpage.data + i, sizeof(FSpage.data[i])*z);
+  
+  FSpage.klen[i]= klen;
+  FSpage.keys[i]= key;
+  FSpage.ts  [i]= ts;
+  FSpage.type[i]= type;
+  FSpage.dlen[i]= dlen;
+  FSpage.data[i]= data;
+
+  if (FSpage.maxklen < klen) FSpage.maxklen= klen;
+  FSpage.totklen+= klen;
+  FSpage.totdlen+= dlen;
+  ++FSpage.n;
+
+  return &FSpage;
+}
+
+void printPage() {
+  char i;
+  // overestimate; gives some slack!
+  int z= FSpage.totdlen + FSpage.totklen + FSpage.n * (256 / MAX_KEYS) + 4;
+  printf("==== OAFS PAGE: n: %2d maxklen: %2d totklen: %3d totdlen: %3d est: %3d\n",
+	 FSpage.n, FSpage.maxklen, FSpage.totklen, FSpage.totdlen, z);
+  for(i=0; i<FSpage.n; ++i) {
+    printf("%2d:", FSpage.klen[i]);
+    fputqsnw(FSpage.keys[i], FSpage.klen[i], stdout, 20);
+    printf("  %5x %02x  %2d:", FSpage.ts  [i], FSpage.type[i], FSpage.dlen[i] );
+    fputqsnw(FSpage.data[i], FSpage.dlen[i], stdout, 20);
+    nl();
+  }
+}
+  
+void insertlines(char* name) {
+  FILE* f= fopen(name, "r");
+  char* s= 0; size_t len= 0;
+
+  assert(f);
+  while(getline(&s, &len, f) > 0) {
+    char len= strlen(s); uint32_t ts= -1;
+    char type= 0;
+    FSinsert(len, strdup(s),  ts, type,  len, strdup(s));
+  }
+  free(s);
+}
+
+int main(int argc, char** argv) {
+  assert(argc);
+  aof= fopen(argv[1], "rw+");
+  assert(aof);
+
+  char* xs= readsector(0, 0);
+
+  printPage();
+  
+  insertlines("numbers.txt");
+
+  printPage();
+
+  fclose(aof);
+  return 0;
+}
 
 /*
 
@@ -355,118 +558,3 @@ If you are optimizing a loader or writing raw assembly code for the WD1793, I ca
 
 
 */
-
-
-
-#define MAX_KEYS (256 / 11) // 24
-
-
-// simplest hack
-// TODO: make dynamic/growing?
-typedef struct OAFSpage {
-  char     n;
-  char     maxklen;
-  char     totklen;
-  char     totdlen;
-
-  // ordered keys
-  char     klen[MAX_KEYS];
-  char*    keys[MAX_KEYS];
-
-  uint32_t ts  [MAX_KEYS];
-  char     type[MAX_KEYS];
-
-  char     dlen[MAX_KEYS];
-  char*    data[MAX_KEYS];
-} OAFSpage;
-
-// For now only one page, lol
-OAFSpage FSpage;
-
-
-OAFSpage* FSinsert
-(char klen, char* key,
- uint32_t ts, char type,
- char dlen, char* data) {
-
-  // TODO: handle overflow
-  assert(FSpage.n < MAX_KEYS);
-    
-  // simple insert sort
-  // not even worth doing binary search?
-  char i= 0, len, l= klen;
-  while(i < FSpage.n) {
-    len= FSpage.klen[i];
-    if (len < klen) l= len;
-    if (memcmp(key, FSpage.keys[i], l) <= 0) break;
-    ++i;
-  }
-  // insert at i location
-  // TODO: irritating, use array of struct?
-  int z= FSpage.n-i;
-  memmove(FSpage.klen + i + 1, FSpage.klen + i, sizeof(FSpage.klen[i])*z);
-  memmove(FSpage.keys + i + 1, FSpage.keys + i, sizeof(FSpage.keys[i])*z);
-  memmove(FSpage.ts   + i + 1, FSpage.ts   + i, sizeof(FSpage.ts  [i])*z);
-  memmove(FSpage.type + i + 1, FSpage.type + i, sizeof(FSpage.type[i])*z);
-  memmove(FSpage.dlen + i + 1, FSpage.dlen + i, sizeof(FSpage.dlen[i])*z);
-  memmove(FSpage.data + i + 1, FSpage.data + i, sizeof(FSpage.data[i])*z);
-  
-  FSpage.klen[i]= klen;
-  FSpage.keys[i]= key;
-  FSpage.ts  [i]= ts;
-  FSpage.type[i]= type;
-  FSpage.dlen[i]= dlen;
-  FSpage.data[i]= data;
-
-  if (FSpage.maxklen < klen) FSpage.maxklen= klen;
-  FSpage.totklen+= klen;
-  FSpage.totdlen+= dlen;
-  ++FSpage.n;
-
-  return &FSpage;
-}
-
-void printPage() {
-  char i;
-  // overestimate; gives some slack!
-  int z= FSpage.totdlen + FSpage.totklen + FSpage.n * (256 / MAX_KEYS) + 4;
-  printf("==== OAFS PAGE: n: %2d maxklen: %2d totklen: %3d totdlen: %3d est: %3d\n",
-	 FSpage.n, FSpage.maxklen, FSpage.totklen, FSpage.totdlen, z);
-  for(i=0; i<FSpage.n; ++i) {
-    printf("%2d:", FSpage.klen[i]);
-    fputqsnw(FSpage.keys[i], FSpage.klen[i], stdout, 20);
-    printf("  %5x %02x  %2d:", FSpage.ts  [i], FSpage.type[i], FSpage.dlen[i] );
-    fputqsnw(FSpage.data[i], FSpage.dlen[i], stdout, 20);
-    nl();
-  }
-}
-  
-void insertlines(char* name) {
-  FILE* f= fopen(name, "r");
-  char* s= 0; size_t len= 0;
-
-  assert(f);
-  while(getline(&s, &len, f) > 0) {
-    char len= strlen(s); uint32_t ts= -1;
-    char type= 0;
-    FSinsert(len, strdup(s),  ts, type,  len, strdup(s));
-  }
-  free(s);
-}
-
-int main(int argc, char** argv) {
-  assert(argc);
-  aof= fopen(argv[1], "rw+");
-  assert(aof);
-
-  char* xs= readsector(0, 0);
-
-  printPage();
-  
-  insertlines("numbers.txt");
-
-  printPage();
-
-  fclose(aof);
-  return 0;
-}
