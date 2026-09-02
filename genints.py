@@ -5,6 +5,15 @@ import math
 NUM_INTEGERS = 1000000
 
 # -----------------------------------------------------------------------------
+# 0. FULL WINDOW (16-bit Window Simulation)
+# -----------------------------------------------------------------------------
+print("Generating u16-all.bin...")
+with open("u16.bin", "wb") as f:
+    for i in range(NUM_INTEGERS):
+        val = i % 0xffff;
+        f.write(struct.pack("<I", val))
+
+# -----------------------------------------------------------------------------
 # 1. UNIFORM DISTRIBUTION (16-bit Window Simulation)
 # -----------------------------------------------------------------------------
 print("Generating uniform.bin...")

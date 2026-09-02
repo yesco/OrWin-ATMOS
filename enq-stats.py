@@ -41,10 +41,11 @@ def verify_dataset(filename):
     print(f"");
     print(f"--- Verification Report: {filename} ---")
     print(f"Total Integers Profiled: {num_ints:,}")
-    print(f"    EB128      {leb128_bytes / 1024:.1f} KB")
-    print(f"    SQLite     {sqlite_bytes / 1024:.1f} KB")
-    print(f"    OAQ        {oaq_bytes / 1024:.1f} KB")
+    print(f"    EB128      {leb128_bytes / 1024:.1f} KB    {leb128_bytes / num_ints:.2f} B/int")
+    print(f"    SQLite     {sqlite_bytes / 1024:.1f} KB    {sqlite_bytes / num_ints:.2f} B/int")
+    print(f"    OAQ        {oaq_bytes    / 1024:.1f} KB    {oaq_bytes    / num_ints:.2f} B/int")
     
+verify_dataset("u16.bin")
 verify_dataset("uniform.bin")
 verify_dataset("clustered.bin")
 verify_dataset("zipfian.bin")

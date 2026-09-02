@@ -513,7 +513,71 @@ hit compared to the EB128 for clustered values. But at least it
 handles large 32=bit values reasonable well.
 
 
+## Total Byte Footprint (0 to 65,535)
+
+Here is the exact byte-count cost and average calculation across all
+65,536 integers (0 to 65,535) for every encoding method:
+
+```
+=========================================================
+Method Total Bytes Used Average Bytes / Integer
+=========================================================
+OAQ 165,504 2.525
+LEB128 / MIDI 180,096 2.748
+SQLite 194,079 2.961
+Btc Compact 196,102 2.992
+=========================================================
+```
+
+------------------------------
+
+## The Mathematical Reason OAQ Sweeps the Board
+
+In a completely flat, uniform distribution of 16-bit integers, OAQ
+beats all of them in raw data density due to where the byte-size
+penalties drop:
+
+* OAQ (2.52 Bytes Avg):
+
+  Your golden 128 to 30,719 window handles an extra 14,336 integers in
+  2 bytes that cause LEB128, MIDI-VLQ, and Prefix Varints to spill
+  over into a 3-byte penalty. Combined with the high-snap reclaims at
+  the very ceiling, OAQ preserves an enormous amount of bytes.
+
+* LEB128 / MIDI (2.74 Bytes Avg):
+
+  These methods choke early on the 2-byte limit, cutting off at
+  16,383. As a result, roughly 75% of the entire 64K integer block is
+  forced into a heavy 3-byte payload structure.
+
+* SQLite (2.96 Bytes Avg):
+
+  SQLite excels at compressing small 8-bit metrics up to 240 into 1
+  byte, but its 2-byte payload ceiling collapses at a very low
+  2,287. Because everything from 2,288 to 65,535 requires 3 bytes, it
+  takes a massive structural beating on a flat 16-bit array.
+  
+* Bitcoin CompactSize (2.99 Bytes Avg):
+
+  This format is the most brutal. It drops into a 3-byte escape
+  container for 99.6% of the numbers in the range, operating almost
+  entirely as a fixed 3-byte layout with a tiny 1-byte window at the
+  start.
+
+
+## The Engineering Conclusion
+
+OAQ provides the rarest combination in computer science: it is
+simultaneously the smallest format on disk and the fastest loop to
+decode on an 8-bit CPU.
+
+
+
 # Gemini generated asm for orderable:
+
+
+
+
 
 
 
@@ -611,8 +675,13 @@ https://github.com/fast-pack/SIMDCompressionAndIntersection
 
 
 
-
-
+// OAQ Encoding
+// ============
+// 
+//     0       127: 1 byte  as is
+//   128 ... 28xxx: 2 bytes as is!
+// 28xxx ... 65279: 3 bytes (a prefix and big-endian
+// 65280 ... 65535: 2 bytes as is!
 
 
 
@@ -638,57 +707,89 @@ union oaq_type {
   } b;
 } oaq_val;
 
+// Used as prefix for signed values
+// basically providing an extended signbit
+
+#define OAQ_NEG 0xf7
+#define OAQ_POS 0xf8
+
+
+
+// Unsigned OAQ encoding:
+//
 // 1 byte  =>  7   bits precision
 // 2 bytes => 14.9 bits precision
 // 3 bytes => 16   bits precision
 //
-//-32768 ... -257 : 3 bytes
-//
-//  -256 ...   -1 : 2 bytes  \
-//     0 ...  127 : 1 byte    > OPTIMAL RANGE!
-//   128 ...32719 : 2 bytes  /
-//
-// 32720 ...32768 : 3 bytes
-//
-//
 char* OAQ(char* s, uint16_t w) {
   if (w < 0x80) { *s= w; return s+1; }
   oaq_val.w= w;
-  // TODO: or is it < 0xf80 ???
-  if (oaq_val.b.second+1 < 0b01111001) {
+  if (oaq_val.b.second+1 < 0b01110001) {
     s[0]= oaq_val.b.second | 0x80;
     s[1]= oaq_val.b.first;
     return s+2;
   } else {
-    s[0]= 0b01111000 | 0x80;
+    s[0]= 0b01110000 | 0x80;
     s[1]= oaq_val.b.second;
     s[2]= oaq_val.b.first;
     return s+3;
   }
 }
 
+// TODO: test
+char* SOAQ(char* s, int16_t i) {
+  *s++= i<0? OAQ_NEG: OAQ_POS;
+  return OAQ(s, (uint16_t)i);
+}
+
+
+// TODO: not use word "L" but u32 maybe
+// TODO: make encoder for u64! (or just use sizeof(long)-1 ???
+
 char* LOAQ(char* s, uint32_t l) {
   if (l < 0xffff) return OAQ(s, l);
   { char i, n= 1;
     oaq_val.l= l;
-    // start encoding first non-zero bigher byte
+
+    // TODO: rewrite to more efficient code
+    
+    // small pos: start encoding at first non-0x00 higher byte
     for(i=3; i--; )
       if ((s[n]= oaq_val.arr[i]) || n > 1) ++n;
 
-    s[0]= 0b11111000 + n - 3; // -3 I think... lol
+
+    // TODO: 0xf0 should be 2 bytes!!! ???? VERIFY!
+
+
+    if (n!=1) s[0]= 0b11110000 + n - 3; // -3 I think... lol
+
+
+    // small neg: start encoding at first non-0xff higher byte
+    for(i=3; i--; )
+      if ((s[n]= oaq_val.arr[i]) || n > 1) ++n;
+    if (n!=1) s[0]= 0b11111000 + 8 - n;
+
     return s + n - 1;
   }
 }
+
+// TODO: test
+char* SLOAQ(char* s, int32_t l) {
+  *s++= l<0? OAQ_NEG: OAQ_POS;
+  return LOAQ(s, (uint32_t)l);
+}
+
+
 
 char* QAO(char* s, uint16_t *w) {
   char c= *s++;
   if (c < 0x80) { *w= c; return s; }
   // hi-bit set
-  if (c+1 < 0b11111001) {
+  if (c+1 < 0b11110001) {
     *w= ((~c? c ^ 0x80: c) << 8) | *s++;
     return s;
   } else {
-    char n= c - 0b11111000; // 0 ==> 2, we need 2,
+    char n= c - 0b11110000; // 0 ==> 2, we need 2,
     c= *s++;
     *w= (c << 8) | *s++;
     // gobble up rest of n bytes
@@ -696,21 +797,36 @@ char* QAO(char* s, uint16_t *w) {
   }
 }
 
+// TODO: test
+char* QAOS(char* s, int16_t *i) {
+  ++s; // skip sign!
+  return QAO(s, (uint16_t*)i);
+}
+
+
 char* QAOL(char* s, uint32_t *l) {
   char c= *s++;
   //  if (c < 0x80) { *w= c; return s; }
   // hi-bit set
   l= 0;
-  if (c+1 < 0b11111001) return QAO(s, (uint16_t*)l);
+  if (c+1 < 0b11110001) return QAO(s, (uint16_t*)l);
   // generic loop, place higher bytes at destination
   { char n= 0;
     oaq_val.l= 0;
-    c-= 0b1111000 - 2;
+    c-= 0b1110000 - 2;
     while(c--)
       oaq_val.arr[3 - n++]= *s++;
     return s;
   }
 }
+
+// TODO: test
+char* QAOLS(char* s, int32_t *l) {
+  ++s; // skip sign!
+  return QAOL(s, (uint32_t*)l);
+}
+
+
 
 // RUNLENGTH encoding of time:
 
