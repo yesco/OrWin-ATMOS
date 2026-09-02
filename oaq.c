@@ -1,7 +1,73 @@
-// OAFS - OrWIN ATMOS File System
+// OAQ - Offset-Aligned-Quantity (OAQ128)
 //
 // (C) 2026 Jonas S Karlsson jsk@yesco.org
+
+// OAQ Encoding
+// ============
+// A custom, 6502 or 8-bit hardware optimized hybrid encoding.
+// Particiularly, it avoids any bitshifting, which clogs down
+// performance for common encodings, like LEB128, varint etc.
+// Decoding involves range and mere simple byte copying.
 //
+// It preservs fast-path for small values 0-127, as well as
+// -1 (0xff) as it may be often occuring (1-10% in some cases!).
+// For the larger range 128-28671 (hibyte = 0b01111111 = 0x6fff).
+//
+// Whereas MIDI, LEB128, and standard Prefix Varint spill over
+// into a 3-byte penalty here, OAQ successfully holds the line
+// at 2 bytes, maximizing data density for common 16-bit values.
+//
+// For other values, 28672-65280, it encodes them using a
+// prefix byte, telling the length, and a big-endian encoded
+// 2 bytes. The encoding isn't limited to 16-bit values but
+// scales up to 64-bit integers.
+//
+// Furthermore, like the SQLite encoding, it is binary
+// orderable without any fuzz. This is useful for database
+// index files.
+//
+// If signed values need be orderable, they are simply
+// prefixed with a "sign-byte" fixing the ordering.
+// 
+//  
+//
+// 
+// Value ranges
+// ------------
+//     0       127 : 1 BYTE  as is
+//   128 ... 28671 : 2 bytes, 15 lower bits as is *
+// 28672 ... 65279 : 3 bytes *
+// 65280 ... 65534 : 2 bytes, second byte = lowest byte *
+// 65535 == 0xffff : 1 BYTE  as is! (sign extend) ***
+//
+// *:   The high-bit in the first byte is set on multi-byte seqs.
+//      All multip-byte sequences are use BIG-ENDIAN.
+// **:  -1 or 0xff and 0xffff often have a probabitiliy of 1-10% !
+//      With this exception, hibit is set so technically:
+//      hi-bit doesn't mean multi-byte.
+//
+//
+// Signed Values
+// -------------
+// 0xf7 : negative prefix
+// 0xf8 : positive prefix
+//
+//
+// Prefix Byte Encoding
+// --------------------
+// 0x00-0x7f : the value as is: 0-0x7f
+// 0xf0-0xf6 : BIG-ENDIAN 2-8 bytes value (good for small nearer 0)
+//
+// 0xf7      : NEGATIVE SIGNED value prefix
+// 0xf8      : POSITIVE SIGNED value prefix
+//
+// 0xf9      : --- RESERVED ---
+// 0xfa-0xff : BIG_ENDIAN 5-0 more bytes
+//
+// 0xfe      : second byte XX gives value: 0xffXX
+// 0xff      : the value as is:  -1 == 0xf...f == all bits set
+
+
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -67,6 +133,14 @@ OAQ architecture outperforms the others.
 
 
 ##  Key Observation
+
+
+
+
+// TODO: update range... no more 719!!!!!
+
+
+
 
 * OAQ vs. The Field (16,384 to 30,719):
 
@@ -675,16 +749,6 @@ https://github.com/fast-pack/SIMDCompressionAndIntersection
 
 
 
-// OAQ Encoding
-// ============
-// 
-//     0       127: 1 byte  as is
-//   128 ... 28xxx: 2 bytes as is!
-// 28xxx ... 65279: 3 bytes (a prefix and big-endian
-// 65280 ... 65535: 2 bytes as is!
-
-
-
 
 
 
@@ -722,7 +786,10 @@ union oaq_type {
 // 3 bytes => 16   bits precision
 //
 char* OAQ(char* s, uint16_t w) {
-  if (w < 0x80) { *s= w; return s+1; }
+  // -1 and 0x7f shifted up (wraparound 16bit)!
+  if ((uint16_t)(w+1) <= 0x80 ) { *s= w;   return s+1; }
+  // multi-byte enoding
+  if ((w>>8) == 0xff) { *s= 0xfe; *++s= w; return s+1; }
   oaq_val.w= w;
   if (oaq_val.b.second+1 < 0b01110001) {
     s[0]= oaq_val.b.second | 0x80;
@@ -736,18 +803,48 @@ char* OAQ(char* s, uint16_t w) {
   }
 }
 
+char* QAO(char* s, uint16_t *w) {
+  char c= *s++;
+  if ((char)(c+1) <= 0x80) { *w= (signed char)c; return s; }
+  // multi-byte decoding
+  if (c == 0xfe) { *w= 0xff00 | *s; return s+1; }
+  if (c+1 < 0b11110001) {
+    *w= ((~c? c ^ 0x80: c) << 8) | *s++;
+    return s;
+  } else {
+    char n= c - 0b11110000; // 0 ==> 2, we need 2,
+    c= *s++;
+    *w= (c << 8) | *s++;
+    // gobble up rest of n bytes
+    return s + n;
+  }
+}
+
 // TODO: test
 char* SOAQ(char* s, int16_t i) {
+  // Add a prefix byte with the sign to get correct sort order!
   *s++= i<0? OAQ_NEG: OAQ_POS;
   return OAQ(s, (uint16_t)i);
 }
+
+
+// TODO: test
+char* QAOS(char* s, int16_t *i) {
+  ++s; // skip sign!
+  return QAO(s, (uint16_t*)i);
+}
+
+
+
 
 
 // TODO: not use word "L" but u32 maybe
 // TODO: make encoder for u64! (or just use sizeof(long)-1 ???
 
 char* LOAQ(char* s, uint32_t l) {
-  if (l < 0xffff) return OAQ(s, l);
+  if (l  <= 0xffff)        return OAQ(s, l);
+  // TODO: verify
+  if (l < 0 && -l <= 0xff) return OAQ(s, l);
   { char i, n= 1;
     oaq_val.l= l;
 
@@ -760,7 +857,6 @@ char* LOAQ(char* s, uint32_t l) {
 
     // TODO: 0xf0 should be 2 bytes!!! ???? VERIFY!
 
-
     if (n!=1) s[0]= 0b11110000 + n - 3; // -3 I think... lol
 
 
@@ -772,37 +868,6 @@ char* LOAQ(char* s, uint32_t l) {
     return s + n - 1;
   }
 }
-
-// TODO: test
-char* SLOAQ(char* s, int32_t l) {
-  *s++= l<0? OAQ_NEG: OAQ_POS;
-  return LOAQ(s, (uint32_t)l);
-}
-
-
-
-char* QAO(char* s, uint16_t *w) {
-  char c= *s++;
-  if (c < 0x80) { *w= c; return s; }
-  // hi-bit set
-  if (c+1 < 0b11110001) {
-    *w= ((~c? c ^ 0x80: c) << 8) | *s++;
-    return s;
-  } else {
-    char n= c - 0b11110000; // 0 ==> 2, we need 2,
-    c= *s++;
-    *w= (c << 8) | *s++;
-    // gobble up rest of n bytes
-    return s + 2 + n;
-  }
-}
-
-// TODO: test
-char* QAOS(char* s, int16_t *i) {
-  ++s; // skip sign!
-  return QAO(s, (uint16_t*)i);
-}
-
 
 char* QAOL(char* s, uint32_t *l) {
   char c= *s++;
@@ -826,6 +891,11 @@ char* QAOLS(char* s, int32_t *l) {
   return QAOL(s, (uint32_t*)l);
 }
 
+// TODO: test
+char* SLOAQ(char* s, int32_t l) {
+  *s++= l<0? OAQ_NEG: OAQ_POS;
+  return LOAQ(s, (uint32_t)l);
+}
 
 
 // RUNLENGTH encoding of time:
@@ -946,6 +1016,8 @@ int main(int argc, char** argv) {
     char* pd= QAO(s, (uint16_t*)&w);
 
     int r= memcmp(last, s, sizeof(last));
+    
+    // TODO: signed
     
     printf("%9ld: %ld %ld %9ld === %s .... %s"
 	   , i, pe-s, pd-s, (long)w
