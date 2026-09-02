@@ -950,6 +950,8 @@ long unJSK128(char* *s) {
  */
 
 
+// TODO: replace and use the oafs: fputqsnw function instead
+//   or maybe here just a byte/hex print %x lol w &
 int qputsn(char* s, int len, FILE* f) {
   int n= 0; char c;
 

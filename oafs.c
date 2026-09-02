@@ -1,22 +1,76 @@
-// OAFS - Object Ascending File System
+// OAFS - Object    Atomic      File System
+//        Ordered   Amorphic    
+//                  Associative
+//                  Attribute
+//                  Array
 //
 // (C) 2026 Jonas S Karlsson jsk@yesco.org
 //
-// A "SmallTable" implementation
+// A "SmallTable" implementation optimized for 8-bitters
 //
 // Features:
 // - "simple"
-// - ordered by string keys <= 80 chars
+// - ordered by multi-compont composite binary keys <= 80 chars
 // - page oriented index
 // - inline small data (<= 80 chars)
 // - file prefix recursive meta forwarding index entries! (=> log n!)
 // - delete thombstone allows "versioning"
 // - design for idempotency
-// - "safe" (maybe optionally log-based)
-// - optinally transactional for several entries "appends" (log file at end/beginning)
+// - "safe" (optionally log-based)
+// - optionally transactional for several entries "appends" (log file at end/beginning)
 
 // It's designed to execute as part of OrWIN ATMOS windowing
 // multi-concurrent actor system. OrWIN Actor, lol
+
+// If the key is plain ASCI: and maybe starts with '/'
+// it's just a filesystem path. End with <$00> <page:offset> !
+//
+// When it comes to keyvalues being multiattribute, maybe they
+// could be prefixed with its inherent encoding:
+//
+// <tablename>
+//     <$80> "bwLws" <byte> <word> <long:Reverse> <word> <string>
+//
+// L: indicates long reverse (descending) encoding and sort order
+// h: could be a pointer to <len><string> (a bin variant of Hollerith)
+// a: could be follows by byte indicate number of bytes
+//
+// no need delimiting items
+//
+// since [ <tablename> <$80> "bwLws" ] is invariant it'll prefcode
+// away mostly in practice!
+//
+// [tablename] [$80] <table_meta...>               ; Table Info
+// [tablename] [$81] "w" [u_i_d + $80]             ; Col 1: Name ends with high-bit set!
+// [tablename] [$82] "L" [t_i_m_e_s_t_a_m_p + $80] ; Col 2: Name ends with high-bit set!
+// ...
+// [tablename] [$BF] "wL" <data_payload_1>         ; First Data Row
+// [tablename] [$BF] "wL" <data_payload_2>         ; Second Data Row
+
+/*
+
+For now actors have their own state, support unix pipes. For a train
+of processes w pipes, there is only one active LINE being passed
+around - a pointer. The receiver owns the heap allocated LINE. If it
+needs to pass it on it needs to take it's own copy.
+
+They could be more structured by having an "train" ENV with named
+variables set to native #var for number and $var for strings. That is
+not yet implemented.
+
+For now, reading a diskblock can return a sequence of linked
+diskblocks without knowing any much more of the data (just a first two
+byte marker and 4 bytes next sector), the consumer backtracks by
+returning null and the trainrunner backs up to the producer. This
+would allow ls to parse the blocks of the index:
+
+`oafs-start 'key' | oafs-next-block | oafs-parse | grep fish | more`
+
+
+ */
+
+
+
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -91,37 +145,34 @@ char* writesector(char* buff, unsigned int n) {
 
 
 // ENTRY:
-//   <keycollen> <prefixlen+1> <coloffset> keycolrest...
-//   <timestamp>
-//   <type> <datalen> <data> 0
+//   <skipoffset> <typedatalen> <timestamp>
+//   <dataoffset> <prefixlen+1> <coloffset> ...keysuffix
+//   <data>
 //
-// TODO: <keycollen> ???
-
-// keycollen: is total expanded key column length expanded, incl 0 0
-// prefixlen: how many bytes to take from previous keycol
-// coloffset: which bytes in expanded is columnoffset
-// keycolrest: and add these bytes to it to form the current
-// 0: added to make it "printable" (if only text data)
-// NOTE: keycol reconstituted is: KEY 0 COL
-// NOTE2: COL is always ending with 0:
-// COL: 0       : no column name, 0 length
-//      -128    : explicit column name string of length n including 0
-//      128-255 : column number
-
+// skipoffset: page index location of next record, 0 indicates END
+// dataoffset: offset (and end) of key data
 // timestamp: monotonically increasing number (32 bits, or runlen encoded)
 //
-// col(len):
+// KEY: 
+//   prefixlen: how many bytes to take from previous entry key
+//   coloffset: which bytes in expanded is columnoffset
+//   keysuffix: and add these bytes to it to form the current
+//
+//   NOTE: key reconstituted is: ROW (coloffset-skipoffset) COL
+//
+//   COL:     0 : no column name, 0 length
+//         -128 : explicit column name string of length n including 0
+//      128-255 : column number
+//   col(len):
 //   - len < 128: is length of column name string (max 64?)
 //   - 'len (>128): is column number
-// column: len bytes
-// 0: terminated with a redundant zero
+//   COL: len bytes
 //
-// offset: serialized long
-//
-// type: 1 byte of type
-//   0 - forwarding key search to sector
-//   1 - inline data
-// 128 - data in sector
+// DATA:
+//   typedatalen: OAQ128
+//     0-127 : inline data of that many bytes
+//     128   : 
+//     128+  : data in sector
 //
 // (* 42 2 256 19) = 4MB max?
 //
