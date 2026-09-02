@@ -51,6 +51,11 @@ int qputsn(char* s, int len, FILE* f) {
   return n;
 }
 
+void qputsnf(char* s, int len, FILE* f, int width) {
+  int l= qputsn(s, l, f);
+  while (l++ < width) putchar(' ');
+}
+
 void nl() { putchar('\n'); }
 
 
@@ -374,9 +379,9 @@ void printPage() {
 	 FSpage.n, FSpage.maxklen, FSpage.totklen, FSpage.totdlen, z);
   for(i=0; i<FSpage.n; ++i) {
     printf("%2d:", FSpage.klen[i]);
-    { int l= qputsn(FSpage.keys[i], FSpage.klen[i], stdout); while (l++ < 20) putchar(' '); }
+    qputsnf(FSpage.keys[i], FSpage.klen[i], stdout, 20);
     printf("  %5x %02x  %2d:", FSpage.ts  [i], FSpage.type[i], FSpage.dlen[i] );
-    { int l= qputsn(FSpage.data[i], FSpage.dlen[i], stdout); while (l++ < 20) putchar(' '); }
+    qputsnf(FSpage.data[i], FSpage.dlen[i], stdout, 20);
     nl();
   }
 }
