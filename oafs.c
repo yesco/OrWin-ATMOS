@@ -25,7 +25,7 @@
 
 FILE* aof= 0;
 
-int qputsn(char* s, int len, FILE* f) {
+int fputqsnw(char* s, int len, FILE* f, int width) {
   int n= 0; char c;
 
   if (!s)  return fputs("(NULL)", f);
@@ -34,6 +34,7 @@ int qputsn(char* s, int len, FILE* f) {
   n += fputs("\'", f);
  next:
   --len;
+  if (width > 0 && width-n <= 3) { n+= printf("..."); goto spaces; }
   switch((c= *s++)) {
   case '\n': n+= fputs("\\n", f);  goto next;
   case '\t': n+= fputs("\\t", f);  goto next;
@@ -48,12 +49,15 @@ int qputsn(char* s, int len, FILE* f) {
   }
  done:
   n+= fputs("'", f);
+
+ spaces:
+  while (n++ < width) putchar(' ');
+
   return n;
 }
 
-void qputsnf(char* s, int len, FILE* f, int width) {
-  int l= qputsn(s, l, f);
-  while (l++ < width) putchar(' ');
+void fputqsn(char* s, int len, FILE* f) {
+  fputqsnw(s, len, f, -1);
 }
 
 void nl() { putchar('\n'); }
@@ -72,14 +76,14 @@ char* readsector(char* buff, unsigned int n) {
   // we allocate one byte more, lol, to terminate any "strings"
   char* b= buff? buff: calloc(257, 1);
   size_t rd= b? fread(b, 256, 1, aof): 0;
-  printf("RD %zu: ", rd); qputsn(b, 256, stdout); nl();
+  printf("RD %zu: ", rd); fputqsn(b, 256, stdout); nl();
   if (!rd && !buff) { free(b); b= 0; }
   return b;
 }
 
 char* writesector(char* buff, unsigned int n) {
   size_t wr= buff? fwrite(buff, 256, 1, aof): 0;
-  printf("WR %zu: " , wr); qputsn(buff, 256, stdout); nl();
+  printf("WR %zu: " , wr); fputqsn(buff, 256, stdout); nl();
   return wr? buff: 0;
 }
 
@@ -379,9 +383,9 @@ void printPage() {
 	 FSpage.n, FSpage.maxklen, FSpage.totklen, FSpage.totdlen, z);
   for(i=0; i<FSpage.n; ++i) {
     printf("%2d:", FSpage.klen[i]);
-    qputsnf(FSpage.keys[i], FSpage.klen[i], stdout, 20);
+    fputqsnw(FSpage.keys[i], FSpage.klen[i], stdout, 20);
     printf("  %5x %02x  %2d:", FSpage.ts  [i], FSpage.type[i], FSpage.dlen[i] );
-    qputsnf(FSpage.data[i], FSpage.dlen[i], stdout, 20);
+    fputqsnw(FSpage.data[i], FSpage.dlen[i], stdout, 20);
     nl();
   }
 }
