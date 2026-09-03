@@ -299,11 +299,17 @@ OAFSpage* FSinsert
   if (FSpage.n >= MAX_KEYS) return 0;
     
   // simple insert sort
-  // not even worth doing binary search?
   while(i < FSpage.n) {
     len= FSpage.klen[i];
     if (len < klen) l= len;
+
+    // TODO: need to be MORE advanced
+    
     if (memcmp(key, FSpage.keys[i], l) <= 0) break;
+
+    // if (FSpage.ts[i]      <=> ...)
+    // if (FSpage.deleted[i] <=> ...)
+
     ++i;
   }
   // insert at i location
