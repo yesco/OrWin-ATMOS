@@ -1,0 +1,1 @@
+rm -f oafs.sim; cl65 -Oirs -t sim6502 oafs.c -o oafs.sim -m oafs.map && ls -l oafs.sim && sim65 oafs.sim fil.oafs

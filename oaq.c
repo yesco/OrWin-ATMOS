@@ -843,8 +843,8 @@ char* QAOS(char* s, int16_t *i) {
 
 char* LOAQ(char* s, uint32_t l) {
   if (l  <= 0xffff)        return OAQ(s, l);
-  // TODO: verify
-  if (l < 0 && -l <= 0xff) return OAQ(s, l);
+  // TODO: verify < 0, lol
+  if ((int32_t)l < 0 && -(int32_t)l <= (int32_t)0xff) return OAQ(s, l);
   { char i, n= 1;
     oaq_val.l= l;
 

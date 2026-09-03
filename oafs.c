@@ -111,7 +111,8 @@ would allow ls to parse the blocks of the index:
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
-#include <strings.h>
+//#include <strings.h>
+#include <string.h>
 
 #include <assert.h>
 
@@ -170,12 +171,18 @@ void nl() { putchar('\n'); }
 
 #else
 
+int fseek(FILE* f, long pos, int whence) {
+  return -1;
+}
+  
+  
 // Simulate the filesystem in a file
 
 // TODO: read "any size"? (smaller bigger)
 char* readsector(char* buff, word n) {
   // we allocate one byte more, lol, to terminate any "strings"
-  char* b= buff? buff: calloc(257, 1);
+  char* b= buff? buff: (char*)calloc(257, 1);
+  int fs= fseek(oaf, 256*n, SEEK_SET);
   size_t rd= b? fread(b, 256, 1, oaf): 0;
   printf("RD %zu: ", rd); fputqsn(b, 256, stdout); nl();
   if (!rd && !buff) { free(b); b= 0; }
@@ -183,6 +190,7 @@ char* readsector(char* buff, word n) {
 }
 
 char* writesector(char* buff, word n) {
+  int fs= fseek(oaf, 256*n, SEEK_SET);
   size_t wr= buff? fwrite(buff, 256, 1, oaf): 0;
   printf("WR %zu: " , wr); fputqsn(buff, 256, stdout); nl();
   return wr? buff: 0;
@@ -208,6 +216,7 @@ word next_sector= 256;
 // TODO: make it "near"
 word FSnewsector(word cur) {
   return next_sector++;
+  (void)cur;
 }
 
 
@@ -232,9 +241,15 @@ struct OAFSentry {
 } entry;
 
 
+#ifndef __CC65__
+
+  #define bzero(a, z) memset(a, 0, z)
+
+#endif
+
 // Returns: 0 if fail
 char parseentry(char* page, char o) { 
-  char r, klen, *p= page+o;
+  char klen, *p= page+o;
 
   bzero(&entry, sizeof(entry));
 
@@ -351,6 +366,7 @@ char OAFSparsepage(char* page) {
 
 // Max buffered writes?
 #define MAX_KEYS 255
+
 //#define MAX_KEYS (256 / 3) // 85!
 
 
@@ -384,6 +400,7 @@ OAFSpage* FSinsert
  uint32_t ts, char type,
  size_t dlen, char* data)
 {
+  int z;
   char i= 0, len, l= klen;
 
   // TODO: handle overflow
@@ -405,7 +422,7 @@ OAFSpage* FSinsert
   }
   // insert at i location
   // TODO: irritating, use array of struct?
-  int z= FSpage.n-i;
+  z= FSpage.n-i;
   memmove(FSpage.klen + i + 1, FSpage.klen + i, sizeof(FSpage.klen[i])*z);
   memmove(FSpage.keys + i + 1, FSpage.keys + i, sizeof(FSpage.keys[i])*z);
   memmove(FSpage.ts   + i + 1, FSpage.ts   + i, sizeof(FSpage.ts  [i])*z);
@@ -426,15 +443,17 @@ OAFSpage* FSinsert
   ++FSpage.n;
 
   return &FSpage;
+  (void)type;
 }
 
 // Returns: index of next item to store (if it didn't fit)
 //   or 0 if all ok
 char packpage(char* page, word next) {
   char towrite_skipoff = 0, towrite_dataoff= 0, dataoff= 0,
-    z= 0, n= 0;
+    z= 0, n= 0, plen= 0, *pkey= 0;
+  word saved= 0;
   char *p, j;
-
+  
   bzero(page, 256);
   
   // header
@@ -444,19 +463,18 @@ char packpage(char* page, word next) {
   page[z++]= next>>8;
 
   printf("--- Packer\n");
-  char plen= 0, *pkey= 0;
-  word saved= 0;
   for(j=next; j<FSpage.n; ++j) {
     char prefix= 0; // This works, but TODO: compress
     char* key= FSpage.keys[j];
     char klen= FSpage.klen[j];
+    char need;
 
     // TODO: LevelDB allows a (single) empty key! 
     if (!key || !klen) { printf("  %%NO KEY: %u %p %u\n", j, key, klen); continue; }
 
     // TODO: typedatalen and timestamp serializes to how many bytes?
     //  maybe move abort till later?
-    char need= 3 + 1 + klen + FSpage.dlen[j];
+    need= 3 + 1 + klen + FSpage.dlen[j];
     
     // max of prev and current key len
     if (klen <= plen) plen= klen;
@@ -549,42 +567,79 @@ void printPage() {
   }
 }
   
+#ifdef __CC65__
+
+int getline(char **s, size_t *z, FILE* f) {
+  char* r;
+  size_t len;
+
+  // Initialize buffer if it's empty
+  if (!*s || !*z) {
+    if (!(*s= realloc(*s, *z= 80))) return -1;
+  }
+
+  r= *s;
+
+  while (fgets(r, *z - (r - *s), f)) {
+    len= strlen(r);
+    // continues? (no nl)
+    if (len > 0 && r[len - 1] != '\n') {
+      *z+= 40;
+      if (!(*s= realloc(*s, *z))) return -1;
+      r= *s + strlen(*s);
+    } else {
+      break;
+    }
+  }
+      
+  if (r == *s && feof(f) && strlen(*s) == 0) return -1;
+
+  return strlen(*s);
+}
+
+#endif // CC65
+
 // Assummes:
 //  "KEY DATA....\n"
 //
 // NOTE: No space in KEY, and no \n in DATA. lol
-
 void insertlines(char* name) {
   FILE* f= strcmp(name, "-")==0? stdin: fopen(name, "r");
-  char* s= 0; size_t z= 0; int len;
+  char type= 0, *s= 0;
+  size_t z= 0;
+  int len;
+  char *data, *ks, *ds;
+  word ts;
 
   assert(f);
   do {
+    // TODO: nono on cc65
     len= getline(&s, &z, f);
     // truncate ending \n
     if (len >=0 && s[len-1]==10) s[--len]= 0;
 
-    char* data= strchr(s, ' ');
+    data= strchr(s, ' ');
     if (data) *data++= 0;
     
     // data now points to char after ' ' or '\0'
 
-    uint32_t ts= 0;
-    char type= 0;
+    ts= 0;
+    type= 0;
 
     // TODO: inserting NULL is same a delete? THINK!
-    char * ks= len>=0? strdup(s): 0;
-    char * ds= len>=0 && data && *data? strdup(data? data: ""): 0;
+    ks= len>=0? strdup(s): 0;
+    ds= len>=0 && data && *data? strdup(data? data: ""): 0;
 
     //printf("%3ld:KEY=%s\t%3ld:DATA=%s\n", ks? strlen(ks): 0, ks, ds? strlen(ds): 0, ds);
 
   retry:
     
     if (len < 0 || !FSinsert(strlen(s), ks, ts, type, ds? strlen(ds): 0, ds)) {
-      printf("\n%%Overflow - FLUSH buffer\n");
-
       char* page= calloc(256, 1);
       char inext= 0;
+
+      printf("\n%%Overflow - FLUSH buffer\n");
+
       while((inext= packpage(page, inext)));
 
       // TODO: instead of looping till none, shift them up, and refill
@@ -609,12 +664,13 @@ void insertlines(char* name) {
 }
 
 int main(int argc, char** argv) {
+  char *xs;
+  
   assert(argc);
-  oaf= fopen(argv[1], "rw+");
+  oaf= fopen(argv[1], "r");
   assert(oaf);
 
-  char* xs= readsector(0, 0);
-  int len;
+  xs= readsector(0, 0);
   
   printPage();
   
