@@ -1337,9 +1337,21 @@ void scheduler() {
   }
 }
 
-int main() {
+extern int readsector(char*, int);
+extern int writesector(char*, int);
+
+extern void insertlines(char*);
+extern void printPage();
+
+int main(int argc, char** argv) {
   int i= 0, j= 0, z= 0;
 
+#ifdef OAFS
+  readsector(0, 0);
+  printPage();
+  insertlines(argc>2? argv[2]: "-");
+#endif // OAFS
+  
   heapstart= _heapmemavail();
   
   // needed for OrWIN on cc65, assumption and used extensivly

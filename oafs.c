@@ -162,25 +162,32 @@ void fputqsn(char* s, int len, FILE* f) {
   fputqsnw(s, len, f, -1);
 }
 
-void nl() { putchar('\n'); }
-
+// TODO: remove lol
+#define nl() { putchar('\n'); }
 
 #ifdef __ATMOS__
 
-  #TODO: Add ORIC ATMOS disk read asm code
+char* readsector(char* buff, word n) {
+  return 0;
+  
+}
+
+char* writesector(char* buff, word n) {
+  return 0;
+}
+
+//#TODO: Add ORIC ATMOS disk read asm code
 
 #else
 
 int fseek(FILE* f, long pos, int whence) {
   return -1;
 }
-  
-  
+
 // Simulate the filesystem in a file
 
 #ifdef __CC65__
 
-// TODO: read "any size"? (smaller bigger)
 char* readsector(char* buff, word n) {
   char* b= buff? buff: (char*)calloc(256, 1);
   char fn[32];
@@ -226,8 +233,9 @@ char* writesector(char* buff, word n) {
   return wr? buff: 0;
 }
 
-#endif
+#endif // __CC65__
 
+#endif // __ATMOS__
 
 
 
@@ -399,6 +407,8 @@ char OAFSparsepage(char* page) {
 
 // Max buffered writes?
 #define MAX_KEYS 255
+
+//#define MAX_KEYS 16
 
 //#define MAX_KEYS (256 / 3) // 85!
 
@@ -696,6 +706,8 @@ void insertlines(char* name) {
   //  if (f != stdin) fclose(f);
 }
 
+#ifndef MAIN
+
 int main(int argc, char** argv) {
   char *xs;
   
@@ -718,179 +730,4 @@ int main(int argc, char** argv) {
   return 0;
 }
 
-/*
-
-Maximum Native Disk Geometry
-
-The most advanced Oric DOS, Sedoric (the standard choice for the
-Microdisc and compatible controllers), defines its largest native disk
-structure using the following maximum geometric values:
-
-Tracks (Cylinders): Up to 80 tracks (numbered 0 to 79).
-
-Sides (Heads): Up to 2 sides (double-sided).
-
-Sectors per Track: Exactly 17 sectors (under optimal Sedoric MFM formatting, though the standard Microdisc used
-16).
-
-Bytes per Sector: Exactly 256 bytes (inherent to the Oric file
-system and Western Digital floppy controllers).
-
-Maximum Disk Calculation:
-
-`80 tracks * 2 sides * 17 sectors * 256 = 696,320 bytes (approx. 680 KB unformatted 544 KB formatted data space)
-
-2. Physical Drive
-
-*Compatibility:*
-
-While the original official Oric Microdisc drive system shipped with a
-single-sided 3-inch mechanism restricted to 40 tracks, 16 sectors, and
-160 KB, the underlying disk code and alternative interfaces (like the
-Cumana or Jasmin) natively support 3.5-inch or 5.25-inch
-double-density PC floppy mechanisms modified to step to 80 tracks.
-
-Interesting storage systems:
-
-- https://github.com/keirf/flashfloppy
-
-3. Disk Code Limitations (.DSK Header)
-
-The software container blueprint for Oric Atmos disk images dictates
-these hard limits. In the standard Oric .DSK file structure, the
-geometry data is embedded directly in the 256-byte header:
-
-```
-02 00 00 00 => Max 2 Sides
-50 00 00 00 => Max 80 Tracks ($50 hex = 80 decimal)
-11 00 00 00 => Max 17 Sectors ($11 hex = 17 decimal)
-
-
-JSK: (* 2 80 17) = 2720 sectors
-
-- read sector in track: 12.5 ms
-- wait for sector: 0 - 200ms (one full rotation in worst case)
-- head move track 0-39: 39 * 6 + 12 = 246 ms (tracks * 6 + 12 ms)
-- switch side: 0 ms!
-- switch side SEDORIC: Track Skewing: 12.5 ms!
-
-
-
-
-
-Gemini generated info:
-
-To understand the physical access times for the Oric Atmos (using the
-official Oric Microdisc or compatible floppy systems), we have to look
-at the mechanical constraints of the drives from that era and the
-Western Digital WD1793 Floppy Disk Controller (FDC). [1] Floppy drives
-for the Oric rotate at a constant speed of 300 RPM (5 revolutions per
-second). This means a single full rotation takes exactly 200
-milliseconds. [2]
-
-------------------------------
-
-## 1. Read 1 Sector on the Current Track: ~12.5 ms to 212.5 ms
-
-When the read head is already on the correct track, the access time is
-a combination of Rotational Latency (waiting for the sector to spin
-under the head) and Transfer Time (reading the data): [3]
-
-* Best Case (0 ms latency):
-
-  The sector is passing under the head exactly as the read command is
-  issued. You only pay the transfer time for 1 sector. Because there
-  are 16 sectors per track on a standard Microdisc, reading 1 sector
-  takes $200\text{ ms} / 16 = \mathbf{12.5\text{ ms}}$. [4]
-
-* Worst Case (200 ms latency):
-
-  The sector just passed the head. You must wait a full rotation (200
-  ms) plus the transfer time (12.5 ms) = 212.5 ms.
-
-* Average Case:
-
-  Half a rotation (100 ms) plus transfer time (12.5 ms) = 112.5 ms.
-
-
-## 2. Moving One Track Away (1 Track Seek): ~18.5 ms to 218.5 ms
-
-To move the head, the FDC sends a step pulse to the drive's stepper
-motor. The WD1793 controller has selectable Step Rates. On the Oric,
-the step rate is usually configured to 6 ms per track.
-
-* Mechanical Step Time: 6 ms
-
-* Head Settling Time: Mechanical drives require an extra 12 ms to 15
-  ms at the end of a movement for the head to stop vibrating before it
-  can read data.
-
-* Total Moving Delay: ~18 ms to 21 ms. [5, 6] 
-
-Once the head settles, you are hit with the same rotational latency as
-above.
-
-* Total Time: 18 ms (step/settle) + Rotational Latency (0 to 200 ms) + 12.5 ms (transfer).
-* Average Time: ~130.5 ms.
-
-## 3. Moving Two Tracks Away: ~24.5 ms to 224.5 ms
-
-The step rate applies to every track crossed, but the head settling
-time only happens once at the very end of the movement. [6]
-
-* Formula: Tracks * 6 ms + 12  ms (settle)
-* Calculation: (2 × 6 ms) + 12 ms = 24 ms mechanical delay.
-* Average Time: 24 ms} + 100 ms (avg. rotation)} + 12.5 ms (transfer) = 136.5 ms.
-* 
-
-## 4. Moving N Tracks Away (The "Seek" Formula)
-
-For any arbitrary track distance N, you can calculate the mechanical
-delay using the standard formula: $$\text{Mechanical Delay} = (N
-\times 6\text{ ms}) + 12\text{ ms}$$
-
-* Max Seek (Track 0 to 39 on a 40-track drive): (39 × 6) + 12 = 246 ms
-  just for the head to move.
-
-* Overall Average Access Time (including rotation/transfer): Add
-  roughly 112.5 ms to your mechanical delay.
- 
-
-## 5. Switching Sides to Read the Same Track: ~12.5 ms (Instantaneous)
-
-Switching sides is completely electronic, not mechanical. The FDC
-simply changes the voltage on the "Side Select" pin of the floppy
-drive ribbon cable.
-
-* Head Switch Time: 0 ms (instantaneous).
-
-* The Catch (Sector Interleaving/Skew):
-
-  Because switching sides takes micro seconds, the disk keeps
-  spinning. If Side 0 Sector 1 is physically directly "above" Side 1
-  Sector 1, by the time the FDC switches sides, Sector 1 will have
-  already spun past the head. You would have to wait a painful 187.5
-  ms for it to rotate all the way back around. [7]
-
-* To solve this, advanced Oric DOS formats like Sedoric use Track
-  Skewing. They offset the sector numbers on the second side (or
-  adjacent tracks) by a few sectors so that when a side switch
-  happens, the next logical sector is perfectly positioned to be read
-  immediately (12.5 ms). [8]
-
-
-
-------------------------------
-If you are optimizing a loader or writing raw assembly code for the WD1793, I can give you the exact register commands to change the step rates or explain how to structure your file sectors to minimize rotational delay. What are you building?
-
-[1] [https://www.atari-forum.com](https://www.atari-forum.com/viewtopic.php?t=37919&start=75)
-[2] [https://www.os2museum.com](http://www.os2museum.com/wp/floppy-capacity-math/)
-[3] [https://medium.com](https://medium.com/@sazalkanti/hard-disk-drive-1e6a75d2ffda)
-[4] [https://www.computinghistory.org.uk](https://www.computinghistory.org.uk/det/31261/Oric-Microdisc-Drive/)
-[5] [https://www.cp.eng.chula.ac.th](https://www.cp.eng.chula.ac.th/~piak/teaching/ca/disk.htm)
-[6] [https://en.wikipedia.org](https://en.wikipedia.org/wiki/Hard_disk_drive_performance_characteristics)
-[7] [https://stackoverflow.com](https://stackoverflow.com/questions/41767414/how-is-average-seek-time-calculated)
-[8] [https://github.com](https://github.com/keirf/flashfloppy/issues/144)
-
-
-*/
+#endif // MAIN
