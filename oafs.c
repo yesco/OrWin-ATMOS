@@ -266,7 +266,7 @@ char OAFSparsepage(char* page) {
 // 
 
 
-#define MAX_KEYS (256 / 11) // 24
+#define MAX_KEYS (256 / 12) // 21 ! Jackpot!
 
 
 // simplest hack
@@ -298,14 +298,15 @@ OAFSpage FSpage;
 OAFSpage* FSinsert
 (char klen, char* key,
  uint32_t ts, char type,
- char dlen, char* data) {
+ char dlen, char* data)
+{
+  char i= 0, len, l= klen;
 
   // TODO: handle overflow
-  assert(FSpage.n < MAX_KEYS);
+  if (FSpage.n >= MAX_KEYS) return 0;
     
   // simple insert sort
   // not even worth doing binary search?
-  char i= 0, len, l= klen;
   while(i < FSpage.n) {
     len= FSpage.klen[i];
     if (len < klen) l= len;
@@ -341,55 +342,85 @@ OAFSpage* FSinsert
 //   or 0 if all ok
 char OAFSpackpage(char* page, uint16_t next) {
   char *p= page;
-  uint16_t i= 0;
   char startoff = 0, dataoff= 0;
-  char j;
+  char j, z; // z = offset/size page constructed so far
 
-  // overestimate; gives some slack!
-  int z= FSpage.totdlen + FSpage.totklen + FSpage.n * (256 / MAX_KEYS) + 4;
   //printf("==== OAFS PAGE: n: %2d maxklen: %2d totklen: %3d totdlen: %3d est: %3d\n",
   //FSpage.n, FSpage.maxklen, FSpage.totklen, FSpage.totdlen, z);
 
+  bzero(page, 256);
+  
   OAFSheader.mark1= '$'+128;
   OAFSheader.mark2= 'I'+128;
   OAFSheader.next= next;
-  memcpy(p, &OAFSheader, i= sizeof(OAFSheader));
+  memcpy(p, &OAFSheader, z= sizeof(OAFSheader));
 
   printf("--- Packer\n");
-  for(j=0; j<FSpage.n; ++j) {
+  char plen= 0, *pkey= 0, saved= 0;
+  for(j=next; j<FSpage.n; ++j) {
     char prefix= 0; // This works, but TODO: compress
-    if (256-i < 10 + FSpage.klen[i]-prefix + FSpage.dlen[j]) break;
+    char* key= FSpage.keys[j];
+    char klen= FSpage.dlen[j];
 
-    startoff= i;
-    p[i++]= 0;
-    p[i++]= 0; // not deleted
-    p[i++]= prefix; // prefixlen
-    p[i++]= 0; // coloff
-    p[i++]= 0; // coloff
-    p[i++]= 0; // dataoff
+    if (!key || !klen) { printf("  %%NO KEY: %u\n", j); continue; }
+
+    // TODO: typedatalen and timestamp serializes to how many bytes?
+    //  maybe move abort till later?
+    char need= 12 + klen + FSpage.dlen[j];
     
-    p= OAQ(p+i, FSpage.dlen[j]); // typedatalen TODO: FSpage.type type
+    // max of prev and current key len
+    if (klen <= plen) plen= klen;
+    if (pkey) while(pkey[prefix]==key[prefix]) ++prefix;
+    need-= prefix;
+
+    if (256-z < need) { printf("  NEEED: %u\n", need); break; }
+
+    startoff= z;
+    p= page + z;
+    
+    p[z++]= 0;
+    p[z++]= 0; // not deleted
+    p[z++]= prefix; // prefixlen
+    p[z++]= 0; // coloff
+    p[z++]= 0; // coloff
+    p[z++]= 0; // dataoff
+    
+    p= OAQ(page + z, FSpage.dlen[j]); // typedatalen TODO: FSpage.type type
 
     //p= OAQ(p  , FSpage.timestamp[j]); // TODO:
     p= OAQ(p  , ~0x4711); //  reverse sort order
 
-    memcpy(p, FSpage.keys[j], FSpage.klen[j]); p+= FSpage.klen[j];
+    memcpy(p, FSpage.keys[j]+prefix, FSpage.klen[j] - prefix); p+= FSpage.klen[j] - prefix;
     dataoff= p-page;
     memcpy(p, FSpage.data[j], FSpage.dlen[j]); p+= FSpage.dlen[j];
     // TODO: add xor checksum?
 
-    i= p-page;
-    page[startoff]= i;
+    z= p-page;
+    page[startoff]= z;
 
-    printf("  %2d %03d-%03d %3d ", j, startoff, i, i-startoff);
-    nl();
+    // store previous
+    plen= klen; pkey= key;
+    
+    printf("  %2d: %02x-%02x %3d   %2d ", j, startoff, z, z-startoff, klen);
+    { char i= prefix; while(i--) putchar('.'); }
+    fputqsn(key+prefix, klen-prefix, stdout);
+    printf("   p%u\n", prefix);
+    saved+= prefix;
+
+    // cleanup
+    free(key);            FSpage.keys[j]= 0;
+    free(FSpage.data[j]); FSpage.data[j]= 0;
   }
 
   // END marker
   *++p= 0;
+  ++z;
 
-  // return next index, or 0 if done
-  return j >= FSpage.n? 0: j;
+  // return inext index to process, or 0 if done
+  j= j >= FSpage.n? 0: j;
+
+  printf("  SAVED: %u\n  INEXT: %d\n\n", saved, j);
+  return j;
 }
 
 void printPage() {
@@ -409,13 +440,34 @@ void printPage() {
   
 void insertlines(char* name) {
   FILE* f= fopen(name, "r");
-  char* s= 0; size_t len= 0;
+  char* s= 0; size_t z= 0, len;
 
   assert(f);
-  while(getline(&s, &len, f) > 0) {
-    char len= strlen(s); uint32_t ts= -1;
+  while((len= getline(&s, &z, f)) > 0) {
+    uint32_t ts= -1;
     char type= 0;
-    FSinsert(len, strdup(s),  ts, type,  len, strdup(s));
+
+  retry:
+    char *ks= strdup(s), *ds= strdup(s);
+    if (!len || !FSinsert(len, ks,  ts, type,  len, ds)) {
+      printf("\n%%Overflow - FLUSH buffer\n");
+
+      char* page= calloc(256, 1);
+      char inext= 0;
+      while((inext= OAFSpackpage(page, inext)));
+
+      FSpage.n= 0;
+
+      // TODO: save "page"
+      
+      free(page);
+
+      if (!len) break;
+
+      // TODO: limit?
+      // Need to retry
+      goto retry;
+    }
   }
   free(s);
 }
@@ -432,13 +484,8 @@ int main(int argc, char** argv) {
   
   insertlines("numbers.txt");
 
-  printPage();
+  //printPage();
   
-  char* page= calloc(256, 1);
-  char inext= OAFSpackpage(page, 0);
-  
-  printf("inext= %d\n", inext);
-	 
   fclose(aof);
   return 0;
 }
