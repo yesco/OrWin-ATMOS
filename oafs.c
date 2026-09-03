@@ -178,10 +178,40 @@ int fseek(FILE* f, long pos, int whence) {
   
 // Simulate the filesystem in a file
 
+#ifdef __CC65__
+
 // TODO: read "any size"? (smaller bigger)
 char* readsector(char* buff, word n) {
-  // we allocate one byte more, lol, to terminate any "strings"
-  char* b= buff? buff: (char*)calloc(257, 1);
+  char* b= buff? buff: (char*)calloc(256, 1);
+  char fn[32];
+  char x= sprintf(fn, "OAFS/sec%05u", n);
+  FILE* f= fopen(fn, "r");
+  size_t rd= b? fread(b, 256, 1, oaf): 0;
+
+  printf("RD %zu: ", rd); fputqsn(b, 256, stdout); nl();
+
+  if (!rd && !buff) { free(b); b= 0; }
+  fclose(f);
+  return b;
+}
+
+char* writesector(char* buff, word n) {
+  char fn[32];
+  char x= sprintf(fn, "OAFS/sec%05u", n);
+  FILE* f= fopen(fn, "r");
+  size_t wr= buff? fwrite(buff, 256, 1, oaf): 0;
+
+  printf("WR %zu: " , wr); fputqsn(buff, 256, stdout); nl();
+
+  fclose(f);
+  return wr? buff: 0;
+}
+
+#else
+
+// TODO: read "any size"? (smaller bigger)
+char* readsector(char* buff, word n) {
+  char* b= buff? buff: (char*)calloc(256, 1);
   int fs= fseek(oaf, 256*n, SEEK_SET);
   size_t rd= b? fread(b, 256, 1, oaf): 0;
   printf("RD %zu: ", rd); fputqsn(b, 256, stdout); nl();
@@ -197,6 +227,9 @@ char* writesector(char* buff, word n) {
 }
 
 #endif
+
+
+
 
 
 #define MAIN
@@ -666,6 +699,9 @@ void insertlines(char* name) {
 int main(int argc, char** argv) {
   char *xs;
   
+  // also not on sim
+  //dio_read(7, 42, argv);
+	   
   assert(argc);
   oaf= fopen(argv[1], "r");
   assert(oaf);
