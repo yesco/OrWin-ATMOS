@@ -79,7 +79,16 @@ would allow ls to parse the blocks of the index:
 
 #include <assert.h>
 
+#ifndef WORD
+
+  typedef uint16_t word;
+
+  #define WORD
+
+#endif // WORD
+
 FILE* oaf= 0;
+
 
 int fputqsnw(char* s, int len, FILE* f, int width) {
   int n= 0; char c;
@@ -128,7 +137,7 @@ void nl() { putchar('\n'); }
 // Simulate the filesystem in a file
 
 // TODO: read "any size"? (smaller bigger)
-char* readsector(char* buff, unsigned int n) {
+char* readsector(char* buff, word n) {
   // we allocate one byte more, lol, to terminate any "strings"
   char* b= buff? buff: calloc(257, 1);
   size_t rd= b? fread(b, 256, 1, oaf): 0;
@@ -137,7 +146,7 @@ char* readsector(char* buff, unsigned int n) {
   return b;
 }
 
-char* writesector(char* buff, unsigned int n) {
+char* writesector(char* buff, word n) {
   size_t wr= buff? fwrite(buff, 256, 1, oaf): 0;
   printf("WR %zu: " , wr); fputqsn(buff, 256, stdout); nl();
   return wr? buff: 0;
@@ -145,80 +154,118 @@ char* writesector(char* buff, unsigned int n) {
 
 #endif
 
+
 #define MAIN
 
 #include "oaq.c"
 
 
+// reserve first 64KB lol
+// sectors; (* 2 80 19) = 3040 max?
+//   .words: 3253 pages!
+word next_sector= 256;
+
+
+// TODO: make it "near"
+word FSnewsector(word cur) {
+  return next_sector++;
+}
+
+
+// TODO: redundant, just do it!
+#define DELETED(p,a)   ((p)[a+1])&0x80)
+
 struct OAFSentry {
   char     skipoff;
-  char     deleted;
-  char     prefixlen;
-  char     coloff;
+  char     prefix;
   char     dataoff;
-  char     dlen;
-  // OAQ encoded
-  uint16_t typedatalen;
-  uint32_t timestamp;
+
+  // decoded
+  char     deleted;
+  
+  uint32_t ts;
+
   char     klen;
   char*    key;
+
+  word     dlen;
   char*    data;
-} OAFSentry;
+} entry;
 
 
 // Returns: 0 if fail
-char OAFSparseentry(char* page, char o) { 
-  char r, klen, *p;
+char parseentry(char* page, char o) { 
+  char r, klen, *p= page+o;
 
-  if (!(r= p[o])) return r; // END
+  bzero(&entry, sizeof(entry));
 
-  // copy fixed
-  bzero(&OAFSentry, sizeof(OAFSentry));
-  memcpy(&OAFSentry, page + o, 6);
+  // END ?
+  if (!(klen= entry.skipoff= *p++)) return 0;
 
-  //if (e->dlen >= 128) p= QOA(page+5, &e->typedatalen); else p= page+6;
-  p= QAO(page + o + 5, &OAFSentry.typedatalen);
-  p= QAOL(p, &OAFSentry.timestamp);
-
-  // calc key length from redundant info (expensive)
-  OAFSentry.klen= OAFSentry.skipoff - OAFSentry.dataoff - (p-page);
-  OAFSentry.key = p;
-
-  if (OAFSentry.dlen >= 0x80) OAFSentry.dlen= 0; // it's a typeflag, lookup len
-  OAFSentry.data= page + OAFSentry.dataoff;
-
-  return r;
-}
-
-
-struct OAFSheader {
-  char     mark1; // '$'+128
-  char     mark2; // 'I'+128 for Index
-  uint16_t next; // (* 2 80 19) = 3040 max
-} OAFSheader;
+  if ((entry.prefix= *p++) & 0x80) {
+    entry.prefix&= 0x7f; entry.deleted= 1;
+  }
   
-char OAFSparsepage(char* page) {
-  char i= sizeof(OAFSheader);
+  // get key
+  if ((entry.dataoff= *p++))
+    klen-= entry.dataoff;
 
-  memcpy(&OAFSheader, page, sizeof(OAFSheader));
+  assert(p-page==3);
+  entry.klen= (klen-= 3);
+  entry.key= p;
 
-  while(i) {
-    char o= i;
-    i= OAFSparseentry(page, i);
-    printf("  %3u o%1u d%3u p%3u c%3u d%3u L%3u  ",
-	   o,
-	   OAFSentry.skipoff, OAFSentry.deleted, OAFSentry.prefixlen,
-	   OAFSentry.coloff, OAFSentry.dataoff, OAFSentry.dlen);
-    // TODO: l and u lol x
-    printf("  ts%x kL%3u > %s : tL%3u = %s\n",
-	   OAFSentry.timestamp, OAFSentry.klen, OAFSentry.key,
-	   OAFSentry.typedatalen, OAFSentry.data);
+  // optionally: get data
+  if (entry.dataoff) {
+    p= QAOL(p + entry.dataoff, &entry.ts);
+    entry.data= p;
   }
 
-  return 0;
+  // next entry offset, 0 if last
+  return entry.skipoff;
 }
 
-// --- ENTRY:
+
+char OAFSparsepage(char* page) {
+  // 4 byte header
+  char i= 4;
+
+  // TODO: 255 if error? lol
+  if (page[0] != '$'+128) return 0;
+  if (page[1] != 'I'+128) return 0;
+  
+  next_sector= page[2] + (page[3]<<8);
+  
+  while(i) {
+    char o= i;
+    i= parseentry(page, i);
+    printf("  %3u o%02x d%u p%3u d%02x  ",
+	   o,
+	   entry.skipoff, entry.deleted, entry.prefix,
+	   entry.dataoff);
+    
+    printf("  ts%x kL%3u > %s : tL%3u = %s\n",
+	   entry.ts, entry.klen, entry.key,
+	   entry.dlen, entry.data);
+  }
+
+  return 1;
+}
+
+// ENTRY DOCUMENATION
+// ==================
+//
+// Minimal entry size: 3 bytes!
+//   (possible for "" or shorter prefix key)
+//
+// KeyLength : limited to like 80 chars
+// DataLength: inline <= 42 (lol)
+// Timestamp : optional (0 growing), always stored if there is data
+//
+// Generic size formula:nn
+//
+//    bytes= 3 + keylen [ + timestamplen + datalen]
+//
+// --- ENTRY LAYOUT
 //
 // @skipoffset:
 //   <skipoffset> <prefixlen> <dataoffset>
@@ -258,9 +305,9 @@ char OAFSparsepage(char* page) {
 // 1) datalen:
 // 
 
-
+// Max buffered writes?
 #define MAX_KEYS 255
-//#define MAX_KEYS (256 / 12) // 21 ! Jackpot!
+//#define MAX_KEYS (256 / 3) // 85!
 
 
 // simplest hack
@@ -339,24 +386,22 @@ OAFSpage* FSinsert
 
 // Returns: index of next item to store (if it didn't fit)
 //   or 0 if all ok
-char OAFSpackpage(char* page, uint16_t next) {
-  char *p;
-  char towrite_skipoff = 0, towrite_dataoff= 0, dataoff= 0;
-  char j, z; // z = offset/size page constructed so far
-
-  //printf("==== OAFS PAGE: n: %2d maxklen: %2d totklen: %3d totdlen: %3d est: %3d\n",
-  //FSpage.n, FSpage.maxklen, FSpage.totklen, FSpage.totdlen, z);
+char packpage(char* page, word next) {
+  char towrite_skipoff = 0, towrite_dataoff= 0, dataoff= 0,
+    z= 0, n= 0;
+  char *p, j;
 
   bzero(page, 256);
   
-  OAFSheader.mark1= '$'+128;
-  OAFSheader.mark2= 'I'+128;
-  OAFSheader.next= next;
-  memcpy(page, &OAFSheader, z= sizeof(OAFSheader));
+  // header
+  page[z++]= '$'+128;
+  page[z++]= 'I'+128;
+  page[z++]= next;
+  page[z++]= next>>8;
 
   printf("--- Packer\n");
   char plen= 0, *pkey= 0;
-  unsigned int saved= 0;
+  word saved= 0;
   for(j=next; j<FSpage.n; ++j) {
     char prefix= 0; // This works, but TODO: compress
     char* key= FSpage.keys[j];
@@ -375,7 +420,7 @@ char OAFSpackpage(char* page, uint16_t next) {
     if (pkey) while(prefix < plen && pkey[prefix]==key[prefix]) ++prefix;
     need-= prefix;
 
-    if (256-z < need) { printf(" =NEED: %u\n", need); break; }
+    if (256-z < need) { printf(" =NEED : %3u\n", need); break; }
 
     towrite_skipoff= z;
     page[z++]= 0; // <skipoff>
@@ -413,8 +458,10 @@ char OAFSpackpage(char* page, uint16_t next) {
     // store previous
     free(pkey);
     plen= klen; pkey= key;
+
+    ++n;
     
-    printf("  %2d: %02x-%02x %3d   %2d ", j, towrite_skipoff, z, z-towrite_skipoff, klen);
+    printf("  %3d: %02x-%02x %3d   %2d ", j, towrite_skipoff, z, z-towrite_skipoff, klen);
     { char i= prefix; while(i--) putchar('.'); }
     fputqsn(key+prefix, klen-prefix, stdout);
     printf("   p%u\n", prefix);
@@ -434,7 +481,8 @@ char OAFSpackpage(char* page, uint16_t next) {
   j= j >= FSpage.n? 0: j;
 
   // TODO: binary, and add to "super index"
-  printf(" =SAVED: %u\n =LAST: %s\n =INEXT: %d\n\n", saved, pkey, j);
+  printf(" =USED : %3u\n =SAVED: %3u\n =COUNT: %3u\n =LAST : \"%s\"\n =INEXT: %3u\n\n",
+	 z, saved, n, pkey, j);
 
   free(pkey); if (j) FSpage.keys[j-1]= 0;
 
@@ -493,7 +541,7 @@ void insertlines(char* name) {
 
       char* page= calloc(256, 1);
       char inext= 0;
-      while((inext= OAFSpackpage(page, inext)));
+      while((inext= packpage(page, inext)));
 
       // TODO: instead of looping till none, shift them up, and refill
       
