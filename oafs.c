@@ -266,7 +266,8 @@ char OAFSparsepage(char* page) {
 // 
 
 
-#define MAX_KEYS (256 / 12) // 21 ! Jackpot!
+#define MAX_KEYS 255
+//#define MAX_KEYS (256 / 12) // 21 ! Jackpot!
 
 
 // simplest hack
@@ -296,9 +297,9 @@ OAFSpage FSpage;
 
 
 OAFSpage* FSinsert
-(char klen, char* key,
+(size_t klen, char* key,
  uint32_t ts, char type,
- char dlen, char* data)
+ size_t dlen, char* data)
 {
   char i= 0, len, l= klen;
 
@@ -360,9 +361,9 @@ char OAFSpackpage(char* page, uint16_t next) {
   for(j=next; j<FSpage.n; ++j) {
     char prefix= 0; // This works, but TODO: compress
     char* key= FSpage.keys[j];
-    char klen= FSpage.dlen[j];
+    char klen= FSpage.klen[j];
 
-    if (!key || !klen) { printf("  %%NO KEY: %u\n", j); continue; }
+    if (!key || !klen) { printf("  %%NO KEY: %u %p %u\n", j, key, klen); continue; }
 
     // TODO: typedatalen and timestamp serializes to how many bytes?
     //  maybe move abort till later?
@@ -370,10 +371,11 @@ char OAFSpackpage(char* page, uint16_t next) {
     
     // max of prev and current key len
     if (klen <= plen) plen= klen;
-    if (pkey) while(pkey[prefix]==key[prefix]) ++prefix;
+    //    if (pkey) while(prefix < plen && pkey[prefix]==key[prefix]) ++prefix;
+    if (pkey) while(prefix < plen && pkey[prefix]==key[prefix]) ++prefix;
     need-= prefix;
 
-    if (256-z < need) { printf("  NEEED: %u\n", need); break; }
+    if (256-z < need) { printf(" =NEED: %u\n", need); break; }
 
     startoff= z;
     p= page + z;
@@ -421,7 +423,7 @@ char OAFSpackpage(char* page, uint16_t next) {
   j= j >= FSpage.n? 0: j;
 
   // TODO: binary, and add to "super index"
-  printf("  SAVED: %u\n  LAST: %s\n  INEXT: %d\n\n", saved, pkey, j);
+  printf(" =SAVED: %u\n =LAST: %s\n =INEXT: %d\n\n", saved, pkey, j);
 
   free(pkey); if (j) FSpage.keys[j-1]= 0;
 
@@ -443,6 +445,11 @@ void printPage() {
   }
 }
   
+// Assummes:
+//  "KEY DATA....\n"
+//
+// NOTE: No space in KEY, and no \n in DATA. lol
+
 void insertlines(char* name) {
   FILE* f= strcmp(name, "-")==0? stdin: fopen(name, "r");
   char* s= 0; size_t z= 0; int len;
@@ -453,13 +460,22 @@ void insertlines(char* name) {
     // truncate ending \n
     if (len >=0 && s[len-1]==10) s[--len]= 0;
 
+    char* data= strchr(s, ' ');
+    if (data) *data++= 0;
+    
+    // data now points to char after ' ' or '\0'
+
     uint32_t ts= -1;
     char type= 0;
-    char *ks= strdup(s), *ds= strdup(s);
+
+    // TODO: inserting NULL is same a delete? THINK!
+    char *ks= len>=0? strdup(s): 0, *ds= len>=0? strdup(data? data: ""): 0;
+
+    //printf("%3ld:KEY=%s\t%3ld:DATA=%s\n", ks? strlen(ks): 0, ks, ds? strlen(ds): 0, ds);
 
   retry:
     
-    if (len < 0 || !FSinsert(len, ks,  ts, type,  len, ds)) {
+    if (len < 0 || !FSinsert(strlen(s), ks, ts, type, strlen(ds), ds)) {
       printf("\n%%Overflow - FLUSH buffer\n");
 
       char* page= calloc(256, 1);
