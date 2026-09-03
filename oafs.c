@@ -221,44 +221,37 @@ char OAFSparsepage(char* page) {
 // --- ENTRY:
 //
 // @skipoffset:
-//   <skipoffset> <deleted> <prefixlen> <coloffset> <dataoffset>
-//        1 B        1 B        1 B         1 B         1 B
-//   <typedatalen> <timestamp>
-//       OAQ          OAQ
+//   <skipoffset> <prefixlen> <dataoffset>
+//        1 B        1 B          1 B      
 //
 //(@key:)
-//   ...keysuffix...
-// @coloffset:
 //   ...keysuffix
 //
 // @dataoffset:
+//   <timestamp>
+//       OAQ    
 //   <data>
 //
 //
 // skipoffset: page index location of next record, 0 indicates END
-// dataoffset: offset (and end) of key data
-// timestamp: monotonically increasing number (32 bits, or runlen encoded)
+// prefixlen:  0..80 shared bytes w previous key, hibit == DELETED!
+// dataoffset: offset (and end) of key data, 0 means no timestamp/data
 //
-// KEY: 
+// timestamp: monotonically increasing number (DESCENDING sort order)
+//  OAQ: encoding, if just using overwrite/timstamp==0 reversed encodes
+//    as one byte 0xff. Other values at least 2 bytes.
+//    the timestamp is never reaching 0, so no conflict with delete marker...
+//
+// LOGICAL SORT ORDER
+// ---- KEY [TIMESTAMP DESCENDING optional] !deleted
+//
+// KEY: binary bytes
 //   prefixlen: how many bytes to take from previous entry key
-//   coloffset: which bytes in expanded is columnoffset
 //   keysuffix: and add these bytes to it to form the current
 //
 //   NOTE: key reconstituted is: ROW (coloffset-skipoffset) COL
 //
-//   COL:     0 : no column name, 0 length
-//         -128 : explicit column name string of length n including 0
-//      128-255 : column number
-//   col(len):
-//   - len < 128: is length of column name string (max 64?)
-//   - 'len (>128): is column number
-//   COL: len bytes
-//
-// DATA:
-//   typedatalen: OAQ128
-//     0-127 : inline data of that many bytes
-//     128   : 
-//     128+  : data in sector
+// DATA: binary bytes, length= skipoffset-dataoffset
 //
 // (* 42 2 256 19) = 4MB max?
 //
@@ -286,14 +279,13 @@ typedef struct OAFSpage {
   char*    keys[MAX_KEYS];
 
   uint32_t ts  [MAX_KEYS];
-  char     type[MAX_KEYS];
 
   char     dlen[MAX_KEYS];
   char*    data[MAX_KEYS];
 } OAFSpage;
 
 // For now only one page, lol
-OAFSpage FSpage;
+OAFSpage FSpage = {0};
 
 
 OAFSpage* FSinsert
@@ -320,14 +312,14 @@ OAFSpage* FSinsert
   memmove(FSpage.klen + i + 1, FSpage.klen + i, sizeof(FSpage.klen[i])*z);
   memmove(FSpage.keys + i + 1, FSpage.keys + i, sizeof(FSpage.keys[i])*z);
   memmove(FSpage.ts   + i + 1, FSpage.ts   + i, sizeof(FSpage.ts  [i])*z);
-  memmove(FSpage.type + i + 1, FSpage.type + i, sizeof(FSpage.type[i])*z);
+  //memmove(FSpage.type + i + 1, FSpage.type + i, sizeof(FSpage.type[i])*z);
   memmove(FSpage.dlen + i + 1, FSpage.dlen + i, sizeof(FSpage.dlen[i])*z);
   memmove(FSpage.data + i + 1, FSpage.data + i, sizeof(FSpage.data[i])*z);
   
   FSpage.klen[i]= klen;
   FSpage.keys[i]= key;
   FSpage.ts  [i]= ts;
-  FSpage.type[i]= type;
+  //FSpage.type[i]= type;
   FSpage.dlen[i]= dlen;
   FSpage.data[i]= data;
 
@@ -342,8 +334,8 @@ OAFSpage* FSinsert
 // Returns: index of next item to store (if it didn't fit)
 //   or 0 if all ok
 char OAFSpackpage(char* page, uint16_t next) {
-  char *p= page;
-  char startoff = 0, dataoff= 0;
+  char *p;
+  char towrite_skipoff = 0, towrite_dataoff= 0, dataoff= 0;
   char j, z; // z = offset/size page constructed so far
 
   //printf("==== OAFS PAGE: n: %2d maxklen: %2d totklen: %3d totdlen: %3d est: %3d\n",
@@ -354,20 +346,22 @@ char OAFSpackpage(char* page, uint16_t next) {
   OAFSheader.mark1= '$'+128;
   OAFSheader.mark2= 'I'+128;
   OAFSheader.next= next;
-  memcpy(p, &OAFSheader, z= sizeof(OAFSheader));
+  memcpy(page, &OAFSheader, z= sizeof(OAFSheader));
 
   printf("--- Packer\n");
-  char plen= 0, *pkey= 0, saved= 0;
+  char plen= 0, *pkey= 0;
+  unsigned int saved= 0;
   for(j=next; j<FSpage.n; ++j) {
     char prefix= 0; // This works, but TODO: compress
     char* key= FSpage.keys[j];
     char klen= FSpage.klen[j];
 
+    // TODO: LevelDB allows a (single) empty key! 
     if (!key || !klen) { printf("  %%NO KEY: %u %p %u\n", j, key, klen); continue; }
 
     // TODO: typedatalen and timestamp serializes to how many bytes?
     //  maybe move abort till later?
-    char need= 12 + klen + FSpage.dlen[j];
+    char need= 3 + 1 + klen + FSpage.dlen[j];
     
     // max of prev and current key len
     if (klen <= plen) plen= klen;
@@ -377,34 +371,44 @@ char OAFSpackpage(char* page, uint16_t next) {
 
     if (256-z < need) { printf(" =NEED: %u\n", need); break; }
 
-    startoff= z;
-    p= page + z;
+    towrite_skipoff= z;
+    page[z++]= 0; // <skipoff>
+
+    // TODO: delete marker
+    page[z++]= prefix; // <prefixlen>
+
+    towrite_dataoff= z;
+    page[z++]= 0; // dataoff
     
-    p[z++]= 0;
-    p[z++]= 0; // not deleted
-    p[z++]= prefix; // prefixlen
-    p[z++]= 0; // coloff
-    p[z++]= 0; // coloff
-    p[z++]= 0; // dataoff
-    
-    p= OAQ(page + z, FSpage.dlen[j]); // typedatalen TODO: FSpage.type type
+    memcpy(page + z, FSpage.keys[j]+prefix, FSpage.klen[j] - prefix); z+= FSpage.klen[j] - prefix;
 
-    //p= OAQ(p  , FSpage.timestamp[j]); // TODO:
-    p= OAQ(p  , ~0x4711); //  reverse sort order
+    // --- DATAOFF (or keyend)
+    // - timestamp
+    dataoff= 0;
 
-    memcpy(p, FSpage.keys[j]+prefix, FSpage.klen[j] - prefix); p+= FSpage.klen[j] - prefix;
-    dataoff= p-page;
-    memcpy(p, FSpage.data[j], FSpage.dlen[j]); p+= FSpage.dlen[j];
-    // TODO: add xor checksum?
+    if (FSpage.ts[j] || FSpage.dlen[j] || FSpage.data[j]) {
+      printf("DATA!!![ %u %u %p]", FSpage.ts[j], FSpage.dlen[j], FSpage.data[j]);
+      dataoff= z;
+      p= OAQ(page + z, ~FSpage.ts[j]); // REVERSE ORDER!
 
-    z= p-page;
-    page[startoff]= z;
+      // - typedatalen 0 if deleted ??? TODO:
+      //assert(FSpage.dlen[j] < 42); // LOL, unless we have stream-multipages
+      //p= OAQ(page + z, FSpage.dlen[j] + 1); // typedatalen TODO: FSpage.type type
+
+      // - acutal data
+      memcpy(p, FSpage.data[j], FSpage.dlen[j]); p+= FSpage.dlen[j];
+      z= p - page;
+    }
+
+    // Update forward pointers
+    page[towrite_skipoff]= z;
+    page[towrite_dataoff]= dataoff;
 
     // store previous
     free(pkey);
     plen= klen; pkey= key;
     
-    printf("  %2d: %02x-%02x %3d   %2d ", j, startoff, z, z-startoff, klen);
+    printf("  %2d: %02x-%02x %3d   %2d ", j, towrite_skipoff, z, z-towrite_skipoff, klen);
     { char i= prefix; while(i--) putchar('.'); }
     fputqsn(key+prefix, klen-prefix, stdout);
     printf("   p%u\n", prefix);
@@ -415,9 +419,10 @@ char OAFSpackpage(char* page, uint16_t next) {
     free(FSpage.data[j]); FSpage.data[j]= 0;
   }
 
-  // END marker
-  *++p= 0;
-  ++z;
+  // END marker (should already be 0!)
+  page[++z]= 0;
+
+  // TODO: 2 byte CRC of the page, add 2 bytes at end to make it 0x0000
 
   // return inext index to process, or 0 if done
   j= j >= FSpage.n? 0: j;
@@ -439,7 +444,8 @@ void printPage() {
   for(i=0; i<FSpage.n; ++i) {
     printf("%2d:", FSpage.klen[i]);
     fputqsnw(FSpage.keys[i], FSpage.klen[i], stdout, 20);
-    printf("  %5x %02x  %2d:", FSpage.ts  [i], FSpage.type[i], FSpage.dlen[i] );
+    //printf("  %5x %02x  %2d:", FSpage.ts  [i], FSpage.type[i], FSpage.dlen[i] );
+    printf("  %5x %2d:", FSpage.ts[i], FSpage.dlen[i] );
     fputqsnw(FSpage.data[i], FSpage.dlen[i], stdout, 20);
     nl();
   }
@@ -465,17 +471,18 @@ void insertlines(char* name) {
     
     // data now points to char after ' ' or '\0'
 
-    uint32_t ts= -1;
+    uint32_t ts= 0;
     char type= 0;
 
     // TODO: inserting NULL is same a delete? THINK!
-    char *ks= len>=0? strdup(s): 0, *ds= len>=0? strdup(data? data: ""): 0;
+    char * ks= len>=0? strdup(s): 0;
+    char * ds= len>=0 && data && *data? strdup(data? data: ""): 0;
 
     //printf("%3ld:KEY=%s\t%3ld:DATA=%s\n", ks? strlen(ks): 0, ks, ds? strlen(ds): 0, ds);
 
   retry:
     
-    if (len < 0 || !FSinsert(strlen(s), ks, ts, type, strlen(ds), ds)) {
+    if (len < 0 || !FSinsert(strlen(s), ks, ts, type, ds? strlen(ds): 0, ds)) {
       printf("\n%%Overflow - FLUSH buffer\n");
 
       char* page= calloc(256, 1);
