@@ -194,7 +194,7 @@ char OAFSparseentry(char* page, char o) {
 struct OAFSheader {
   char     mark1; // '$'+128
   char     mark2; // 'I'+128 for Index
-  uint16_t nextsector; // (* 2 80 19) = 3040 max
+  uint16_t next; // (* 2 80 19) = 3040 max
 } OAFSheader;
   
 char OAFSparsepage(char* page) {
@@ -337,6 +337,61 @@ OAFSpage* FSinsert
   return &FSpage;
 }
 
+// Returns: index of next item to store (if it didn't fit)
+//   or 0 if all ok
+char OAFSpackpage(char* page, uint16_t next) {
+  char *p= page;
+  uint16_t i= 0;
+  char startoff = 0, dataoff= 0;
+  char j;
+
+  // overestimate; gives some slack!
+  int z= FSpage.totdlen + FSpage.totklen + FSpage.n * (256 / MAX_KEYS) + 4;
+  //printf("==== OAFS PAGE: n: %2d maxklen: %2d totklen: %3d totdlen: %3d est: %3d\n",
+  //FSpage.n, FSpage.maxklen, FSpage.totklen, FSpage.totdlen, z);
+
+  OAFSheader.mark1= '$'+128;
+  OAFSheader.mark2= 'I'+128;
+  OAFSheader.next= next;
+  memcpy(p, &OAFSheader, i= sizeof(OAFSheader));
+
+  printf("--- Packer\n");
+  for(j=0; j<FSpage.n; ++j) {
+    char prefix= 0; // This works, but TODO: compress
+    if (256-i < 10 + FSpage.klen[i]-prefix + FSpage.dlen[j]) break;
+
+    startoff= i;
+    p[i++]= 0;
+    p[i++]= 0; // not deleted
+    p[i++]= prefix; // prefixlen
+    p[i++]= 0; // coloff
+    p[i++]= 0; // coloff
+    p[i++]= 0; // dataoff
+    
+    p= OAQ(p+i, FSpage.dlen[j]); // typedatalen TODO: FSpage.type type
+
+    //p= OAQ(p  , FSpage.timestamp[j]); // TODO:
+    p= OAQ(p  , ~0x4711); //  reverse sort order
+
+    memcpy(p, FSpage.keys[j], FSpage.klen[j]); p+= FSpage.klen[j];
+    dataoff= p-page;
+    memcpy(p, FSpage.data[j], FSpage.dlen[j]); p+= FSpage.dlen[j];
+    // TODO: add xor checksum?
+
+    i= p-page;
+    page[startoff]= i;
+
+    printf("  %2d %03d-%03d %3d ", j, startoff, i, i-startoff);
+    nl();
+  }
+
+  // END marker
+  *++p= 0;
+
+  // return next index, or 0 if done
+  return j >= FSpage.n? 0: j;
+}
+
 void printPage() {
   char i;
   // overestimate; gives some slack!
@@ -371,13 +426,19 @@ int main(int argc, char** argv) {
   assert(aof);
 
   char* xs= readsector(0, 0);
-
+  int len;
+  
   printPage();
   
   insertlines("numbers.txt");
 
   printPage();
-
+  
+  char* page= calloc(256, 1);
+  char inext= OAFSpackpage(page, 0);
+  
+  printf("inext= %d\n", inext);
+	 
   fclose(aof);
   return 0;
 }
