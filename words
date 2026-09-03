@@ -1,1 +1,3 @@
-aspell -l en dump master
+# not football's - it's redundant
+
+aspell -l en dump master | grep -v "'s$"

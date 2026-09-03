@@ -160,9 +160,12 @@ char* writesector(char* buff, word n) {
 #include "oaq.c"
 
 
-// reserve first 64KB lol
-// sectors; (* 2 80 19) = 3040 max?
-//   .words: 3253 pages!
+// sectors: (* 2 80 19) = 3040 max?
+//  .words: 2433 pages! (3253 if have word's)
+//
+// prefix compression => 72% (saved 28)
+
+// reserve first 64KB lol (cc65 gives much code)
 word next_sector= 256;
 
 
