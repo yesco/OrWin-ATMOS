@@ -399,6 +399,7 @@ char OAFSpackpage(char* page, uint16_t next) {
     page[startoff]= z;
 
     // store previous
+    free(pkey);
     plen= klen; pkey= key;
     
     printf("  %2d: %02x-%02x %3d   %2d ", j, startoff, z, z-startoff, klen);
@@ -408,7 +409,7 @@ char OAFSpackpage(char* page, uint16_t next) {
     saved+= prefix;
 
     // cleanup
-    free(key);            FSpage.keys[j]= 0;
+    FSpage.keys[j]= 0;
     free(FSpage.data[j]); FSpage.data[j]= 0;
   }
 
@@ -419,7 +420,11 @@ char OAFSpackpage(char* page, uint16_t next) {
   // return inext index to process, or 0 if done
   j= j >= FSpage.n? 0: j;
 
-  printf("  SAVED: %u\n  INEXT: %d\n\n", saved, j);
+  // TODO: binary, and add to "super index"
+  printf("  SAVED: %u\n  LAST: %s\n  INEXT: %d\n\n", saved, pkey, j);
+
+  free(pkey); if (j) FSpage.keys[j-1]= 0;
+
   return j;
 }
 
@@ -461,6 +466,8 @@ void insertlines(char* name) {
       char inext= 0;
       while((inext= OAFSpackpage(page, inext)));
 
+      // TODO: instead of looping till none, shift them up, and refill
+      
       FSpage.n= 0;
 
       // TODO: save "page"
