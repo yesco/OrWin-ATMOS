@@ -79,7 +79,7 @@ would allow ls to parse the blocks of the index:
 
 #include <assert.h>
 
-FILE* aof= 0;
+FILE* oaf= 0;
 
 int fputqsnw(char* s, int len, FILE* f, int width) {
   int n= 0; char c;
@@ -87,7 +87,7 @@ int fputqsnw(char* s, int len, FILE* f, int width) {
   if (!s)  return fputs("(NULL)", f);
   if (!*s) return fputs("\"\"", f);
   
-  n += fputs("\'", f);
+  n += fputs("\"", f);
  next:
   --len;
   if (width > 0 && width-n <= 3) { n+= printf("..."); goto spaces; }
@@ -104,7 +104,7 @@ int fputqsnw(char* s, int len, FILE* f, int width) {
     if (len>0 && len) goto next;
   }
  done:
-  n+= fputs("'", f);
+  n+= fputs("\"", f);
 
  spaces:
   while (n++ < width) putchar(' ');
@@ -131,14 +131,14 @@ void nl() { putchar('\n'); }
 char* readsector(char* buff, unsigned int n) {
   // we allocate one byte more, lol, to terminate any "strings"
   char* b= buff? buff: calloc(257, 1);
-  size_t rd= b? fread(b, 256, 1, aof): 0;
+  size_t rd= b? fread(b, 256, 1, oaf): 0;
   printf("RD %zu: ", rd); fputqsn(b, 256, stdout); nl();
   if (!rd && !buff) { free(b); b= 0; }
   return b;
 }
 
 char* writesector(char* buff, unsigned int n) {
-  size_t wr= buff? fwrite(buff, 256, 1, aof): 0;
+  size_t wr= buff? fwrite(buff, 256, 1, oaf): 0;
   printf("WR %zu: " , wr); fputqsn(buff, 256, stdout); nl();
   return wr? buff: 0;
 }
@@ -439,17 +439,22 @@ void printPage() {
 }
   
 void insertlines(char* name) {
-  FILE* f= fopen(name, "r");
-  char* s= 0; size_t z= 0, len;
+  FILE* f= strcmp(name, "-")==0? stdin: fopen(name, "r");
+  char* s= 0; size_t z= 0; int len;
 
   assert(f);
-  while((len= getline(&s, &z, f)) > 0) {
+  do {
+    len= getline(&s, &z, f);
+    // truncate ending \n
+    if (len >=0 && s[len-1]==10) s[--len]= 0;
+
     uint32_t ts= -1;
     char type= 0;
+    char *ks= strdup(s), *ds= strdup(s);
 
   retry:
-    char *ks= strdup(s), *ds= strdup(s);
-    if (!len || !FSinsert(len, ks,  ts, type,  len, ds)) {
+    
+    if (len < 0 || !FSinsert(len, ks,  ts, type,  len, ds)) {
       printf("\n%%Overflow - FLUSH buffer\n");
 
       char* page= calloc(256, 1);
@@ -462,31 +467,34 @@ void insertlines(char* name) {
       
       free(page);
 
-      if (!len) break;
+      if (len < 0) break;
 
       // TODO: limit?
       // Need to retry
       goto retry;
     }
-  }
+
+  } while(1);
+
   free(s);
+  //  if (f != stdin) fclose(f);
 }
 
 int main(int argc, char** argv) {
   assert(argc);
-  aof= fopen(argv[1], "rw+");
-  assert(aof);
+  oaf= fopen(argv[1], "rw+");
+  assert(oaf);
 
   char* xs= readsector(0, 0);
   int len;
   
   printPage();
   
-  insertlines("numbers.txt");
+  insertlines(argc>2? argv[2]: "-");
 
   //printPage();
   
-  fclose(aof);
+  fclose(oaf);
   return 0;
 }
 
