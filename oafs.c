@@ -25,6 +25,30 @@
 // If the key is plain ASCI: and maybe starts with '/'
 // it's just a filesystem path. End with <$00> <page:offset> !
 //
+// TODO: maybe use a different delimiter, and possibly prefix subpath names
+// with 0xFF to that they sort later?
+//
+// Problem:
+//
+//    /foo/bar/abba.txt
+//    /foo/bar/fie/fum.txt
+//    /foo/bar/fie/... 1 million files ...
+//    /foo/bar/gurka
+//
+// So a prefix scan on /foo/bar/ would have to scan all sub dirs
+// to get to see all the file names.
+//
+// Solution:
+//
+//    replace by 0xFF     _ Last / is repolace by 0x00
+//      /        /       /
+//    <FF> foo <FF> bar <00> abba.txt         FILE
+//    <FF> foo <FF> bar <00> fie              DIR <----! NEW!
+//    <FF> foo <FF> bar <00> gurka            FILE 
+//    <FF> foo <FF> bar <FF> fie <00> fum.txt FILE
+//    <FF> foo <FF> bar <FF> fie <00> ... 1 million files ...
+//
+//
 // When it comes to keyvalues being multiattribute, maybe they
 // could be prefixed with its inherent encoding:
 //
@@ -70,7 +94,19 @@ would allow ls to parse the blocks of the index:
  */
 
 
-
+// TODO: read:
+//
+// - https://wiki.defence-force.org/doku.php?id=oric:hardware:dsk_disk_format
+//
+// - https://osdk.org/index.php?page=documentation&subpage=floppybuilder
+//
+// RocksDB user defined timestamps:
+// - https://github.com/facebook/rocksdb/wiki/User-defined-Timestamp
+//
+// RocksDB atomic update functions:
+// - https://github.com/facebook/rocksdb/wiki/Merge-Operator
+// Transactions
+// - https://github.com/facebook/rocksdb/wiki/Transactions
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -257,8 +293,14 @@ char OAFSparsepage(char* page) {
 // ENTRY DOCUMENATION
 // ==================
 //
-// Minimal entry size: 3 bytes!
+// Minimal key only entry size: 3 bytes!
 //   (possible for "" or shorter prefix key)
+//
+// Minimal key+data entry size: 4 bytes!
+//   (timestamp: if not used and is 0x00 - 1 extra byte)
+//   (0 bytes data, minimal, but storing it, lol)
+//
+// Maximal overhead: 3 + bytes for timestamp (1, 2-5)
 //
 // KeyLength : limited to like 80 chars
 // DataLength: inline <= 42 (lol)
@@ -278,9 +320,8 @@ char OAFSparsepage(char* page) {
 //   ...keysuffix
 //
 // @dataoffset:
-//   <timestamp>
-//       OAQ    
-//   <data>
+//   <timestamp> <data>
+//       OAQ      bytes
 //
 //
 // skipoffset: page index location of next record, 0 indicates END

@@ -886,3 +886,117 @@ without breaking the compression logic.
 [3] [https://www.pagetable.com](https://www.pagetable.com/?p=1810)
 [4] [https://osdk.org](https://osdk.org/index.php?page=documentation&subpage=floppybuilder)
 [5] [https://wiki.defence-force.org](https://wiki.defence-force.org/doku.php?id=oric:hardware:dsk_disk_format)
+
+
+
+
+# How does the code actually read the disc without an OS?
+
+When an Oric demo or custom game runs its own code from a bare
+bootable disk with no OS code (like Sedoric) loaded at all, it
+interacts directly with the disk controller chip using a technique
+called Hardware Register Polling via Memory Mapping. [1] Instead of
+calling system routines, the Oric game code talks straight to the
+Western Digital WD1770/1772 Floppy Disk Controller (FDC) chip through
+standard 6502 memory addresses.  On the Oric Microdisc interface, the
+FDC chip is mapped into memory space starting at $0310.
+
+## The 4 Memory-Mapped Registers Used by the Oric Code
+
+The custom 6502 bootloader reads and writes to four specific memory
+locations to force the physical drive to move and read sectors:
+
+   1. $0310 — Command / Status Register:
+
+   * Writing to it: Sends hardware instructions to the drive (e.g.,
+     Seek to Track, Step In, Read Sector).
+
+      * Reading from it: Checks the state of the drive (e.g., Is the
+        head on Track 0? Is there a CRC Error? Is the drive busy?).
+
+   2. $0311 — Track Register: Holds the number of the physical track
+   where the drive head is currently positioned.
+
+   3. $0312 — Sector Register: Holds the specific target sector number
+   your code wants to look for.
+
+   4. $0313 — Data Register: The physical pipeline. When reading,
+   bytes stream off the magnetic disk surface and appear right here,
+   one by one.
+
+Additionally, memory location $0314 acts as an Interface Control
+Register (managed by an overlay latch on the Oric board). Writing
+specific bits to $0314 physically controls drive features like turning
+the disk drive motor on/off, selecting Drive A vs. Drive B, and
+switching the side of the floppy disk (Side 0 or Side 1).
+
+------------------------------
+
+## The Anatomy of a Raw, Bare-Metal Oric Read Loop
+
+Without an OS, a 6502 block-loading routine (like the ones generated
+by the OSDK tool FloppyBuilder, which packages custom game files)
+executes a tight loop that interacts directly with the hardware: [2]
+
+```
+; --- 1. SET UP THE TARGET LOCATION
+LDA #$05            ; We want to read Sector 5
+STA $0312           ; Write it to the FDC Sector Register
+
+; --- 2. EXECUTE THE READ COMMAND
+LDA #$80            ; $80 is the WD1770 binary command code for "Read Sector"
+STA $0310           ; Writing to $0310 fires the hardware laser/head immediately!
+
+; --- 3. THE HOT POLLING LOOP (Byte-by-Byte Streaming)
+ReadLoop:
+    LDA $0310       ; Read the Status Register
+    LSR A           ; Push the lowest bit (Data Request / DRQ) into the Carry flag
+    BCC CheckEnd    ; If Carry is 0, no byte is ready yet. Check if done.
+    
+    ; A byte is ready! Siphon it instantly before it gets overwritten
+    LDA $0313       ; Grab the raw byte from the Data Register
+    STA (TargetPtr), Y ; Dump it directly into your 4KB RAM Track Buffer
+    INY
+    BNE ReadLoop    ; Keep going
+    INC TargetPtr+1
+
+CheckEnd:
+    LDA $0310       ; Read status again
+    AND #$01        ; Mask Bit 0 (Busy Flag)
+    BNE ReadLoop    ; If the FDC Busy Flag is still 1, the sector isn't finished yet!
+```
+
+------------------------------
+
+## The Ultimate Balancing Act for Your OAFS Paging Engine
+
+When running raw code like this on an Oric Atmos, the 6502 is the
+clock master, but the physical disk drive dictates the speed.
+
+* The Timing Trap: The WD1770 updates that Data Register ($0313)
+  roughly every 32 microseconds when reading a standard MFM sector.
+
+* At 1 MHz, the 6502 only executes about 32 clock cycles in that
+  entire timeframe.
+
+* Notice how sparse the ReadLoop above is. If your 6502 code does
+  anything extra inside that reading loop (like trying to calculate a
+  dynamic decompression match or running complex prefixlen memory
+  manipulation), it will miss the 32-microsecond window. The next byte
+  will slam into the Data Register, and the FDC will trigger a Lost
+  Data Error.
+
+
+This historical hardware bottleneck is the definitive validation for
+your 4KB track buffer loop strategy. By having your raw 6502 code do
+nothing except pull raw sectors from $0313 out-of-order and stuff them
+blindly into a flat 4KB RAM buffer, you ensure the loop stays under 32
+cycles. Once the FDC Busy Flag drops to 0 and all 16 sectors are
+safely sitting in RAM, your code can safely execute your unpack.s
+decompression routine without risking hardware timing violations.
+When you pack your data on the desktop side, are you setting up a
+custom header table to tell your bare bootloader exactly which track
+numbers contain your OAFS dictionary chunks?
+
+[1] [https://www.youtube.com](https://www.youtube.com/watch?v=P_uCelYmB7o&t=1119)
+[2] [https://osdk.org](https://osdk.org/index.php?page=documentation&subpage=floppybuilder)
