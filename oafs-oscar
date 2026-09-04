@@ -1,0 +1,21 @@
+rm -f oafs.prg
+
+# 16735 cc65
+# 14875 oscar
+# 11635 oscar -Os
+
+# -- run
+#./oscar -v -g -O0 -f=fil.oafs -dOSCAR64 oafs.c -gp -e
+
+# -- opt size
+#./oscar -v2 -g -Os -f=fil.oafs -dOSCAR64 oafs.c -gp
+
+# -- size and opt
+./oscar -v2 -g -Os -f=fil.oafs -dOSCAR64 oafs.c -gp -e
+
+
+ls -l oafs.*
+
+
+
+

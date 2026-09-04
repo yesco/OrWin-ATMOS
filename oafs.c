@@ -116,6 +116,9 @@ would allow ls to parse the blocks of the index:
 
 #include <assert.h>
 
+#define assertptr(p) assert(p!=NULL)
+
+
 #ifndef WORD
 
   typedef uint16_t word;
@@ -124,8 +127,20 @@ would allow ls to parse the blocks of the index:
 
 #endif // WORD
 
-FILE* oaf= 0;
 
+#ifdef OSCAR64
+
+char* strdup(char* s) {
+  char* r;
+  if (!s) return 0;
+  if (!(r= calloc(strlen(s)+1, 1))) return 0;
+  return strcpy(r, s);
+}
+
+#endif
+
+
+FILE* oaf= 0;
 
 int fputqsnw(char* s, int len, FILE* f, int width) {
   int n= 0; char c;
@@ -136,7 +151,7 @@ int fputqsnw(char* s, int len, FILE* f, int width) {
   n += fputs("\"", f);
  next:
   --len;
-  if (width > 0 && width-n <= 3) { n+= printf("..."); goto spaces; }
+  if (width > 0 && width-n <= 3) { n+= fprintf(f, "..."); goto spaces; }
   switch((c= *s++)) {
   case '\n': n+= fputs("\\n", f);  goto next;
   case '\t': n+= fputs("\\t", f);  goto next;
@@ -180,6 +195,10 @@ char* writesector(char* buff, word n) {
 
 #else
 
+#ifndef SEEK_SET
+  #define SEEK_SET 1
+#endif
+
 int fseek(FILE* f, long pos, int whence) {
   return -1;
 }
@@ -222,7 +241,7 @@ char* readsector(char* buff, word n) {
   int fs= fseek(oaf, 256*n, SEEK_SET);
   size_t rd= b? fread(b, 256, 1, oaf): 0;
   printf("RD %zu: ", rd); fputqsn(b, 256, stdout); nl();
-  if (!rd && !buff) { free(b); b= 0; }
+  if (!rd && !buff) { free(b); b= NULL; }
   return b;
 }
 
@@ -240,9 +259,13 @@ char* writesector(char* buff, word n) {
 
 
 
+// LOL
 #define MAIN
 
 #include "oaq.c"
+
+#undef MAIN
+
 
 
 // sectors: (* 2 80 19) = 3040 max?
@@ -543,7 +566,7 @@ char packpage(char* page, word next) {
     dataoff= 0;
 
     if (FSpage.ts[j] || FSpage.dlen[j] || FSpage.data[j]) {
-      printf("DATA!!![ %u %u %p]", FSpage.ts[j], FSpage.dlen[j], FSpage.data[j]);
+      //printf("DATA!!![ %u %u %p]", FSpage.ts[j], FSpage.dlen[j], FSpage.data[j]);
       dataoff= z;
       p= OAQ(page + z, ~FSpage.ts[j]); // REVERSE ORDER!
 
@@ -566,15 +589,19 @@ char packpage(char* page, word next) {
 
     ++n;
     
-    printf("  %3d: %02x-%02x %3d   %2d ", j, towrite_skipoff, z, z-towrite_skipoff, klen);
+    printf("  %3d: %02x-%02x %3d   p%2u %2d ", j,
+	   towrite_skipoff, z,z-towrite_skipoff, prefix, klen);
     { char i= prefix; while(i--) putchar('.'); }
     fputqsn(key+prefix, klen-prefix, stdout);
-    printf("   p%u\n", prefix);
+    printf("\t  @%02x DATA[%u]: ", dataoff, FSpage.dlen[j]);
+    fputqsn(FSpage.data[j], FSpage.dlen[j], stdout);
+    nl();
+
     saved+= prefix;
 
     // cleanup
-    FSpage.keys[j]= 0;
-    free(FSpage.data[j]); FSpage.data[j]= 0;
+    FSpage.keys[j]= NULL;
+    free(FSpage.data[j]); FSpage.data[j]= NULL;
   }
 
   // END marker (should already be 0!)
@@ -589,7 +616,7 @@ char packpage(char* page, word next) {
   printf(" =USED : %3u\n =SAVED: %3u\n =COUNT: %3u\n =LAST : \"%s\"\n =INEXT: %3u\n\n",
 	 z, saved, n, pkey, j);
 
-  free(pkey); if (j) FSpage.keys[j-1]= 0;
+  free(pkey); if (j) FSpage.keys[j-1]= NULL;
 
   return j;
 }
@@ -610,37 +637,114 @@ void printPage() {
   }
 }
   
-#ifdef __CC65__
+#if defined(__CC65__) || defined(OSCAR64)
+
+#define PR(...) (void)0
+
+#if 1
+
+int getline(char **s, size_t *z, FILE* f) {
+  size_t pos = 0;
+  int c;
+
+  PR("GET: 11111\n");
+    
+  // Enforce explicit initialization guard
+  if (!s || !z || !f) return -1;
+
+  PR("GET: 22222\n");
+  if (!*s || *z == 0) {
+    PR("GET: 3333\n");
+    *z = 80;
+    *s = (char*)realloc(*s, *z);
+    PR("GET: 444\n");
+    if (!*s) return -1;
+    PR("GET: 555\n");
+  }
+
+  while ((c = fgetc(f)) != EOF) {
+    PR("GET: 666\n");
+    // Grow buffer if we are running out of space (leaving room for \n and \0)
+    if (pos >= *z - 2) {
+      PR("GET: 777\n");
+      *z += 40;
+      char* new_s = (char*)realloc(*s, *z);
+      PR("GET: 888\n");
+      if (!new_s) return -1;
+      PR("GET: 999\n");
+      *s = new_s;
+    }
+
+    PR("GET: aaa\n");
+    (*s)[pos++] = (char)c;
+
+    // Break on newline
+    if (c == '\n') {
+      PR("GET: bbb\n");
+      break;
+    }
+    PR("GET: ccc\n");
+  }
+
+  // Handle End of File conditions cleanly
+  PR("GET: ddd\n");
+  if (pos == 0 && c == EOF) {
+    PR("GET: eee\n");
+    return -1;
+  }
+
+  (*s)[pos] = '\0'; // Null-terminate
+  PR("GET: ffff\n");
+  return (int)pos;
+}
+
+#else
 
 int getline(char **s, size_t *z, FILE* f) {
   char* r;
   size_t len;
+  char* rr;
 
   // Initialize buffer if it's empty
   if (!*s || !*z) {
+    printf("get000\n");
     if (!(*s= realloc(*s, *z= 80))) return -1;
+    printf("get111\n");
   }
 
   r= *s;
 
-  while (fgets(r, *z - (r - *s), f)) {
+  static char xyz[128]= "blueberry";
+  printf("get11212\n");
+//  while ((rr= fgets(r, *z - (r - *s), f))) {
+  while ((rr= fgets(xyz, sizeof(xyz), f))) {
+    printf("get2222\n");
     len= strlen(r);
     // continues? (no nl)
+    printf("get333\n");
     if (len > 0 && r[len - 1] != '\n') {
+      printf("get444\n");
       *z+= 40;
       if (!(*s= realloc(*s, *z))) return -1;
+      printf("get555\n");
       r= *s + strlen(*s);
     } else {
+      printf("get666\n");
       break;
     }
   }
+  printf("get777: rr= >%s<\n", rr);
+
       
   if (r == *s && feof(f) && strlen(*s) == 0) return -1;
 
+  printf("get888\n");
   return strlen(*s);
 }
 
-#endif // CC65
+#endif // CC65 || OSCAR64
+
+
 
 // Assummes:
 //  "KEY DATA....\n"
@@ -654,10 +758,15 @@ void insertlines(char* name) {
   char *data, *ks, *ds;
   word ts;
 
-  assert(f);
+  //assertptr(f);
+  //printf("file=%s\n", name);
+  //f= strcmp(name, "-")==0? stdin: fopen(name, "r");
+  //printf("file=%s p=%x\n", name, f);
   do {
     // TODO: nono on cc65
+    //printf("getline>>>\n");
     len= getline(&s, &z, f);
+    //printf("<<<getline\n");
     // truncate ending \n
     if (len >=0 && s[len-1]==10) s[--len]= 0;
 
@@ -670,10 +779,11 @@ void insertlines(char* name) {
     type= 0;
 
     // TODO: inserting NULL is same a delete? THINK!
-    ks= len>=0? strdup(s): 0;
-    ds= len>=0 && data && *data? strdup(data? data: ""): 0;
+    ks= len>=0? strdup(s): NULL;
+    ds= len>=0 && data && *data? strdup(data? data: ""): NULL;
 
     //printf("%3ld:KEY=%s\t%3ld:DATA=%s\n", ks? strlen(ks): 0, ks, ds? strlen(ds): 0, ds);
+    printf("%3d:KEY=%s\t%3d:DATA=%s\n", ks? strlen(ks): 0, ks, ds? strlen(ds): 0, ds);
 
   retry:
     
@@ -708,26 +818,51 @@ void insertlines(char* name) {
 
 #ifndef MAIN
 
+
+#ifdef OSCAR64
+
+int main(void) {
+  int argc = 2;
+  static const char* argv[] = { "oafs", "FIL.OAFS", NULL }; 
+
+#else
+
 int main(int argc, char** argv) {
+
+#endif
+
   char *xs;
   
   // also not on sim
   //dio_read(7, 42, argv);
 	   
+  printf("1111\n");
   assert(argc);
+  printf("11212112\n");
+#if 0
+
   oaf= fopen(argv[1], "r");
-  assert(oaf);
+
+  printf("22222\n");
+  assertptr(oaf);
+  printf("333\n");
 
   xs= readsector(0, 0);
+  printf("4444\n");
   
   printPage();
+#endif
+  printf("555\n");
   
-  insertlines(argc>2? argv[2]: "-");
+  printf("argv %s\n", argv[2]);
+  insertlines(argc>2? (char*)argv[2]: "-");
 
+  printf("666\n");
+  
   //printPage();
   
   fclose(oaf);
   return 0;
 }
 
-#endif // MAIN
+#endif // !MAIN

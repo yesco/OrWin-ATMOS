@@ -12,5 +12,15 @@ fil
 *.ext
 *.sim
 *.x
+*.bin
+*.out
+*.idx
+*.lbl
+*.prg
+*.csz
+*.dbj
+*.int
+diff
+diff.c
 
 
