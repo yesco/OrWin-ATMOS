@@ -26,19 +26,6 @@
 #define EOS     ((char*)0x500)
 
 
-#ifdef OSCAR64
-
-  // TODO:
-
-  int getline(char** s, size_t* z, FILE* f) {
-
-    assert(0);
-    return 0;
-  }
-
-
-#endif
-
 
 typedef void* (*cmdfun)(void* state, char* line);
 

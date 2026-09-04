@@ -65,6 +65,7 @@
 
 extern char wputc(char);
 extern char putcraw(char);
+
 extern void wputi(int);
 extern void nl();
 extern void clnl();
@@ -83,9 +84,13 @@ extern char togglecursor();
 extern void setfocus(signed char);
 
 // TODO: hack, chicken and egg!
-#ifndef CLOCKS_PER_SEC
+#ifdef CLOCKS_PER_SEC
 
-  // LOL
+  #define CLOCK
+
+#else
+
+  // LOL: XSI defines have to be 1,000,000 - can't!
   #define CLOCKS_PER_SEC 100
   typedef unsigned int clock_t;
 
@@ -146,7 +151,8 @@ extern char cursorgetc();
 
 //extern void cprintf(const char* c, ...);
 
-extern void bzero(void* p, size_t z);
+// ORIC has it, maybe not optimal?
+//extern void bzero(void* p, size_t z);
 
 extern char putcraw(char c);
 extern void nl();

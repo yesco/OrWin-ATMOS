@@ -1,7 +1,7 @@
 # this script needs to be run after running ./orwin for cc65
 # for the gen files...
 
-rm orwin.prg
+rm -f orwin.prg
 
 #./oscar -dNOLONG -dNOFLOAT -dOSCAR64 orwin.c app_*.c
 ./oscar -dNOFLOAT -dOSCAR64 orwin.c app_*.c

@@ -44,6 +44,7 @@
 
 // have
 #define BZERO
+#define CPUTC
 
 
 // TODO: local implementations

@@ -1176,7 +1176,7 @@ void scheduler() {
 	if (latency < 100) {
           #undef gotoxy
 	  gotoxy(11, 0);
-	  cprintf("%2u#%3u%4d/s %2u%%"
+	  printf("%2u#%3u%4d/s %2u%%"
 		  " %2d%%%5d"
 		  "%4c"
 
@@ -1233,18 +1233,21 @@ extern void printPage();
 // TODO: shitty!
 #ifdef OSCAR64
 
-  int main() {
-    int argc;
-    const char* argv[]= {"orwin", NULL};
+int main() {
+  int argc;
+  const char* argv[]= {"orwin", NULL};
     
 #else 
     
-  int main(int argc, char** argv) {
+int main(int argc, char** argv) {
+
 
 #endif // OSCAR64
 
-
   int i= 0, j= 0, z= 0;
+
+  init();
+
 
 #ifdef OAFS
   readsector(0, 0);
