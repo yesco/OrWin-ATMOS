@@ -54,11 +54,17 @@ char* wcurscr= NULL;
   #undef printf
 #endif
 
+#ifdef clrscr
+  #undef clrscr
+#endif
+
 // vt100
-void vt_clear() { printf("\x1b[2J\x1b[H"); }
-void vt_clearend() { printf("\x1b[K"); }
-void vt_cleareos() { printf("\x1b[J"); }
+void vt_clear()       { printf("\x1b[2J\x1b[H"); }
+void vt_clearend()    { printf("\x1b[K"); }
+void vt_cleareos()    { printf("\x1b[J"); }
 void vt_resetcolors() { printf("\x1b[0m"); } // bgcol= 0; fgcol= 7; }
+void vt_cursoroff()   { printf("\x1b[?25l"); }
+void vt_cursoron()    { printf("\x1b[?25h"); }
 
 void vt_gotorc(int r, int c) {
   // negative values breaks the ESC seq giving garbage on the screen!
@@ -73,8 +79,12 @@ char* woldscr= NULL;
 void redrawscreen() {
   char x= 0, y, c, *p= TEXTSCREEN-1;
 
+  vt_cursoroff();
+
   for(y=0; y<SCREENROWS; ++y) {
-    vt_gotorc(y, x); vt_resetcolors();
+    vt_gotorc(y, x); putchar(13);
+    //vt_resetcolors();
+    printf(">%02d:", y);
 
     for(x=0; x<SCREENCOLS; ++x) {
       // TODO: handle colors
@@ -93,18 +103,51 @@ void redrawscreen() {
       }
     }
   }
+
   
   // save current state
   memcpy(woldscr, wcurscr, SCREENSIZE);
 
-  vt_gotorc(winp->y + winp->r, winp->x + winp->c);
+  // move cursor to actual posotion"
+  
+  //vt_gotorc(winp->y + winp->r, winp->x + winp->c);
+  
+  // lower right corner, no clobeer when exit!
+  vt_gotorc(255,255);
+
+  vt_cursoron();
+}
+
+// Delays execution for a specific number of hardware "jiffies" 
+// (1 jiffy ≈ 16.6ms on NTSC / 20ms on PAL)
+void usleep(unsigned int count) {
+  while(count) {
+    __asm {
+      lda $a2         // Load the low byte of the system jiffy clock
+   wait_loop:
+      cmp $a2         // Compare it against itself until it ticks
+      beq wait_loop
+    };
+  count--;
+  }
 }
 
 void initscreen() {
+  long x;
+  
   wcurscr= malloc(SCREENSIZE);
   woldscr= malloc(SCREENSIZE);
   
-  memset(wcurscr, SCRFILLCHAR, SCREENSIZE);
+  vt_clear();
+
+  // test speed
+  if (1)
+    for(char a= ' '; a<128; ++a) {
+      usleep(1000);
+      memset(wcurscr, a, SCREENSIZE);
+      redrawscreen();
+    }
+        
   memset(woldscr, 0,           SCREENSIZE);
 
   redrawscreen();
@@ -314,11 +357,14 @@ void fill(char x, char y, char w, char h, char c) {
 #endif // HEAPMEME
 
 //////////////////////////////
-//#ifndef
+#ifndef INIT
 
-void init() {
-  initscreen();
-}
+  #define INIT
+  void init() {
+    initscreen();
+  }
+
+#endif // INIT
 
 //////////////////////////////
 #ifndef NL_IMPL
@@ -353,7 +399,7 @@ char* savewin() { return NULL; }
 
 
 //////////////////////////////
-#ifndef LOADEWIN
+#ifndef LOADWIN
 
 #define LOADWIN
 void loadwin(char* p) { free(p); }
@@ -386,3 +432,12 @@ char cursorgetc() {
 void cputc(char c) { putchar(c); }
 
 #endif // CPUTC
+
+//////////////////////////////
+#ifndef CGETC
+
+#define CGETC
+char cgetc() { return mygetc(); }
+
+#endif // CGETC
+

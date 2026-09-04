@@ -4,7 +4,7 @@
 rm -f orwin.prg
 
 #./oscar -dNOLONG -dNOFLOAT -dOSCAR64 orwin.c app_*.c
-./oscar -dNOFLOAT -dOSCAR64 orwin.c app_*.c
+stdbuf -o0 ./oscar -dNOFLOAT -dOSCAR64 orwin.c app_*.c -e
 
 # byte code only
 #./oscar -v2 -bc -dNOLONG -dNOFLOAT -dOSCAR64 orwin.c app_*.c

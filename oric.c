@@ -84,6 +84,7 @@ clock_t clock() {
 
 // Init the platform
 
+#define INIT
 void init() {
   // needed for OrWIN on cc65, assumption and used extensivly
   //assert(sizeof(void*)==sizeof(int));
@@ -217,6 +218,7 @@ size_t _heapmaxavail(void);
 
 // Remapping arrow keys w FUNCT and CTRL
 // 
+#define MYGETC
 char mygetc() {
   // 209: Keyshifts, s= ScanCodes
   char orig= cgetc(), k= *(char*)0x209, s= *(char*)0x208, c= orig;
