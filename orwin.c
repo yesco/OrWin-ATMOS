@@ -6,6 +6,41 @@
 
 //#include <assert.h>
 
+#ifdef OSCAR64
+
+  #define bzero(p, z) memset(p, 0, z)
+
+  #define cgetc() fgetc(stdin)
+
+  #define cputc(c) putchar(c)
+
+  #define cprintf printf
+
+  // oscar64 function definiition differs
+  void putchar(char c) { wputc(c); }
+
+// TODO: extract out once for all...
+
+char* strdup(char* s) {
+  char* r;
+  if (!s) return 0;
+  if (!(r= calloc(strlen(s)+1, 1))) return 0;
+  return strcpy(r, s);
+}
+
+#else
+
+#undef putchar
+// inefficient, but should do the job
+// TODO: rename wputc?
+
+char wputc(char c);
+
+int putchar(int c) { return wputc(c); }
+
+#endif
+
+
 //#ifdef DEBUGKEY
 
 /* Sizes
@@ -87,8 +122,8 @@ typedef unsigned int uint;
 #define SUMMARY 0
 #define CC65 0
 
-struct apps {
-  char* name;
+struct App {
+  const char* name;
   void* fun;
   uint size;
 } apps[] = {
@@ -136,9 +171,6 @@ struct apps {
 //#define SPAWN_STEP 30
 
 #define BYTES (SPAWN_REC*(SPAWN_STEP+1))
-
-
-typedef int (*app)();
 
 //#define TRACE
 
@@ -207,11 +239,11 @@ Window* winp= wins;
 
 char* wname(char winid) {
   void* fun= wins[winid].fun;
-  struct apps* p= apps;
+  struct App* p= apps;
   
   while(p && (p->fun != fun)) ++p;
 
-  return p? p->name: 0;
+  return p? (char*)p->name: NULL;
 }
 
 
@@ -246,13 +278,11 @@ void wfree(void* p) {
 
 
 char* updatewinptr() {
-  return winp->p= SCREENXY(winp->x + winp->c, winp->y + winp->r);
+  // oscar64 error ; expected
+  // term starts w illegal token = 
+  // funciton expected for call
+  return (winp->p= SCREENXY(winp->x + winp->c, winp->y + winp->r));
 }
-
-#undef putchar
-// inefficient, but should do the job
-// TODO: rename wputc?
-int putchar(int c) { return wputc(c); }
 
 // 2x-10x faster not calling putchar for every char!
 
@@ -682,7 +712,9 @@ void dorun(char* line) {
   run= clock();
 
   wtime= HITIME;
-  winp->ret= wret= (char*)(*(app)winp->fun)((int)winp->state, line);
+  // oscar64 function expeted for call
+  //                       xxxxxxxxxxxxxxxx
+  winp->ret= wret= (char*)((*winp->fun)(winp->state, line));
 
   winp->ticks+= run= clock()-run;
   winp->cpu= run*rounds;
@@ -694,7 +726,7 @@ void dorun(char* line) {
 //
 // TODO: possibly rename "exec".
 // 
-void startline(app fun, char* line) {
+void startline(runptr fun, char* line) {
   winp->status= 1;
   winp->args= strdup(line);
   
@@ -706,7 +738,7 @@ void startline(app fun, char* line) {
   winp->ret= 0;
 }
 
-void start(app fun) { startline(fun, 0); }
+void start(runptr fun) { startline(fun, 0); }
 
 
 // This used to be conservative requring gray in bigger area around
@@ -751,21 +783,25 @@ char overlap(char x, char y, char w, char h) {
 //   possibly, it could save what's under and not allow switching
 //   until have free area == becomes modal, or can be minimized
 //
-char window(char x, char y, char w, char h, char bg, char fg) {
+char window(
+  signed char x,  signed char y,
+  signed char w,  signed char h,
+  signed char bg, signed char fg)
+{
   char o;
 
   // already drawn/configure
   if (winp->w) return wcur;
   
   // placer
-  if (x == 255 || y == 255) {
+  if (x == -1 || y == -1) {
     x= 2; y= 1;
     while((o=overlap(x, y, w, h)) && y<29-h) {
       // doesn't work
       //gotoxy(28, 27); printf("(%2d %2d)", x, y);
       if (++x + w + 4 > 39) { ++y; x= 2; }
     }
-    if (o) return -1;
+    if (o) return 0;
   }
   winp->x= x;
   winp->y= y;
@@ -773,7 +809,7 @@ char window(char x, char y, char w, char h, char bg, char fg) {
   winp->w= w;
   winp->h= h;
 
-  if (bg==255 | fg==255) {
+  if (bg == -1 | fg == -1) {
     // pick colors w "good contrast"
     do {
       bg= rand() & 7;
@@ -802,10 +838,10 @@ void help() {
 }
 
 void apprun();
-void randnewwin(char* title, app main);
+void randnewwin(char* title, runptr main);
 
 void mowin(signed char dx, signed char dy, signed char dw, signed char dh);
-void task(app fun);
+void task(runptr fun);
 
 char wkey= 0;
 
@@ -930,7 +966,7 @@ char wgetc(char win) {
     return c;
   }
   // Nah, not yours and/or not in focus
-  return wkey= 0;
+  return (wkey= 0);
 }
 
 
@@ -970,7 +1006,7 @@ void apprun() {
   // TODO: common buff somewhere
   char line[40]= {0};
   char i= 0, w= wcur;
-  struct apps *p, *found;
+  struct App *p, *found;
   char c, k, *spc, *tmp;
 
   // flush
@@ -1000,7 +1036,7 @@ void apprun() {
 
       putcraw(8);
       
-      wputz(p->name); // 7 cs !!! (printf 55 cs!)
+      wputz((char*)p->name); // 7 cs !!! (printf 55 cs!)
       //wputc('\t'); wputi(p->size); // +19cs
 
       putchar(white);
@@ -1059,7 +1095,7 @@ void apprun() {
     
       // default tileable window size
       window(-1, -1, WMAX, HMAX, bg, fg);
-      wstatus(-1, found->name);
+      wstatus(-1, (char*)found->name);
       wdecorate();
     }
   }
@@ -1343,7 +1379,20 @@ extern int writesector(char*, int);
 extern void insertlines(char*);
 extern void printPage();
 
-int main(int argc, char** argv) {
+
+#ifdef OSCAR64
+
+  int main() {
+    int argc;
+    char** argv= {"orwin", NULL};
+    
+#else 
+    
+  int main(int argc, char** argv) {
+
+#endif
+
+
   int i= 0, j= 0, z= 0;
 
 #ifdef OAFS
@@ -1503,5 +1552,6 @@ int main(int argc, char** argv) {
   scheduler();
 
   return 0;
+  (void)argc; (void)argv;
 }
 

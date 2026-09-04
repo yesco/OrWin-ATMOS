@@ -98,7 +98,10 @@ extern char wtime;
 //#define KEEPRUNNING ((wtime^HITIME) & 0b10000000)
 
 
-char window(char x, char y, char w, char h, char bg, char fg);
+extern char window(
+  signed char x,  signed char y,
+  signed char w,  signed char h,
+  signed char bg, signed char fg);
 
 #undef putchar
 #define putchar wputc
@@ -173,6 +176,10 @@ extern char* lfree(char* line);
 ////////////////////////////////////////////////////////////
 // Internals - Don't use unless have to (ps)
 
+
+typedef void* (*runptr)(void*, char*);
+
+
 typedef struct Window {
   char x, y, w, h;
   char r, c;
@@ -191,7 +198,7 @@ typedef struct Window {
   char* ret; // TODO: should be using status?
 
   // light-weight process task
-  void* fun;
+  runptr fun;
   void* state;
 
   char* args;
@@ -213,3 +220,6 @@ extern char nwin;
 
 extern char* wname(char winid);
 
+// APP hack...
+
+#define app ((APP*)voidapp)

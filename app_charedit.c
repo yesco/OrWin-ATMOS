@@ -14,7 +14,7 @@ typedef struct APP {
   char x, y, c, *def;
 } APP;
 
-void draw(APP* app) {
+void draw(void* voidapp) {
   int r, c;
 
   gotoxy(0,0);
@@ -35,7 +35,7 @@ void draw(APP* app) {
   }
 }
 
-void* app_charedit(APP* app, char* line) {
+void* app_charedit(void* voidapp, char* line) {
   char c;
 
   if (!app) {

@@ -11,7 +11,7 @@ name=orwin
 
 rm -f apps_*.ext apps_*.reg
 
-ls -1 app_*.c | sed 's/.c$//' | sed 's/^app_//' | xargs -I{} sh -c 'echo "extern int app_{}();" > apps_{}.ext'
+ls -1 app_*.c | sed 's/.c$//' | sed 's/^app_//' | xargs -I{} sh -c 'echo "extern void* app_{}(void*,char*);" > apps_{}.ext'
 ls -1 app_*.c | sed 's/.c$//' | sed 's/^app_//' | xargs -I{} sh -c 'echo "{\"{}\", app_{}},"    > apps_{}.reg'
 
 #ls -l apps_*.*

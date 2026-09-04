@@ -209,7 +209,7 @@ void snowpile(char* p) {
   } while (f);
 }
   
-extern void* app_snow(APP* app, char* line) {
+extern void* app_snow(void* voidapp, char* line) {
   static char first= 1;
   static char m= 0;
   char c, *p;

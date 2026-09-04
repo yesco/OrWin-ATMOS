@@ -1,0 +1,1 @@
+./oscar -dOSCAR64 orwin.c app_*.c

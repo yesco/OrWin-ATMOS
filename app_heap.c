@@ -88,7 +88,7 @@ void dumpheap(char all) {
   printf("\n#free %u allocs: %u   ", f, n);
 }
 
-void* app_heap(APP* app, char* line) {
+void* app_heap(void* voidapp, char* line) {
   if (!app) {
     window(3, 17, 32, 10, yellow, black);
     wstatus(-1, "Heap Viewer");

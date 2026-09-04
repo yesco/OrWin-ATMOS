@@ -7,7 +7,7 @@ typedef struct APP {
   char c;
 } APP;
 
-void* app_ascii(APP* app, char* line) {
+void* app_ascii(void* voidapp, char* line) {
   if (!app) return calloc(sizeof(APP), 1);
   
   putchar((app->c++ % 96)+32);

@@ -8,7 +8,7 @@ typedef struct APP {
   char dummy;
 } APP;
 
-void* app_echo(APP* app, char* line) {
+void* app_echo(void* voidapp, char* line) {
   char c;
   
   if (!app) return calloc(sizeof(APP), 1);

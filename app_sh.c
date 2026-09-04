@@ -25,7 +25,7 @@ void prompt() {
   putchar(blue);
 }
 
-void run(APP* app, char* cmd) {
+void run(void* voidapp, char* cmd) {
   prompt(); puts(cmd);
   putchar(black);
   
@@ -36,7 +36,7 @@ void run(APP* app, char* cmd) {
   app->line= EOS;
 }
 
-void* app_sh(APP* app, char* line) {
+void* app_sh(void* voidapp, char* line) {
   if (!app) {
     app= calloc(sizeof(APP), 1);
     if (!app) return 0;

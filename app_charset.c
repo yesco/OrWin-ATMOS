@@ -7,7 +7,7 @@ typedef struct APP {
   char sel;
 } APP;
 
-void* app_charset(APP* app, char* line) {
+void* app_charset(void* voidapp, char* line) {
   if (!app) {
     int c;
 

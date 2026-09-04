@@ -795,6 +795,7 @@ int wrunsystrain(cmdtrain* train) {
   
   // TODO: address of last program
   return 0;
+  (void)fp;
 }
 
 
