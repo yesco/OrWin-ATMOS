@@ -8,14 +8,14 @@ typedef struct APP {
   unsigned int slast;
 } APP;
 
-void* app_clock(APP* state, char* line) {
+void* app_clock(void* voidapp, char* line) {
   clock_t now= clock();
   int s= now / CLOCKS_PER_SEC, m= s / 60, h= m / 60;
 
-  if (!state) return calloc(sizeof(APP), 1);
+  if (!app) return calloc(sizeof(APP), 1);
   
   // print dots if second not change
-  if (s == state->slast) putchar('.');
+  if (s == app->slast) putchar('.');
   else
 
 #if 0
@@ -30,7 +30,7 @@ void* app_clock(APP* state, char* line) {
       putchar('\n'); puti(s);
 #endif
 
-    state->slast= s;
+      app->slast= s;
   }
 
   return 0;

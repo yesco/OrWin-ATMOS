@@ -70,8 +70,8 @@ extern void wputi(int);
 extern void nl();
 extern void clnl();
 extern void nlpure();
-extern void wputz(char*);
-extern void wputs(char*);
+extern void wputz(const char*);
+extern void wputs(const char*);
 
 extern char* winptr();
 
@@ -79,7 +79,7 @@ extern void wgotoxy(char x, char y);
 extern void wclreol();
 extern void wclrscr();
 
-extern void wstatus(signed char, char*);
+extern void wstatus(signed char, const char*);
 extern char togglecursor();
 extern void setfocus(signed char);
 
@@ -105,6 +105,7 @@ extern char window(
 
 #undef putchar
 #define putchar wputc
+
 #define puti wputi
 #define putz wputz
 #define puts wputs
@@ -160,6 +161,8 @@ extern void wscreensize(char* w, char* h);
 #define EOS     ((char*)0x500)
 
 // Memory Allocations
+
+#include <stddef.h> // for size_t on OSCAR64
 
 extern void* walloc(size_t z);
 extern void* wcalloc(size_t z, size_t n);
@@ -223,3 +226,9 @@ extern char* wname(char winid);
 // APP hack...
 
 #define app ((APP*)voidapp)
+
+#ifdef OSCAR64
+
+  #define  __fastcall__
+
+#endif

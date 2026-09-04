@@ -12,7 +12,7 @@ void* app_charset(void* voidapp, char* line) {
     int c;
 
     window(-1, -1, 18, 12, green, black);
-    wstatus(-1, "Charset (edit)");
+    wstatus(-1, (char*)"Charset (edit)");
     
     for(c= 0; c<256; ++c) {
       if ((c & 0x7f) < 32) continue;

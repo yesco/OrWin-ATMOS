@@ -26,6 +26,19 @@
 #define EOS     ((char*)0x500)
 
 
+#ifdef OSCAR64
+
+  // TODO:
+
+  int getline(char** s, size_t* z, FILE* f) {
+
+    assert(0);
+    return 0;
+  }
+
+
+#endif
+
 
 typedef void* (*cmdfun)(void* state, char* line);
 
@@ -55,7 +68,7 @@ typedef struct pstate { cmdfun f; char* s; } pstate;
 
 void* memdup(void* p, unsigned int bytes) {
   char* r= malloc(bytes);
-  assert(r);
+  assert(r != NULL);
   return memcpy(r, p, bytes);
 }
 
@@ -143,7 +156,7 @@ char* lstrdup(char* s) {
 // printing
 
 void shprint(char* line) {
-  char lastc;
+  static char lastc= 0;
   
 #ifdef SHELLTRACE
   if (!line)         puts("*NULL*");    else
@@ -228,11 +241,19 @@ void* cat(filestate* state, char* line) {
   lfree(line);
 
   // EOF if eof or error?
+
 #ifdef __CC65__
+
+
+
   // TODO: fix: thisis unsafe
+
+
+
   ln= calloc(81,1);
   if (NULL!=fgets(ln, sz, state->fil)) {
 #else
+
   if (EOF==getline(&ln, &sz, state->fil)) {
 #endif
     //printf("==eof==\n");
@@ -340,10 +361,24 @@ int wildmatch(char* pat, char* s) {
 
 
 #ifndef __ATMOS__
+
+// LOL?????? not cc65
+
 // ============================================================================
 // CC65 Implementation
 // ============================================================================
-#include <errno.h>
+
+//#include <errno.h>
+
+#ifdef OSCAR64
+typedef struct lsstate {
+} lsstate;
+ 
+void* ls(lsstate* state, char* line) {
+  assert(0);
+  return NULL;
+}
+#endif
 
 #ifdef __CC65__
 // TODO: no have on atmos...
@@ -402,6 +437,12 @@ void* ls(lsstate* state, char* line) {
 
 #else
 
+#ifdef OSCAR64
+
+
+
+#else 
+
 // ============================================================================
 // POSIX / Linux / Termux Target Implementation
 // ============================================================================
@@ -456,6 +497,8 @@ void* ls(lsstate* state, char* line) {
   return lstrdup(de->d_name);
 }
 
+#endif // !OSCAR64 == unix
+
 #endif //
 
 #else
@@ -508,6 +551,10 @@ int nextInt(char** line, int dflt) {
 ///////////////////////////////////////////////////
 
 #ifdef __CC65__
+  typedef int intptr_t; // LOL
+#endif
+
+#ifdef OSCAR64
   typedef int intptr_t;
 #endif
 
@@ -632,8 +679,9 @@ char* wstate(char* ret) {
   return "RUN";
 }
  
-
+#ifdef __CC65__
 #include <cc65.h> // for udiv32by16r16
+#endif
  
 void* ps(simplestate* state, char* line) {
   char s, p, ln[60]; // ... shell args...
@@ -649,24 +697,35 @@ void* ps(simplestate* state, char* line) {
  " PID %C #M  SZ  ST  TIME CMD");
 //4203 27 33 437 KEY 27:30 foobar -a"
 
-  w= 0;
+  w= NULL;
   p= state->i - 1;
   while(p < nwin+1) {
     w= wins + p;
     if (w->status) break;
-    w= 0; ++p;
+    w= NULL; ++p;
   }
 
   state->i= p + 1;
   if (!w) return EOS;
   
+#ifdef __CC65__  
   // A single assembly loop calculates both values simultaneously
   packed_result = udiv32by16r16(w->ticks/CLOCKS_PER_SEC, 60);
 
   // Extract the pieces from the 32-bit packed register
   m = (unsigned int)(packed_result & 0xFFFF);
   s = (unsigned int)(packed_result >> 16);
+#else
+  m = (unsigned int)(w->ticks/CLOCKS_PER_SEC/60);
+  s = w->ticks/CLOCKS_PER_SEC - m*60;
+#endif
 
+#ifdef OSCAR64
+  // Drops the safety size limit parameter completely for Oscar64
+  #define snprintf(buf, size, ...) sprintf(buf, __VA_ARGS__)
+#endif
+
+  // WARNING! sizeof not used!
   snprintf(ln, sizeof(ln), "42%02d %2d %2d%4d %.3s%3d:%02d %s %s"
 	   , p
 
@@ -708,7 +767,7 @@ void* terminal(simplestate* state, char* line) {
   return line==EOS? EOS: NULL;
 }
 
-char* cmdnames[]= {
+const char* cmdnames[]= {
   "pwd", "grep", "cat", "wc", "ls", "iota", "head", "tail",
   "ps",
   "teeterminal", "terminal",
@@ -869,7 +928,7 @@ int wrunsystrain(cmdtrain* train) {
 
     // = find command fun
     // TODO: move to function
-    n= cmdnames;
+    n= (char**)cmdnames;
     f= (cmdfun*)commands;
     while(*n && *f) {
       //printf("  ?  %s %s\n", line, (char*)*n);
@@ -901,7 +960,7 @@ int wrunsystrain(cmdtrain* train) {
 
     // This calls the INIT for the command!
     // (state==0)
-    arr[++i]= state= (*f)(0, line);
+    arr[++i]= state= (*f)(NULL, line);
 
     if (!state) {
       // TODO: ABORT stderr?

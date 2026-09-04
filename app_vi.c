@@ -17,9 +17,9 @@ typedef struct APP {
   int last;
 } APP;
 
-void redraw(APP* state) {
-  int i, x = 0, y = 0, pos= state->pos;
-  char w, h, *buf= state->buf;
+void redraw(void* voidapp) {
+  int i, x = 0, y = 0, pos= app->pos;
+  char w, h, *buf= app->buf;
 
   screensize(&w, &h);
 
@@ -27,8 +27,8 @@ void redraw(APP* state) {
   clrscr();
 
   // TODO: use while(*p)
-  for (i = 0; i < state->b_len; ++i) {
-    if (i == pos) { state->cx = x; state->cy = y; }
+  for (i = 0; i < app->b_len; ++i) {
+    if (i == pos) { app->cx = x; app->cy = y; }
     if (buf[i] == '\n') {
       x = 0; y++;
       if (y >= h - 1) break;
@@ -39,88 +39,88 @@ void redraw(APP* state) {
     }
   }
 
-  if (pos == state->b_len) { state->cx = x; state->cy = y; }
+  if (pos == app->b_len) { app->cx = x; app->cy = y; }
   gotoxy(0, h - 1);
   // TODO: goes bad, if toolong...
   printf("--- vi abcdefg");
-  //printf("%-15s Pos:%d/%d", state->ins ? "-- INSERT --" : "-- COMMAND --", state->pos, state->b_len);
-  gotoxy(state->cx, state->cy);
+  //printf("%-15s Pos:%d/%d", app->ins ? "-- INSERT --" : "-- COMMAND --", app->pos, app->b_len);
+  gotoxy(app->cx, app->cy);
 }
 
-int next_line(APP* state, int p) {
-  while (p < state->b_len && state->buf[p] != '\n') p++;
-  return (p < state->b_len) ? p + 1 : state->b_len;
+int next_line(void* voidapp, int p) {
+  while (p < app->b_len && app->buf[p] != '\n') p++;
+  return (p < app->b_len) ? p + 1 : app->b_len;
 }
 
-int prev_line(APP* state, int p) {
+int prev_line(void* voidapp, int p) {
   if (p <= 0) return 0;
-  p--; if (p > 0 && state->buf[p] == '\n') p--;
-  while (p > 0 && state->buf[p-1] != '\n') p--;
+  p--; if (p > 0 && app->buf[p] == '\n') p--;
+  while (p > 0 && app->buf[p-1] != '\n') p--;
   return p;
 }
 
-void* app_vi(APP* state, char* line) {
+void* app_vi(void* voidapp, char* line) {
   char c;
   // cached
   char *buf;
   int pos, b_len;
 
-  if (!state) {
+  if (!app) {
 
     // TODO: combine into one
-    state= calloc(sizeof(APP), 1);
-    if (!state) return 0;
-    state->buf= calloc(BUF_SIZE, 1);
-    strcpy(state->buf, "Text\n  to\nedIt,");
-    return state;
+    app= calloc(sizeof(APP), 1);
+    if (!app) return 0;
+    app->buf= calloc(BUF_SIZE, 1);
+    strcpy(app->buf, "Text\n  to\nedIt,");
+    return app;
 
   } else if (line == CLEANUP) {
-    free(state->buf); state->buf= 0;
+    free(app->buf); app->buf= NULL;
     return 0;
   }
   
-  buf= state->buf;
-  pos= state->pos;
-  b_len= state->b_len;
+  buf= app->buf;
+  pos= app->pos;
+  b_len= app->b_len;
   
   if (!buf) return WAITKEY;
 		     
   c = getc();
   if (!c) return WAITKEY;
   
-  if (state->ins) {
-    if (c == 27) { state->ins = 0; if (pos > 0 && buf[pos-1] != '\n') pos--; }
+  if (app->ins) {
+    if (c == 27) { app->ins = 0; if (pos > 0 && buf[pos-1] != '\n') pos--; }
     else if (c == 8 || c == 127) {
       if (pos > 0) { memmove(&buf[pos-1], &buf[pos], b_len - pos); pos--; b_len--; }
     } else if (b_len < BUF_SIZE - 1) {
       memmove(&buf[pos+1], &buf[pos], b_len - pos); buf[pos++] = (c == 13) ? '\n' : c; b_len++;
     }
   } else {
-    if (c == 'i') state->ins = 1;
+    if (c == 'i') app->ins = 1;
     else if (c == 'h' && pos > 0 && buf[pos-1] != '\n') pos--;
     else if (c == 'l' && pos < b_len && buf[pos] != '\n') pos++;
-    else if (c == 'j') pos = next_line(state, pos);
-    else if (c == 'k') pos = prev_line(state, pos);
+    else if (c == 'j') pos = next_line(app, pos);
+    else if (c == 'k') pos = prev_line(app, pos);
     else if (c == 'x' && pos < b_len && buf[pos] != '\n') {
       memmove(buf+pos, buf+pos+1, b_len - pos - 1);
       b_len--;
     } else if (c == 'd') {
-      if (state->last == 'd') {
-	int start = prev_line(state, pos + 1), end = next_line(state, pos);
+      if (app->last == 'd') {
+	int start = prev_line(app, pos + 1), end = next_line(app, pos);
 	memmove(buf+start, buf+end, b_len - end);
-	b_len -= (end - start); pos = start; state->last = 0;
+	b_len -= (end - start); pos = start; app->last = 0;
       }
       goto update;
     } else if (c == 'q') { clrscr(); return WAITKEY; } // TODO: exit
 
-    state->last = 0;
+    app->last = 0;
   }
 
  update:
-  state->pos= pos;
-  state->b_len= b_len;
+  app->pos= pos;
+  app->b_len= b_len;
 
-  redraw(state);
+  redraw(app);
     
   return WAITKEY;
 }

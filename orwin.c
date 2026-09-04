@@ -17,11 +17,13 @@
   #define cprintf printf
 
   // oscar64 function definiition differs
-  void putchar(char c) { wputc(c); }
+  char wputc(char);
+  // oscar64 cannot override
+  //void putchar(char c) { wputc(c); }
 
 // TODO: extract out once for all...
 
-char* strdup(char* s) {
+char* strdup(const char* s) {
   char* r;
   if (!s) return 0;
   if (!(r= calloc(strlen(s)+1, 1))) return 0;
@@ -544,7 +546,7 @@ void wputz(char* s) {
 
 // Clever but old, should be using write!
 
-void wputz(char* s) {
+void wputz(const char* s) {
   char c, r, *p, k, w= winp->w, h= winp->h;
   unsigned int nputc= winp->nputc;
 
@@ -579,8 +581,8 @@ void wputz(char* s) {
 }
 #endif
 
-void wputs(char* s) {
-  write(1, s, strlen(s));
+void wputs(const char* s) {
+  write(1, (char*)s, strlen(s));
   nl();
 }
 
@@ -601,7 +603,7 @@ void wputi(int i) {
 //
 //void cspc() { cputc(' '); }
 
-void wstatus(signed char c, char* s) {
+void wstatus(signed char c, const char* s) {
   char* p= winp->y * SCREENCOLS+ winp->x + c + TEXTSCREEN - SCREENCOLS;
   char w= winp->w + 2 + 1;
   //char xor= winp->bg&7==7?0 :128; // if white back
@@ -656,6 +658,7 @@ char newwin() {
   if (nwin==WIN_MAX) return 0;
   setwin(++nwin);
   setfocus(nwin);
+  return nwin;
 }
 
 
@@ -726,16 +729,16 @@ void dorun(char* line) {
 //
 // TODO: possibly rename "exec".
 // 
-void startline(runptr fun, char* line) {
+void startline(runptr fun, const char* line) {
   winp->status= 1;
   winp->args= strdup(line);
   
   winp->fun=   (void*)fun;
-  dorun(line);
+  dorun((char*)line);
   
   // TODO: glue (fun,state) together? (like the train)
   winp->state= winp->ret;
-  winp->ret= 0;
+  winp->ret= NULL;
 }
 
 void start(runptr fun) { startline(fun, 0); }
@@ -1079,7 +1082,7 @@ void apprun() {
 
     // launch!
     newwin();
-    startline(found->fun, spc? spc+1: 0);
+    startline(found->fun, spc? spc+1: NULL);
 
     //cprintf("\n\n\n\n\n[WIN.%d: %p %p]", wcur, winp->state, winp->fun);
 
@@ -1272,10 +1275,22 @@ void mowin(signed char dx, signed char dy, signed char dw, signed char dh) {
 //////////////////////////////////////////////////////////
 // SCHEDULER!
 
+#ifdef __CC65__
+
 size_t _heapmemavail(void);
 size_t _heapmaxavail(void);
 
 unsigned int heapstart;
+
+#else
+
+// simuate
+size_t _heapmemavail(void) { return 4711; }
+size_t _heapmaxavail(void) { return   42; }
+
+unsigned int heapstart;
+
+#endif
 
 void scheduler() {
   runprocs= rounds= timesum= runsum= 0;
@@ -1384,7 +1399,7 @@ extern void printPage();
 
   int main() {
     int argc;
-    char** argv= {"orwin", NULL};
+    const char* argv[]= {"orwin", NULL};
     
 #else 
     
@@ -1462,7 +1477,7 @@ extern void printPage();
 
   updatewinptr();
   
-  wins[0].status= -1;
+  wins[0].status= 255;
 
 // TODO: RWRITE TO BE APPS
   

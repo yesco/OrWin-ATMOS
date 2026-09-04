@@ -41,7 +41,7 @@ void* app_charedit(void* voidapp, char* line) {
   if (!app) {
     // TODO: reduce by one once attributes OPT at beginning line
     window(-1, -1, 10, 11, yellow, black);
-    wstatus(-1, "Char Edit");
+    wstatus(-1, (char*)"Char Edit");
     
     c= isdigit(*line)? atoi(line): *line;
     if ((c & 0x7f) < 32) c= '`'; // copyright - useless!?

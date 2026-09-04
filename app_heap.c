@@ -10,13 +10,13 @@ typedef struct usedblock {
   char*        start;
 } used;
 
-void* __fastcall__ malloc (size_t size);
-void* __fastcall__ calloc (size_t count, size_t size);
-void* __fastcall__ realloc (void* block, size_t size);
-void __fastcall__ free (void* block);
+void* __fastcall__ malloc(size_t size);
+void* __fastcall__ calloc(size_t count, size_t size);
+void* __fastcall__ realloc(void* block, size_t size);
+void __fastcall__ free(void* block);
 
-int __fastcall__ posix_memalign (void** memptr, size_t alignment, size_t size);
-void __fastcall__ __heapadd (void* mem, size_t size);
+int __fastcall__ posix_memalign(void** memptr, size_t alignment, size_t size);
+void __fastcall__ __heapadd(void* mem, size_t size);
 
 size_t _heapmemavail(void);
 size_t _heapmaxavail(void);

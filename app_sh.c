@@ -156,7 +156,7 @@ void* app_sh(void* voidapp, char* line) {
     // finshed?
     if (app->line == EOS) {
       shellcleanup(app->train, app->n, app->cleanbits);
-      app->train= 0;
+      app->train= NULL;
       return EOS;
     }
 

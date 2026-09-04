@@ -1,1 +1,18 @@
-./oscar -dOSCAR64 orwin.c app_*.c
+# this script needs to be run after running ./orwin for cc65
+# for the gen files...
+
+rm orwin.prg
+
+#./oscar -dNOLONG -dNOFLOAT -dOSCAR64 orwin.c app_*.c
+./oscar -dNOFLOAT -dOSCAR64 orwin.c app_*.c
+
+# byte code only
+#./oscar -v2 -bc -dNOLONG -dNOFLOAT -dOSCAR64 orwin.c app_*.c
+
+ls -l orwin.*
+
+# 33050 cc65
+# 25339 oscar64 .prg -Os small
+# 22907 oscar64 -dNOFLOAT
+# 22417 oscar64 490 bytes saved: -dNOFLOAT -dNOLONG (- 22907 22417) 
+# 21776 oscar64 BYTECODE 641 bytes saved: (-dNOFLOAT -dNOLONG) (- 22417 21776) 
