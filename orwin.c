@@ -1,107 +1,85 @@
+// OrWIN ATMOS - Window System "unix" for ORIC ATMOS
+//
+// (C) 2026 Jonas S Karlsson (jsk@yesco.org)
+
+// An experimential C-based retro text-based windowing system and
+// multitasking environment for the ORIC ATMOS.
+//
+// see README.md for documentation!
+
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <conio.h>
 #include <ctype.h>
+#include <assert.h>
 
-//#include <assert.h>
 
-#ifdef OSCAR64
-
-  #define bzero(p, z) memset(p, 0, z)
-
-  #define cgetc() fgetc(stdin)
-
-  #define cputc(c) putchar(c)
-
-  #define cprintf printf
-
-  // oscar64 function definiition differs
-  char wputc(char);
-  // oscar64 cannot override
-  //void putchar(char c) { wputc(c); }
-
-// TODO: extract out once for all...
-
-char* strdup(const char* s) {
-  char* r;
-  if (!s) return 0;
-  if (!(r= calloc(strlen(s)+1, 1))) return 0;
-  return strcpy(r, s);
-}
-
-#else
-
-#undef putchar
-// inefficient, but should do the job
-// TODO: rename wputc?
 
 char wputc(char c);
 
-int putchar(int c) { return wputc(c); }
+#define HELPTEXT "FUNCT-3 Prev spc Next List Run Kill Shll"
 
-#endif
+
+#include "orwin.h"
+
+
+
+// Each file sets FOOBAR if they provide foobar()
+// Otherwise, "fillins.c, will fill them in!
+
+
+#ifdef OSCAR64
+
+  #include "oscar64.c"
+
+#else
+
+  #ifdef __CC65__
+    #ifdef __ATMOS__
+
+      #include "oric.c"
+
+    #else
+
+      #include "sim6502.c"
+
+    #endif  // __ATMOS__
+  #else     // __CC65__ else case (POSIX)
+
+    // POSIX
+    #include "unix.c"
+
+  #endif // __CC65__
+
+#endif // !OSCAR64
+
+
+// Any missing routines will be filled in!
+#include "fillins.c"
+
+
+
+
 
 
 //#ifdef DEBUGKEY
 
-/* Sizes
-
-ORWIN:  9508
-APPS :  8412
-DATA :  1797
-MISC :  3888 other apps older app-( stackers
-CC65 :  6208
-CCDAT:   428
-------------
-TAP  : 30241 (- 30241 9508 8412 1797 6208 428) 3888
-
-(- (+ 21942 1672) 9508 8412 1797 6208) -2311
 
 
-*/
 
+// TODO: platform specific?
 
 // Preferred Window Layout
 
 #define NHORIZWIN  3
 #define NVERTWIN 3
 
-#define WMAX ((40-NHORIZWIN*5) / NHORIZWIN -1)
-#define HMAX ((28-NVERTWIN*4) / NVERTWIN)
+#define WMAX ((SCREENCOLS-NHORIZWIN*5) / NHORIZWIN -1)
+#define HMAX ((SCREENROWS-NVERTWIN*4) / NVERTWIN)
 
 
-
-// TODO: magenta on blue - not sood good
-#define IS_BAD_CONTRAST(fg, bg) ((0xB1 >> ((fg) ^ (bg))) & 1)
-
-#include "orwin.h"
-
-//  "\0\0\0\0\0\x3f\x3f\x3f" \ // TODO: already 32+3*16
-//  "\0\0\0\x3f\x3f\x3f\x3f\x3f" \ // TODO: 96-3
-
-#define SPARKDEFS \
-  "\0\0\0\0\0\0\0\x3f" \
-  "\0\0\0\0\0\0\x3f\x3f" \
-  "\0\0\0\0\0\x3f\x3f\x3f" \
-  "\0\0\0\0\x3f\x3f\x3f\x3f" \
-  "\0\0\0\x3f\x3f\x3f\x3f\x3f" \
-  "\0\0\x3f\x3f\x3f\x3f\x3f\x3f" \
-  "\0\x3f\x3f\x3f\x3f\x3f\x3f\x3f" \
-\
-  "\x00\x21\x12\x0c\x0c\x12\x21\x00" \
-  "\x38\x20\x20\x20\x38\x20\x20\x20" \
-  "\x20\x20\x20\x20\x20\x20\x20\x3f" \
-  "\x00\x00\x00\x00\x00\x20\x20\x3f" \
-\
-  "\x20\x20\x20\x20\x20\x20\x20\x20" \
-  "\x30\x30\x30\x30\x30\x30\x30\x30" \
-  "\x38\x38\x38\x38\x38\x38\x38\x38" \
-  "\x3c\x3c\x3c\x3c\x3c\x3c\x3c\x3c" \
-  "\x3e\x3e\x3e\x3e\x3e\x3e\x3e\x3e"
-
-
-  
 #define MOWIN 
 #define OPTMOV
 
@@ -182,46 +160,13 @@ struct App {
 #else
   #define DEB(c) 
   #define DKEY() 
-#endif
+#endif // TRACE
 
 // hi byte of timer at yield
 char wtime= 0;
 
-clock_t clock() {
-  // ORIC TIMER 100 interrupts/s,
-  // TODO: make clock_t bigger and handle wraparound
-  return ~*(volatile unsigned int*)0x276;
-}
-
-
 
 //////////////----------------------------------------
-#define HELP "FUNCT-3 Prev spc Next List Run Kill Shll"
-
-// TODO: make an "oric.h"
-
-#define CHARSET    ((char*)0xB400) // $B400-B7FF
-#define CHARDEF(C) ((char*)(CHARSET+(C)*8))
-#define ALTSET     ((char*)0xB800) // $B800-BB7F
-
-#define TEXTSCREEN ((char*)0xBB80) // $BB80-BF3F
-#define SCREENROWS 28
-#define SCREENCOLS 40
-
-#define SCREENSIZE (SCREENROWS*SCREENCOLS)
-#define SCREENLAST (TEXTSCREEN+SCREENSIZE-1)
-
-#define curscr TEXTSCREEN
-#define SCREENXY(x, y) ((char*)(curscr+(5*(y))*8+(x)))
-
-void fill(char x, char y, char w, char h, char c) {
-  char* p= SCREENXY(x, y);
-  // strided
-  while(h--) {
-    memset(p, c, w);
-    p+= SCREENCOLS;
-  }
-}
 
 
 char nwin= 0, wfocus= 0, wcur= 0, wnext, *wret;
@@ -322,7 +267,7 @@ int write(int fd, char* buf, size_t count) {
   return count;
 }
 
-#endif
+#endif // !WRITE
 
 
 
@@ -374,41 +319,16 @@ void wclrscr() {
 
   // set text color
   fill(winp->x-1, winp->y, 1, winp->h, winp->fg);
-#endif
+#endif // IMPLE
 }
+
 
 char* winptr() {
   return winp->p;
 }
 
 
-// doesn't scroll, just wraps around, no wclreol()
-void nlpure() {
-  winp->c= 0;
-  if (++winp->r >= winp->h) winp->r= 0;
-  updatewinptr();
-
-  // set current (new) colors
-  winp->p[-2]= BG | winp->bg;
-  winp->p[-1]=      winp->fg;
-}
-
-void clnl() {
-  wclreol();
-  nlpure();
-}
-
-// doesn't scroll, just wraps around, DOES wclreol()
-void nl() {
-  nlpure();
-  wclreol();
-}
-
-char putcraw(char c) {
-  *winp->p= c;
-  wputc(KEYRIGHT);
-  return c;
-}
+// TODO: maybe move to "fill" in generic
 
 // minimal terminal codes
 // Free codes: 11, 14; 24,25,26, 28,29,30,31
@@ -579,7 +499,9 @@ void wputz(const char* s) {
   // good time to release, minimic terminal avoid jitter
   //yield();
 }
-#endif
+#endif // OPTPUTZ
+
+
 
 void wputs(const char* s) {
   write(1, (char*)s, strlen(s));
@@ -593,6 +515,7 @@ void wputi(int i) {
   //   last change back text color column
   wputs(s);
 }
+
 
 //TODO: use instead of printf?
 //
@@ -765,10 +688,13 @@ char overlap(char x, char y, char w, char h) {
   for(j= y-1; j<y+h+1; ++j)
     for(i= x-2; i<x+w+2; ++i)
       if (*SCREENXY(i, j) != 126) return 1;
-#endif
+#endif // MOWIN
   return 0;
 }
 
+
+// TODO: magenta on blue - not sood good
+#define IS_BAD_CONTRAST(fg, bg) ((0xB1 >> ((fg) ^ (bg))) & 1)
 
 // Draw a window in current process/window slot
 //
@@ -831,15 +757,6 @@ char window(
   return nwin;
 }
 
-
-void help() {
-  char tmp[40];
-  memcpy(tmp, TEXTSCREEN, sizeof(tmp));
-  memcpy(TEXTSCREEN, HELP, sizeof(HELP));
-  cgetc();
-  memcpy(TEXTSCREEN, tmp, sizeof(tmp));
-}
-
 void apprun();
 void randnewwin(char* title, runptr main);
 
@@ -849,44 +766,6 @@ void task(runptr fun);
 char wkey= 0;
 
 #undef kbhit
-
-// Remapping arrow keys w FUNCT and CTRL
-// 
-char mygetc() {
-  // 209: Keyshifts, s= ScanCodes
-  char orig= cgetc(), k= *(char*)0x209, s= *(char*)0x208, c= orig;
-
-  // ORIC ATMOS: ROM magical shift key $209
-  #define NOKEY     0x38
-  #define CTRLKEY   0xa2
-  #define LSHIFTKEY 0xa4
-  #define FUNCTKEY  0xa5
-  #define RSHIFTKEY 0xa7
-
-  // remap ARROW KEYS: 8-11 to 28-31
-  if (s==0xac || s==0xbc || s==0xb4 || s==0x9c) { // arrow key codes
-    // CTRL -> 88..8b (original range + 128)
-    if (k!=0xa2)  c+= 28-8; else c|= 128;
-  }
-  
-  // CTRL keys "stunts" some bits put in range 0-31
-  if (k==0xa2) c&= 0b10011111;
-
-  // TODO: CTRL-M and RETURN are ambigous,
-  // but RETURN probably should stay at 13, lol
-
-  if (c==13 && k==0xa2) c== 11; // nlpure()
-
-  // Set hi-bit if alt key
-  if (k==0xa5) c|= 128;
-
-  #ifdef DEBUGKEY
-  sprintf(SCREENXY(SCREENCOLS-3*4+1-2,SCREENROWS-1),
-	  "[%02x %02x %02x %02x]", c, orig, k, s);
-  #endif
-
-  return c;
-}
 
 // non-blocking test if key hit for the given winnumber
 char wkbhit(char win) {
@@ -972,35 +851,6 @@ char wgetc(char win) {
   return (wkey= 0);
 }
 
-
-char cursorgetc() {
-  char c;
-  togglecursor();
-  c= cgetc();
-  togglecursor();
-  return c;
-}
-
-char* savewin() {
-  char h= winp->h, w= winp->w + 3;
-  char *p= malloc(w * h), *r= p;
-  char *s= SCREENXY(winp->x - 2, winp->y);
-  while(h--) {
-    memmove(p, s, w);
-    p+= w; s+= SCREENCOLS;
-  }
-  return r;
-}
-
-void loadwin(char* p) {
-  char h= winp->h, w= winp->w + 3, *r= p;
-  char *s= SCREENXY(winp->x - 2, winp->y);
-  while(h--) {
-    memmove(s, p, w);
-    p+= w; s+= SCREENCOLS;
-  }
-  free(r);
-}
 
 // Pick app to run
 //
@@ -1134,7 +984,7 @@ void randwin(char* title, app main) {
   task(main);
   //  spawn(main);
 }
-#endif
+#endif // 0
 
 
 // TODO: title not moved...
@@ -1212,7 +1062,7 @@ void mowin(signed char dx, signed char dy, signed char dw, signed char dh) {
 
     free(tmp);
   } else
-#endif
+#endif // OPTWIN
 
   // TODO: RESIZE crashes!
   // Resize by capture text, undraw, and redraw
@@ -1275,22 +1125,7 @@ void mowin(signed char dx, signed char dy, signed char dw, signed char dh) {
 //////////////////////////////////////////////////////////
 // SCHEDULER!
 
-#ifdef __CC65__
-
-size_t _heapmemavail(void);
-size_t _heapmaxavail(void);
-
 unsigned int heapstart;
-
-#else
-
-// simuate
-size_t _heapmemavail(void) { return 4711; }
-size_t _heapmaxavail(void) { return   42; }
-
-unsigned int heapstart;
-
-#endif
 
 void scheduler() {
   runprocs= rounds= timesum= runsum= 0;
@@ -1395,6 +1230,7 @@ extern void insertlines(char*);
 extern void printPage();
 
 
+// TODO: shitty!
 #ifdef OSCAR64
 
   int main() {
@@ -1405,7 +1241,7 @@ extern void printPage();
     
   int main(int argc, char** argv) {
 
-#endif
+#endif // OSCAR64
 
 
   int i= 0, j= 0, z= 0;
@@ -1418,31 +1254,11 @@ extern void printPage();
   
   heapstart= _heapmemavail();
   
-  // needed for OrWIN on cc65, assumption and used extensivly
-  //assert(sizeof(void*)==sizeof(int));
-
-  memcpy(CHARDEF('_'), SPARKDEFS, 8);
-  memcpy(ALTSET+(32+64)*8, SPARKDEFS, sizeof(SPARKDEFS));
-	 
-  // KBRPT - keyboard repeat rate
-  *(char*)0x24f= 2;
-  // KBDLY - keyboard delay before repeat
-  *(char*)0x24e= 6;
-  
-  // cursor(0); // doesn't work
-  // status location is at #26A.
-  //  1 – cursor ON when set.
-  //  2 – screen ON when set.
-  //  4 – not used.
-  //  8 – keyboard click OFF when set.
-  // 16 – ESC has been pressed.
-  // 32 – columns 0 and 1 protected when set.
-  #define SCREENSTATE *((char*)0x26a)
-  SCREENSTATE= 0+2+0+8+0;
-  
   // clear background to "gray" checkerboard
   fill(0, 0, SCREENCOLS, SCREENROWS, 126);
 
+  // TODO: abstract it!
+  
   // Print logo in Upper Status Line
   strncpy(SCREENXY(0, 0), "0rWIN/ATMOS                                     ", 40);
 
@@ -1479,81 +1295,8 @@ extern void printPage();
   
   wins[0].status= 255;
 
-// TODO: RWRITE TO BE APPS
-  
-//#define TIMER
-//#define ATMOS
-//#define FISH
-//#define ECHO
-//#define ASCII2
-//#define CALC
-//#define SNOW
-  
-#ifdef DEMO
-  // OK
-  // window( 3,  2, 23,  7, GREEN, BLACK);
-  // CRASH: smaller than 23 crash+++
-  // window( 3,  2, 22,  7, GREEN, BLACK);
-  // ok
-#ifdef TIMER
-  window( 2,  2, 12,  7, green, black);
-  wstatus(-1, "Timer");
-  spawn(timer_main);
-#else
-  window( 2,  2, 23,  7, green, black);
-  wstatus(-1, "Counter");
-  spawn(counter_main);
-#endif
-  
-#ifdef ECHO
-  window( 4, 12, 11,  7, blue,  white);
-  wstatus(-1, "ECHO");
-  spawn(echo_main);
-#endif
-
-#ifdef FISH
-  window(31,  5,  6,  5, white, blue);
-  wstatus(-1, "ASCII");
-  spawn(ascii_main);
-#endif 
-
-#ifdef CALC
-  // Need odd line! for double!
-  window( 4, 13, 17, 13, white,  black);
-  wstatus(-1, "RPN-CALC");
-  spawn(calc_main);
-#endif
-
-#ifdef ASCII
-  window( 2, 22, 14,  5, cyan,  red);
-  wstatus(-1, "ASCII");
-  start(ascii_main);
-#endif
-  
-#ifdef ATMOS
-  // Atmos
-  window(22, 12, 14, 14, black, yellow);
-  wstatus(-1, "File Edit Options Tools");
-  //spawn(atmos_main);
-  spawn(flipflop_main);
-#endif ATMOS
-  
-#else
-
-#ifdef ASCII
-  // TODO: need at least one because allocations
-  window(30,  5,  6,  5, blue, white);
-  wstatus(-1, "ASCII");
-  spawn(ascii_main);
-#endif
-  
-#endif // DEMO
-  
-#ifdef SNOW
-  start(app_snow);
-  window(39-16-2, 4, 16, 10, red, yellow);
-  wstatus(-1, "Snow");
-#endif
+#define DEMO
+#ifdef DEMO  
 
   newwin();
   window(-1, -1, 5, 3, blue, white);
@@ -1562,8 +1305,8 @@ extern void printPage();
   
   newwin();
   start(app_charset);
-
-
+#endif // DEMO
+  
   scheduler();
 
   return 0;

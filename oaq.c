@@ -74,56 +74,6 @@
 #include <stdint.h>
 #include <assert.h>
 
-// Varoious encodings:
-
-// working I think
-
-char* LEB128(char* s, long v) {
-  while(v >= 128) {
-    *s++= (v & 127) | 128;
-    v>>= 7;
-  }
-  *s++= v;
-  return s;
-}
-
-char* unLEB128(char* s, long *v) {
-  char c;
-  if ((c= *s) < 128) {
-    *v|= c;
-    return s+1;
-  } else {
-    *v|= c & 127;
-    *v<<= 7;
-    return unLEB128(s+1, v);
-  }
-}
-
-
-// reverse LEB128 encoding (big endian)
-// working?
-char* BEL128(char* s, unsigned long v) {
-  if (v >= 128) {
-    *s= 128;
-    s= BEL128(s, v >> 7);
-  }
-
-  *s^= v;
-  return s+1;
-}
-
-char* unBEL128(char* s, long *v) {
-  static char c;
-  *v= 0;
-  while((c= *s++) >= 128) {
-    *v|= c & 127;
-    *v<<= 7;
-  }
-  *v|= c;
-  return s;
-}
-
-
 
 /*
 
@@ -655,7 +605,7 @@ decode on an 8-bit CPU.
 
 
 
-"untested"
+"untested" -- OUTDATED!
 
 ```
 ; =============================================================================
@@ -749,9 +699,6 @@ https://github.com/fast-pack/SIMDCompressionAndIntersection
 
 
 
-
-
-
 // Assumption SMALL_ENDIAN 6502/ARM
 // TODO: make it independent
 union oaq_type {
@@ -820,6 +767,10 @@ char* QAO(char* s, uint16_t *w) {
   }
 }
 
+
+
+#ifdef OAQ_SIGNED
+
 // TODO: test
 char* SOAQ(char* s, int16_t i) {
   // Add a prefix byte with the sign to get correct sort order!
@@ -834,9 +785,12 @@ char* QAOS(char* s, int16_t *i) {
   return QAO(s, (uint16_t*)i);
 }
 
+#endif // OAQ_SIGNED
 
 
 
+
+#ifdef OAQ_U32
 
 // TODO: not use word "L" but u32 maybe
 // TODO: make encoder for u64! (or just use sizeof(long)-1 ???
@@ -885,99 +839,16 @@ char* QAOL(char* s, uint32_t *l) {
   }
 }
 
-// TODO: test
-char* QAOLS(char* s, int32_t *l) {
-  ++s; // skip sign!
-  return QAOL(s, (uint32_t*)l);
-}
-
-// TODO: test
-char* SLOAQ(char* s, int32_t l) {
-  *s++= l<0? OAQ_NEG: OAQ_POS;
-  return LOAQ(s, (uint32_t)l);
-}
+#ifdef OAQ_SIGNED
 
 
-// RUNLENGTH encoding of time:
-
-// working???
-
-//   0-127: itself
-//   hival (preval << 7) | (hival & 0x7f)
-// (terminates before next byte < 128)
-//
-// OR USES LEB129
-// minimal bytes keylen prefixlen 0 collen 0 datalen 0
-
-// extracts: a long from a pointer to char* pointer by moving it forward:
-//   char* s= ...
-//   long val= JSK128(&s);
-//   // s is advanced to the next byte to process
-//
-long unJSK128(char* *s) {
-  static char c; static long v;
-  if ((c= *(*s)++) < 128) return c;
-  v= c ^ 128;
-  while((c= *++*s) >= 128) {
-    v= (v<<7) + c ^ 128;
-  }
-  return v;
-}
-
-/*
-  // AX= ptr to next byte
-  unJSK128:
-    sta ptr
-    stx ptr+1
-    ldy #0
-    ldX #0
-
-    lda (ptr),y
-    inc ptr
-    bne :+
-    inc ptr+1
-  :
-    bpl ret
-
-    and #127
-
-  loop:
-    
 
 
-  ret:
-    rts
- */
+
 
 #ifndef MAIN
 
-// TODO: replace and use the oafs: fputqsnw function instead
-//   or maybe here just a byte/hex print %x lol w &
-int qputsn(char* s, int len, FILE* f) {
-  int n= 0; char c;
-
-  if (!s) return fputs("(NULL)", f);
-  n += fputc('"', f);
-
- next:
-  switch((c= *s++)) {
-  case '\n': n+= fputs("\\n", f);  goto next;
-  case '\t': n+= fputs("\\t", f);  goto next;
-  case '"' : n+= fputs("\\\"", f); goto next;
-  default  :
-    if (c<32 || c>126)
-      n+= fprintf(f, "\\x%02x", c);
-    else
-      n+= fputc(c, f);
-    if (len>0 && --len) goto next;
-  }
-
-  n+= fputc('"', f);
-  return n;
-}
-
-void nl() { putchar('\n'); }
-
+#include "qputs.c"
 
 int main(int argc, char** argv) {
   // test encoding

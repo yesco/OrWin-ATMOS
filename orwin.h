@@ -63,7 +63,6 @@
 
 #define VSPARKS "\x20\xeb\xec\xed\xee\xef\xdf"
 
-
 extern char wputc(char);
 extern char putcraw(char);
 extern void wputi(int);
@@ -82,6 +81,18 @@ extern void wclrscr();
 extern void wstatus(signed char, const char*);
 extern char togglecursor();
 extern void setfocus(signed char);
+
+// TODO: hack, chicken and egg!
+#ifndef CLOCKS_PER_SEC
+
+  // LOL
+  #define CLOCKS_PER_SEC 100
+  typedef unsigned int clock_t;
+
+  extern clock_t clock();
+
+#endif // CLOCKS_PER_SEC
+
 
 extern char wtime;
 
@@ -128,16 +139,32 @@ extern char wgetc(char win);
 #define getc() wgetc(wcur)
 
 
-//#include <types.h>
-
-#define CLOCKS_PER_SEC 100
-typedef unsigned int clock_t;
-
-extern clock_t clock();
-
-
-
 extern void wscreensize(char* w, char* h);
+extern char cgetc();
+extern void cputc(char c);
+extern char cursorgetc();
+
+//extern void cprintf(const char* c, ...);
+
+extern void bzero(void* p, size_t z);
+
+extern char putcraw(char c);
+extern void nl();
+
+extern char* strdup(const char* s);
+
+extern void fill(char x, char y, char w, char h, char c);
+
+extern void help();
+
+extern char* savewin();
+extern void loadwin(char* p);
+
+extern char* updatewinptr();
+
+// Your function to change key mapping and encoding
+extern char mygetc();
+
 
 #define screensize wscreensize
 
@@ -215,6 +242,9 @@ typedef struct Window {
 
 } Window;
 
+// window pointer (current)
+extern Window* winp;
+
 extern Window wins[WIN_MAX];
 
 extern char wcur;
@@ -227,8 +257,13 @@ extern char* wname(char winid);
 
 #define app ((APP*)voidapp)
 
+
+
+// LOL: TODO: remove or move where relevant
+
 #ifdef OSCAR64
 
   #define  __fastcall__
 
-#endif
+#endif // OSCAR64
+

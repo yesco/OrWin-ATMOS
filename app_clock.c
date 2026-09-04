@@ -8,6 +8,7 @@ typedef struct APP {
   unsigned int slast;
 } APP;
 
+
 void* app_clock(void* voidapp, char* line) {
   clock_t now= clock();
   int s= now / CLOCKS_PER_SEC, m= s / 60, h= m / 60;

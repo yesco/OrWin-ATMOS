@@ -20,7 +20,7 @@ fil
 *.csz
 *.dbj
 *.int
+*.bcs
+
 diff
 diff.c
-
-
