@@ -788,8 +788,7 @@ char* QAOS(char* s, int16_t *i) {
 #endif // OAQ_SIGNED
 
 
-
-
+// TODO: "long"
 #ifdef OAQ_U32
 
 // TODO: not use word "L" but u32 maybe
@@ -841,11 +840,25 @@ char* QAOL(char* s, uint32_t *l) {
 
 #ifdef OAQ_SIGNED
 
+// TODO: test
+char* SLOAQ(char* s, int32_t l) {
+  *s++= l<0? OAQ_NEG: OAQ_POS;
+  return LOAQ(s, (uint32_t)l);
+}
+
+char* QAOLS(char* s, int16_t *i) {
+  ++s; // skip sign!
+  return QAOL(s, (uint16_t*)i);
+}
+
+#endif // OAQ_SIGNED
+
+
+#endif // OQA_U32
 
 
 
-
-
+// testing code
 #ifndef MAIN
 
 #include "qputs.c"

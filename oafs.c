@@ -228,6 +228,7 @@ char* writesector(char* buff, word n) {
 // LOL
 #define MAIN
 
+#define OAQ_U32
 #include "oaq.c"
 
 #undef MAIN
@@ -433,7 +434,8 @@ OAFSpage* FSinsert
  size_t dlen, char* data)
 {
   int z;
-  char i= 0, len, l= klen;
+  char i= 0, l= klen;
+  char len, r;
 
   // TODO: handle overflow
   if (FSpage.n >= MAX_KEYS) return 0;
@@ -444,8 +446,10 @@ OAFSpage* FSinsert
     if (len < klen) l= len;
 
     // TODO: need to be MORE advanced
+    // TODO: include opt timestamp, or default to 0
     
-    if (memcmp(key, FSpage.keys[i], l) <= 0) break;
+    if ((r= memcmp(key, FSpage.keys[i], l)) < 0) break;
+    if (r==0 && klen < len) break;
 
     // if (FSpage.ts[i]      <=> ...)
     // if (FSpage.deleted[i] <=> ...)
@@ -641,7 +645,7 @@ void insertlines(char* name) {
     ds= len>=0 && data && *data? strdup(data? data: ""): NULL;
 
     //printf("%3ld:KEY=%s\t%3ld:DATA=%s\n", ks? strlen(ks): 0, ks, ds? strlen(ds): 0, ds);
-    printf("%3d:KEY=%s\t%3d:DATA=%s\n", ks? strlen(ks): 0, ks, ds? strlen(ds): 0, ds);
+    printf("%3d:KEY=%s\t%3d:DATA=%s\n", (int)(ks? strlen(ks): -1), ks, (int)(ds? strlen(ds): -1), ds);
 
   retry:
     
