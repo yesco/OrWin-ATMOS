@@ -22,6 +22,7 @@
 
 // Global RAM scratchpad area
 char bitset[BITSET_BYTES];
+uint nwords, ntris;
 
 /*
  * 1. LIGHTWEIGHT 13-BIT HYBRID HASH FUNCTION
@@ -41,6 +42,8 @@ uint hash_trigram(char* s) {
   h = (tolower(a) << 4) ^ tolower(b);
   if (c) { h = (h << 4) ^ tolower(c); }
     
+  ++ntris;
+  
   return h & 0x1FFF; // Restrict output cleanly to 13 bits (0 to 8191)
 }
 
@@ -58,6 +61,8 @@ uint hash_bigram(uint hash1, uint hash2) {
   return (h ^ hash2) & 0x1FFF;
 }
 
+uint index_popcount(uint bytes);
+
 // Indexer
 //
 // Streams through a null-terminated string.
@@ -69,16 +74,38 @@ uint hash_bigram(uint hash1, uint hash2) {
 //
 // setting positional bits in bitset
  
+// TODO: take optional length for binary sectors, keys
+
 void index_string(char* text) {
   char *p = text, *wstart = text;
   char wlen = 0;
   uint whash = 0, last_whash = 0;
   uint i;
-    
+  uint lastpop= 0, lastnwords= 0, lastntris= 0, lastdiff= 0;
+  uint nwordnew= 0, nwordseqnew= 0, ntrinew= 0;
+
+  nwords= ntris= 0;
+  
   // Step A: Clear the 1 KB bitset completely
   memset(bitset, 0, BITSET_BYTES);
     
   do {
+
+    // every page print stats
+    if (((p-text) % 256)==0) {
+      uint pop= index_popcount(BITSET_BYTES);
+      uint diff= pop-lastpop;
+      fprintf(stderr, "\tSector %3u: %5u %5u => %5u +%3u (%3d) %3u %3u %3u  %2d%%\n"
+        , (int)((p-text)/256), ntris, nwords, pop, diff
+        // how many more bits unless collision
+        , (ntris-lastntris + nwords-lastnwords)
+        , ntrinew, nwordnew, nwordseqnew
+        , pop*100/BITSET_BYTES/8
+      );
+      nwordnew= nwordseqnew= ntrinew= 0;
+      lastpop= pop; lastnwords= nwords; lastntris= ntris; lastdiff=  diff;
+    }
+
     // tokenize word tracking spaces/punctuation boundaries
     if (isalnum(*p)) { 
       // char (TODO: stop non a-z?)
@@ -87,19 +114,25 @@ void index_string(char* text) {
     } else {
       // \b - word boundary (space, control char, etc.)
       if (wlen > 0) {
-	whash = hash_unigram(wstart, wlen);
+        ++nwords;
+        whash = hash_unigram(wstart, wlen);
                 
-	// Set Unigram Anchor Bit
-	bitset[whash >> 3] |= (1 << (whash & 7));
+        if (!(bitset[whash >> 3] & (1 << (whash & 7)))) ++nwordnew;
+
+        // Set Unigram Anchor Bit
+        bitset[whash >> 3] |= (1 << (whash & 7));
                 
-	// if have previous word hash sequence!
-	if (last_whash) {
-	  i = hash_bigram(last_whash, whash);
-	  bitset[i >> 3] |= (1 << (i & 7));
-	}
+        // if have previous word hash sequence!
+        if (last_whash) {
+          i = hash_bigram(last_whash, whash);
+
+          if (!(bitset[i >> 3] & (1 << (i & 7)))) ++nwordseqnew;
+          
+          bitset[i >> 3] |= (1 << (i & 7));
+        }
                 
-	last_whash = whash;
-	wlen = 0;
+        last_whash = whash;
+        wlen = 0;
       }
     }
 
@@ -108,7 +141,10 @@ void index_string(char* text) {
     
     // trigram over sliding window
     i = hash_trigram(p);
+
     // TODO: lookup table for 6502
+    if (!(bitset[i >> 3] & (1 << (i & 7)))) ++ntrinew;
+
     if (i) bitset[i >> 3] |= (1 << (i & 7));
 
     ++p;
@@ -238,9 +274,11 @@ int main(int argc, char* argv[]) {
 
     // Print diagnostic system properties and the output bitstream
     printf("\n--- INDEX COMPLETED ---\n");
-    printf("Rounds Folded:  %u\n", folds);
-    printf("Final Data Size: %u bytes\n", fold_size);
-    printf("Storage Ratio:  %u%%\n", (uint)(((unsigned long)fold_size*100) / bytes));
+    printf("Ntris           : %5u\n", ntris);
+    printf("Nwords          : %5u\n", nwords);
+    printf("Rounds Folded   : %5u\n", folds);
+    printf("Final Data Size : %5u bytes\n", fold_size);
+    printf("Storage Ratio   : %5u %%\n", (uint)(((unsigned long)fold_size*100) / bytes));
     
     printf("\nIndex Preview (Hex):\n");
     for(i = 0; i < z; ++i) {
@@ -253,7 +291,7 @@ int main(int argc, char* argv[]) {
 
     posfolds= append_index(argv[1]);
 
-    printf("\nWrote index file %s.idx posfolds: %08x\n", argv[1], posfolds);
+    printf("\nWrote index file %s.idx posfolds: %08x\n", argv[1], (int)posfolds);
 
     free(buf);
     
