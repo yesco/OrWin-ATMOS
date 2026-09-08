@@ -111,11 +111,20 @@ would allow ls to parse the blocks of the index:
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
-//#include <strings.h>
 #include <string.h>
-
 #include <assert.h>
 
+#include "qputs.c"
+
+#if defined(__CC65__) || defined(OSCAR64)
+
+#include "getline.c"
+
+#endif
+
+
+
+// OSCAR64 being strict, ptr isn't bool
 #define assertptr(p) assert(p!=NULL)
 
 
@@ -141,10 +150,6 @@ char* strdup(char* s) {
 
 
 FILE* oaf= 0;
-
-#include "qputs.c"
-
-
 
 #ifdef __ATMOS__
 
@@ -443,7 +448,7 @@ OAFSpage* FSinsert
   // simple insert sort
   while(i < FSpage.n) {
     len= FSpage.klen[i];
-    if (len < klen) l= len;
+    if (len < (l= klen)) l= len;
 
     // TODO: need to be MORE advanced
     // TODO: include opt timestamp, or default to 0
@@ -612,14 +617,16 @@ void printPage() {
 //  "KEY DATA....\n"
 //
 // NOTE: No space in KEY, and no \n in DATA. lol
-void insertlines(char* name) {
+// Returns: number of page
+unsigned int insertlines(char* name) {
   FILE* f= strcmp(name, "-")==0? stdin: fopen(name, "r");
   char type= 0, *s= 0;
   size_t z= 0;
+  word npages= 0;
   int len;
   char *data, *ks, *ds;
   word ts;
-
+  
   //assertptr(f);
   //printf("file=%s\n", name);
   //f= strcmp(name, "-")==0? stdin: fopen(name, "r");
@@ -655,7 +662,7 @@ void insertlines(char* name) {
 
       printf("\n%%Overflow - FLUSH buffer\n");
 
-      while((inext= packpage(page, inext)));
+      while((inext= packpage(page, inext))) ++npages;
 
       // TODO: instead of looping till none, shift them up, and refill
       
@@ -676,6 +683,8 @@ void insertlines(char* name) {
 
   free(s);
   //  if (f != stdin) fclose(f);
+
+  return npages;
 }
 
 #ifndef MAIN
@@ -690,7 +699,8 @@ int main(void) {
 #else
 
 int main(int argc, char** argv) {
-
+  word npages;
+  
 #endif
 
   char *xs;
@@ -717,13 +727,14 @@ int main(int argc, char** argv) {
   printf("555\n");
   
   printf("argv %s\n", argv[2]);
-  insertlines(argc>2? (char*)argv[2]: "-");
-
+  npages= insertlines(argc>2? (char*)argv[2]: "-");
+  printf("pages= %u\n", npages);
+    
   printf("666\n");
   
   //printPage();
   
-  fclose(oaf);
+  if (oaf) fclose(oaf);
   return 0;
 }
 

@@ -13,8 +13,8 @@ rm -f oafs.prg
 # -- size and opt
 ./oscar -v2 -g -Os -f=fil.oafs -dOSCAR64 oafs.c -gp -e
 
-
 ls -l oafs.*
+
 
 
 
