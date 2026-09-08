@@ -495,10 +495,8 @@ char packpage(char* page, word next) {
   word saved= 0;
   char *p, j;
   
-  printf("pp aa\n");
   bzero(page, 256);
   
-  printf("pp bb\n");
   // header
   page[z++]= '$'+128;
   page[z++]= 'I'+128;
@@ -512,49 +510,38 @@ char packpage(char* page, word next) {
     char klen= FSpage.klen[j];
     char need;
 
-  printf("pp cc\n");
     // TODO: LevelDB allows a (single) empty key! 
     if (!key || !klen) { printf("  %%NO KEY: %u %p %u\n", j, key, klen); continue; }
 
-  printf("pp dd\n");
     // TODO: typedatalen and timestamp serializes to how many bytes?
     //  maybe move abort till later?
     need= 3 + 1 + klen + FSpage.dlen[j];
-  printf("pp ee\n");
     
     // max of prev and current key len
     if (klen <= plen) plen= klen;
     //    if (pkey) while(prefix < plen && pkey[prefix]==key[prefix]) ++prefix;
     if (pkey) while(prefix < plen && pkey[prefix]==key[prefix]) ++prefix;
     need-= prefix;
-  printf("pp ff\n");
 
     if (256-z < need) { printf(" =NEED : %3u\n", need); break; }
 
-  printf("pp gg\n");
     towrite_skipoff= z;
     page[z++]= 0; // <skipoff>
 
-  printf("pp hh\n");
     // TODO: delete marker
     page[z++]= prefix; // <prefixlen>
 
-  printf("pp ii\n");
     towrite_dataoff= z;
     page[z++]= 0; // dataoff
     
-  printf("pp jj\n");
     memcpy(page + z, FSpage.keys[j]+prefix, FSpage.klen[j] - prefix); z+= FSpage.klen[j] - prefix;
 
-  printf("pp kk\n");
     // --- DATAOFF (or keyend)
     // - timestamp
     dataoff= 0;
 
-  printf("pp ll\n");
     if (FSpage.ts[j] || FSpage.dlen[j] || FSpage.data[j]) {
       //printf("DATA!!![ %u %u %p]", FSpage.ts[j], FSpage.dlen[j], FSpage.data[j]);
-  printf("pp mm\n");
       dataoff= z;
       p= OAQ(page + z, ~FSpage.ts[j]); // REVERSE ORDER!
 
@@ -564,48 +551,34 @@ char packpage(char* page, word next) {
 
       // - acutal data
       memcpy(p, FSpage.data[j], FSpage.dlen[j]); p+= FSpage.dlen[j];
-  printf("pp nn\n");
       z= p - page;
     }
 
-  printf("pp oo\n");
     // Update forward pointers
     page[towrite_skipoff]= z;
     page[towrite_dataoff]= dataoff;
 
     // store previous
-  printf("pp pp\n");
     free(pkey);
-  printf("pp qq\n");
     plen= klen; pkey= key;
 
     ++n;
     
-  printf("pp rr\n");
     printf("  %3d: %02x-%02x %3d   p%2u %2d ", j,
 	   towrite_skipoff, z,z-towrite_skipoff, prefix, klen);
-  printf("pp rr 111\n");
     { char i= prefix; while(i--) putchar('.'); }
-  printf("pp rr 222\n");
     fputqsn(key+prefix, klen-prefix, stdout);
-  printf("pp rr 333\n");
     printf("\t  @%02x DATA[%u]: ", dataoff, FSpage.dlen[j]);
-  printf("pp rr 444\n");
     fputqsn(FSpage.data[j], FSpage.dlen[j], stdout);
-  printf("pp rr 5555 \n");
     nl();
-  printf("pp ss\n");
 
     saved+= prefix;
 
     // cleanup
     FSpage.keys[j]= NULL;
-  printf("pp tt\n");
     free(FSpage.data[j]); FSpage.data[j]= NULL;
-  printf("pp uu\n");
   }
 
-  printf("pp vv\n");
   // END marker (should already be 0!)
   page[++z]= 0;
 
@@ -614,14 +587,11 @@ char packpage(char* page, word next) {
   // return inext index to process, or 0 if done
   j= j >= FSpage.n? 0: j;
 
-  printf("pp xx\n");
   // TODO: binary, and add to "super index"
   printf(" =USED : %3u\n =SAVED: %3u\n =COUNT: %3u\n =LAST : \"%s\"\n =INEXT: %3u\n\n",
 	 z, saved, n, pkey, j);
 
-  printf("pp yy\n");
   free(pkey); if (j) FSpage.keys[j-1]= NULL;
-  printf("pp zz\n");
 
   return j;
 }
