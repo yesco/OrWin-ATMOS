@@ -1,6 +1,8 @@
 // usually part of fillins.c
 // broken out
 
+#ifndef GETLINE
+
 #define GETLINE
 
 #define PR(...) (void)0
@@ -111,3 +113,4 @@ int getline(char **s, size_t *z, FILE* f) {
 }
 #endif
 
+#endif // !GETLINE

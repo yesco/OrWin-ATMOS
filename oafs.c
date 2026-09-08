@@ -138,6 +138,7 @@ would allow ls to parse the blocks of the index:
 
 
 #ifdef OSCAR64
+#ifndef STRDUP
 
 char* strdup(char* s) {
   char* r;
@@ -146,7 +147,8 @@ char* strdup(char* s) {
   return strcpy(r, s);
 }
 
-#endif
+#endif // STRDUP
+#endif // OSCAR64
 
 
 FILE* oaf= 0;
@@ -155,11 +157,12 @@ FILE* oaf= 0;
 
 char* readsector(char* buff, word n) {
   return 0;
-  
+  (void)buff; (void)n;
 }
 
 char* writesector(char* buff, word n) {
   return 0;
+  (void)buff; (void)n;
 }
 
 //#TODO: Add ORIC ATMOS disk read asm code
@@ -229,15 +232,8 @@ char* writesector(char* buff, word n) {
 
 
 
-
-// LOL
-#define MAIN
-
 #define OAQ_U32
 #include "oaq.c"
-
-#undef MAIN
-
 
 
 // sectors: (* 2 80 19) = 3040 max?
@@ -440,7 +436,8 @@ OAFSpage* FSinsert
 {
   int z;
   char i= 0, l= klen;
-  char len, r;
+  char len;
+  signed char r;
 
   // TODO: handle overflow
   if (FSpage.n >= MAX_KEYS) return 0;

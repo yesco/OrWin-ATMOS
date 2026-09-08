@@ -1223,11 +1223,17 @@ void scheduler() {
   }
 }
 
-extern int readsector(char*, int);
-extern int writesector(char*, int);
+extern char* readsector(char*, unsigned int);
+extern char* writesector(char*, unsigned int);
 
-extern void insertlines(char*);
+extern unsigned int insertlines(char* name);
+
 extern void printPage();
+
+
+#define MAIN
+
+//#include "oafs.c"
 
 
 // TODO: shitty!
@@ -1245,8 +1251,12 @@ int main(int argc, char** argv) {
 #endif // OSCAR64
 
   int i= 0, j= 0, z= 0;
-
+  unsigned int n;
+  
   init();
+
+
+  //n= insertlines((char*)"-");
 
 
 #ifdef OAFS
