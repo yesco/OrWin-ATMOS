@@ -11,24 +11,33 @@
 //
 // A "SmallTable" implementation optimized for 8-bitters
 //
-// Features:
+// FEATURES
+//
 // - "simple"
 // - ordered by multi-compont composite binary keys <= 80 chars
 // - page oriented index
-// - inline small data (<= 80 chars)
+// - inline small data (<= 42 chars!)
 // - file prefix recursive meta forwarding index entries! (=> log n!)
-// - delete thombstone allows "versioning"
+// - delete thombstone/bit allows "versioning"
 // - design for idempotency
 // - "safe" (optionally log-based)
-// - optionally transactional for several entries "appends" (log file at end/beginning)
+// - optionally transactional for several dispersed entries
+//   "appends" to a log file at end/beginning of the index
+//   As long as applying it is idempotent, we're good!
 
 // It's designed to execute as part of OrWIN ATMOS windowing
 // multi-concurrent actor system. OrWIN Actor, lol
 
-// If the key is plain ASCI: and maybe starts with '/'
+// TODO: make it not need to rewrite pages when adding keys randomly
+//   particularly for flash-optimized write systems (LOCI?) that
+//   only, presumingly, would write the bytes needed. (?)
+
+// CONVENTIONS
+//
+// - If the key is plain ASCI: and maybe starts with '/'
 // it's just a filesystem path. End with <$00> <page:offset> !
 //
-// When it comes to keyvalues being multiattribute, maybe they
+// - When it comes to keyvalues being multiattribute, maybe they
 // could be prefixed with its inherent encoding:
 //
 // <tablename>
@@ -50,6 +59,7 @@
 // [tablename] [$BF] "wL" <data_payload_1>         ; First Data Row
 // [tablename] [$BF] "wL" <data_payload_2>         ; Second Data Row
 ```
+
 
 ## Getting `log(n)`-performance
 
