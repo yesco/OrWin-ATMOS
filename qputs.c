@@ -1,4 +1,10 @@
-int fputqsnw(unsigned char* s, int len, FILE* f, int width) {
+#ifndef QPUTS
+
+#define QPUTS
+
+#define fputqsnw(s, len, f, width) unsigned_fputqsnw((unsigned char*)(s), (len), (f), (width))
+  
+int unsigned_fputqsnw(unsigned char* s, int len, FILE* f, int width) {
   int n= 0; unsigned char c;
 
   //printf("fputqsnw: %04X %d %04X %d\n", s,  len, f, width);
@@ -38,7 +44,12 @@ int fputqsnw(unsigned char* s, int len, FILE* f, int width) {
 }
 
 void fputqsn(char* s, int len, FILE* f) {
-  fputqsnw(s, len, f, -1);
+  fputqsnw((unsigned char*)s, len, f, -1);
+}
+
+// convenience, assumes ends with 0
+void qputs(char* s) {
+  fputqsnw(s, strlen(s), stdout, -1);
 }
 
 //////////////////////////////
@@ -86,3 +97,6 @@ int qputsn(char* s, int len, FILE* f) {
 void nl() { putchar('\n'); }
 
 #endif
+
+
+#endif // QPUTS

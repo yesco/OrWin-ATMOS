@@ -230,11 +230,19 @@ char* writesector(char* buff, word n) {
 
 #endif // __ATMOS__
 
-
+// TODO: silly
+#ifndef MAIN
+#define OAFSMAIN
+#define MAIN
+#endif // MAIN
 
 #define OAQ_U32
 #include "oaq.c"
 
+// TODO: silly
+#ifdef OAFSMAIN
+#undef MAIN
+#endif // MAIN
 
 // sectors: (* 2 80 19) = 3040 max?
 //  .words: 2433 pages! (3253 if have word's)
@@ -488,7 +496,7 @@ OAFSpage* FSinsert
 //   or 0 if all ok
 char packpage(char* page, word next) {
   char towrite_skipoff = 0, towrite_dataoff= 0, dataoff= 0,
-    z= 0, n= 0, plen= 0, *pkey= 0;
+    z= 0, n= 0, plen= 0, *pkey= 0, *firstKey= 0, flen= 0;
   word saved= 0;
   char *p, j;
   
@@ -556,8 +564,11 @@ char packpage(char* page, word next) {
     page[towrite_dataoff]= dataoff;
 
     // store previous
-    free(pkey);
+    if (pkey != firstKey) free(pkey);
     plen= klen; pkey= key;
+
+    // set first
+    if (!firstKey) { firstKey= key; flen= klen; }
 
     ++n;
     
@@ -582,13 +593,20 @@ char packpage(char* page, word next) {
   // TODO: 2 byte CRC of the page, add 2 bytes at end to make it 0x0000
 
   // return inext index to process, or 0 if done
-  j= j >= FSpage.n? 0: j;
+  j= (j >= FSpage.n)? 0: j;
 
-  // TODO: binary, and add to "super index"
-  printf(" =USED : %3u\n =SAVED: %3u\n =COUNT: %3u\n =LAST : \"%s\"\n =INEXT: %3u\n\n",
-	 z, saved, n, pkey, j);
-
-  free(pkey); if (j) FSpage.keys[j-1]= NULL;
+  // - print stats
+  // TODO: add to "super index"
+  printf(" =USED : %3u\n =SAVED: %3u\n =COUNT: %3u\n =FIRST: ",
+    z, saved, n); fputqsn(firstKey, flen, stdout);
+  printf("\n =LAST : "); fputqsn(pkey, plen, stdout);
+  printf("\n =INEXT: %3u\n\n", j);
+  
+  // cleanup
+  free(firstKey);
+  if (pkey != firstKey) free(pkey);
+  // TODO: really needed?
+  if (j) FSpage.keys[j-1]= NULL;
 
   return j;
 }

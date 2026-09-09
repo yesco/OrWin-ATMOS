@@ -1,0 +1,11 @@
+# simulate several layers index => logn
+./words | sort | wc
+./words | sort | ./oafs | grep FIRST | sed 's/ =FIRST: "//' | sed 's/"//g' | tee 1st.lst | wc
+cat 2nd.lst    | ./oafs | grep FIRST | sed 's/ =FIRST: "//' | sed 's/"//g' | tee 3rd.lst | wc
+cat 3rd.lst    | ./oafs | grep FIRST | sed 's/ =FIRST: "//' | sed 's/"//g' | tee 4th.lst | wc
+cat 4th.lst    | ./oafs | grep FIRST | sed 's/ =FIRST: "//' | sed 's/"//g' | tee 5th.lst | wc
+
+./words | sort | ./oafs | grep '\(FIRST\|LAST\)' | sed 's/ =FIRST: "/\n/' | sed 's/ =LAST : "//' | sed 's/"//g' | tee 1st-range.lst
+
+
+

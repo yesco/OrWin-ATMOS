@@ -51,16 +51,84 @@
 // [tablename] [$BF] "wL" <data_payload_2>         ; Second Data Row
 ```
 
+## Getting `log(n)`-performance
+
+The index pages are ordered, and linked in a potentially massive
+linked list, so they can be enumurated. However, as indicated below
+storing 92,604 `./words` gives 2,236 index pages, which is massive.
+To get anywhere near decent performance, we want to limit how many
+serial pages to search. If we would create successive "super-indices"
+- each a "higher" level, basically `key= 0x00 FIRSTKEY` for each page
+we end up with 87 pages, more managable, but still quite a few pages
+to read. So by doing successive higher super-indices, each prefixing
+with another 0xx gives us the sequence 92K 2236 87 4 1. So we require
+maybe maybe 3 or 4 levels.
+
+
+```
+> ./oafs-levels
+  92604   92604  860792
+   2236    2236   21214
+     87      87     853
+      4       4      28
+      1       1       2
+```
+
+Curious is though, already at the first level, the key are
+different enough that their shared prefix is very small 
+maybe at most 2 characters "at most":
+
+```
+A
+AWOL
+Achernar
+Adrenalin
+Aggie
+Akron
+Alcoa
+Algonquin
+Alpert
+Amaterasu
+Ampere
+Andrews
+Angstrom
+Antigone
+Appalachian
+Arawak
+Arius
+Artemis
+Asquith
+Atacama
+Auden
+Autumn
+BASICs
+```
+
+TODO: This means we could shorten the "super-index key" significantly,
+to any key lexically *bigger than the last key* of the previous
+page. This probably works out to about 2 bytes per key! This would
+significantly pack the entries, giving us nearly halved number
+of index pages at each successive level. The accumulated effect--
+`2236: ~45 ~1` as the effect is "inherited".
+
+Another alternative is to not keep and entry per 256 bytes page, let's
+say we use a 4KB page/buffer (which is 16x) bigger, meaning each level
+would shrink the number of super-keys generated with 1/16x.
+We could end up with just 2-3 super index pages!
+
+
 ## Actors
 
-For now actors have their own state, support unix pipes. For a train
-of processes w pipes, there is only one active LINE being passed
-around - a pointer. The receiver owns the heap allocated LINE. If it
-needs to pass it on it needs to take it's own copy.
+For now actors have their own state, support a kind of unix pipes. For
+a train of processes w pipes, there is only one active LINE being
+passed around - a pointer. The receiver owns the heap allocated
+LINE. If it needs to pass it on AND keep it, it must make a copy
+as once passed on, it gives up ownership.
 
-They could be more structured by having an "train" ENV with named
+TODO: They could be more structured by having an "train" ENV with named
 variables set to native #var for number and $var for strings. That is
-not yet implemented.
+
+TODO: not yet implemented.
 
 For now, reading a diskblock can return a sequence of linked
 diskblocks without knowing any much more of the data (just a first two
@@ -72,6 +140,8 @@ would allow ls to parse the blocks of the index:
 
 
 # Compression choice discussion for 6502
+
+TODO: consider, particularly with super-index pages.
 
 *(with Gemini AI)*
 
