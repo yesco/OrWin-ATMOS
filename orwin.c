@@ -13,6 +13,7 @@
 #include <string.h>
 #include <conio.h>
 #include <ctype.h>
+#include <unistd.h> // write
 #include <assert.h>
 
 
@@ -231,6 +232,10 @@ char* updatewinptr() {
   return (winp->p= SCREENXY(winp->x + winp->c, winp->y + winp->r));
 }
 
+// Replace the default; makes printf etc work transparently!
+// (cannot override for target: sim6502... putchar enough?)
+#ifdef __ATMOS5__
+
 // 2x-10x faster not calling putchar for every char!
 
 // TODO: I think buggy!
@@ -268,6 +273,8 @@ int write(int fd, char* buf, size_t count) {
 }
 
 #endif // !WRITE
+
+#endif // __ATMOS__
 
 
 

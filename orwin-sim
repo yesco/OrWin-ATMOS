@@ -4,7 +4,7 @@
 rm -f orwin.sim
 
 ( \
-cl65 -Oirs -t sim6502 orwin.c app_*.c -o orwin.sim -m orwin.map 2>&1 \
+cl65 -Oirs -t sim6502 -DPROGSIZE orwin.c app_*.c -o orwin.sim -m orwin.map 2>&1 \
 | sed 's/(\([0-9]\+\))/:\1/g' )\
 || (echo "??????????????? FAILED ???????????"; exit 72)
 
