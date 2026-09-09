@@ -1233,11 +1233,11 @@ extern void printPage();
 
 #define MAIN
 
-//#include "oafs.c"
-
 
 // TODO: shitty!
 #ifdef OSCAR64
+
+#include "oafs.c"
 
 int main() {
   int argc;
@@ -1255,8 +1255,11 @@ int main(int argc, char** argv) {
   
   init();
 
+#ifdef OSCAR64
 
-  //n= insertlines((char*)"-");
+  n= insertlines((char*)"-");
+  
+#endif 
 
 
 #ifdef OAFS
