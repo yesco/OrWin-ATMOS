@@ -155,17 +155,6 @@ int putchar(int c) { return wputc(c); }
 #define putchar wputc
 
 
-
-#define FILL
-void fill(char x, char y, char w, char h, char c) {
-  char* p= SCREENXY(x, y);
-  // strided
-  while(h--) {
-    memset(p, c, w);
-    p+= SCREENCOLS;
-  }
-}
-
 // For efficiency implemented just like this!
 
 #define HELP

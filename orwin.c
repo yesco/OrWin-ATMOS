@@ -1251,13 +1251,15 @@ int main(int argc, char** argv) {
 #endif // OSCAR64
 
   int i= 0, j= 0, z= 0;
-  unsigned int n;
   
   init();
 
 #ifdef OSCAR64
-
-  n= insertlines((char*)"-");
+  {
+    unsigned int n;
+    n= insertlines((char*)"-");
+    printf("Pages: %d\n", n);
+  }
   
 #endif 
 

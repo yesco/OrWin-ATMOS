@@ -76,6 +76,8 @@ char* woldscr= NULL;
 
 // TODO: clever updatedatescreen();
 
+#define ESC "\x1b"
+
 void redrawscreen() {
   char x= 0, y, c, *p= TEXTSCREEN-1;
 
@@ -94,10 +96,10 @@ void redrawscreen() {
         // TODO: hibit inversion
         if (c <= 7) {
           // ink
-          printf("\e[%dm", 7-(c)+30); break;
+          printf(ESC "[%dm", 7-(c)+30); break;
         } else if (c >= 0x10 && c <= 0x17) {
           // bg
-          printf("\e[%dm", 7-(c-0x10)+40); break;
+          printf(ESC "[%dm", 7-(c-0x10)+40); break;
         } else 
           putchar(c);
       }
@@ -121,6 +123,8 @@ void redrawscreen() {
 // Delays execution for a specific number of hardware "jiffies" 
 // (1 jiffy ≈ 16.6ms on NTSC / 20ms on PAL)
 void usleep(unsigned int count) {
+// TODO:
+#ifdef OSCAR64  
   while(count) {
     __asm {
       lda $a2         // Load the low byte of the system jiffy clock
@@ -130,10 +134,16 @@ void usleep(unsigned int count) {
     };
   count--;
   }
+#else
+  {
+    long n= count*1000;
+    while(n--);
+  }
+#endif // !OSCAR64
 }
 
 void initscreen() {
-  long x;
+  char a; // TODO: remove
   
   wcurscr= malloc(SCREENSIZE);
   woldscr= malloc(SCREENSIZE);
@@ -142,7 +152,7 @@ void initscreen() {
 
   // test speed
   if (1)
-    for(char a= ' '; a<128; ++a) {
+    for(a= ' '; a<128; ++a) {
       usleep(1000);
       memset(wcurscr, a, SCREENSIZE);
       redrawscreen();
@@ -205,8 +215,12 @@ char* strdup(const char* s) {
 
 #define FILL
 void fill(char x, char y, char w, char h, char c) {
-  assert(0);
-  // TODO: loop over terminal gotoxy...
+  char* p= SCREENXY(x, y);
+  // strided
+  while(h--) {
+    memset(p, c, w);
+    p+= SCREENCOLS;
+  }
 }
 
 #endif // FILL

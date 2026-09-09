@@ -16,6 +16,3 @@
 //#define SHADE "▓" //  75% (U+2593) — Dark shade)
 #define FULL  "█" // 100% (U+2588) — 100% Filled)
 
-clock_t clock() {
-  // map to simulator register... 
-}

@@ -3,6 +3,7 @@
 
 #include "orwin.h"
 
+#define INCLUDE_PS
 #include "shell.c"
 
 typedef struct APP {

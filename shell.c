@@ -20,11 +20,18 @@
 
 #include <stdio.h>
 
+#define MAIN
+
 // TODO: make it a printable string?
-#define CLEANUP	((char*)0x4fe)
+#ifndef EVENTS
 
-#define EOS     ((char*)0x500)
+  // TODO: should come from shared orwin.c?
+  #define WAITKEY ((char*)0x300)
+  #define CLEANUP	((char*)0x4fe)
+  #define EVENTS  ((char*)0x500)
+  #define EOS     ((char*)0x500)
 
+#endif
 
 
 typedef void* (*cmdfun)(void* state, char* line);
@@ -367,9 +374,9 @@ void* ls(lsstate* state, char* line) {
 }
 #endif
 
-#ifdef __CC65__
+#ifdef CRAP__CC65__
 // TODO: no have on atmos...
-#include <directory.h>
+#include <dirent.h>
 
 typedef struct lsstate {
   cmdfun f;
@@ -387,10 +394,10 @@ void* ls(lsstate* state, char* line) {
     if (line && *line) {
       // If it contains a wildcard or is an explicit filename, save it as a filter pattern
       if (strchr(line, '*')) {
-	char* p= strrchr(line, '/');
-	if (p) { *p= 0; state->pat = strdup(p+1); }
-	// TODO: simplify duplication
-	else { state->pat = strdup(line); line = 0; }
+        char* p= strrchr(line, '/');
+        if (p) { *p= 0; state->pat = strdup(p+1); }
+        // TODO: simplify duplication
+        else { state->pat = strdup(line); line = 0; }
       }	else { state->pat = strdup(line); line = 0; }
     }
 
@@ -408,11 +415,11 @@ void* ls(lsstate* state, char* line) {
 
   do {
     if (0==read_dir(&state->dir, &state->entry)
-	|| line == CLEANUP) {
+      || line == CLEANUP) {
       if (state->dir_open) {
-	close_dir(&state->dir);
-	state->dir_open = 0;
-	free(state->pat);
+        close_dir(&state->dir);
+        state->dir_open = 0;
+        free(state->pat);
       }
       return EOS;
     }
@@ -426,7 +433,7 @@ void* ls(lsstate* state, char* line) {
 
 #ifdef OSCAR64
 
-
+// TODO: obviously...
 
 #else 
 
@@ -443,6 +450,9 @@ typedef struct lsstate {
 } lsstate;
 
 void* ls(lsstate* state, char* line) {
+  struct dirent* de;
+  char* p;
+  
   if (!state) {
     state = STALLOC(lsstate, ls);
     if (!state) return NULL;
@@ -450,7 +460,8 @@ void* ls(lsstate* state, char* line) {
     if (line && *line) {
       // If it contains a wildcard or is an explicit filename, save it as a filter pattern
       if (strchr(line, '*')) {
-	char* p= strrchr(line, '/');
+
+	p= strrchr(line, '/');
 	if (p) { *p= 0; state->pat = strdup(p+1); }
 	// TODO: simplify duplication
 	else { state->pat = strdup(line); line = 0; }
@@ -467,7 +478,6 @@ void* ls(lsstate* state, char* line) {
   lfree(line);
   if (!state->dir) return EOS;
 
-  struct dirent* de;
   do {
     if (!(de=readdir(state->dir)) || line == CLEANUP) {
       if (state->dir) {
@@ -650,8 +660,9 @@ void* tail(countstate* state, char* line) {
 }
 
 
-
 ///////////////////////////////////////////////////
+
+#ifdef INCLUDE_PS
 
 /// ~/GIT/OrWin-ATMOS $ ps -aux
 // USER       PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
@@ -730,6 +741,15 @@ void* ps(simplestate* state, char* line) {
   (void)line;
 }
 
+#else
+ 
+// Dummy
+void* ps(simplestate* state, char* line) {
+  return NULL;
+  (void)state; (void)line;
+}
+   
+#endif // INCLUDE_PS
 
 ///////////////////////////////////////////////////
 
@@ -996,46 +1016,49 @@ int wsystem(char* command) {
 }
 
 
-
 #define system wsystem
 
 
-#ifdef MAIN
- 
-int main(int argc, char** argv) {
-  cmdtrain mock[]= {
-    0,
-    pwd(0, 0),
-    terminal(0, 0),
-    0,
-  };
 
-  printf("------------ wsystrain: pwd | terminal\n");
+#ifndef MAIN
+ 
+void tsystem(char* cmd) {
+  printf("---- %s\n", cmd);
+  system(cmd);
+}
   
-  wsystrain(mock);
+int main(int argc, char** argv) {
+  cmdtrain mock[4]= {0};
+  mock[1]= pwd(0, 0);
+  mock[2]= terminal(0, 0);
+
+  printf("---- wrunsystrain: MOCK: pwd | terminal\n");
+  
+  wrunsystrain(mock);
   
   // Error codes? How & semantics
 
-  printf("------------ wsystem: pwd | terminal\n");
-  wsystem("pwd | terminal");
-  wsystem("cat numbers.txt | grep o | terminal");
-  wsystem("ls | terminal");
-  wsystem("ls *.c | terminal");
-  wsystem("ls *.md | terminal");
-  wsystem("ls ../OrWin-ATMOS/*~ | terminal");
+  printf("---- wsystem: pwd | terminal\n");
+  tsystem("pwd | terminal");
+  tsystem("cat numbers.txt | grep o | terminal");
+  tsystem("ls | terminal");
+  tsystem("ls *.c | terminal");
+  tsystem("ls *.md | terminal");
+  tsystem("ls ../OrWin-ATMOS/*~ | terminal");
 
-  wsystem("iota 2 22 | terminal");
-  wsystem("iota 10 -10 -2 | terminal");
+  tsystem("iota 2 22 | terminal");
+  tsystem("iota 10 -10 -2 | terminal");
 
-  wsystem("iota 1 10 | tail +6 | terminal");
+  tsystem("iota 1 10 | tail +6 | terminal");
 
   // Crash
-  wsystem("iota 1 10 | tail -3 | terminal");
+// TODO: nothing! fix!
+  tsystem("iota 1 10 | tail -3 | terminal");
 
   //exit(0);
 
-  wsystem("cat numbers.txt | head | terminal");
-  wsystem("cat numbers.txt | head -3 | terminal");  
+  tsystem("cat numbers.txt | head | terminal");
+  tsystem("cat numbers.txt | head -3 | terminal");  
 
   //wsystem("ls | head -3 | terminal");
   

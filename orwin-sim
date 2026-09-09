@@ -1,0 +1,21 @@
+# this script needs to be run after running ./orwin for cc65
+# for the gen files...
+
+rm -f orwin.sim
+
+( \
+cl65 -Oirs -t sim6502 orwin.c app_*.c -o orwin.sim -m orwin.map 2>&1 \
+| sed 's/(\([0-9]\+\))/:\1/g' )\
+|| (echo "??????????????? FAILED ???????????"; exit 72)
+
+ls -l orwin.sim
+
+sim65 orwin.sim
+
+ls -l orwin.*
+
+# 33050 cc65
+# 25339 oscar64 .prg -Os small
+# 22907 oscar64 -dNOFLOAT
+# 22417 oscar64 490 bytes saved: -dNOFLOAT -dNOLONG (- 22907 22417) 
+# 21776 oscar64 BYTECODE 641 bytes saved: (-dNOFLOAT -dNOLONG) (- 22417 21776) 
