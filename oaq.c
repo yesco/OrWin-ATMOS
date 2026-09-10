@@ -827,13 +827,22 @@ char* QAOL(char* s, uint32_t *l) {
   //  if (c < 0x80) { *w= c; return s; }
   // hi-bit set
   l= 0;
-  if (c+1 < 0b11110001) return QAO(s, (uint16_t*)l);
+  if ((char)(c+1) < 0b11110001) return QAO(s, (uint16_t*)l);
   // generic loop, place higher bytes at destination
   { char n= 0;
     oaq_val.l= 0;
     c-= 0b1110000 - 2;
-    while(c--)
-      oaq_val.arr[3 - n++]= *s++;
+    if (c < 7) 
+      while(c--)
+        oaq_val.arr[3 - n++]= *s++;
+    else {
+
+//  TODO: test - wrong????
+
+      oaq_val.l= -1;
+      while(c++ < 15)
+        oaq_val.arr[15-c]= *s++;
+    }
     return s;
   }
 }

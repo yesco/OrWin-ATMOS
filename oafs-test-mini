@@ -1,0 +1,1 @@
+printf "foo 1\nfie 12\nfish 12345678\nfum\n" | ./oafs

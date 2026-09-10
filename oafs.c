@@ -293,6 +293,8 @@ char parseentry(char* page, char o) {
 
   bzero(&entry, sizeof(entry));
 
+  prhexdump(p, *p-o, 0);
+
   // END ?
   if (!(klen= entry.skipoff= *p++)) return 0;
 
@@ -304,20 +306,32 @@ char parseentry(char* page, char o) {
   if ((entry.dataoff= *p++)) {
     klen-= entry.dataoff;
 
-    entry.data= QAOL(page + entry.dataoff, &entry.ts);
+    {
+      char* xx= page+entry.dataoff;
 
-// TODO: NOT RIGHT
+// TODO: decoder borken?
+      
+//      entry.data= QAOL(page + entry.dataoff, &entry.ts);
 
-    entry.dlen= entry.skipoff - (entry.data - page);
+      entry.data= page + entry.dataoff + 1;
+
+      assert(entry.data-xx==1);
+      printf("\n===== %ld =========\n", entry.data-xx);
+    }
+
   } else 
     klen-= o;
   
   // get key
+
   entry.key= p;
   
 //  assert(p-page-o==3);
   entry.klen+= 3 - entry.prefix;
 
+  if (entry.dataoff)
+    entry.dlen= entry.skipoff- entry.dataoff - 1;
+  
   // next entry offset, 0 if last
   return entry.skipoff;
 }
@@ -327,6 +341,8 @@ char parsepage(char* page) {
   // 4 byte header
   char i= 4;
 
+  prhexdump(page, 256, 16);
+  
   // TODO: 255 if error? lol
   if (page[0] != '$'+128) return 0;
   if (page[1] != 'I'+128) return 0;
@@ -344,8 +360,13 @@ char parsepage(char* page) {
     printf("  ts%x kL%3u > %*s",
       entry.ts, entry.klen, entry.prefix, "");
     fputqsn(entry.key, entry.klen, stdout);
-    printf(" : tL%3u = ", entry.dlen); fputqsn(entry.data, entry.dlen, stdout);
+    printf(" : data[%u] = ", entry.dlen);
+    fputqsn(entry.data, entry.dlen, stdout);
+
     putchar('\n');
+
+    //if (entry.data) prhexline(entry.data, 0, 16, 16);
+
   }
 
   return 1;
@@ -539,13 +560,14 @@ char packpage(char* page, word next) {
     towrite_skipoff= z;
     page[z++]= 0; // <skipoff>
 
-    // TODO: delete marker
+    // TODO: delete marker - set hi bit!
     page[z++]= prefix; // <prefixlen>
 
     towrite_dataoff= z;
     page[z++]= 0; // dataoff
     
-    memcpy(page + z, FSpage.keys[j]+prefix, FSpage.klen[j] - prefix); z+= FSpage.klen[j] - prefix;
+    memcpy(page + z, FSpage.keys[j] + prefix, FSpage.klen[j] - prefix);
+    z+= FSpage.klen[j] - prefix;
 
     // --- DATAOFF (or keyend)
     // - timestamp
@@ -553,7 +575,7 @@ char packpage(char* page, word next) {
 
     if (FSpage.ts[j] || FSpage.dlen[j] || FSpage.data[j]) {
       //printf("DATA!!![ %u %u %p]", FSpage.ts[j], FSpage.dlen[j], FSpage.data[j]);
-      dataoff= z;
+      dataoff= z-1;
       p= LOAQ(page + z, ~FSpage.ts[j]); // REVERSE ORDER!
 
       // - typedatalen 0 if deleted ??? TODO:
@@ -561,13 +583,14 @@ char packpage(char* page, word next) {
       //p= OAQ(page + z, FSpage.dlen[j] + 1); // typedatalen TODO: FSpage.type type
 
       // - actual data
-      memcpy(p, FSpage.data[j], FSpage.dlen[j]); p+= FSpage.dlen[j];
+      memcpy(p, FSpage.data[j], FSpage.dlen[j]);
+      p+= FSpage.dlen[j];
       z= p - page;
     }
 
     // Update forward pointers
     page[towrite_skipoff]= z;
-    page[towrite_dataoff]= dataoff;
+    page[towrite_dataoff]= dataoff+1;
 
     // store previous
     if (pkey != firstKey) free(pkey);
