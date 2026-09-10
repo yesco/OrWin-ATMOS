@@ -409,7 +409,7 @@ char wputc(char c) {
   // (Ultra-Compact):VT52 uses fixed-length,
   // binary-byte coordinate sequences, good for8-bit machine
   // ESC Y [Row+32] [Col+32]
-																																																																									  
+
   // HIBIT - TODO: to allow for easy (no need use putcraw()!
   //
   // Oric Serial Attribute Codes (8 to 15)
@@ -426,14 +426,14 @@ char wputc(char c) {
     // change INK or BG color for future, like ANSI!
     if (c<24) {
       if (c<8) {
-	// inkk - use line attribute
-	winp->fg= c & 0x7f;
-	if (!winp->c) { lastcolor= winp->p[-1]= c; goto done; }
+        // inkk - use line attribute
+        winp->fg= c & 0x7f;
+        if (!winp->c) { lastcolor= winp->p[-1]= c; goto done; }
       } else if (c>=16) {
-	// paper - use line attribute
-	winp->bg= c & 0x7f;
-	if (!winp->c && lastcolor > 24)
-	  { lastcolor= winp->p[-2]= c & 0x7f; goto done; }
+        // paper - use line attribute
+        winp->bg= c & 0x7f;
+        if (!winp->c && lastcolor > 24)
+          { lastcolor= winp->p[-2]= c & 0x7f; goto done; }
       }
       // or fall-through use a position on screen
     } else lastcolor= 255;
@@ -504,7 +504,7 @@ void wputz(const char* s) {
   
   winp->c= c; winp->p= p+1;
   winp->nputc= nputc;
-	       
+               
   if (k) { wputc(k); ++s; goto restart; }
 
   // good time to release, minimic terminal avoid jitter
@@ -546,7 +546,7 @@ void wstatus(signed char c, const char* s) {
 
   p[w-1]= ('0' | 128) + nwin;
 }
-	     
+             
 // (un)decorate wfocus (toggle hi-bit)
 void wdecorate() {
   Window* w= wins + wfocus;
@@ -837,7 +837,7 @@ char wkbhit(char win) {
 #endif // MOWIN
 
     default: if (isdigit(c) || isalpha(c) && c<='F')
-	setfocus(c - (isdigit(c)? '0': 'A'+10));
+        setfocus(c - (isdigit(c)? '0': 'A'+10));
     }
 
     return 0;
@@ -893,8 +893,8 @@ void apprun() {
     while(p->name) {
 
       if (strstr(p->name, line)) {
-	putchar(green);
-	if (!found) found= p;
+        putchar(green);
+        if (!found) found= p;
       }
       else putchar(white);
 
@@ -953,8 +953,8 @@ void apprun() {
 
       // pick colors w good contrast
       do {
-	bg= rand() & 7;
-	fg= rand() & 7;
+        bg= rand() & 7;
+        fg= rand() & 7;
       } while(IS_BAD_CONTRAST(fg, bg));
     
       // default tileable window size
@@ -1088,7 +1088,7 @@ void mowin(signed char dx, signed char dy, signed char dw, signed char dh) {
       // but printing it may take space, lol
       // Adjust printing after NL
       for(i= x; i<x+w; ++i) 
-	*++t= *SCREENXY(i, j);
+        *++t= *SCREENXY(i, j);
       // TODO: edgecases...
       while(*t==' ') t--,cputc(8);
       *++t= '\n';
@@ -1183,34 +1183,38 @@ void scheduler() {
       ++rounds;
       timesum+= (latency<<3) +1;
       if (now-lastupdate > 100) {
-	// No display if was in menu
-	if (latency < 100) {
-	  sprintf(SCREENXY(11,0),
-      "%2u#%3u%4d/s %2u%%"
-		  " %2d%%%5d"
-		  "%3c"
+        // No display if was in menu
+        if (latency < 100) {
+          sprintf(SCREENXY(11,0),
+            "%2u#%3u%4d/s %2u%%"
+            " %2d%%%5d"
+            "%3c"
 
-		  , latency, rounds
-		  , (int)(runprocs*100L/(now-lastupdate))
-		  , (int)(runsum*100L/timesum)
-		  
-		  , (int)(100L*_heapmemavail()/heapstart)
-		  , _heapmemavail()
-		  
-		  , ' '
-		  );
+            , latency, rounds
+            , (int)(runprocs*100L/(now-lastupdate))
+            , (int)(runsum*100L/timesum)
 
-    // LOL
-    redrawscreen();
+            , (int)(100L*_heapmemavail()/heapstart)
+            , _heapmemavail()
+
+            , ' '
+          );
+
+          // On simulated ORIC we redraw the screen
+          // every 100th ish clock pass, on simulated
+          // this is so superfast we hardly blink redrawing
+          // the screen "millions" of times per second!
+          // (on ORIC this does nothing, not even fun-call)
+          redrawscreen();
     
-	}
-	
-	lastupdate= now;
-	rounds= runprocs= 0;
+        }
+        
+        lastupdate= now;
+        rounds= runprocs= 0;
 
-	// Rolling average (?)
-	if (timesum > 4096) runsum/=4,timesum/=4;
-
+        // Rolling average (?)
+        if (timesum > 4096) runsum/=4,timesum/=4;
+  
       }
       wcur= nwin;
     }
@@ -1253,6 +1257,9 @@ extern void printPage();
 
 //#include "oafs.c"
 
+// For some silly reason oscar64 doesn't provide
+// standard main signature...
+
 int main() {
   int argc;
   const char* argv[]= {"orwin", NULL};
@@ -1276,7 +1283,6 @@ int main(int argc, char** argv) {
   }
   
 #endif 
-
 
 #ifdef OAFS
   readsector(0, 0);
