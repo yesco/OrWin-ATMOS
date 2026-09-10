@@ -355,7 +355,7 @@ int wildmatch(char* pat, char* s) {
 #endif
 
 
-#if defined( __ATMOS__) || defined(__CC65__)
+#if defined( __ATMOS__) || defined(__CC65__) || defined(OSCAR64)
 
 // NO HAVE FILES ON ATMOS
 
@@ -375,19 +375,8 @@ void* ls(lsstate* state, char* line) {
   (void)state; (void)line;
 }  
 
-#else // !ATMOS && !CC64
+#else // !ATMOS && !CC65
  
-
-#ifdef OSCAR64
-typedef struct lsstate {
-} lsstate;
- 
-void* ls(lsstate* state, char* line) {
-  assert(0);
-  return NULL;
-}
-#endif // OSCAR64
-
 
 #ifdef __CC65__
 // TODO: no have on atmos... (maybe works on C64)
@@ -445,14 +434,14 @@ void* ls(lsstate* state, char* line) {
   return lstrdup(state->entry.name);
 }
 
-#else // cc65 ... unix
+#else // UNIX
  
 // ============================================================================
 // POSIX / Linux / Termux Target Implementation
 // ============================================================================
 #include <sys/types.h>
 #include <dirent.h>
-
+ 
 typedef struct lsstate {
   cmdfun f;
   DIR* dir;
