@@ -14,7 +14,7 @@
 // FEATURES
 //
 // - "simple"
-// - ordered by multi-compont composite binary keys <= 80 chars
+// - ordered by multi-component composite binary keys <= 80 bytes
 // - page oriented index
 // - inline small data (<= 42 chars!)
 // - file prefix recursive meta forwarding index entries! (=> log n!)

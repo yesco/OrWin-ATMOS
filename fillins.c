@@ -58,13 +58,20 @@ char* wcurscr= NULL;
   #undef clrscr
 #endif
 
+// cc65 missing \e
+#define ESC "\x1b"
+
 // vt100
+char vt_bg= 0, vt_fg= 7;
+
 void vt_clear()       { printf("\x1b[2J\x1b[H"); }
 void vt_clearend()    { printf("\x1b[K"); }
 void vt_cleareos()    { printf("\x1b[J"); }
-void vt_resetcolors() { printf("\x1b[0m"); } // bgcol= 0; fgcol= 7; }
+void vt_resetcolors() { printf("\x1b[0m"); vt_bg= 0; vt_fg= 7; }
 void vt_cursoroff()   { printf("\x1b[?25l"); }
 void vt_cursoron()    { printf("\x1b[?25h"); }
+void vt_ink(char c)   { vt_fg= c & 7; printf(ESC "[%dm", vt_fg+30); }
+void vt_paper(char c) { vt_bg= c & 7; printf(ESC "[%dm", vt_bg+40); }
 
 void vt_gotorc(int r, int c) {
   // negative values breaks the ESC seq giving garbage on the screen!
@@ -76,53 +83,93 @@ char* woldscr= NULL;
 
 // TODO: clever updatedatescreen();
 
-#define ESC "\x1b"
+// doesn't handle inverse of color attributes, lol
+//#define VT_INVERSE
 
-void redrawscreen() {
+// TODO: this one is only used to draw char in sequnce
+//   not be used interactively, it translates memory
+//   oric screen char and prints it out
+void vt_putc(char c) {
+  // inverse
+  if (c & 0x80) {
+
+//    c&= 0x80;
+    // ink / paper
+//    if (c < 32) c&= 7;
+
+    // inverse
+    #ifdef VT_INVERSE
+    printf(ESC "[7m");
+    #else
+    vt_ink  (7 - vt_fg);
+    vt_paper(7 - vt_bg);
+    #endif
+
+    vt_putc(c & 0x7f);
+    
+    //if (c < 32) {   c&= 7;
+    
+    // restore
+    #ifdef VT_INVERSE
+    printf(ESC "[27m");
+    #else
+    vt_ink  (7 - vt_fg);
+    vt_paper(7 - vt_bg);
+    #endif
+
+    return;
+  }
+  
+  // normal
+  switch(c) {
+  case 126: fputs(SHADESTR, stdout); break; // ~ lol
+  case 127: fputs(FULLSTR, stdout); break;
+  default:
+    // We're "simulating" ORIC where color change uses one position!
+    // and colors reset at every line
+    if (c <= 7) {
+      vt_ink(c & 7); putchar(' ');
+    } else if (c >= 0x10 && c <= 0x17) {
+      vt_paper(c & 7); putchar(' ');
+    } else 
+      putchar(c);
+  }
+}
+
+extern void redrawscreen() {
   char x= 0, y, c, *p= TEXTSCREEN-1;
 
   vt_cursoroff();
 
   for(y=0; y<SCREENROWS; ++y) {
     vt_gotorc(y, x); putchar(13);
-    //vt_resetcolors();
-    printf(">%02d:", y);
+    vt_resetcolors();
+    //printf(">%02d:", y);
 
-    for(x=0; x<SCREENCOLS; ++x) {
-      // TODO: handle colors
-      switch((c= *++p)) {
-      case 127: fputs(FULLSTR, stdout); break;
-      default:
-        // TODO: hibit inversion
-        if (c <= 7) {
-          // ink
-          printf(ESC "[%dm", 7-(c)+30); break;
-        } else if (c >= 0x10 && c <= 0x17) {
-          // bg
-          printf(ESC "[%dm", 7-(c-0x10)+40); break;
-        } else 
-          putchar(c);
-      }
-    }
+    for(x=0; x<SCREENCOLS; ++x) vt_putc(*++p);
   }
 
   
   // save current state
   memcpy(woldscr, wcurscr, SCREENSIZE);
 
-  // move cursor to actual posotion"
+  // move cursor to actual position, maybe?
   
   //vt_gotorc(winp->y + winp->r, winp->x + winp->c);
   
-  // lower right corner, no clobeer when exit!
+  // lower right corner, no clobber when exit!
   vt_gotorc(255,255);
 
-  vt_cursoron();
+  // TODO: turn on when exiting...
+  //vt_cursoron();
 }
+
 
 // Delays execution for a specific number of hardware "jiffies" 
 // (1 jiffy ≈ 16.6ms on NTSC / 20ms on PAL)
+
 void usleep(unsigned int count) {
+
 // TODO:
 #ifdef OSCAR64  
   while(count) {
@@ -151,7 +198,7 @@ void initscreen() {
   vt_clear();
 
   // test speed
-  if (1)
+  if (0)
     for(a= ' '; a<128; ++a) {
       usleep(1000);
       memset(wcurscr, a, SCREENSIZE);
@@ -166,7 +213,11 @@ void initscreen() {
 #else
 
 // dummy
-void initscreen() { }
+//void initscreen() { }
+
+#define initscreen()     (void)0
+
+#define redrawscreen()   (void)0
 
 #endif
 
@@ -277,11 +328,12 @@ void fill(char x, char y, char w, char h, char c) {
 
 #define NL_IMPL
 
-void nl()     { putchar('\n'); }
-void nlpure() { putchar('\n'); }
-void clnl()   { putchar('\n'); }
+void nl()     { wputc('\n'); }
+void nlpure() { wputc('\n'); }
+void clnl()   { wputc('\n'); }
 
-char putcraw(char c) { putchar(c); return c; }
+// TODO: ...
+char putcraw(char c) { wputc(c); return c; }
 
 #endif // NL_IMPL
 
@@ -293,6 +345,19 @@ char mygetc() { return getc(); }
 
 #endif // MYGET
 
+
+//////////////////////////////
+#ifndef GOTOXY
+
+#define GOTOXY
+
+#undef gotoxy // lol
+void gotoxy(char x, char y) {
+  assert(0);
+  (void)x; (void)y;
+}
+    
+#endif // GOTOXY
 
 //////////////////////////////
 #ifndef SAVEWIN

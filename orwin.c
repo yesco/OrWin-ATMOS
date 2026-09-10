@@ -13,9 +13,13 @@
 #include <string.h>
 #include <conio.h>
 #include <ctype.h>
-#include <unistd.h> // write
-#include <assert.h>
 
+// HMMM, ATMOS overrides write
+#if !defined(__ATMOS__) && !defined(OSCAR64)
+#include <unistd.h> // write
+#endif
+
+#include <assert.h>
 
 
 char wputc(char c);
@@ -234,7 +238,7 @@ char* updatewinptr() {
 
 // Replace the default; makes printf etc work transparently!
 // (cannot override for target: sim6502... putchar enough?)
-#ifdef __ATMOS5__
+#ifdef __ATMOS__
 
 // 2x-10x faster not calling putchar for every char!
 
@@ -1181,11 +1185,10 @@ void scheduler() {
       if (now-lastupdate > 100) {
 	// No display if was in menu
 	if (latency < 100) {
-          #undef gotoxy
-	  gotoxy(11, 0);
-	  printf("%2u#%3u%4d/s %2u%%"
+	  sprintf(SCREENXY(11,0),
+      "%2u#%3u%4d/s %2u%%"
 		  " %2d%%%5d"
-		  "%4c"
+		  "%3c"
 
 		  , latency, rounds
 		  , (int)(runprocs*100L/(now-lastupdate))
@@ -1196,6 +1199,10 @@ void scheduler() {
 		  
 		  , ' '
 		  );
+
+    // LOL
+    redrawscreen();
+    
 	}
 	
 	lastupdate= now;

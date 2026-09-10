@@ -11,3 +11,8 @@
 // 
 // This file targets to run under oscar64
 
+#define WRITE
+
+size_t write(int fd, char* s, size_t count) {
+  while(count-- >= 0) putchar(*s++);
+}

@@ -293,6 +293,7 @@ void* wc(wcstate* state, char* line) {
 }
   
 
+#define LS
 // ============================================================================
 // ls
 
@@ -354,15 +355,28 @@ int wildmatch(char* pat, char* s) {
 #endif
 
 
-#ifndef __ATMOS__
+#if defined( __ATMOS__) || defined(__CC65__)
 
-// LOL?????? not cc65
+// NO HAVE FILES ON ATMOS
 
-// ============================================================================
-// CC65 Implementation
-// ============================================================================
+#ifdef __ATMOS__
+// (used by whom?)
+int open(char* path, int flags, int mode) { return 0; (void)path; (void)flags; (void)mode; }
+int close(int fd) { return 0; (void) fd; }
+#endif // ATMOS
 
-//#include <errno.h>
+typedef struct lsstate { int x; } lsstate;
+
+// Dummy
+ 
+void* ls(lsstate* state, char* line) {
+  // TODO: implement and use LOCI
+  return 0;
+  (void)state; (void)line;
+}  
+
+#else // !ATMOS && !CC64
+ 
 
 #ifdef OSCAR64
 typedef struct lsstate {
@@ -372,10 +386,12 @@ void* ls(lsstate* state, char* line) {
   assert(0);
   return NULL;
 }
-#endif
+#endif // OSCAR64
 
-#ifdef CRAP__CC65__
-// TODO: no have on atmos...
+
+#ifdef __CC65__
+// TODO: no have on atmos... (maybe works on C64)
+//   doesn't have on sim65 :-(
 #include <dirent.h>
 
 typedef struct lsstate {
@@ -429,14 +445,8 @@ void* ls(lsstate* state, char* line) {
   return lstrdup(state->entry.name);
 }
 
-#else
-
-#ifdef OSCAR64
-
-// TODO: obviously...
-
-#else 
-
+#else // cc65 ... unix
+ 
 // ============================================================================
 // POSIX / Linux / Termux Target Implementation
 // ============================================================================
@@ -461,10 +471,10 @@ void* ls(lsstate* state, char* line) {
       // If it contains a wildcard or is an explicit filename, save it as a filter pattern
       if (strchr(line, '*')) {
 
-	p= strrchr(line, '/');
-	if (p) { *p= 0; state->pat = strdup(p+1); }
-	// TODO: simplify duplication
-	else { state->pat = strdup(line); line = 0; }
+        p= strrchr(line, '/');
+        if (p) { *p= 0; state->pat = strdup(p+1); }
+        // TODO: simplify duplication
+        else { state->pat = strdup(line); line = 0; }
       }	else { state->pat = strdup(line); line = 0; }
     }
 
@@ -481,9 +491,9 @@ void* ls(lsstate* state, char* line) {
   do {
     if (!(de=readdir(state->dir)) || line == CLEANUP) {
       if (state->dir) {
-	closedir(state->dir);
-	state->dir = NULL;
-	free(state->pat);
+        closedir(state->dir);
+        state->dir = NULL;
+        free(state->pat);
       }
       return EOS;
     }
@@ -494,28 +504,13 @@ void* ls(lsstate* state, char* line) {
   return lstrdup(de->d_name);
 }
 
-#endif // !OSCAR64 == unix
-
-#endif //
-
-#else
-// NO HAVE FILES ON ATMOS
-
-int open(char* path, int flags, int mode) { return 0; (void)path; (void)flags; (void)mode; }
-int close(int fd) { return 0; (void) fd; }
-
-
-typedef struct lsstate { int x; } lsstate;
- 
-void* ls(lsstate* state, char* line) {
-  // TODO: implement and use LOCI
-  return 0;
-  (void)state; (void)line;
-}  
+#endif // CC65 ... UNIX
 
 #endif // __ATMOS__
+ 
 
-
+// TODO: move to supporting functions shared w app_
+ 
 ///////////////////////////////////////////////////
 // line space delimited parameter choppers
 // If none: returns the DeFauLT value!

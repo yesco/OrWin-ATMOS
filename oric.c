@@ -34,11 +34,12 @@
 
 
 
-// Various generic "missing" implentations:
+// Various generic "specialized" implentations:
 
 #define CGETC
 #define CPUTC
 #define CPRINTF
+#define GOTOXY
 
 #define PUTCHAR
 

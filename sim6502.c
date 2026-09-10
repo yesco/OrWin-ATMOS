@@ -11,8 +11,14 @@
 // 
 // This file targets to run under sim65 (cc65).
 
-//#define SHADE "░" // 25% (U+2591 — Light shade)
-#define SHADE "▒" //  50% (U+2592) — Medium shade)
-//#define SHADE "▓" //  75% (U+2593) — Dark shade)
-#define FULL  "█" // 100% (U+2588) — 100% Filled)
+#define HEAPMEM
+size_t _heapmemavail(void);
+size_t _heapmaxavail(void);
+
+// TODO: define, need to fiddle with stty in starting script
+#define KBHIT
+#undef kbhit
+char kbhit() {
+  return 0;
+}
 
