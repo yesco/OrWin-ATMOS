@@ -300,26 +300,30 @@ char parseentry(char* page, char o) {
     entry.prefix&= 0x7f; entry.deleted= 1;
   }
   
-  // get key
-  if ((entry.dataoff= *p++))
+  // get (optional) timestamp + data
+  if ((entry.dataoff= *p++)) {
     klen-= entry.dataoff;
 
-  assert(p-page==3);
-  entry.klen= (klen-= 3);
-  entry.key= p;
+    entry.data= QAOL(page + entry.dataoff, &entry.ts);
 
-  // optionally: get data
-  if (entry.dataoff) {
-    p= QAOL(p + entry.dataoff, &entry.ts);
-    entry.data= p;
-  }
+// TODO: NOT RIGHT
+
+    entry.dlen= entry.skipoff - (entry.data - page);
+  } else 
+    klen-= o;
+  
+  // get key
+  entry.key= p;
+  
+//  assert(p-page-o==3);
+  entry.klen+= 3 - entry.prefix;
 
   // next entry offset, 0 if last
   return entry.skipoff;
 }
 
 
-char OAFSparsepage(char* page) {
+char parsepage(char* page) {
   // 4 byte header
   char i= 4;
 
@@ -332,14 +336,16 @@ char OAFSparsepage(char* page) {
   while(i) {
     char o= i;
     i= parseentry(page, i);
-    printf("  %3u o%02x d%u p%3u d%02x  ",
+    printf("  %02x-%02x d%u p%3u d%02x  ",
 	   o,
 	   entry.skipoff, entry.deleted, entry.prefix,
 	   entry.dataoff);
     
-    printf("  ts%x kL%3u > %s : tL%3u = %s\n",
-	   entry.ts, entry.klen, entry.key,
-	   entry.dlen, entry.data);
+    printf("  ts%x kL%3u > %*s",
+      entry.ts, entry.klen, entry.prefix, "");
+    fputqsn(entry.key, entry.klen, stdout);
+    printf(" : tL%3u = ", entry.dlen); fputqsn(entry.data, entry.dlen, stdout);
+    putchar('\n');
   }
 
   return 1;
@@ -548,13 +554,13 @@ char packpage(char* page, word next) {
     if (FSpage.ts[j] || FSpage.dlen[j] || FSpage.data[j]) {
       //printf("DATA!!![ %u %u %p]", FSpage.ts[j], FSpage.dlen[j], FSpage.data[j]);
       dataoff= z;
-      p= OAQ(page + z, ~FSpage.ts[j]); // REVERSE ORDER!
+      p= LOAQ(page + z, ~FSpage.ts[j]); // REVERSE ORDER!
 
       // - typedatalen 0 if deleted ??? TODO:
       //assert(FSpage.dlen[j] < 42); // LOL, unless we have stream-multipages
       //p= OAQ(page + z, FSpage.dlen[j] + 1); // typedatalen TODO: FSpage.type type
 
-      // - acutal data
+      // - actual data
       memcpy(p, FSpage.data[j], FSpage.dlen[j]); p+= FSpage.dlen[j];
       z= p - page;
     }
@@ -673,11 +679,22 @@ unsigned int insertlines(char* name) {
     
     if (len < 0 || !FSinsert(strlen(s), ks, ts, type, ds? strlen(ds): 0, ds)) {
       char* page= calloc(256, 1);
-      word inext= 0;
+      word inext;
 
       printf("\n%%Overflow - FLUSH buffer\n");
 
-      while((inext= packpage(page, inext))) ++npages;
+      inext= 0;
+      do {
+        // always packs a page
+        inext= packpage(page, inext);
+        ++npages;
+
+        // try to parse
+        printf(">>>>>> PAGE\n");
+        parsepage(page);
+        
+        // no more
+      } while (inext);
 
       // TODO: instead of looping till none, shift them up, and refill
       
