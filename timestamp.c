@@ -30,21 +30,37 @@
 #include <string.h>
 #include <assert.h>
 
+// Testing
+
+#define MAIN
+
+#define OAQ_U32
+#include "oaq.c"
+
+#undef MAIN
+
 struct TimeStamp {
   uint16_t Y;
   char M, D, h, m, s;
 } TS;
 
+
+//#define SMALLTIME
+
 // this +16 Y have high "second" resolution
 //#define BASEYEAR 2026
 #define BASEYEAR 2032
 #define YEARSTEP 16
+//#define YEARSHIFTS 3
+#define YEARSHIFTS 1
+
 // rounding up will eventually give >59 >23 >31 >12 == illegal!
+//#define TIMEROUND 7
 #define TIMEROUND 1 
 //#define TIMEROUND 0
 
 uint32_t encodeTS() {
-  uint32_t r; char* p= (char*)&r;
+  int32_t r; char* p= (char*)&r;
   int16_t my;
   char ny= 0;
 
@@ -65,7 +81,13 @@ uint32_t encodeTS() {
   r<<= 6; r|= TS.m;
   r<<= 6; r|= TS.s;
   //printf("[%d]", my);
-  while(ny--) r>>= 1;
+
+  while(ny--) 
+    #ifdef SMALLTIME 
+    if (r<=(0xffff0000L<<(YEARSHIFTS-1))) r>>= 1;
+    else
+    #endif
+    r>>= YEARSHIFTS;
 
   return r;
 }  
@@ -84,7 +106,24 @@ void decodeTS(uint32_t ts) {
   TS.Y= BASEYEAR;
   
   // fill with ones to make "illegal dates" (rounding up)
-  while(ts < 0x80000000) { ts<<= 1; ts|=TIMEROUND; TS.Y-= YEARSTEP; ++ny; }
+
+#if 1
+  // leading ones
+  #ifdef SMALLTIME
+  while(ts >= 0xffff0000) { ts<<= 1; ts|=1; TS.Y-= YEARSTEP; ++ny; }
+  #endif
+
+  while((ts & 0xe0000000)==0xe0000000) { ts<<= YEARSHIFTS; ts|=TIMEROUND; TS.Y-= YEARSTEP; ++ny; }
+  while(ts & 0x80000000) { ts<<= YEARSHIFTS; ts|=TIMEROUND; TS.Y-= YEARSTEP; ++ny; }
+
+  ts>>= 1; ts|=0x80000000;
+#else
+  #ifdef SMALLTIME
+  while(ts < (0x8000L<<(YEARSHIFTS-1))) { ts<<= YEARSHIFTS; ts|=1; TS.Y-= YEARSTEP; ++ny; }
+  #endif
+  while(ts < 0x80000000) { ts<<= YEARSHIFTS; ts|=TIMEROUND; TS.Y-= YEARSTEP; ++ny; }
+#endif
+  
   printf(" (%d) ", ny);
 
   TS.s = ts & 63; ts>>= 6;
@@ -92,7 +131,7 @@ void decodeTS(uint32_t ts) {
   TS.h = ts & 31; ts>>= 5;
   TS.D = ts & 31; ts>>= 5;
   TS.M = ts & 15; ts>>= 4;
-  TS.Y+= ts & 15; ts>>= 4; assert(ts==0b10);
+  TS.Y+= ts & 15; //ts>>= 4; assert(ts==0b10);
 }  
 
 void printTS(uint32_t ts) {
@@ -102,18 +141,33 @@ void printTS(uint32_t ts) {
     TS.Y, TS.M, TS.D, TS.h, TS.m, TS.s);
 }
 
+#ifndef MAIN
 int main() {
   int y, i;
-  for(y=BASEYEAR+YEARSTEP-1; y>=1900; y-= (y<1973)? 1: 3) {
+
+//  for(y=BASEYEAR+YEARSTEP-1; y>=1900; y-= (y<1973)? 1: 3) {
+  for(y=BASEYEAR+YEARSTEP-1; y>=1900; --y) {
+    char buff[8]= {0}, *p;
     uint32_t a= timestamp(y,7,12, 21,42,17);
     uint32_t x= a;
+
     printf("%04x%04x ", (uint16_t)(a>>16), (uint16_t)(a&0xffff));
+
     for(i=32;i--;) {
       putchar((x & 0x80000000)? '1': '0');
       x<<= 1;
     }
-    printTS(a); putchar('\n');
+    printTS(a);
+    
+    // show OAQ encoding bytes length
+    printf(" #%d ", (int)(LOAQ(buff, a)-(char*)buff));
+    printf(" #%d ", (int)(LOAQ(buff, ~a)-(char*)buff));
+    for(i=0; i<sizeof(buff); ++i)
+      printf("%02x", buff[i]);
+
+    putchar('\n');
   }
   
   return 0;
 }
+#endif // MAIN

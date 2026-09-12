@@ -795,30 +795,30 @@ char* QAOS(char* s, int16_t *i) {
 // TODO: make encoder for u64! (or just use sizeof(long)-1 ???
 
 char* LOAQ(char* s, uint32_t l) {
-  if (l  <= 0xffff)        return OAQ(s, l);
+  if (l <= 0xffff) return OAQ(s, l);
   // TODO: verify < 0, lol
   if ((int32_t)l < 0 && -(int32_t)l <= (int32_t)0xff) return OAQ(s, l);
+  // Prefix $00 or $ff compaction (small abs numbers)
   { char i, n= 1;
     oaq_val.l= l;
 
     // TODO: rewrite to more efficient code
     
     // small pos: start encoding at first non-0x00 higher byte
-    for(i=3; i--; )
+    for(i=4; i--; )
       if ((s[n]= oaq_val.arr[i]) || n > 1) ++n;
-
-
+    
     // TODO: 0xf0 should be 2 bytes!!! ???? VERIFY!
-
     if (n!=1) s[0]= 0b11110000 + n - 3; // -3 I think... lol
+    else {
 
+      // small neg: start encoding at first non-0xff higher byte
+      for(i=3; i--; )
+        if ((s[n]= oaq_val.arr[i]) || n > 1) ++n;
+      if (n!=1) s[0]= 0b11111000 + 8 - n;
+    }
 
-    // small neg: start encoding at first non-0xff higher byte
-    for(i=3; i--; )
-      if ((s[n]= oaq_val.arr[i]) || n > 1) ++n;
-    if (n!=1) s[0]= 0b11111000 + 8 - n;
-
-    return s + n - 1;
+    return s + n;
   }
 }
 
