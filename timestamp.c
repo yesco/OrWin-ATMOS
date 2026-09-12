@@ -45,19 +45,53 @@ struct TimeStamp {
 } TS;
 
 
-//#define SMALLTIME
+#define SMALLTIME
 
 // this +16 Y have high "second" resolution
 
 // Now, is the best time, lol
 #define BASEYEAR (2026-8)
+
 #define YEARSTEP 16
-//#define YEARSHIFTS 3
-#define YEARSHIFTS 1
+
+#if 0
+  #define YEARSHIFTS 4
+  #define PREFIXBITS 0xf0000000
+  #define TIMEROUND  15
+#endif
+
+#if 1
+  #define YEARSHIFTS 8
+  #define PREFIXBITS 0xff000000
+  #define TIMEROUND  255
+#endif
+
+#if 0
+  #define YEARSHIFTS 7
+  #define PREFIXBITS 0xfe000000
+  #define TIMEROUND  127
+#endif
+
+#if 0
+  #define YEARSHIFTS 6
+  #define PREFIXBITS 0xfc000000
+  #define TIMEROUND  63
+#endif
+
+#if 0
+  #define YEARSHIFTS 1
+  #define PREFIXBITS 0x80000000
+  #define TIMEROUND  1
+#endif
+
 
 // rounding up will eventually give >59 >23 >31 >12 == illegal!
+
+
+//#define PREFIXBITS 0x80000000
+
 //#define TIMEROUND 7
-#define TIMEROUND 1 
+//#define TIMEROUND 1 
 //#define TIMEROUND 0
 
 uint32_t encodeTS() {
@@ -73,7 +107,15 @@ uint32_t encodeTS() {
 
   // ???? oscar -DNO 1430 - SAME!
   // cc65 3967
-  // 10YY YYMM  MMDD DDDh  hhhh mmmm  mmss ssss
+
+  // -- full 1s resolution encoding
+  // 10YY YYMM  MMDD DDDh  hhhh mmmm  mmss ssss | 1111 1111  1111 1111
+
+  // -- archival encoding - date!
+  //                       10YY YYMM  MMDD DDDh | hhhh mmmm  mmss ssss
+  
+  //                       YYYY YYMM  MMDD DDDD = 5bitY 4bitM 5bitD
+  //                       (- 1970 32) = 1938 ... ?
   r= 0b10;
   r<<= 4; r|= my;
   r<<= 4; r|= TS.M;
@@ -85,7 +127,7 @@ uint32_t encodeTS() {
 
   while(ny--) 
     #ifdef SMALLTIME 
-    if (r<=(0xffff0000L<<(YEARSHIFTS-1))) r>>= 1;
+    if (((uint32_t)r)>>16==0xffff) r>>= 1;
     else
     #endif
     r>>= YEARSHIFTS;
@@ -111,20 +153,24 @@ void decodeTS(uint32_t ts) {
 #if 1
   // leading ones
   #ifdef SMALLTIME
-  while(ts >= 0xffff0000) { ts<<= 1; ts|=1; TS.Y-= YEARSTEP; ++ny; }
+  if ((ts>>16) == 0xffffL) {
+    while((ts & 0xc000) != 0x8000) {
+      ts<<= 1; ts|=1; TS.Y-= YEARSTEP; ++ny;
+    }
+  }
   #endif
 
-  while((ts & 0xe0000000)==0xe0000000) { ts<<= YEARSHIFTS; ts|=TIMEROUND; TS.Y-= YEARSTEP; ++ny; }
-
-  // TODO: 0x8 only works with one bit shifts!
-  while(ts & 0x80000000) { ts<<= YEARSHIFTS; ts|=TIMEROUND; TS.Y-= YEARSTEP; ++ny; }
+  while((ts & PREFIXBITS)==PREFIXBITS) { ts<<= YEARSHIFTS; ts|=TIMEROUND; TS.Y-= YEARSTEP; ++ny; }
 
   // get back a leading 1, lol
+  #ifdef xSMALLTIME
   if (ny) {
     ts>>= 1; ts|=0x80000000; --ny; TS.Y+= YEARSTEP;
   }
+  #endif
   
 #else
+  // leading zeroes
   #ifdef SMALLTIME
   while(ts < (0x8000L<<(YEARSHIFTS-1))) { ts<<= YEARSHIFTS; ts|=1; TS.Y-= YEARSTEP; ++ny; }
   #endif
@@ -152,8 +198,18 @@ void printTS(uint32_t ts) {
 int main() {
   uint32_t y, i, last;
 
-//  for(y=BASEYEAR+YEARSTEP-1; y>=1900; y-= (y<1973)? 1: 3) {
-  for(y=BASEYEAR+YEARSTEP-1; y>=1900; --y) {
+  //  for(y=BASEYEAR+YEARSTEP-1; y>=1900; y-= (y<1973)? 1: 3) {
+
+  // SMALLTIME  YEARSHIFTS=8
+  // -----------------------
+  // 1842-07-xx xx:xx:xx ~1 byte
+  // 1970-07-12 xx:xx:xx ~2 bytes (occasionally 3)
+  // 2002-07-12 21:xx:xx ~4 bytes (21 might be "fake?")
+  // 2018-07-12 21:42:17 ~5 bytes
+  // 2033-07-12 21:42:17 ~5 bytes
+  // (max, without readjusting "container"/page)
+  // PARAMETERS/CONTAINER: BASEYEAR= (2026-8) GENERATION= $ff
+  for(y=BASEYEAR+YEARSTEP-1; y>=1800; --y) {
     char buff[8]= {0}, *p;
     uint32_t a= timestamp(y,7,12, 21,42,17);
     uint32_t x= a;
@@ -161,17 +217,17 @@ int main() {
     printf("%04x%04x ", (uint16_t)(a>>16), (uint16_t)(a&0xffff));
 
     for(i=32;i--;) {
+      if (i%4==3) putchar(' ');
       putchar((x & 0x80000000)? '1': '0');
       x<<= 1;
     }
-    printf(" %0d", y);
+    //printf(" %4d", y);
     printTS(a);
     
     // show OAQ encoding bytes length
     printf(" #%d ", (int)(LOAQ(buff, a)-(char*)buff));
-    printf(" #%d ", (int)(LOAQ(buff, ~a)-(char*)buff));
-    for(i=0; i<sizeof(buff); ++i)
-      printf("%02x", buff[i]);
+    printf(" ~%d ", (int)(LOAQ(buff, ~a)-(char*)buff));
+    //for(i=0; i<sizeof(buff); ++i) printf("%02x", buff[i]);
 
     putchar('\n');
   }
