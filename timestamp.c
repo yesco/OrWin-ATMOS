@@ -36,18 +36,23 @@ struct TimeStamp {
 } TS;
 
 // this +16 Y have high "second" resolution
-#define BASEYEAR 2026
-#define YEARSTEP 8
+//#define BASEYEAR 2026
+#define BASEYEAR 2032
+#define YEARSTEP 16
+// rounding up will eventually give >59 >23 >31 >12 == illegal!
+#define TIMEROUND 1 
+//#define TIMEROUND 0
 
 uint32_t encodeTS() {
   uint32_t r; char* p= (char*)&r;
   int16_t my;
   char ny= 0;
 
+  //printf("Y=%d ", TS.Y);
   my= TS.Y - BASEYEAR;
   // TODO: how to handle "future"? ->  upgrade container!
   while(my < 0) { ++ny; my+= YEARSTEP; }
-  printf("(NY= %d)\t", ny);
+  printf("(%d) ", ny);
 
   // ???? oscar -DNO 1430 - SAME!
   // cc65 3967
@@ -59,7 +64,7 @@ uint32_t encodeTS() {
   r<<= 5; r|= TS.h;
   r<<= 6; r|= TS.m;
   r<<= 6; r|= TS.s;
-
+  //printf("[%d]", my);
   while(ny--) r>>= 1;
 
   return r;
@@ -67,6 +72,7 @@ uint32_t encodeTS() {
 
 uint32_t timestamp(
   uint16_t Y, char M, char D, char h, char m, char s) {
+  memset(&TS, 0, sizeof(TS));
   TS.Y= Y; TS.M= M; TS.D= D; TS.h= h; TS.m= m; TS.s= s;
   return encodeTS();
 }
@@ -78,8 +84,8 @@ void decodeTS(uint32_t ts) {
   TS.Y= BASEYEAR;
   
   // fill with ones to make "illegal dates" (rounding up)
-  while(ts < 0x80000000) { ts<<= 1; ts|=1; TS.Y-= YEARSTEP; ++ny; }
-  printf("(NY= %d)\t", ny);
+  while(ts < 0x80000000) { ts<<= 1; ts|=TIMEROUND; TS.Y-= YEARSTEP; ++ny; }
+  printf(" (%d) ", ny);
 
   TS.s = ts & 63; ts>>= 6;
   TS.m = ts & 63; ts>>= 6;
@@ -98,10 +104,10 @@ void printTS(uint32_t ts) {
 
 int main() {
   int y, i;
-  for(y=2026+15; y>1970; y-= 3) {
+  for(y=BASEYEAR+YEARSTEP-1; y>=1900; y-= (y<1973)? 1: 3) {
     uint32_t a= timestamp(y,7,12, 21,42,17);
     uint32_t x= a;
-    printf("a= %08lx\t", a);
+    printf("%04x%04x ", (uint16_t)(a>>16), (uint16_t)(a&0xffff));
     for(i=32;i--;) {
       putchar((x & 0x80000000)? '1': '0');
       x<<= 1;
