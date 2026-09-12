@@ -49,7 +49,7 @@ struct TimeStamp {
 
 // this +16 Y have high "second" resolution
 //#define BASEYEAR 2026
-#define BASEYEAR 2032
+#define BASEYEAR (2026-8)
 #define YEARSTEP 16
 //#define YEARSHIFTS 3
 #define YEARSHIFTS 1
@@ -114,9 +114,15 @@ void decodeTS(uint32_t ts) {
   #endif
 
   while((ts & 0xe0000000)==0xe0000000) { ts<<= YEARSHIFTS; ts|=TIMEROUND; TS.Y-= YEARSTEP; ++ny; }
+
+  // TODO: 0x8 only works with one bit shifts!
   while(ts & 0x80000000) { ts<<= YEARSHIFTS; ts|=TIMEROUND; TS.Y-= YEARSTEP; ++ny; }
 
-  ts>>= 1; ts|=0x80000000;
+  // get back a leading 1, lol
+  if (ny) {
+    ts>>= 1; ts|=0x80000000; --ny; TS.Y+= YEARSTEP;
+  }
+  
 #else
   #ifdef SMALLTIME
   while(ts < (0x8000L<<(YEARSHIFTS-1))) { ts<<= YEARSHIFTS; ts|=1; TS.Y-= YEARSTEP; ++ny; }
@@ -157,6 +163,7 @@ int main() {
       putchar((x & 0x80000000)? '1': '0');
       x<<= 1;
     }
+    printf(" %0d", y);
     printTS(a);
     
     // show OAQ encoding bytes length
