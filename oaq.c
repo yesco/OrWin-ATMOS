@@ -797,25 +797,42 @@ char* QAOS(char* s, int16_t *i) {
 char* LOAQ(char* s, uint32_t l) {
   if (l <= 0xffff) return OAQ(s, l);
   // TODO: verify < 0, lol
-  if ((int32_t)l < 0 && -(int32_t)l <= (int32_t)0xff) return OAQ(s, l);
+  if ((int32_t)l < 0 && -(int32_t)l <= (int32_t)0x100) return OAQ(s, l);
+
   // Prefix $00 or $ff compaction (small abs numbers)
   { char i, n= 1;
+
     oaq_val.l= l;
 
-    // TODO: rewrite to more efficient code
-    
-    // small pos: start encoding at first non-0x00 higher byte
-    for(i=4; i--; )
-      if ((s[n]= oaq_val.arr[i]) || n > 1) ++n;
-    
-    // TODO: 0xf0 should be 2 bytes!!! ???? VERIFY!
-    if (n!=1) s[0]= 0b11110000 + n - 3; // -3 I think... lol
-    else {
+    //if (oaq_val.l < 0) { // TODO: doesn't work?
+    if (oaq_val.b.fourth == 0xff) {
 
+      // 253 ffffff02  #2 fe02 000000000000
+      // 254 ffffff01  #2 fe01 000000000000
+      // 255 ffffff00  #3 fdff00 0000000000 <<< could be shorter!!!
+      // 256 fffffeff  #3 fdfeff 0000000000
+      // 257 fffffefe  #3 fdfefe 0000000000
+  
       // small neg: start encoding at first non-0xff higher byte
-      for(i=3; i--; )
+      i= 3;
+      while(oaq_val.arr[i]==0xff && i) --i;
+
+      printf("[%d]", i);
+      
+      do {
+        s[n++]= oaq_val.arr[i];
+      } while(i--);
+
+      s[0]= 0b11111000 + 8 - n;
+
+    } else {
+
+      // small pos: start encoding at first non-0x00 higher byte
+      for(i=4; i--; )
         if ((s[n]= oaq_val.arr[i]) || n > 1) ++n;
-      if (n!=1) s[0]= 0b11111000 + 8 - n;
+
+      s[0]= 0b11110000 + n - 3; // -3 I think... lol
+
     }
 
     return s + n;

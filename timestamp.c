@@ -48,7 +48,8 @@ struct TimeStamp {
 //#define SMALLTIME
 
 // this +16 Y have high "second" resolution
-//#define BASEYEAR 2026
+
+// Now, is the best time, lol
 #define BASEYEAR (2026-8)
 #define YEARSTEP 16
 //#define YEARSHIFTS 3
@@ -149,7 +150,7 @@ void printTS(uint32_t ts) {
 
 #ifndef MAIN
 int main() {
-  int y, i;
+  uint32_t y, i, last;
 
 //  for(y=BASEYEAR+YEARSTEP-1; y>=1900; y-= (y<1973)? 1: 3) {
   for(y=BASEYEAR+YEARSTEP-1; y>=1900; --y) {
@@ -173,6 +174,28 @@ int main() {
       printf("%02x", buff[i]);
 
     putchar('\n');
+  }
+  
+  last= 0;
+  for(y=0; last <= y; ++y) {
+    char buff[8]= {0}, *p;
+    uint32_t a= ~y;
+
+    last= y;
+
+    if (y > 65736L) { y= y + y/10; }
+    if (y > 1000 && y < 0xffff-256) { y+= 256; continue; }
+    
+    printf("%7lu %04x%04x ", y, (uint16_t)(a>>16), (uint16_t)(a&0xffff));
+    
+    // show OAQ encoding bytes length
+    printf(" #%d ", (int)(LOAQ(buff, a)-(char*)buff));
+//    printf(" #%d ", (int)(LOAQ(buff, ~a)-(char*)buff));
+    for(i=0; i<sizeof(buff); ++i)
+      printf("%02x", buff[i]);
+
+    putchar('\n');
+
   }
   
   return 0;
