@@ -29,6 +29,8 @@
 #include <stdio.h>
 #include <assert.h>
 
+#if 1
+
 struct TimeStamp {
   uint16_t Y;
   char M, D, h, m, s;
@@ -40,18 +42,71 @@ struct TimeStamp {
 // TODO: should work - bug!
 //#define BASEYEAR 2007
 
-// oscar64 #x112 = 274 bytes - exactly same 1 or 0 !
+#if 0
+uint32_t PACKI;
+
+// oscar -DNOFLOAT -DNOLONG 1746 bytes (- 1746 1349) = 397
+
+//
+// cc65 -DPROGSIZE: 3977
+
+//#pragma optimize(push)
+//#pragma optimize(0)
+void packint(char n, uint16_t x) {
+  PACKI= (PACKI<<n) | x;
+}
+
 uint32_t encodeTS() {
-  uint32_t r;
+  uint32_t r; char* p= (char*)&r;
+  int16_t my;
+  char ny= 0;
+  my= TS.Y - BASEYEAR;
+  while(my>=16) { ++ny; my-= 16; }
+  printf("---NY= %d\n", ny);
+  // 10YY YYMM  MMDD DDDh  hhhh mmmm  mmss ssss
+//  return packint(packint(packint(packint(packint(packint(
+//              0b01, 4,my), 4,TS.M), 5,TS.D), 5,TS.h), 6,TS.m), 6,TS.s);
+  PACKI= 0b10;
+  packint(4, my);
+  packint(4, TS.M);
+  packint(5, TS.D);
+  packint(5, TS.h);
+  packint(6, TS.m);
+  packint(6, TS.s);
+  return PACKI;
+}
+//#pragma optimize(pop)
+
+#else
+// -Os 4102
+// oscar64 
+uint32_t encodeTS() {
+  uint32_t r; char* p= (char*)&r;
   int16_t my;
   char ny= 0;
   my= TS.Y - BASEYEAR;
   while(my>=16) { ++ny; my-= 16; }
   printf("---NY= %d\n", ny);
   // Compiles more compact on both cc65 and oscar64
-#if 0
+#if 1
+  #if 0
+    // oscar -DNO 1596
+    // cc65 4066
+  // 10YY YYMM  MMDD DDDh  hhhh mmmm  mmss ssss
+      // TODO: actually correct byte order!
+    // just doesan't compare as INT! LOL
+  p[0]= (0b10<<6) | (my<<2) | (TS.M>>2);
+  p[1]= (TS.M<<6) | (TS.D<<1) | (TS.h>>4);
+  p[2]= (TS.h<<4) | (TS.m>>2);
+  p[3]= (TS.m<<6) | TS.s;
+  #else
+// SMALLTEST!???
+// oscar -DNOFLOAT -DNOLONG 1430 bytes (- 1430 1349) = 81
   r= (((((((((((0b10L<<4) | my)<<4) | TS.M)<<5) | TS.D)<<5) | TS.h)<<6) | TS.m)<<6) | TS.s;
+  #endif
 #else
+  // oscar -DNO 1430 - SAME!
+  // cc65 3967
   r= 0b10; 
   r<<= 4; r|= my;
   r<<= 4; r|= TS.M;
@@ -65,8 +120,11 @@ uint32_t encodeTS() {
 
   return r;
 }  
+#endif
 
-uint32_t timestamp(uint16_t Y, char M, char D, char h, char m, char s) {
+
+uint32_t timestamp(
+  uint16_t Y, char M, char D, char h, char m, char s) {
   TS.Y= Y; TS.M= M; TS.D= D; TS.h= h; TS.m= m; TS.s= s;
   return encodeTS();
 }
@@ -89,17 +147,66 @@ void decodeTS(uint32_t ts) {
 
 void printTS(uint32_t ts) {
   // YYYY-MM-DD hh:mm:ss
-  char str[22];
   decodeTS(ts);
   printf("%04d-%02d-%02d %02d:%02d:%02d",
     TS.Y, TS.M, TS.D, TS.h, TS.m, TS.s);
 }
-  
-uint32_t encodeTSc() { return 44; }
+
+#else
+// -Os 4173
+// oscar 4904 bytes (- 5496 4904) 592 bytes
+// oscar -DNOFLOAT -DNOLONG 1349
+
+// cc65 2803 bytes
+
+struct TimeStamp {
+  char Yh, Yl;
+  char M, D, h, m, s6ms2, ms8;
+} TS;
+
+uint16_t TSY;
+char TSs;
+uint16_t TSms;
+
+// bytes: Y,Y,M,D, h,m,s,x == 8 long long
+
+//uint32_t encodeTS() {
+//}
+
+char* timestamp(
+  uint16_t Y, char M, char D, char h, char m, char s, uint16_t ms) {
+  TS.Yh= Y>>8; TS.Yl= Y; TS.M= M; TS.D= D; TS.h= h; TS.m= m;
+  TS.s6ms2= (s<<2) | (ms>>8); TS.ms8= ms;
+  return (char*)&TS;
+}
+
+void decodeTS() {
+  TSY= (TS.Yh<<8) | TS.Yl;
+  TSs= TS.s6ms2>>2; TSms= (TS.s6ms2 & 3)<<8 | TS.ms8;
+}
+
+void printTS() {
+  // YYYY-MM-DD hh:mm:ss.xxx
+  decodeTS();
+  printf("%04d-%02d-%02d %02d:%02d:%02d.%03d",
+    TSY, TS.M, TS.D, TS.h, TS.m, TSs, TSms);
+}
+
+#endif
 
 int main() {
+#if 1
   uint32_t a= timestamp(2026,9,11, 4,55,54);
   printf("a= %08lx\n", a);
   printTS(a); putchar('\n');
+
+//  a= timestamp(1984,12,17, 16,44,03);
+//  printf("a= %08lx\n", a);
+//  printTS(a); putchar('\n');
+#else
+  timestamp(2026,9,11, 4,55,54, 666);
+  //printf("a= %08lx\n", a);
+  printTS(); putchar('\n');
+#endif
   return 0;
 }
