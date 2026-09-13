@@ -21,16 +21,15 @@ typedef union ByteProgram {
   word words[];
 } ByteProgram;
   
-// 64: sh6lor - prefix loader
-// 32: read global
-//  8: read local
-//  8: write local
-//  8: read local--
-//  8: EXTRA!
-
-// 64: jmp +/- 32
-// 32: jsr[]
-// 32: instructions
+// 01 : 64: sh6lor - prefix loader
+// 2  : 32: read global
+// 3  :  8: read local
+//       8: write local
+//       8: read local--
+//       8: EXTRA!
+// 45 : 64: jmp +/- 32
+// 6  : 32: jsr[]
+// 7  : 32: instructions
 
 #ifdef LIVM
 
@@ -222,7 +221,7 @@ char Num(word v) {
     }
     // no free SLOT!
     errno= EXFULL;
-    if (!gcbs()) { perror("BS: Nums exhausted"); return 0; }
+    if (!gcbs()) { perror("\t%%BS: Nums exhausted"); return 0; }
     return Num(v);
   }
 }
@@ -251,7 +250,7 @@ char Str(char* s) {
     }
     // no free SLOT!
     errno= EXFULL;
-    if (!gcbs()) { perror("BS: Strs exhausted"); return 0; }
+    if (!gcbs()) { perror("\t%%BS: Strs exhausted"); return 0; }
     return Str(s);
   }
 }
@@ -259,8 +258,6 @@ char Str(char* s) {
 char* str(char i) {
   return i<STRBASE? 0: bs->str[i & 63];
 }
-
-
 
 
 int main() {
@@ -277,14 +274,20 @@ int main() {
   }
 
   do {
+    int len;
+    // TODO: use getline()
     // last line will get null
     s= fgets(line, sizeof(line), stdin);
+    if (!s) break;
 #if 0
     printf("%s", s);
 #else
+    // chop
+    len= strlen(s); if (len && s[--len]==10) s[len]= 0;
+
     i= Str(s); ss= str(i);
     printf("Str(\"%s\") => %3d : \"%s\" -- %s\n",
 	   s?s:"(NULL)", i, ss?ss:"(NULL)", (s && ss && !strcmp(s,ss)) || s==ss? "OK": "FAIL");
 #endif
-  } while(s);
+  } while(1);
 }
