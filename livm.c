@@ -69,9 +69,9 @@ void livm(ByteProgram* bp) {
   case 3: // local
     switch((c>>3) & 3) {
     case 0: PUSH; tos= num(t= bp->idx[bp->iframe + c&7]); goto next; // RLOCAL
-    case 1: t= bp->idx[bp->iframe + c&7]= Num(tosO); goto pop; // WLOCAL
+    case 1: t= bp->idx[bp->iframe + c&7]= Num(tosO); goto pop;       // WLOCAL
 
-      // TODO: redundant and expensive in code
+      // ++RLOCAL: xredundant and expensive in code
     case 2: PUSH; tos= num(t= bp->idx[bp->iframe] + c&7)+1; goto next;
 
     // String operations
