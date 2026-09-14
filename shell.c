@@ -20,7 +20,7 @@
 
 #include <stdio.h>
 
-#define MAIN
+//#define MAIN
 
 // TODO: make it a printable string?
 #ifndef EVENTS
@@ -645,6 +645,79 @@ void* tail(countstate* state, char* line) {
 
 
 ///////////////////////////////////////////////////
+// Variable manipluations
+ 
+// TODO: these are global for now
+char* vars= NULL;
+#define MAX_VARS 128
+char* vals[MAX_VARS]= {0};
+
+// possibly too much code,lol - too clever?
+char vnth(char* name) {
+  unsigned int vlen, len, n= (unsigned int)(intptr_t)name;
+  char* found;
+  if (vars) {
+    if ((n^0x80) < 0x80) return n;
+    // second chance, lol
+    n= *name;
+    if ((n^0x80) < 0x80) return n;
+  }
+  // defined?
+  // TODO: prefix by ':'
+  if (vars && (found= strstr(vars, name))) return found[-1];
+
+  // not defined, let's add
+  n= ((vars?*vars: 0) + 1) | 0x80; // assigns next 0x8n code
+  len= strlen(name)+1;
+  // TODO: reallocs every friggin time, lol
+  vlen = vars? strlen(vars)+1: 1;
+  vars= realloc(vars, vlen + len);
+  memmove(vars+len, vars, vlen);
+  // prefix with "id" number 0x8n
+  *vars= n;
+  memcpy(vars+1, name, len-1);
+
+  return n;
+}
+    
+#include "qputs.c"
+
+char* vset(char* name, char* val) {
+  char n= vnth(name), **p;
+  qputs(vars);
+  lfree(*(p= &vals[n & 0x80]));
+  return *p= val;
+}
+
+// you don't own the value coming out
+// you can make a copy
+char* vget(char* name) {
+  char n= vnth(name), *p;
+  return vals[n & 0x80];
+}
+
+char* veval(char* expr) {
+  return expr;
+}
+
+typedef struct varstate {
+  char * name, * val;
+} varstate;
+
+char* set(varstate* state, char* line) {
+  if (!state) {
+    char *name, *val;
+    state= STALLOC(varstate, set);
+    state->name= nextStr(&line, "");
+    state->val = nextStr(&line, "");
+    return (char*)state;
+  }
+  // TODO: wrap val in EVAL?
+  vset(state->name, veval(state->val));
+  return line;
+}
+
+///////////////////////////////////////////////////
 
 #ifdef INCLUDE_PS
 
@@ -1011,10 +1084,28 @@ void tsystem(char* cmd) {
   system(cmd);
 }
   
+void vt(char* name, char* val) {
+  printf("%10s=%10s  ", name, vget(name));
+  vset(name, strdup(val));
+  printf(" => %10s\n", vget(name));
+}
+
 int main(int argc, char** argv) {
   cmdtrain mock[4]= {0};
   mock[1]= pwd(0, 0);
   mock[2]= terminal(0, 0);
+
+  vt("foo", "41");
+  vt("foo", "42");
+  vt("bar", "fish");
+  vt("bar", "fourtytwo");
+  vt("fie", "33");
+  vt("fum", "71a");
+  vt("fie", "69");
+
+  qputs(vars); putchar('\n');
+
+exit(0);
 
   printf("---- wrunsystrain: MOCK: pwd | terminal\n");
   
