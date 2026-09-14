@@ -4,32 +4,59 @@
 
 // OAQ Encoding
 // ============
+//
 // A custom, 6502 or 8-bit hardware optimized hybrid encoding.
 // Particiularly, it avoids any bitshifting, which clogs down
 // performance for common encodings, like LEB128, varint etc.
-// Decoding involves range and mere simple byte copying.
+// Decoding, typically, involves range and mere simple byte copying.
 //
 // It preservs fast-path for small values 0-127, as well as
 // -1 (0xff) as it may be often occuring (1-10% in some cases!).
-// For the larger range 128-28671 (hibyte = 0b01111111 = 0x6fff).
+//
+// It uses only 2 bytes in the range range 128-28671:
+// (hibyte <= 0b01...11 = 0x6fff).
 //
 // Whereas MIDI, LEB128, and standard Prefix Varint spill over
 // into a 3-byte penalty here, OAQ successfully holds the line
 // at 2 bytes, maximizing data density for common 16-bit values.
+// And, more vitally, doesn't waste precious 6502 cycles on
+// multi-byte bit-shifting.
 //
-// For other values, 28672-65280, it encodes them using a
+// For larger 16-bit values, 28672-65280, it encodes them using a
 // prefix byte, telling the length, and a big-endian encoded
-// 2 bytes. The encoding isn't limited to 16-bit values but
+// 2 bytes. The encoding isn't limited to 16-bit values and
 // scales up to 64-bit integers.
+//
+// Again, not only do we employ prefix encoding of leading
+// 00 bytes (for smaller values of 64-bit), but also for
+// large values ("negative") with all bits set, having leading
+// bytes of $ff. These are counted and dispelled with, giving
+// an excellent, near-symmetrical, advantage encoding of potentially
+// bit-reversed small integers, efficiently encoding DESCENDING
+// ordering for smaller values.
 //
 // Furthermore, like the SQLite encoding, it is binary
 // orderable without any fuzz. This is useful for database
-// index files.
+// index style files.
 //
 // If signed values need be orderable, they are simply
 // prefixed with a "sign-byte" fixing the ordering.
-// 
-//  
+//
+// Similarly, that extra byte, can be used to encode NULLable
+// values (-NULL, -NaN, -INF, -int, +int, +INF, +NaN, +NULL).
+// We don't presume that NULLs are smaller/bigger than-it's
+// flexible.
+//
+// This encoding also can be used for type-tagging values
+// similarly to FoundationDB allowing purely, self-decoding values.
+//
+// StrOAQ: adds another efficient encoding, allowing for
+// efficient, string, UTF-8, allowing for embedded 0 bytes.
+// Curiously, the quoting scheme is also efficient for BLOB
+// values, even with many embedded $00 bytes. They are collpased
+// but keeps their byte-lexical ordering property. This is in
+// contrast with most known orderable serialization schemes
+// (FoundationDB, 
 //
 // 
 // Value ranges
@@ -39,6 +66,11 @@
 // 28672 ... 65279 : 3 bytes *
 // 65280 ... 65534 : 2 bytes, second byte = lowest byte *
 // 65535 == 0xffff : 1 BYTE  as is! (sign extend) ***
+//     
+// U32:  ... 16 M  : 4 bytes
+// U40:  ...  4 G  : 5 bytes
+//       ...       : 6-7
+// U64:  .... 1 E  : 8 bytes
 //
 // *:   The high-bit in the first byte is set on multi-byte seqs.
 //      All multip-byte sequences are use BIG-ENDIAN.
@@ -47,10 +79,18 @@
 //      hi-bit doesn't mean multi-byte.
 //
 //
-// Signed Values
-// -------------
-// 0xf7 : negative prefix
-// 0xf8 : positive prefix
+// Signed/Typed Values
+// -------------------
+// (0x00 : -NULL)
+//
+// (0xf5 : -NaN )
+// (0xf6 : -INF )
+//  0xf7 : negative prefix
+//  0xf8 : positive prefix
+// (0xf9 : +INF )
+// (0xfa : +NaN )
+//
+// (0xFF : +NULL)
 //
 //
 // Prefix Byte Encoding
@@ -791,6 +831,8 @@ char* QAOS(char* s, int16_t *i) {
 // TODO: "long"
 #ifdef OAQ_U32
 
+// TODO: generalize to N bytes parameter, make wrappers
+
 // TODO: not use word "L" but u32 maybe
 // TODO: make encoder for u64! (or just use sizeof(long)-1 ???
 
@@ -881,6 +923,69 @@ char* QAOLS(char* s, int16_t *i) {
 
 
 #endif // OQA_U32
+
+//////////////////////////////////////////////////
+// ASCIIZZ
+//
+// Strings/UTF-8 and BLOBs are encoded efficiently
+// using a minimal escaping sequence. ASCIIZZ are
+// terminated by a double 0: 00 00. Instead of choking
+// and doubling storage on plain sequences of zeroes,
+// we employ a simplistic RLE encoding, just for zeroes.
+
+#ifdef StrOAQ
+
+
+char* StrOAQ(char* p, char* s, int len) {
+  char zeroes= 0;
+  if (len==-1) s= strlen(s); // Plain C string (or "clean" UTF-8)
+  while(len--) {
+    if (*p= *s++) ++p;
+    else {
+      do {
+        ++zeroes; ++s;
+      } while(!(*p= *s) && zeroes<255 && len--);
+      *p++= zeroes; zeroes= 0;
+      *p++= *s++; --len;
+    }
+  }
+  *p++= 0;
+  *p++= 0;
+  return p;
+}
+
+#include <string.h>
+
+char* StrOAQ(char* p, const char* s, int len) {
+  char zeroes;
+
+  if (len==-1) len= (int)strlen(s);
+  
+  while (len--) {
+    if ((*p++= *s++)) continue;
+    zeroes= 1;
+    while(len && *s==0 && ++zeroes<255) {
+      ++s;
+      --len;
+    }
+    *p++ = zeroes;
+  }
+  *p++ = 0; *p++ = 0;
+  return p;
+}
+
+char* QAOStr(char* p, char** ps) {
+  char c, count= 1, * s = *ps;
+  unsigned int len= 0;
+
+  do {
+    count= (c= *p++)?1: ~*p++;
+    s= realloc(s, ((len+count) | 15) + 17);
+    memset(s+len, c, count | 1);
+    len+= count;
+  } while(count);
+  return *ps= s;
+}
 
 
 
