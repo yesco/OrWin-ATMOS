@@ -20,8 +20,6 @@
 
 #include <stdio.h>
 
-//#define MAIN
-
 // TODO: make it a printable string?
 #ifndef EVENTS
 
@@ -647,6 +645,114 @@ void* tail(countstate* state, char* line) {
 ///////////////////////////////////////////////////
 // Variable manipluations
  
+#include "qputs.c"
+
+
+#if 1
+ 
+#define MAX_VARS 32
+ 
+// first is emtpy
+struct var {
+  char* name; // %var points to int %str points to string!
+  union {
+    int *  iptr;
+    char** sptr;
+    char*  ostr; 
+  };
+} vars[MAX_VARS]= {0};
+
+unsigned int nvar= 0;
+
+
+// Returns >0 on successful binding
+char* vdummy= "";
+ 
+char vnth(char* name) {
+  char i= 0, *nm;
+  while(++i<=nvar) {
+    if ((nm= vars[i].name) && 0==strcmp(name, nm)) return i;
+  }
+  // not found - add var
+  if (nvar+1 >= MAX_VARS) return 0;
+  ++nvar;
+  vars[nvar].name= name;
+  vars[nvar].sptr= &vdummy;
+  return i;
+}
+
+// you can bind %var and _var
+// TODO: unbind using ptr=NULL - action: don't want change order...
+char vbind(char* name, void* ptr) {
+  char n= vnth(name);
+
+  assert(n);
+  assert(*name != '$');
+
+  vars[n].iptr= ptr;
+  return n;
+}
+
+int vgeti(char* name) {
+  char n= vnth(name);
+  return (n && *name == '%')? *vars[n].iptr: 0;
+}
+ 
+// depending on $var (can be modified) const _var
+char tmp10char[10]= "(int)"; // TODO: share?
+ 
+char* vgets(char* name) {
+  char n= vnth(name), *s= 
+    !n? "":
+    (*name == '_')? *vars[n].sptr:
+    (*name == '$')? vars[n].ostr:
+//    (*name == '%')? "(INT)":
+//    (*name == '%')? (sprintf(tmp10char,"%d",42), tmp10char):
+    (*name == '%')? (sprintf(tmp10char, "%d", vgeti(name)),tmp10char):
+    NULL;
+  return s? s: "";
+}
+ 
+// How to do different types?
+char* veval(char* expr) {
+// TODO: stringify?
+//  if (*expr == '%') return vgeti(expr);
+   if (*expr == '$') return vgets(expr);
+  return "";
+}
+
+int vseti(char* name, int val) {
+  char n= vnth(name);
+  if (*name != '%') return 0;
+  return *vars[n].iptr= val;
+}
+
+char* vsets(char* name, char* val) {
+  char n= vnth(name), **sp;
+  if (*name == '%') { vseti(name, atoi(val)); return val; }
+  if (*name != '$') return "";
+  lfree(*(sp=&vars[n].ostr));
+  return *sp= val;
+}
+
+void vdump() {
+  char i= 0, *name;
+  while(++i < MAX_VARS) {
+    if (!(name= vars[i].name)) continue;
+    printf(";%d:%s=", i, name);
+    switch(*name) {
+    case '%': printf("%d", vgeti(name)); break;
+    case '_':
+    case '$': printf("\%s\"", vgets(name)); break;
+    default:  printf("???"); break;
+    }
+  }
+  putchar('\n');
+}
+
+#else
+ 
+ 
 // TODO: these are global for now
 char* vars= NULL;
 #define MAX_VARS 128
@@ -680,8 +786,6 @@ char vnth(char* name) {
   return n;
 }
     
-#include "qputs.c"
-
 char* vset(char* name, char* val) {
   char n= vnth(name), **p;
   qputs(vars);
@@ -700,7 +804,11 @@ char* veval(char* expr) {
   return expr;
 }
 
+#endif
+
 typedef struct varstate {
+  cmdfun fun;
+  // pointers owned
   char * name, * val;
 } varstate;
 
@@ -708,12 +816,12 @@ char* set(varstate* state, char* line) {
   if (!state) {
     char *name, *val;
     state= STALLOC(varstate, set);
-    state->name= nextStr(&line, "");
+    state->name= strdup(nextStr(&line, ""));
     state->val = nextStr(&line, "");
     return (char*)state;
   }
   // TODO: wrap val in EVAL?
-  vset(state->name, veval(state->val));
+  vbind(state->name, veval(state->val));
   return line;
 }
 
@@ -1085,9 +1193,16 @@ void tsystem(char* cmd) {
 }
   
 void vt(char* name, char* val) {
-  printf("%10s=%10s  ", name, vget(name));
-  vset(name, strdup(val));
-  printf(" => %10s\n", vget(name));
+  printf("%s=%s  ", name, vgets(name));
+  if (*name=='$') {
+    vsets(name, val);
+  } else {
+    char** s= malloc(2);
+    *s= val;
+    vbind(name, s);
+  }
+  printf(" => %s\n", vgets(name));
+  putchar('\t'); vdump();
 }
 
 int main(int argc, char** argv) {
@@ -1095,15 +1210,15 @@ int main(int argc, char** argv) {
   mock[1]= pwd(0, 0);
   mock[2]= terminal(0, 0);
 
-  vt("foo", "41");
-  vt("foo", "42");
-  vt("bar", "fish");
-  vt("bar", "fourtytwo");
-  vt("fie", "33");
+  vt("%foo", "41");
+  vt("%foo", "42");
+  vt("$bar", "fish");
+  vt("$bar", "fourtytwo");
+  vt("%fie", "33");
   vt("fum", "71a");
-  vt("fie", "69");
+  vt("$fie", "69");
 
-  qputs(vars); putchar('\n');
+  //qputs(vars); putchar('\n');
 
 exit(0);
 
