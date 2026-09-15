@@ -703,18 +703,21 @@ int vgeti(char* name) {
     atoi(vgets(name));
 }
  
-// depending on $var (can be modified) const _var
+// Depending on $var (can be modified) const _var
 char tmp10char[10]= "(int)"; // TODO: share?
  
+// Return string representation of ?VAR
+// It even works for int %VAR but gives a very temporary
+// string that has to be used IMMEDIATELY (strdup maybe).
+//
+// If not var, return NAME! This means it can be used as "expander"
 char* vgets(char* name) {
   char n= vnth(name), *s= 
     !n? "":
     (*name == '_')? *vars[n].sptr:
     (*name == '$')? vars[n].ostr:
-//    (*name == '%')? "(INT)":
-//    (*name == '%')? (sprintf(tmp10char,"%d",42), tmp10char):
     (*name == '%')? (sprintf(tmp10char, "%d", vgeti(name)),tmp10char):
-    NULL;
+    name; // lol
   return s? s: "";
 }
  
@@ -737,6 +740,7 @@ int vseti(char* name, int val) {
   return *vars[n].iptr= val;
 }
 
+// gives ownershipt to $VAR of VAL string
 char* vsets(char* name, char* val) {
   char n= vnth(name), **sp;
   if (*name == '%') { vseti(name, atoi(val)); return val; }
@@ -745,6 +749,11 @@ char* vsets(char* name, char* val) {
   return *sp= val;
 }
 
+// set ?VAR from string VAL, copy if $VAR, otherwise convert
+char* vsetsfrom(char* name, char* val) {
+  return vsets(name, *name=='$'? strdup(val): val);
+}
+ 
 void vdump() {
   char i= 0, *name;
   while(++i < MAX_VARS) {
@@ -818,21 +827,85 @@ char* veval(char* expr) {
 
 typedef struct varstate {
   cmdfun fun;
-  // pointers owned
-  char * name, * val;
+  char*  name;   // TODO: make it store (char*)(char)idx
+  char   varidx; // TODO: use
+  char*  val;    // Owned if _VAR
 } varstate;
 
-char* set(varstate* state, char* line) {
+// "LET - Lexial EnvironmenT binding"
+char* let(varstate* state, char* line) {
   if (!state) {
-    char *name, *val;
-    state= STALLOC(varstate, set);
-    state->name= strdup(nextStr(&line, ""));
-    state->val = nextStr(&line, "");
+    char *name, *val, typ;
+    state= STALLOC(varstate, let);
+    // We don't care the type!
+    name= nextStr(&line, "");
+    state->name= strdup(name);
+    state->varidx= vbind(name, &val);
+    // TODO: implicit eval? compile to vm bytecode!
+
+    // TODO: too complicated!
+    if (*name == '_') state->val = strdup(nextStr(&line, ""));
+    else vsetsfrom(name, nextStr(&line, ""));
+    
     return (char*)state;
+  } else if (line==CLEANUP) {
+    // only own if _var (TODO: make cleaner)
+    //if (*vars[state->varidx].name == '_') lfree(state->val);
+    if (*state->name == '_') lfree(state->val);
+    state->val= NULL;
+    lfree(state->name); state->name= NULL;
+    return line;
   }
+
   // TODO: wrap val in EVAL?
-  vbind(state->name, veval(state->val));
+  vsets(state->name, veval(state->val));
   return line;
+}
+
+// alias
+ 
+char* set(varstate* state, char* line) {
+  return let(state, line);
+}
+  
+// printer
+
+typedef struct printstate {
+  cmdfun fun;
+  char** params;
+} printstate;
+ 
+char* print(printstate* state, char* line) {
+  if (!state) {
+    char np= 0, *param[16]= {0}, *p;
+    state= STALLOC(varstate, let);
+    if (!state) return NULL;
+    do {
+      p= param[np++]= strdup(nextStr(&line, NULL));
+    } while(p!=NULL);
+    state->params= memdup(param, np*sizeof(char*));
+    if (!state->params) { free(state); return NULL; }
+    return (char*)state;
+  } else if (line==CLEANUP) {
+    // TODO: make our FREE(&var) do it!
+    free(state->params); state->params= NULL;
+    return NULL;
+  }
+  
+  if (line==EOS) return line;
+
+  // For every data return, print a line fill in params
+  {
+    char tmp[255]= {0}; // TODO: use dstr!
+    char** p= state->params;
+    while(*p) {
+      // vgets convers all var types as well as returns non-names!
+      strcat(tmp, vgets(*p));
+      ++p;
+    }
+    lfree(line); // we don't care?
+    return strdup(tmp);
+  }
 }
 
 ///////////////////////////////////////////////////
