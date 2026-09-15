@@ -666,7 +666,7 @@ unsigned int nvar= 0;
 
 
 // Returns >0 on successful binding
-char* vdummy= "";
+//char* vdummy= "";
  
 char vnth(char* name) {
   char i= 0, *nm;
@@ -677,7 +677,8 @@ char vnth(char* name) {
   if (nvar+1 >= MAX_VARS) return 0;
   ++nvar;
   vars[nvar].name= name;
-  vars[nvar].sptr= &vdummy;
+//  vars[nvar].sptr= &vdummy;
+  vars[nvar].sptr= NULL;
   return i;
 }
 
@@ -693,9 +694,13 @@ char vbind(char* name, void* ptr) {
   return n;
 }
 
+char* vgets(char* name);
+ 
 int vgeti(char* name) {
   char n= vnth(name);
-  return (n && *name == '%')? *vars[n].iptr: 0;
+  return !n? 0:
+    (*name == '%')? *vars[n].iptr:
+    atoi(vgets(name));
 }
  
 // depending on $var (can be modified) const _var
@@ -717,13 +722,18 @@ char* vgets(char* name) {
 char* veval(char* expr) {
 // TODO: stringify?
 //  if (*expr == '%') return vgeti(expr);
-   if (*expr == '$') return vgets(expr);
-  return "";
+  return vgets(expr);
 }
 
+char* vsets(char* name, char* val);
+ 
 int vseti(char* name, int val) {
   char n= vnth(name);
-  if (*name != '%') return 0;
+  if (*name == '$') {
+    sprintf(tmp10char, "%d", val);
+    vsets(name, strdup(tmp10char));
+    return val;
+  } else if (*name == '_') return 0;
   return *vars[n].iptr= val;
 }
 
@@ -1205,21 +1215,82 @@ void vt(char* name, char* val) {
   putchar('\t'); vdump();
 }
 
+void gts(char* name) {
+  printf("%s: \"%s\"\n", name, vgets(name));
+}
+
+void gti(char* name) {
+  printf("%s: %d\n", name, vgeti(name));
+}
+
 int main(int argc, char** argv) {
   cmdtrain mock[4]= {0};
   mock[1]= pwd(0, 0);
   mock[2]= terminal(0, 0);
 
-  vt("%foo", "41");
-  vt("%foo", "42");
-  vt("$bar", "fish");
-  vt("$bar", "fourtytwo");
-  vt("%fie", "33");
-  vt("fum", "71a");
-  vt("$fie", "69");
+  // Test string binding
+  {
+    char* bar= "fish";
+    vbind("_bar", &bar);
+    gts("_bar");
+    gti("_bar");
+    
+    bar= "fourtytwo";
+    gts("_bar");
+    gti("_bar");
+    
+    bar= "666";
+    gts("_bar");
+    gti("_bar");
+
+    putchar('\n'); vdump(); putchar('\n');
+  }
+
+  // Test int binding
+  {
+    int foo= 33;
+    vbind("%foo", &foo);
+    gts("%foo");
+    gti("%foo");
+    
+    foo= 42;
+    gts("%foo");
+    gti("%foo");
+    
+    vsets("%foo", "666");
+    gts("%foo");
+    gti("%foo");
+
+    putchar('\n'); vdump(); putchar('\n');
+  }
+
+  // Test int binding
+  {
+    //vbind("$foo", &foo);
+    vsets("$fie", "33");
+    gts("$fie");
+    gti("$fie");
+    
+    vseti("$fie", 42);
+    gts("$fie");
+    gti("$fie");
+    
+    putchar('\n'); vdump(); putchar('\n');
+  }
+/*
+    vt("%foo", "41");
+    vt("%foo", "42");
+
+    vt("$bar", "fish");
+    vt("$bar", "fourtytwo");
+
+    vt("%fie", "33");
+    vt("fum", "71a");
+    vt("$fie", "69");
 
   //qputs(vars); putchar('\n');
-
+*/
+  
 exit(0);
 
   printf("---- wrunsystrain: MOCK: pwd | terminal\n");
