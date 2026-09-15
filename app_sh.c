@@ -3,6 +3,8 @@
 
 #include "orwin.h"
 
+#define MAIN
+
 #define INCLUDE_PS
 #include "shell.c"
 

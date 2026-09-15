@@ -64,6 +64,8 @@ void* memdup(void* p, unsigned int bytes) {
   return memcpy(r, p, bytes);
 }
 
+// TODO: ugly, use my fillins.c?
+
 #if !defined(_POSIX_C_SOURCE) && !defined(__ANDROID__) && !defined(_STRDUP_DEFINED)
   #define strdup(s) safe_fallback_strdup(s)
   
@@ -505,9 +507,9 @@ void* ls(lsstate* state, char* line) {
 // NOTE: they modify the incoming line
 // NOTE: if you need to keep the string do strdup!
 
-char* nextStr(char** line, char* dflt) {
+char* nextStr(char** line, const char* dflt) {
   char *r, *p= *line;
-  if (!line || !*line) return dflt;
+  if (!line || !*line) return (char*)dflt;
   // skip spaces
   while(isspace(*p)) ++p;
   // r points to first non whitespace (or at end)
@@ -518,7 +520,7 @@ char* nextStr(char** line, char* dflt) {
   if (*p) *p++= 0;
   // move input pointer to rest
   *line= p;
-  return *r? r: dflt;
+  return *r? r: (char*)dflt;
 }
 
 int nextInt(char** line, int dflt) {
@@ -645,11 +647,25 @@ void* tail(countstate* state, char* line) {
 ///////////////////////////////////////////////////
 // Variable manipluations
  
+// cc65: (- 37001 33450) = 3551 bytes = frickin hell!
+// osc : (- 26237 24233) = 2004 // if not used doesn/t count!
+// LOC: 85 lines
+ 
+#define ENVVARS
+ 
+#ifndef ENVVARS
+ 
+// dummies
+char* let(void* state, char* line) { return NULL; }
+char* set(void* state, char* line) { return NULL; }
+ 
+#else
+ 
 #include "qputs.c"
 
 
-#if 1
- 
+// TODO: make it part of each "train"
+
 #define MAX_VARS 32
  
 // first is emtpy
@@ -659,8 +675,8 @@ struct var {
     int *  iptr;
     char** sptr;
     char*  ostr; 
-  };
-} vars[MAX_VARS]= {0};
+   } val; // oscar64 requires a named union!
+} vars[MAX_VARS]; // = {0}; cl65 cannot
 
 unsigned int nvar= 0;
 
@@ -678,7 +694,7 @@ char vnth(char* name) {
   ++nvar;
   vars[nvar].name= name;
 //  vars[nvar].sptr= &vdummy;
-  vars[nvar].sptr= NULL;
+  vars[nvar].val.sptr= NULL;
   return i;
 }
 
@@ -690,7 +706,7 @@ char vbind(char* name, void* ptr) {
   assert(n);
   assert(*name != '$');
 
-  vars[n].iptr= ptr;
+  vars[n].val.iptr= ptr;
   return n;
 }
 
@@ -699,7 +715,7 @@ char* vgets(char* name);
 int vgeti(char* name) {
   char n= vnth(name);
   return !n? 0:
-    (*name == '%')? *vars[n].iptr:
+    (*name == '%')? *vars[n].val.iptr:
     atoi(vgets(name));
 }
  
@@ -714,8 +730,8 @@ char tmp10char[10]= "(int)"; // TODO: share?
 char* vgets(char* name) {
   char n= vnth(name), *s= 
     !n? "":
-    (*name == '_')? *vars[n].sptr:
-    (*name == '$')? vars[n].ostr:
+    (*name == '_')? *vars[n].val.sptr:
+    (*name == '$')? vars[n].val.ostr:
     (*name == '%')? (sprintf(tmp10char, "%d", vgeti(name)),tmp10char):
     name; // lol
   return s? s: "";
@@ -737,7 +753,7 @@ int vseti(char* name, int val) {
     vsets(name, strdup(tmp10char));
     return val;
   } else if (*name == '_') return 0;
-  return *vars[n].iptr= val;
+  return (*(vars[n].val.iptr)= val);
 }
 
 // gives ownershipt to $VAR of VAL string
@@ -745,8 +761,8 @@ char* vsets(char* name, char* val) {
   char n= vnth(name), **sp;
   if (*name == '%') { vseti(name, atoi(val)); return val; }
   if (*name != '$') return "";
-  lfree(*(sp=&vars[n].ostr));
-  return *sp= val;
+  lfree(*(sp=&vars[n].val.ostr));
+  return (*sp= val);
 }
 
 // set ?VAR from string VAL, copy if $VAR, otherwise convert
@@ -754,6 +770,8 @@ char* vsetsfrom(char* name, char* val) {
   return vsets(name, *name=='$'? strdup(val): val);
 }
  
+#if 0
+// 175 bytes cc65 (oscar removes if not called, lol)
 void vdump() {
   char i= 0, *name;
   while(++i < MAX_VARS) {
@@ -762,69 +780,14 @@ void vdump() {
     switch(*name) {
     case '%': printf("%d", vgeti(name)); break;
     case '_':
-    case '$': printf("\%s\"", vgets(name)); break;
+    case '$': printf("\"%s\"", vgets(name)); break;
     default:  printf("???"); break;
     }
   }
   putchar('\n');
 }
-
-#else
- 
- 
-// TODO: these are global for now
-char* vars= NULL;
-#define MAX_VARS 128
-char* vals[MAX_VARS]= {0};
-
-// possibly too much code,lol - too clever?
-char vnth(char* name) {
-  unsigned int vlen, len, n= (unsigned int)(intptr_t)name;
-  char* found;
-  if (vars) {
-    if ((n^0x80) < 0x80) return n;
-    // second chance, lol
-    n= *name;
-    if ((n^0x80) < 0x80) return n;
-  }
-  // defined?
-  // TODO: prefix by ':'
-  if (vars && (found= strstr(vars, name))) return found[-1];
-
-  // not defined, let's add
-  n= ((vars?*vars: 0) + 1) | 0x80; // assigns next 0x8n code
-  len= strlen(name)+1;
-  // TODO: reallocs every friggin time, lol
-  vlen = vars? strlen(vars)+1: 1;
-  vars= realloc(vars, vlen + len);
-  memmove(vars+len, vars, vlen);
-  // prefix with "id" number 0x8n
-  *vars= n;
-  memcpy(vars+1, name, len-1);
-
-  return n;
-}
-    
-char* vset(char* name, char* val) {
-  char n= vnth(name), **p;
-  qputs(vars);
-  lfree(*(p= &vals[n & 0x80]));
-  return *p= val;
-}
-
-// you don't own the value coming out
-// you can make a copy
-char* vget(char* name) {
-  char n= vnth(name), *p;
-  return vals[n & 0x80];
-}
-
-char* veval(char* expr) {
-  return expr;
-}
-
 #endif
-
+ 
 typedef struct varstate {
   cmdfun fun;
   char*  name;   // TODO: make it store (char*)(char)idx
@@ -835,16 +798,16 @@ typedef struct varstate {
 // "LET - Lexial EnvironmenT binding"
 char* let(varstate* state, char* line) {
   if (!state) {
-    char *name, *val, typ;
+    char *name;
     state= STALLOC(varstate, let);
     // We don't care the type!
-    name= nextStr(&line, "");
+    name= nextStr(&line, (char*)"");
     state->name= strdup(name);
-    state->varidx= vbind(name, &val);
+    state->varidx= vbind(name, &state->val);
     // TODO: implicit eval? compile to vm bytecode!
 
     // TODO: too complicated!
-    if (*name == '_') state->val = strdup(nextStr(&line, ""));
+    if (*name == '_') state->val= strdup(nextStr(&line, ""));
     else vsetsfrom(name, nextStr(&line, ""));
     
     return (char*)state;
@@ -896,7 +859,7 @@ char* print(printstate* state, char* line) {
 
   // For every data return, print a line fill in params
   {
-    char tmp[255]= {0}; // TODO: use dstr!
+    char tmp[128]= {0}; // TODO: use dstr!
     char** p= state->params;
     while(*p) {
       // vgets convers all var types as well as returns non-names!
@@ -907,6 +870,8 @@ char* print(printstate* state, char* line) {
     return strdup(tmp);
   }
 }
+
+#endif // ENVVARS
 
 ///////////////////////////////////////////////////
 
@@ -1025,6 +990,7 @@ void* terminal(simplestate* state, char* line) {
 const char* cmdnames[]= {
   "pwd", "grep", "cat", "wc", "ls", "iota", "head", "tail",
   "ps",
+  "set", "let", "print",
   "teeterminal", "terminal",
   
   //  "ls cat find "
@@ -1052,6 +1018,7 @@ const char* cmdnames[]= {
 void* commands[]= {
   pwd, grep, cat, wc, ls, iota, head, tail,
   ps,
+  let, set, print,
   teeterminal, terminal,
   
 };
@@ -1296,11 +1263,8 @@ void gti(char* name) {
   printf("%s: %d\n", name, vgeti(name));
 }
 
-int main(int argc, char** argv) {
-  cmdtrain mock[4]= {0};
-  mock[1]= pwd(0, 0);
-  mock[2]= terminal(0, 0);
-
+//int main(int argc, char** argv) {
+int main() {
   // Test string binding
   {
     char* bar= "fish";
@@ -1339,7 +1303,6 @@ int main(int argc, char** argv) {
 
   // Test int binding
   {
-    //vbind("$foo", &foo);
     vsets("$fie", "33");
     gts("$fie");
     gti("$fie");
@@ -1350,25 +1313,17 @@ int main(int argc, char** argv) {
     
     putchar('\n'); vdump(); putchar('\n');
   }
-/*
-    vt("%foo", "41");
-    vt("%foo", "42");
-
-    vt("$bar", "fish");
-    vt("$bar", "fourtytwo");
-
-    vt("%fie", "33");
-    vt("fum", "71a");
-    vt("$fie", "69");
-
-  //qputs(vars); putchar('\n');
-*/
-  
-exit(0);
 
   printf("---- wrunsystrain: MOCK: pwd | terminal\n");
   
-  wrunsystrain(mock);
+  if (0)
+  {
+    cmdtrain mock[4]= {0};
+    mock[1]= pwd(0, 0);
+    mock[2]= terminal(0, 0);
+
+    wrunsystrain(mock);
+  }
   
   // Error codes? How & semantics
 
