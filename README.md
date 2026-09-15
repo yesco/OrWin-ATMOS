@@ -16,7 +16,9 @@ and multitasking environment for the ORIC ATMOS.
 
 - Have fun!
 - Simple, low effort window system
-- Compile + run several C program together sharing stack
+- Efficient/cheap Unix pipes+programs
+- Capable "unixy" scripting language
+- Compile several small programs into one big "OrWIN BINARY"
 - Cheap coopertive tasks, basically event-driven actor system
 - Have several window terminals
 - ORIC Terminal - transparantly taking unquoted inline INK/PAPER
@@ -29,8 +31,7 @@ and multitasking environment for the ORIC ATMOS.
 - Wraparound instead of scroll (fast!)
 
 - TODO: VT100/52 compat
-- Simple VI+Emacs-style editor
-- TODO: Simple script/interactive programming language, maybe minipanda
+- Simple VI (+Emacs-style) editor
 - TODO: integrate w LOCI storage device, and oric "native" `DSK`
 - TODO: Simple telnet using LOCI/usb-web devices
 
@@ -42,7 +43,7 @@ and multitasking environment for the ORIC ATMOS.
 - No separate binaries loaded (only interpreted apps)
 - No generic relocation of C programs
 - No multi-tasking pre-exising programs, you may switch to it
-- No Slicing the stack (limits you to 4 processes max)
+- No Slicing the HW/C-stack (limits you to 4 processes max)
 
 
 
@@ -400,6 +401,43 @@ How to handle variable type clashes. We're not using C++ namespaces in cc65.
 Maybe just have a file be required to compile by itself and ONLY do export
 on external visible functions. (Severe limitiation for porting). I guess one
 could do renames in .o files, .o65 library files?
+
+
+# (P)OSH - Object SHell
+
+Taking inspiration form `nu-shell` we implement a powerful
+scripting language, using our unix pipes, and environment
+variables, to communicate native data between processes.
+
+```
+%VAR = integer data (owned by a process); can set/get
+_VAR = string (constant) data (owned by a process)
+$VAR = "global" string data; can set/get
+```
+
+So for example, simple program utilities like `ps, ls` and
+others can choose to output data in native int/string format.
+No need to write complicated `awk/perl/sed/cut/xargs` scripts
+to extract components. Instead, we utilize our evaluation
+engine that passes around data between processes that acts as
+structured generators, pipes, and filters--very much like a
+database engine (guess why? lol).
+
+TODO: This *will* enable programs like:
+
+```
+ls | where %size>4M | print $name ($size/1024) "bytes"
+ps | where $name=!"ps" | select $cpu $name $state $size | order-by DESC:$cpu
+```
+
+## Control structures
+
+We can notice that some kind of loops are already built into
+our pipes. Furthermore, filtering is a kind of "if", and
+then aggregation/summation is another feature. With that
+most computation can be built with some additional functional
+operators. More on this later.
+
 
 
 ## Note on AI usage
