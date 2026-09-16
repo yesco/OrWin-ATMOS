@@ -34,6 +34,8 @@
 
 typedef void* (*cmdfun)(void* state, char* line);
 
+char* dummyfun(void* state, char* line) { return NULL; }
+ 
 typedef cmdfun* cmdtrain;
 
 unsigned int traincleanbits;
@@ -85,18 +87,20 @@ void* memdup(void* p, unsigned int bytes) {
 ////////////////////////////////////////////////////////////
 // line reuse
 
+#define LFREE(x) xfree(&(x))
+
 #if 0
 
 // 
 
 // 14s iota ... 
 
-char* lfree(char* line) {
+void lfree(char* line) {
   if (line > EVENTS) free(line);
   return 0;
 }
 
-char* lstrdup(char* s) {
+char* lstrdup(const char* s) {
   return strdup(s);
 }
 
@@ -129,7 +133,7 @@ char* lfree(char* line) {
 
 // copy s
 // TODO: make it taken len!
-char* lstrdup(char* s) {
+char* lstrdup(const char* s) {
   char slen= strlen(s), *line;
   if (slen <= relen && relen) {
     // reuse
@@ -145,6 +149,12 @@ char* lstrdup(char* s) {
 
 #endif
 
+void xfree(void** pp) {
+  if (!pp) return;
+  lfree(*pp);
+  *pp= NULL;
+}
+  
 
 ////////////////////////////////////////////////////////////
 // printing
@@ -175,7 +185,7 @@ void* pwd(simplestate* state, char* line) {
 
   // generate a value on EOS (or any), lol
   lfree(line);
-  return strdup("/home/orwin");
+  return lstrdup("/home/orwin");
 }
 
 
@@ -369,11 +379,7 @@ typedef struct lsstate { int x; } lsstate;
 
 // Dummy
  
-void* ls(lsstate* state, char* line) {
-  // TODO: implement and use LOCI
-  return 0;
-  (void)state; (void)line;
-}  
+#define ls dummyfun
 
 #else // !ATMOS && !CC65
  
@@ -507,6 +513,7 @@ void* ls(lsstate* state, char* line) {
 // NOTE: they modify the incoming line
 // NOTE: if you need to keep the string do strdup!
 
+// 123 : nextStr, NATIVE_CODE:code
 char* nextStr(char** line, const char* dflt) {
   char *r, *p= *line;
   if (!line || !*line) return (char*)dflt;
@@ -523,6 +530,7 @@ char* nextStr(char** line, const char* dflt) {
   return *r? r: (char*)dflt;
 }
 
+// 68 : nextInt, NATIVE_CODE:code
 int nextInt(char** line, int dflt) {
   char *r= nextStr(line, NULL);
   return (r && (isdigit(*r) || *r=='-'))
@@ -626,8 +634,7 @@ void* tail(countstate* state, char* line) {
   if (line && line != EOS) { 
     // insert
     if (++state->n >= state->e) state->n= 0;
-    lfree(ring[state->n]);
-    ring[state->n]= line;
+    LFREE(ring[state->n]);
     return NULL;
   }
 
@@ -648,21 +655,27 @@ void* tail(countstate* state, char* line) {
 // Variable manipluations
  
 // cc65: (- 37001 33450) = 3551 bytes = frickin hell!
-// osc : (- 26237 24233) = 2004 // if not used doesn/t count!
-// LOC: 85 lines
+// osc : (- 23702 21969) = 1733 // was 2007 if not used doesn/t count!
+//
+// LOC: 85 lines (/ 1733 85) ~ 20 bytes/line
+
  
+// oscar64: 106 vnth,   50 vbind
+//          126 vgeti, 202 vgets
+//          204 vseti, 173 vsets
+//           30 vevals
 #define ENVVARS
  
 #ifndef ENVVARS
  
 // dummies
-char* let(void* state, char* line) { return NULL; }
-char* set(void* state, char* line) { return NULL; }
- 
+#define let   dummyfun
+#define set   dummyfun
+#define print dummyfun 
+
 #else
  
 #include "qputs.c"
-
 
 // TODO: make it part of each "train"
 
@@ -680,10 +693,8 @@ struct var {
 
 unsigned int nvar= 0;
 
-
-// Returns >0 on successful binding
-//char* vdummy= "";
  
+// 106 : vnth, NATIVE_CODE:code
 char vnth(char* name) {
   char i= 0, *nm;
   while(++i<=nvar) {
@@ -693,18 +704,19 @@ char vnth(char* name) {
   if (nvar+1 >= MAX_VARS) return 0;
   ++nvar;
   vars[nvar].name= name;
-//  vars[nvar].sptr= &vdummy;
   vars[nvar].val.sptr= NULL;
   return i;
 }
 
 // you can bind %var and _var
 // TODO: unbind using ptr=NULL - action: don't want change order...
+
+// 59 : vbind, NATIVE_CODE:code
 char vbind(char* name, void* ptr) {
   char n= vnth(name);
 
-  assert(n);
-  assert(*name != '$');
+  //assert(n);
+  //assert(*name != '$');
 
   vars[n].val.iptr= ptr;
   return n;
@@ -712,6 +724,7 @@ char vbind(char* name, void* ptr) {
 
 char* vgets(char* name);
  
+// 126 : vgeti, NATIVE_CODE:code
 int vgeti(char* name) {
   char n= vnth(name);
   return !n? 0:
@@ -727,6 +740,8 @@ char tmp10char[10]= "(int)"; // TODO: share?
 // string that has to be used IMMEDIATELY (strdup maybe).
 //
 // If not var, return NAME! This means it can be used as "expander"
+
+// 202 : vgets, NATIVE_CODE:code
 char* vgets(char* name) {
   char n= vnth(name), *s= 
     !n? "":
@@ -738,7 +753,9 @@ char* vgets(char* name) {
 }
  
 // How to do different types?
-char* veval(char* expr) {
+
+// 39 : veval, NATIVE_CODE:code
+char* vevals(char* expr) {
 // TODO: stringify?
 //  if (*expr == '%') return vgeti(expr);
   return vgets(expr);
@@ -746,6 +763,7 @@ char* veval(char* expr) {
 
 char* vsets(char* name, char* val);
  
+// 204 : vseti, NATIVE_CODE:code
 int vseti(char* name, int val) {
   char n= vnth(name);
   if (*name == '$') {
@@ -757,6 +775,8 @@ int vseti(char* name, int val) {
 }
 
 // gives ownershipt to $VAR of VAL string
+
+// 173 : vsets, NATIVE_CODE:code
 char* vsets(char* name, char* val) {
   char n= vnth(name), **sp;
   if (*name == '%') { vseti(name, atoi(val)); return val; }
@@ -766,10 +786,13 @@ char* vsets(char* name, char* val) {
 }
 
 // set ?VAR from string VAL, copy if $VAR, otherwise convert
+
+//  91 : vsetsfrom, NATIVE_CODE:code
 char* vsetsfrom(char* name, char* val) {
   return vsets(name, *name=='$'? strdup(val): val);
 }
  
+
 #if 0
 // 175 bytes cc65 (oscar removes if not called, lol)
 void vdump() {
@@ -796,6 +819,7 @@ typedef struct varstate {
 } varstate;
 
 // "LET - Lexial EnvironmenT binding"
+// 397 : let, NATIVE_CODE:code
 char* let(varstate* state, char* line) {
   if (!state) {
     char *name;
@@ -814,23 +838,16 @@ char* let(varstate* state, char* line) {
   } else if (line==CLEANUP) {
     // only own if _var (TODO: make cleaner)
     //if (*vars[state->varidx].name == '_') lfree(state->val);
-    if (*state->name == '_') lfree(state->val);
-    state->val= NULL;
-    lfree(state->name); state->name= NULL;
+    if (*state->name == '_') LFREE(state->val);
+    LFREE(state->name);
     return line;
   }
 
   // TODO: wrap val in EVAL?
-  vsets(state->name, veval(state->val));
+  vsets(state->name, vevals(state->val));
   return line;
 }
 
-// alias
- 
-char* set(varstate* state, char* line) {
-  return let(state, line);
-}
-  
 // printer
 
 typedef struct printstate {
@@ -838,6 +855,7 @@ typedef struct printstate {
   char** params;
 } printstate;
  
+// 463 : print, NATIVE_CODE:code
 char* print(printstate* state, char* line) {
   if (!state) {
     char np= 0, *param[16]= {0}, *p;
@@ -851,7 +869,7 @@ char* print(printstate* state, char* line) {
     return (char*)state;
   } else if (line==CLEANUP) {
     // TODO: make our FREE(&var) do it!
-    free(state->params); state->params= NULL;
+    LFREE(state->params);
     return NULL;
   }
   
@@ -957,10 +975,7 @@ void* ps(simplestate* state, char* line) {
 #else
  
 // Dummy
-void* ps(simplestate* state, char* line) {
-  return NULL;
-  (void)state; (void)line;
-}
+#define ps dummyfun
    
 #endif // INCLUDE_PS
 
@@ -1018,7 +1033,7 @@ const char* cmdnames[]= {
 void* commands[]= {
   pwd, grep, cat, wc, ls, iota, head, tail,
   ps,
-  let, set, print,
+  let, let, print,
   teeterminal, terminal,
   
 };
