@@ -34,7 +34,10 @@
 
 typedef void* (*cmdfun)(void* state, char* line);
 
-char* dummyfun(void* state, char* line) { return NULL; }
+char* dummyfun(void* state, char* line) {
+  return NULL;
+  (void)state; (void)line;
+}
  
 typedef cmdfun* cmdtrain;
 
@@ -693,21 +696,23 @@ struct var {
    } val; // oscar64 requires a named union!
 } vars[MAX_VARS]; // = {0}; cl65 cannot
 
-unsigned int nvar= 0;
+unsigned char nvar= 0;
 
  
 // 106 : vnth, NATIVE_CODE:code
 char vnth(char* name) {
-  char i= 0, *nm;
-  while(++i<=nvar) {
+  char i= nvar, *nm;
+  if (!((intptr_t)name)>>8) return *name; // 0x80+i
+  do {
     if ((nm= vars[i].name) && 0==strcmp(name, nm)) return i;
-  }
+  } while(--i);
+
   // not found - add var
   if (nvar >= MAX_VARS-1) return 0;
   ++nvar;
   vars[nvar].name= name;
   vars[nvar].val.sptr= NULL;
-  return i;
+  return nvar;
 }
 
 // you can bind %var and _var
@@ -795,24 +800,7 @@ char* vsetsfrom(char* name, char* val) {
 }
  
 
-#if 0
-// 175 bytes cc65 (oscar removes if not called, lol)
-void vdump() {
-  char i= 0, *name;
-  while(++i < MAX_VARS) {
-    if (!(name= vars[i].name)) continue;
-    printf(";%d:%s=", i, name);
-    switch(*name) {
-    case '%': printf("%d", vgeti(name)); break;
-    case '_':
-    case '$': printf("\"%s\"", vgets(name)); break;
-    default:  printf("???"); break;
-    }
-  }
-  putchar('\n');
-}
-#endif
- 
+
 typedef struct varstate {
   cmdfun fun;
   char*  name;   // TODO: make it store (char*)(char)idx
@@ -1259,25 +1247,28 @@ void tsystem(char* cmd) {
   system(cmd);
 }
   
-void vt(char* name, char* val) {
-  printf("%s=%s  ", name, vgets(name));
-  if (*name=='$') {
-    vsets(name, val);
-  } else {
-    char** s= malloc(2);
-    *s= val;
-    vbind(name, s);
-  }
-  printf(" => %s\n", vgets(name));
-  putchar('\t'); vdump();
-}
-
 void gts(char* name) {
   printf("%s: \"%s\"\n", name, vgets(name));
 }
 
 void gti(char* name) {
   printf("%s: %d\n", name, vgeti(name));
+}
+
+// 175 bytes cc65 (oscar removes if not called, lol)
+void vdump() {
+  char i= 0, *name;
+  while(++i < MAX_VARS) {
+    if (!(name= vars[i].name)) continue;
+    printf(";%d:%s=", i, name);
+    switch(*name) {
+    case '%': printf("%d", vgeti(name)); break;
+    case '_':
+    case '$': printf("\"%s\"", vgets(name)); break;
+    default:  printf("???"); break;
+    }
+  }
+  putchar('\n');
 }
 
 //int main(int argc, char** argv) {
