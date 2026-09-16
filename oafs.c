@@ -376,16 +376,16 @@ char parsepage(char* page) {
 // ENTRY DOCUMENATION
 // ==================
 //
-// Minimal key only entry size: 3 bytes!
-//   (possible for "" or shorter prefix key)
+// Minimal key only entry size: 4 bytes!
+//   (possible for first "" or key that differ one char from prefix)
 //
-// Minimal key+data entry size: 4 bytes!
-//   (timestamp: if not used and is 0x00 - 1 extra byte)
-//   (0 bytes data, minimal, but storing it, lol)
+// Minimal key+data entry size: 5 bytes!
+//   (timestamp; if not used and is 0x00 - 1 extra byte)
+//   (0 bytes data, minimal, but storing it, lol NULL/VS "")
 //
 // Maximal overhead: 3 + bytes for timestamp (1, 2-5)
 //
-// KeyLength : limited to like 80 chars
+// KeyLength : limited to like 80 chars (or TODO: 127?)
 // DataLength: inline <= 42 (lol)
 // Timestamp : optional (0 growing), always stored if there is data
 //
@@ -401,11 +401,12 @@ char parsepage(char* page) {
 //
 //(@key:)
 //   ...keysuffix
+//        1 B
 //
 // @dataoffset:
 //   <timestamp> <data>
-//       OAQ      bytes
-//
+//       OAQ      N bytes
+//      1-9 B
 //
 // skipoffset: page index location of next record, 0 indicates END
 // prefixlen:  0..80 shared bytes w previous key, hibit == DELETED!
@@ -427,17 +428,18 @@ char parsepage(char* page) {
 //
 // DATA: binary bytes, length= skipoffset-dataoffset
 //
-// (* 42 2 256 19) = 4MB max?
+// ???? (* 42 2 256 19) = 4MB max?
 //
-// 1) datalen:
-// 
 
-// Max buffered writes?
+
+
+// Max buffered writes? this can be very costly
+// useful for "transactions" and (secondary) index updates
 #define MAX_KEYS 255
 
 //#define MAX_KEYS 16
 
-//#define MAX_KEYS (256 / 3) // 85!
+//#define MAX_KEYS (256 / 4) // (/ 256 4) = 64 max entries per page
 
 
 // simplest hack
@@ -445,13 +447,15 @@ char parsepage(char* page) {
 
 // TODO: this is more like a buffer...
 //   maybe used then to update many pages?
-typedef struct OAFSpage {
+typedef struct Buffer {
   char     n;
   char     maxklen;
   char     totklen;
   char     totdlen;
 
   // ordered keys
+  // terrible for resize and moving around
+  // TODO: make array of struct? (bad access)
   char     klen[MAX_KEYS];
   char*    keys[MAX_KEYS];
 
@@ -459,13 +463,12 @@ typedef struct OAFSpage {
 
   char     dlen[MAX_KEYS];
   char*    data[MAX_KEYS];
-} OAFSpage;
+} Buffer;
 
-// For now only one page, lol
-OAFSpage FSpage = {0};
+Buffer buffer = {0};
 
 
-OAFSpage* FSinsert
+Buffer* FSinsert
 (size_t klen, char* key,
  uint32_t ts, char type,
  size_t dlen, char* data)
@@ -476,47 +479,47 @@ OAFSpage* FSinsert
   signed char r;
 
   // TODO: handle overflow
-  if (FSpage.n >= MAX_KEYS) return 0;
+  if (buffer.n >= MAX_KEYS) return 0;
     
   // simple insert sort
-  while(i < FSpage.n) {
-    len= FSpage.klen[i];
+  while(i < buffer.n) {
+    len= buffer.klen[i];
     if (len < (l= klen)) l= len;
 
     // TODO: need to be MORE advanced
     // TODO: include opt timestamp, or default to 0
     
-    if ((r= memcmp(key, FSpage.keys[i], l)) < 0) break;
+    if ((r= memcmp(key, buffer.keys[i], l)) < 0) break;
     if (r==0 && klen < len) break;
 
-    // if (FSpage.ts[i]      <=> ...)
-    // if (FSpage.deleted[i] <=> ...)
+    // if (buffer.ts[i]      <=> ...)
+    // if (buffer.deleted[i] <=> ...)
 
     ++i;
   }
   // insert at i location
   // TODO: irritating, use array of struct?
-  z= FSpage.n-i;
-  memmove(FSpage.klen + i + 1, FSpage.klen + i, sizeof(FSpage.klen[i])*z);
-  memmove(FSpage.keys + i + 1, FSpage.keys + i, sizeof(FSpage.keys[i])*z);
-  memmove(FSpage.ts   + i + 1, FSpage.ts   + i, sizeof(FSpage.ts  [i])*z);
-  //memmove(FSpage.type + i + 1, FSpage.type + i, sizeof(FSpage.type[i])*z);
-  memmove(FSpage.dlen + i + 1, FSpage.dlen + i, sizeof(FSpage.dlen[i])*z);
-  memmove(FSpage.data + i + 1, FSpage.data + i, sizeof(FSpage.data[i])*z);
+  z= buffer.n-i;
+  memmove(buffer.klen + i + 1, buffer.klen + i, sizeof(buffer.klen[i])*z);
+  memmove(buffer.keys + i + 1, buffer.keys + i, sizeof(buffer.keys[i])*z);
+  memmove(buffer.ts   + i + 1, buffer.ts   + i, sizeof(buffer.ts  [i])*z);
+  //memmove(buffer.type + i + 1, buffer.type + i, sizeof(buffer.type[i])*z);
+  memmove(buffer.dlen + i + 1, buffer.dlen + i, sizeof(buffer.dlen[i])*z);
+  memmove(buffer.data + i + 1, buffer.data + i, sizeof(buffer.data[i])*z);
   
-  FSpage.klen[i]= klen;
-  FSpage.keys[i]= key;
-  FSpage.ts  [i]= ts;
-  //FSpage.type[i]= type;
-  FSpage.dlen[i]= dlen;
-  FSpage.data[i]= data;
+  buffer.klen[i]= klen;
+  buffer.keys[i]= key;
+  buffer.ts  [i]= ts;
+  //buffer.type[i]= type;
+  buffer.dlen[i]= dlen;
+  buffer.data[i]= data;
 
-  if (FSpage.maxklen < klen) FSpage.maxklen= klen;
-  FSpage.totklen+= klen;
-  FSpage.totdlen+= dlen;
-  ++FSpage.n;
+  if (buffer.maxklen < klen) buffer.maxklen= klen;
+  buffer.totklen+= klen;
+  buffer.totdlen+= dlen;
+  ++buffer.n;
 
-  return &FSpage;
+  return &buffer;
   (void)type;
 }
 
@@ -537,10 +540,10 @@ char packpage(char* page, word next) {
   page[z++]= next>>8;
 
   printf("--- Packer\n");
-  for(j=next; j<FSpage.n; ++j) {
+  for(j=next; j<buffer.n; ++j) {
     char prefix= 0; // This works, but TODO: compress
-    char* key= FSpage.keys[j];
-    char klen= FSpage.klen[j];
+    char* key= buffer.keys[j];
+    char klen= buffer.klen[j];
     char need;
 
     // TODO: LevelDB allows a (single) empty key! 
@@ -548,7 +551,7 @@ char packpage(char* page, word next) {
 
     // TODO: typedatalen and timestamp serializes to how many bytes?
     //  maybe move abort till later?
-    need= 3 + 1 + klen + FSpage.dlen[j];
+    need= 3 + 1 + klen + buffer.dlen[j];
     
     // max of prev and current key len
     if (klen <= plen) plen= klen;
@@ -567,25 +570,25 @@ char packpage(char* page, word next) {
     towrite_dataoff= z;
     page[z++]= 0; // dataoff
     
-    memcpy(page + z, FSpage.keys[j] + prefix, FSpage.klen[j] - prefix);
-    z+= FSpage.klen[j] - prefix;
+    memcpy(page + z, buffer.keys[j] + prefix, buffer.klen[j] - prefix);
+    z+= buffer.klen[j] - prefix;
 
     // --- DATAOFF (or keyend)
     // - timestamp
     dataoff= 0;
 
-    if (FSpage.ts[j] || FSpage.dlen[j] || FSpage.data[j]) {
-      printf("DATA!!![ %u %u %p]", FSpage.ts[j], FSpage.dlen[j], FSpage.data[j]);
+    if (buffer.ts[j] || buffer.dlen[j] || buffer.data[j]) {
+      printf("DATA!!![ %u %u %p]", buffer.ts[j], buffer.dlen[j], buffer.data[j]);
       dataoff= z-1;
-      p= LOAQ(page + z, ~FSpage.ts[j]); // REVERSE ORDER!
+      p= LOAQ(page + z, ~buffer.ts[j]); // REVERSE ORDER!
 
       // - typedatalen 0 if deleted ??? TODO:
-      //assert(FSpage.dlen[j] < 42); // LOL, unless we have stream-multipages
-      //p= OAQ(page + z, FSpage.dlen[j] + 1); // typedatalen TODO: FSpage.type type
+      //assert(buffer.dlen[j] < 42); // LOL, unless we have stream-multipages
+      //p= OAQ(page + z, buffer.dlen[j] + 1); // typedatalen TODO: buffer.type type
 
       // - actual data
-      memcpy(p, FSpage.data[j], FSpage.dlen[j]);
-      p+= FSpage.dlen[j];
+      memcpy(p, buffer.data[j], buffer.dlen[j]);
+      p+= buffer.dlen[j];
       z= p - page;
     }
 
@@ -606,15 +609,15 @@ char packpage(char* page, word next) {
 	   towrite_skipoff, z,z-towrite_skipoff, prefix, klen);
     { char i= prefix; while(i--) putchar('.'); }
     fputqsn(key+prefix, klen-prefix, stdout);
-    printf("\t  @%02x DATA[%u]: ", dataoff, FSpage.dlen[j]);
-    fputqsn(FSpage.data[j], FSpage.dlen[j], stdout);
+    printf("\t  @%02x DATA[%u]: ", dataoff, buffer.dlen[j]);
+    fputqsn(buffer.data[j], buffer.dlen[j], stdout);
     nl();
 
     saved+= prefix;
 
     // cleanup
-    FSpage.keys[j]= NULL;
-    free(FSpage.data[j]); FSpage.data[j]= NULL;
+    buffer.keys[j]= NULL;
+    free(buffer.data[j]); buffer.data[j]= NULL;
   }
 
   // END marker (should already be 0!)
@@ -623,7 +626,7 @@ char packpage(char* page, word next) {
   // TODO: 2 byte CRC of the page, add 2 bytes at end to make it 0x0000
 
   // return inext index to process, or 0 if done
-  j= (j >= FSpage.n)? 0: j;
+  j= (j >= buffer.n)? 0: j;
 
   // - print stats
   // TODO: add to "super index"
@@ -636,7 +639,7 @@ char packpage(char* page, word next) {
   free(firstKey);
   if (pkey != firstKey) free(pkey);
   // TODO: really needed?
-  if (j) FSpage.keys[j-1]= NULL;
+  if (j) buffer.keys[j-1]= NULL;
 
   return j;
 }
@@ -644,15 +647,15 @@ char packpage(char* page, word next) {
 void printPage() {
   char i;
   // overestimate; gives some slack!
-  int z= FSpage.totdlen + FSpage.totklen + FSpage.n * (256 / MAX_KEYS) + 4;
+  int z= buffer.totdlen + buffer.totklen + buffer.n * (256 / MAX_KEYS) + 4;
   printf("==== OAFS PAGE: n: %2d maxklen: %2d totklen: %3d totdlen: %3d est: %3d\n",
-	 FSpage.n, FSpage.maxklen, FSpage.totklen, FSpage.totdlen, z);
-  for(i=0; i<FSpage.n; ++i) {
-    printf("%2d:", FSpage.klen[i]);
-    fputqsnw(FSpage.keys[i], FSpage.klen[i], stdout, 20);
-    //printf("  %5x %02x  %2d:", FSpage.ts  [i], FSpage.type[i], FSpage.dlen[i] );
-    printf("  %5x %2d:", FSpage.ts[i], FSpage.dlen[i] );
-    fputqsnw(FSpage.data[i], FSpage.dlen[i], stdout, 20);
+	 buffer.n, buffer.maxklen, buffer.totklen, buffer.totdlen, z);
+  for(i=0; i<buffer.n; ++i) {
+    printf("%2d:", buffer.klen[i]);
+    fputqsnw(buffer.keys[i], buffer.klen[i], stdout, 20);
+    //printf("  %5x %02x  %2d:", buffer.ts  [i], buffer.type[i], buffer.dlen[i] );
+    printf("  %5x %2d:", buffer.ts[i], buffer.dlen[i] );
+    fputqsnw(buffer.data[i], buffer.dlen[i], stdout, 20);
     nl();
   }
 }
@@ -722,7 +725,7 @@ unsigned int insertlines(char* name) {
 
       // TODO: instead of looping till none, shift them up, and refill
       
-      FSpage.n= 0;
+      buffer.n= 0;
 
       // TODO: save "page"
       
