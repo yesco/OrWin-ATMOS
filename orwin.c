@@ -1343,6 +1343,14 @@ int main(int argc, char** argv) {
   
   newwin();
   start(app_charset);
+
+// TODO: open in -sim -oscar and crash, but can run later?
+#ifdef CRASH
+  newwin();
+  window(1, -1, 20-7, 10, green, black);
+  start(app_sh);
+#endif
+  
 #endif // DEMO
   
   scheduler();
