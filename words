@@ -1,5 +1,6 @@
 # not football's - it's redundant
 
-aspell -l en dump master | grep -v "'s$"
+aspell -l en dump master | grep -v "'s$" | sort
+
 
 

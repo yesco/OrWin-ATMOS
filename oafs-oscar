@@ -8,12 +8,13 @@ rm -f oafs.prg
 #./oscar -v -g -O0 -f=fil.oafs -dOSCAR64 oafs.c -gp -e
 
 # -- opt size
-#./oscar -v2 -g -Os -f=fil.oafs -dOSCAR64 oafs.c -gp
+./oscar -g -Os -f=fil.oafs -dOSCAR64 oafs.c -gp
 
 # -- size and opt
-./oscar -v2 -g -Os -f=fil.oafs -dOSCAR64 oafs.c -gp -e
+#./oscar -v2 -g -Os -f=fil.oafs -dOSCAR64 oafs.c -gp -e
 
-ls -l oafs.*
+ls -l oafs.prg
+
 
 
 

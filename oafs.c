@@ -316,7 +316,7 @@ char parseentry(char* page, char o) {
       entry.data= page + entry.dataoff + 1;
 
       assert(entry.data-xx==1);
-      printf("\n===== %ld =========\n", entry.data-xx);
+//      printf("\n===== %ld =========\n", entry.data-xx);
     }
 
   } else 
@@ -341,7 +341,7 @@ char parsepage(char* page) {
   // 4 byte header
   char i= 4;
 
-  prhexdump(page, 256, 16);
+  prhexdump(page, 128, 16);
   
   // TODO: 255 if error? lol
   if (page[0] != '$'+128) return 0;
@@ -352,10 +352,10 @@ char parsepage(char* page) {
   while(i) {
     char o= i;
     i= parseentry(page, i);
-    printf("  %02x-%02x d%u p%3u d%02x  ",
-	   o,
-	   entry.skipoff, entry.deleted, entry.prefix,
-	   entry.dataoff);
+    printf("%3s%02x-%02x p%02u @%02X  ",
+      entry.deleted?"DEL":"",
+      o, entry.skipoff,
+      entry.prefix, entry.dataoff);
     
     printf("  ts%x kL%3u > %*s",
       entry.ts, entry.klen, entry.prefix, "");

@@ -27,7 +27,7 @@ char* prhexline(char* a, unsigned int offset, char n, char style) {
       #ifdef HIBITINVERSE
         putchar( (d&0x80) | (c<32 && c>125 ? '.' : d) );
       #else
-        putchar( (c<32 || c>125 ? '.' : c>=128? '\'': d) );
+        putchar( (c<32 || c>125 ? '.' : c>=128? '\'': c) );
       #endif
     } while(--i);
   }

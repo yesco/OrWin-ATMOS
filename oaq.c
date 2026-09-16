@@ -933,26 +933,7 @@ char* QAOLS(char* s, int16_t *i) {
 // and doubling storage on plain sequences of zeroes,
 // we employ a simplistic RLE encoding, just for zeroes.
 
-#ifdef StrOAQ
-
-
-char* StrOAQ(char* p, char* s, int len) {
-  char zeroes= 0;
-  if (len==-1) s= strlen(s); // Plain C string (or "clean" UTF-8)
-  while(len--) {
-    if (*p= *s++) ++p;
-    else {
-      do {
-        ++zeroes; ++s;
-      } while(!(*p= *s) && zeroes<255 && len--);
-      *p++= zeroes; zeroes= 0;
-      *p++= *s++; --len;
-    }
-  }
-  *p++= 0;
-  *p++= 0;
-  return p;
-}
+#ifdef OAQ_STR
 
 #include <string.h>
 
@@ -984,9 +965,11 @@ char* QAOStr(char* p, char** ps) {
     memset(s+len, c, count | 1);
     len+= count;
   } while(count);
+
   return *ps= s;
 }
 
+#endif // OAQ_STR
 
 
 // testing code
