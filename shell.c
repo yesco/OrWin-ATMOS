@@ -654,8 +654,8 @@ void* tail(countstate* state, char* line) {
 ///////////////////////////////////////////////////
 // Variable manipulators
  
-// cc65: (- 36669 33462) = 3207 bytes = frickin hell!
-// osc : (- 23702 21969) = 1733 // was 2007 if not used doesn/t count!
+// cc65: (- 36660 33462) = 3198 bytes = frickin hell!
+// osc : (- 23690 21969) = 1721 // was 2007 if not used doesn/t count!
 //
 // cc65: 4065 free only... 7370 bytes with NO ENV...
  
@@ -666,7 +666,7 @@ void* tail(countstate* state, char* line) {
 //          126 vgeti, 202 vgets
 //          204 vseti, 173 vsets
 //           30 vevals
-//#define ENVVARS
+#define ENVVARS
  
 #ifndef ENVVARS
  
@@ -703,7 +703,7 @@ char vnth(char* name) {
     if ((nm= vars[i].name) && 0==strcmp(name, nm)) return i;
   }
   // not found - add var
-  if (nvar+1 >= MAX_VARS) return 0;
+  if (nvar >= MAX_VARS-1) return 0;
   ++nvar;
   vars[nvar].name= name;
   vars[nvar].val.sptr= NULL;
