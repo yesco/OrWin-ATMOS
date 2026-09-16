@@ -19,3 +19,16 @@
 size_t write(int fd, char* s, size_t count) {
   while(count-- >= 0) putchar(*s++);
 }
+
+#define HEAPMEM
+
+// no difference
+//#pragma heapsize(0)
+
+size_t heapfreex() {
+  //char* p= malloc(1);
+  return heapfree();
+}
+  
+#define _heapmemavail heapfreex
+#define _heapmaxavail heapfreex

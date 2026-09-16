@@ -18,8 +18,8 @@ void __fastcall__ free(void* block);
 int __fastcall__ posix_memalign(void** memptr, size_t alignment, size_t size);
 void __fastcall__ __heapadd(void* mem, size_t size);
 
-size_t _heapmemavail(void);
-size_t _heapmaxavail(void);
+///size_t _heapmemavail(void);
+//size_t _heapmaxavail(void);
 
 extern void* _heaporg;
 extern void* _heapptr;

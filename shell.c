@@ -657,8 +657,8 @@ void* tail(countstate* state, char* line) {
 ///////////////////////////////////////////////////
 // Variable manipulators
  
-// cc65: (- 36660 33462) = 3198 bytes = frickin hell!
-// osc : (- 23690 21969) = 1721 // was 2007 if not used doesn/t count!
+// cc65: (- 35460 33462) = 1998 bytes = frickin hell!
+// osc : (- 23710 21969) = 1741 // was 2007 if not used doesn/t count!
 //
 // cc65: 4065 free only... 7370 bytes with NO ENV...
  
@@ -673,15 +673,13 @@ void* tail(countstate* state, char* line) {
  
 #ifndef ENVVARS
  
-// dummies
+// dummies when not included
 #define let   dummyfun
 #define set   dummyfun
 #define print dummyfun 
 
 #else
  
-#include "qputs.c"
-
 // TODO: make it part of each "train"
 
 #define MAX_VARS 32
@@ -1254,6 +1252,8 @@ void gts(char* name) {
 void gti(char* name) {
   printf("%s: %d\n", name, vgeti(name));
 }
+
+#include "qputs.c"
 
 // 175 bytes cc65 (oscar removes if not called, lol)
 void vdump() {

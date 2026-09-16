@@ -271,5 +271,12 @@ extern char* wname(char winid);
 
   #define  __fastcall__
 
+extern size_t heapfreex();
+
+  #define _heapmemavail heapfreex
+  #define _heapmaxavail heapfreex
+
+
+
 #endif // OSCAR64
 
