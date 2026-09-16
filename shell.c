@@ -87,7 +87,7 @@ void* memdup(void* p, unsigned int bytes) {
 ////////////////////////////////////////////////////////////
 // line reuse
 
-#define LFREE(x) xfree(&(x))
+#define LFREE(x) xfree((void**)&(x))
 
 #if 0
 
@@ -652,11 +652,13 @@ void* tail(countstate* state, char* line) {
 
 
 ///////////////////////////////////////////////////
-// Variable manipluations
+// Variable manipulators
  
-// cc65: (- 37001 33450) = 3551 bytes = frickin hell!
+// cc65: (- 36669 33462) = 3207 bytes = frickin hell!
 // osc : (- 23702 21969) = 1733 // was 2007 if not used doesn/t count!
 //
+// cc65: 4065 free only... 7370 bytes with NO ENV...
+ 
 // LOC: 85 lines (/ 1733 85) ~ 20 bytes/line
 
  
@@ -664,7 +666,7 @@ void* tail(countstate* state, char* line) {
 //          126 vgeti, 202 vgets
 //          204 vseti, 173 vsets
 //           30 vevals
-#define ENVVARS
+//#define ENVVARS
  
 #ifndef ENVVARS
  
