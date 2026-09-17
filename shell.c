@@ -90,6 +90,8 @@ void* memdup(void* p, unsigned int bytes) {
 ////////////////////////////////////////////////////////////
 // line reuse
 
+extern char isliteral(const void* p);
+
 #define LFREE(x) xfree((void**)&(x))
 
 #if 0
@@ -100,7 +102,7 @@ void* memdup(void* p, unsigned int bytes) {
 
 void lfree(char* line) {
   if (line > EVENTS) free(line);
-  return 0;
+  return;
 }
 
 char* lstrdup(const char* s) {
@@ -118,11 +120,12 @@ char relen=0, *reuse= 0;
 // 13s iota ... ONLY SAVES 1s? barely worth the effort!!!
 // 10 should be according to CHEAPEST: in app_shell.c
 
-// save s if bigger
-// Always return 0, reassign var you passed in!
+// save S if bigger than reuse ptr!
+// Always return 0, to make easy return after disposal
 char* lfree(char* line) {
   char len;
 
+  if (isliteral(line)) return 0;
   if (line <= EVENTS) return 0;
   
   len= strlen(line);
@@ -658,7 +661,7 @@ void* tail(countstate* state, char* line) {
 // Variable manipulators
  
 // cc65: (- 35460 33462) = 1998 bytes = frickin hell!
-// osc : (- 23710 21969) = 1741 // was 2007 if not used doesn/t count!
+// osc : (- 23802 22061) = 1741 // was 2007 if not used doesn/t count!
 //
 // cc65: 4065 free only... 7370 bytes with NO ENV...
  
@@ -669,6 +672,7 @@ void* tail(countstate* state, char* line) {
 //          126 vgeti, 202 vgets
 //          204 vseti, 173 vsets
 //           30 vevals
+//
 #define ENVVARS
  
 #ifndef ENVVARS
@@ -708,9 +712,24 @@ char vnth(char* name) {
   // not found - add var
   if (nvar >= MAX_VARS-1) return 0;
   ++nvar;
-  vars[nvar].name= name;
+
+  // we make a copy if it's not a program literal!
+  vars[nvar].name= isliteral(name)? name: strdup(name);
   vars[nvar].val.sptr= NULL;
   return nvar;
+}
+
+void vcleanup() {
+  char i= nvar, *nm;
+  do {
+    if ((nm= vars[i].name)) {
+      if (*nm == '$') free(vars[i].val.ostr);
+      if (!isliteral(nm)) free(nm);
+    }
+  } while(--i);
+
+  nvar= 0;
+  memset(vars, 0, sizeof(vars));
 }
 
 // you can bind %var and _var
@@ -803,47 +822,45 @@ typedef struct varstate {
   cmdfun fun;
   char*  name;   // TODO: make it store (char*)(char)idx
   char   varidx; // TODO: use
-  char*  val;    // Owned if _VAR
+  char*  expr;    // Owned if _VAR
 } varstate;
 
 // "LET - Lexial EnvironmenT binding"
-// 397 : let, NATIVE_CODE:code
+//(397 : let, NATIVE_CODE:code)
+// 474 : let, NATIVE_CODE:code
 char* let(varstate* state, char* line) {
   if (!state) {
     char *name;
     state= STALLOC(varstate, let);
-    // We don't care the type!
-    name= nextStr(&line, (char*)"");
-    state->name= strdup(name);
-    state->varidx= vbind(name, &state->val);
-    // TODO: implicit eval? compile to vm bytecode!
 
-    // TODO: too complicated!
-    if (*name == '_') state->val= strdup(nextStr(&line, ""));
-    else vsetsfrom(name, nextStr(&line, ""));
-    
+    // varaible name to set to expr
+    name= state->name= strdup(nextStr(&line, (char*)""));
+    state->varidx= vnth(name);
+    state->expr= strdup(nextStr(&line, ""));
     return (char*)state;
+
   } else if (line==CLEANUP) {
-    // only own if _var (TODO: make cleaner)
-    //if (*vars[state->varidx].name == '_') lfree(state->val);
-    if (*state->name == '_') LFREE(state->val);
     LFREE(state->name);
+    LFREE(state->expr);
     return line;
   }
 
-  // TODO: wrap val in EVAL?
-  vsets(state->name, vevals(state->val));
+  vsets(state->name, vevals(state->expr));
   return line;
 }
 
 // printer
-
 typedef struct printstate {
   cmdfun fun;
   char** params;
 } printstate;
  
-// 463 : print, NATIVE_CODE:code
+// 457 : print, NATIVE_CODE:code
+// TODO: it's almost like many "let/set" - share logic?
+// TODO: or is this just CONCAT? LOL
+// actually, PRINT : have spaces between items (?)
+// actually, CONCAT: no spaces, lol!
+// ACTUALLY: they both are "JOIN" but with " " and ""!
 char* print(printstate* state, char* line) {
   if (!state) {
     char np= 0, *param[16]= {0}, *p;
@@ -1271,6 +1288,11 @@ void vdump() {
   putchar('\n');
 }
 
+// Dummy, lol. Make all copy!
+char isliteral(const void* p) {
+  return 0;
+}
+
 //int main(int argc, char** argv) {
 int main() {
   // Test string binding
@@ -1321,6 +1343,8 @@ int main() {
     
     putchar('\n'); vdump(); putchar('\n');
   }
+
+  vcleanup();
 
   printf("---- wrunsystrain: MOCK: pwd | terminal\n");
   

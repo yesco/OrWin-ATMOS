@@ -201,6 +201,16 @@ void loadwin(char* p) {
   free(r);
 }
 
+
+#define ISLITERAL
+extern void* _heaporg;
+//extern void* _heapptr;
+//extern void* _heapend;
+
+char isliteral(void* p) {
+  return (p < &_heaporg);
+}
+
 #define HEAPMEM
 size_t _heapmemavail(void);
 size_t _heapmaxavail(void);

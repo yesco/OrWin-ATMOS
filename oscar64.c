@@ -20,6 +20,16 @@ size_t write(int fd, char* s, size_t count) {
   while(count-- >= 0) putchar(*s++);
 }
 
+#include <stdint.h>
+
+#define ISLITERAL
+//extern char __heap_start[];
+extern char __heap_start;
+#define HEAP_START ((uint16_t)__heap_start)
+char isliteral(const void* p) {
+  return ((uint16_t)p > HEAP_START);
+}
+
 #define HEAPMEM
 
 // no difference
