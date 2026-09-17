@@ -8,9 +8,10 @@
 // - datamash qsv vsv
 
 // TODO: behaves differently,, like never ends for set/print?
-#define SHELLTRACE
+//#define SHELLTRACE
 
-#define SHELLINFO
+// prints internal line tokens in plain text
+//#define SHELLINFO
 //#define SHELLTEST
 
 #define MAX_TRAIN 16
@@ -72,7 +73,8 @@ void* memdup(void* p, unsigned int bytes) {
 
 // TODO: wtf? (2 bytes fail!)
 
-  char* r= malloc(bytes+2);
+//  char* r= malloc(bytes+2);
+  char* r= malloc(bytes);
 #ifdef __CC65__
 //  printf("BYTES=%5d\t%p\tAVAIL=%u\n", bytes, r, _heapmemavail());
 #endif
@@ -949,22 +951,22 @@ char* print(printstate* state, char* line) {
     return line;
   }
   
-
   if (line<=EVENTS) return line;
   
-  //printf("PRINT: "); shprint(line);
   // For every data return, print a line fill in params
+  // TODO: move  to sarrevals()
   {
     char tmp[128]= {0}; // TODO: use dstr!
     char** p= state->params;
     char* ln= line;
     char* x;
+    char n= 255;
 
-    // TODO: varrevals(p, *line)
+    // TODO: vevalarrs(p, *line)
     while(*p) {
       //printf("\t%p : %s => %s\n", p, *p, vgets(*p));
       x= *p;
-      if (*x!='^') strcat(tmp, " "); else ++x;
+      if (++n) if (*x!='^') strcat(tmp, " "); else ++x;
       strcat(tmp, vevals(x, &line));
       ++p;
     }
@@ -1021,7 +1023,7 @@ char* stats(StatsState* state, char* line) {
   // End Of Stream => report
 
 #ifdef SHELLINFO
-  printf("  LINE:"); shprint(line);
+//  printf("  LINE:"); shprint(line);
 #endif
 
   if (state->done) return (lfree(line),EOS);
@@ -1031,7 +1033,6 @@ char* stats(StatsState* state, char* line) {
     // TODO: only runs during trace" ???
 
     char report[128]= {0};
-    printf("HERE!\n");
     state->avg    = state->sum / state->n;
     state->var    = (state->sqsum-((state->sum*state->sum)/state->n))/state->n;
 
@@ -1039,7 +1040,7 @@ char* stats(StatsState* state, char* line) {
 //    state->stddev = sqrt(var);
 
     // TODO: median, histogram?
-    sprintf(report, "count:\t%u\nmin:\t%d\nmax:\t%d\nsum:\t%d\nsqsum:\t%d\n%avg:\t%d\n%median:\t%d\nvar:\t%d\nstddev:\t%d",
+    sprintf(report, "count:\t%u\nmin:\t%d\nmax:\t%d\nsum:\t%d\nsqsum:\t%d\navg:\t%d\nmedian:\t%d\nvar:\t%d\nstddev:\t%d",
       state->n, state->min, state->max, state->sum, state->sqsum, state->avg, state->median, state->var, state->stddev);
     state->done= 1;
     return strdup(report);
@@ -1244,12 +1245,34 @@ void* commands[]= {
 
 ////////////////////////////////////////////////////////////
 
+#ifdef SHELLINFO
+char* taskname(void* fun) {
+  char**  n= (char**)cmdnames;
+  cmdfun* f= (cmdfun*)commands;
+  while(*n && *f) {
+    if (*f==fun) return *n;
+    ++n; ++f;
+  }
+  return "-N/A-";
+}  
+#endif
+
 char* wtrainstep(cmdtrain** train, char* line) {
   cmdfun *fp;
   
+#ifdef SHELLINFO
+//  printf(">>> %s\n", taskname(*fp));
+#endif
+
+//  if (!(fp=**train)) return line; // not rigth? was EOS = not right!
   if (!(fp=**train)) return EOS;
   line= (*fp)(fp, line);
   if (line) ++*train; else --*train;
+
+#ifdef SHELLINFO
+  printf("> %s => ", taskname(*fp));
+  shprint(line); 
+#endif  
 
   return line;
 }
@@ -1267,7 +1290,7 @@ int wrunsystrain(cmdtrain* train) {
 #if 1
   do {
     line= wtrainstep(&train, line);
-  } while(line!=EOS);
+  } while(*train);
 #else
   while((fp=*train)) {
     line= (*fp)(fp, line);
@@ -1595,7 +1618,7 @@ int main() {
   // NOTE: FISH ^$foo canNOT write FISH^$foo !
   tsystem("iota 1 3 | set $foo fish | print $foo $* ^FISH ^$foo Iota: ^$++ None: ^$++| terminal");  
 
-  tsystem("iota 1 100 | stats | print max= $max sum= $sum $@ | terminal");
+  tsystem("iota 1 100 | stats | print max= %max sum= %sum $* | terminal");
   
   //wsystem("ls | head -3 | terminal");
 
