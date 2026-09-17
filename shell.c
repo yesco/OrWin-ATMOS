@@ -866,6 +866,8 @@ char* vevals(char* x, char** pline) {
   else                           return vgets(x);
 }       
 
+// TODO: add formattting %.3foo $-7bar %05i - lol!
+
 
 typedef struct varstate {
   cmdfun fun;
@@ -917,12 +919,10 @@ typedef struct printstate {
   char** params;
 } printstate;
  
+// actually, PRINT is CONCAT w spaces, or foo ^bar no space!
+// (SPRINTF, how?) "%03.4foo" lol?
+//
 // 457 : print, NATIVE_CODE:code
-// TODO: it's almost like many "let/set" - share logic?
-// TODO: or is this just CONCAT? LOL
-// actually, PRINT : have spaces between items (?)
-// actually, CONCAT: no spaces, lol!
-// ACTUALLY: they both are "JOIN" but with " " and ""!
 char* print(printstate* state, char* line) {
   if (!state) {
     char np= 0, *param[16]= {0}, *p, *endline= line+strlen(line);
@@ -960,6 +960,8 @@ char* print(printstate* state, char* line) {
     char** p= state->params;
     char* ln= line;
     char* x;
+
+    // TODO: varrevals(p, *line)
     while(*p) {
       //printf("\t%p : %s => %s\n", p, *p, vgets(*p));
       x= *p;
@@ -976,6 +978,27 @@ char* print(printstate* state, char* line) {
 
 #endif // ENVVARS
 
+///////////////////////////////////////////////////
+// Control structure words:
+//
+//    MATCH $foo $bar 
+//    ONCE
+//    REPEAT 7
+//    EMPTY cond
+//    NONE cond
+//    ALL cond
+//    AGGREGATE
+
+/*
+
+I've been considering an "if" or using "&&" and "||", but then one
+might need support () or at least { .. } hmmm. Lot's of hubris.
+
+Potentially, if it's just oneliners the match/once/repeat 7/empty
+operations may be enough.
+
+*/
+ 
 ///////////////////////////////////////////////////
 
 #ifdef INCLUDE_PS
