@@ -8,9 +8,9 @@
 // - datamash qsv vsv
 
 // TODO: behaves differently,, like never ends for set/print?
-//#define SHELLTRACE
+#define SHELLTRACE
 
-//define SHELLINFO
+#define SHELLINFO
 //#define SHELLTEST
 
 #define MAX_TRAIN 16
@@ -19,7 +19,6 @@
 #include <string.h>
 #include <ctype.h>
 #include <assert.h>
-
 #include <stdio.h>
 
 // TODO: make it a printable string?
@@ -181,7 +180,7 @@ void xfree(void** pp) {
 void shprint(char* line) {
   static char lastc= 0;
   
-#ifdef SHELLTRACE
+#if defined(SHELLTRACE) || defined(SHELLINFO)
   if (!line)         puts("*NULL*");    else
   if (line==EOS)     puts("*EOS*");     else
   if (line==CLEANUP) puts("*CLEANUP*"); else {
@@ -978,6 +977,101 @@ char* print(printstate* state, char* line) {
 
 #endif // ENVVARS
 
+
+#define SHELL_STATS_COMMAND
+#ifdef SHELL_STATS_COMMAND
+
+// Inside your stats state handler structure
+typedef struct {
+  cmdfun fun;
+  char done;
+  // TODO: float? oscar64 can do it
+  int n;
+  int min;
+  int max;
+  int sum;
+  int sqsum;
+  int samples[16];
+  // results
+  int avg;        // TODO: use 100x to get 2 decimals?
+  int median;
+  int var;
+  int stddev;
+} StatsState;
+
+char* stats(StatsState* state, char* line) {
+  if (!state) {
+    state= STALLOC(StatsState, stats);
+    state->min= 0x7fff;
+    state->max= 0x8000;
+
+    vbind("%count",  &state->n);
+    vbind("%min",    &state->min);
+    vbind("%max",    &state->max);
+    vbind("%sum",    &state->sum);
+    vbind("%sqsum",  &state->sqsum);
+    vbind("%avg",    &state->avg);
+    vbind("%median", &state->median);
+    vbind("%var",    &state->var);
+    vbind("%stddev", &state->stddev);
+    return (char*)state;
+
+  }
+  
+  // End Of Stream => report
+
+#ifdef SHELLINFO
+  printf("  LINE:"); shprint(line);
+#endif
+
+  if (state->done) return (lfree(line),EOS);
+  
+  if (line==EOS) {
+
+    // TODO: only runs during trace" ???
+
+    char report[128]= {0};
+    printf("HERE!\n");
+    state->avg    = state->sum / state->n;
+    state->var    = (state->sqsum-((state->sum*state->sum)/state->n))/state->n;
+
+// TODO:
+//    state->stddev = sqrt(var);
+
+    // TODO: median, histogram?
+    sprintf(report, "count:\t%u\nmin:\t%d\nmax:\t%d\nsum:\t%d\nsqsum:\t%d\n%avg:\t%d\n%median:\t%d\nvar:\t%d\nstddev:\t%d",
+      state->n, state->min, state->max, state->sum, state->sqsum, state->avg, state->median, state->var, state->stddev);
+    state->done= 1;
+    return strdup(report);
+  }
+  
+  if (line < EVENTS) return line;
+  
+  // Process one piece of data
+  { 
+    int v= atoi(line);
+    ++state->n;
+    state->sum+= v;
+    state->sqsum+= v*v;
+    if (v < state->min) state->min= v;
+    if (v > state->max) state->max= v;
+    
+    //printf("STATS: %u %d\n", state->n, v);
+    
+    // backgtrack to suck up  more
+    lfree(line);
+    return NULL;
+  }
+}
+ 
+
+// Sort sample_buffer and grab the middle index for the median approximation!
+
+
+#endif // SHELL_STATS
+
+
+
 ///////////////////////////////////////////////////
 // Control structure words:
 //
@@ -1114,6 +1208,7 @@ const char* cmdnames[]= {
   "pwd", "grep", "cat", "wc", "ls", "iota", "head", "tail",
   "ps",
   "set", "print",
+  "stats",
   "teeterminal", "terminal",
   
   //  "ls cat find "
@@ -1142,6 +1237,7 @@ void* commands[]= {
   pwd, grep, cat, wc, ls, iota, head, tail,
   ps,
   set, print,
+  stats,
   teeterminal, terminal,
   
 };
@@ -1499,7 +1595,10 @@ int main() {
   // NOTE: FISH ^$foo canNOT write FISH^$foo !
   tsystem("iota 1 3 | set $foo fish | print $foo $* ^FISH ^$foo Iota: ^$++ None: ^$++| terminal");  
 
+  tsystem("iota 1 100 | stats | print max= $max sum= $sum $@ | terminal");
+  
   //wsystem("ls | head -3 | terminal");
+
   
   return 0;
 }
