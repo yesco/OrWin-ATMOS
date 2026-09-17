@@ -7,8 +7,10 @@
 // - bc
 // - datamash qsv vsv
 
+// TODO: behaves differently,, like never ends for set/print?
 //#define SHELLTRACE
-//#define SHELLINFO
+
+//define SHELLINFO
 //#define SHELLTEST
 
 #define MAX_TRAIN 16
@@ -31,6 +33,10 @@
 
 #endif
 
+
+#ifdef __CC65__
+  extern size_t _heapmemavail(void);
+#endif
 
 typedef void* (*cmdfun)(void* state, char* line);
 
@@ -64,7 +70,13 @@ typedef struct pstate { cmdfun f; char* s; } pstate;
 #define PSTALLOC(fun, p) (state=STALLOC(pstate, fun), state->s=strdup(p), state)
 
 void* memdup(void* p, unsigned int bytes) {
-  char* r= malloc(bytes);
+
+// TODO: wtf? (2 bytes fail!)
+
+  char* r= malloc(bytes+2);
+#ifdef __CC65__
+//  printf("BYTES=%5d\t%p\tAVAIL=%u\n", bytes, r, _heapmemavail());
+#endif
   assert(r != NULL);
   return memcpy(r, p, bytes);
 }
@@ -90,7 +102,7 @@ void* memdup(void* p, unsigned int bytes) {
 ////////////////////////////////////////////////////////////
 // line reuse
 
-extern char isliteral(const void* p);
+extern char isliteral(void* p);
 
 #define LFREE(x) xfree((void**)&(x))
 
@@ -128,6 +140,7 @@ char* lfree(char* line) {
   if (isliteral(line)) return 0;
   if (line <= EVENTS) return 0;
   
+  // TODO: get actual size of allocation!
   len= strlen(line);
   if (!reuse || len > relen) {
     // it's bigger
@@ -234,6 +247,7 @@ void* cat(filestate* state, char* line) {
   size_t sz= 0;
 
   if (!state) {
+    return NULL;
     state= STALLOC(filestate, cat);
     if (!state) return NULL;
 
@@ -244,7 +258,7 @@ void* cat(filestate* state, char* line) {
     free(state);
     return NULL; // TODO: logic?
   } else if (line==CLEANUP) {
-    if (state->fil) fclose(state->fil);
+    if (state->fil) fclose(state->fil); state->fil= NULL;
     return NULL;
   }
 
@@ -679,7 +693,6 @@ void* tail(countstate* state, char* line) {
  
 // dummies when not included
 #define let   dummyfun
-#define set   dummyfun
 #define print dummyfun 
 
 #else
@@ -776,15 +789,6 @@ char* vgets(char* name) {
   return s? s: "";
 }
  
-// How to do different types?
-
-// 39 : veval, NATIVE_CODE:code
-char* vevals(char* expr) {
-// TODO: stringify?
-//  if (*expr == '%') return vgeti(expr);
-  return vgets(expr);
-}
-
 char* vsets(char* name, char* val);
  
 // 204 : vseti, NATIVE_CODE:code
@@ -817,6 +821,51 @@ char* vsetsfrom(char* name, char* val) {
 }
  
 
+////////////////////////////////////////////////////////////
+// variable commands
+
+/*
+  
+1. The Standard $ Special Parameters (The Basics)
+
+In POSIX shells,these are read-only macros maintained natively by the
+shell's state machine.
+
+$* and $@: All positional parameters. (In your code, mapping $* to the remaining raw string line matches classic Bourne shell behavior).
+$#: The number of positional parameters currently set (as a stringified integer).
+$?: The exit status of the last executed foreground command (crucial for && and || chaining).
+$$: The Process ID (PID) of the current shell instance. 
+$!: The Process ID (PID) of the most recently executed background command.
+$0: The name of the shell script or the shell invocation string itself.
+$1 to $9 (and ${10}): The explicit positional arguments.
+
+3. Esoteric Prefixes Found in Other Shells
+
+Depending on how much flavor you want to add to your shell, these
+exist in the wild:
+
+! History Expansion): Used by Bash/Zsh interactively.
+!! repeats the last command, and !$ grabs the last argument of the
+previous command.
+
+^ (Rc Shell / Es): The rc shell (Plan 9) uses ^ as an explicit string
+concatenation operator rather than a variable prefix, turning lists
+into flattened arrays
+
+*/
+
+// TDOO: nextStr quote '$foo' - what about 'foo$foo' - maybe split?
+// TODO: nextStr to break on ^ and do concat
+// TODO: varrevals (take an array and "concat" implicitly)
+//   but if get ^ no space, otherwise space
+    
+char* vevals(char* x, char** pline) {
+  // TODO: make more generic
+       if (0==strcmp(x, "$*"))   return *pline; // TODO: $@ ???
+  else if (0==strcmp(x, "$++"))  return nextStr(pline, ""); // shift
+  else                           return vgets(x);
+}       
+
 
 typedef struct varstate {
   cmdfun fun;
@@ -826,14 +875,14 @@ typedef struct varstate {
 } varstate;
 
 // "LET - Lexial EnvironmenT binding"
-//(397 : let, NATIVE_CODE:code)
-// 474 : let, NATIVE_CODE:code
-char* let(varstate* state, char* line) {
+//(397 : set, NATIVE_CODE:code)
+// 474 : set, NATIVE_CODE:code
+char* set(varstate* state, char* line) {
   if (!state) {
     char *name;
-    state= STALLOC(varstate, let);
+    state= STALLOC(varstate, set);
 
-    // varaible name to set to expr
+    // variable name to set to expr
     name= state->name= strdup(nextStr(&line, (char*)""));
     state->varidx= vnth(name);
     state->expr= strdup(nextStr(&line, ""));
@@ -845,8 +894,21 @@ char* let(varstate* state, char* line) {
     return line;
   }
 
-  vsets(state->name, vevals(state->expr));
-  return line;
+  if (line<=EVENTS) return line;
+  else {
+    char* oline= line;
+    char* endline= line+strlen(line);
+    //printf("SET:"); shprint(line);
+    //printf("xxx: %s %s\n", state->name, state->expr);
+
+    vsetsfrom(state->name, vevals(state->expr, &line));
+
+    if (line==oline) return line;
+    else if (line <= endline) {
+      // pass on what's left
+      endline= strdup(line); lfree(line); return endline;
+    } else return ""; // something
+  }
 }
 
 // printer
@@ -863,33 +925,51 @@ typedef struct printstate {
 // ACTUALLY: they both are "JOIN" but with " " and ""!
 char* print(printstate* state, char* line) {
   if (!state) {
-    char np= 0, *param[16]= {0}, *p;
-    state= STALLOC(varstate, let);
+    char np= 0, *param[16]= {0}, *p, *endline= line+strlen(line);
+    state= STALLOC(varstate, print);
     if (!state) return NULL;
     do {
       p= param[np++]= strdup(nextStr(&line, NULL));
-    } while(p!=NULL);
-    state->params= memdup(param, np*sizeof(char*));
+      //printf("\tprint %u %s\n", np, p);
+
+// TODO: give "error" at 16
+// TODO: nextStr doesn't know how to terminate!
+
+    //} while(p!=NULL && line < endline);
+    } while(line < endline);
+
+    state->params= memdup(param, (np+1)*sizeof(char*));
     if (!state->params) { free(state); return NULL; }
     return (char*)state;
+
   } else if (line==CLEANUP) {
-    // TODO: make our FREE(&var) do it!
+    char** p= state->params;
+    while(*p) LFREE(*p++);
+
     LFREE(state->params);
-    return NULL;
+    return line;
   }
   
-  if (line==EOS) return line;
 
+  if (line<=EVENTS) return line;
+  
+  //printf("PRINT: "); shprint(line);
   // For every data return, print a line fill in params
   {
     char tmp[128]= {0}; // TODO: use dstr!
     char** p= state->params;
+    char* ln= line;
+    char* x;
     while(*p) {
-      // vgets convers all var types as well as returns non-names!
-      strcat(tmp, vgets(*p));
+      //printf("\t%p : %s => %s\n", p, *p, vgets(*p));
+      x= *p;
+      if (*x!='^') strcat(tmp, " "); else ++x;
+      strcat(tmp, vevals(x, &line));
       ++p;
     }
-    lfree(line); // we don't care?
+    lfree(ln); // used up!
+
+    // TODO: "current" LINE should be set by system?
     return strdup(tmp);
   }
 }
@@ -1010,7 +1090,7 @@ void* terminal(simplestate* state, char* line) {
 const char* cmdnames[]= {
   "pwd", "grep", "cat", "wc", "ls", "iota", "head", "tail",
   "ps",
-  "set", "let", "print",
+  "set", "print",
   "teeterminal", "terminal",
   
   //  "ls cat find "
@@ -1038,7 +1118,7 @@ const char* cmdnames[]= {
 void* commands[]= {
   pwd, grep, cat, wc, ls, iota, head, tail,
   ps,
-  let, let, print,
+  set, print,
   teeterminal, terminal,
   
 };
@@ -1206,7 +1286,7 @@ int wrunsystrain(cmdtrain* train) {
 
     if (!state) {
       // TODO: ABORT stderr?
-      printf("Command %s init error gave NULL!\n", cmd);
+      printf("%%Command.init \"%s\" gave NULL!\n", cmd);
       return NULL;
     }
 
@@ -1258,7 +1338,7 @@ int wsystem(char* command) {
 #ifndef MAIN
  
 void tsystem(char* cmd) {
-  printf("---- %s\n", cmd);
+  printf("\n\n----(%u) %s\n", _heapmemavail(), cmd);
   system(cmd);
 }
   
@@ -1288,10 +1368,19 @@ void vdump() {
   putchar('\n');
 }
 
-// Dummy, lol. Make all copy!
-char isliteral(const void* p) {
-  return 0;
+// for test
+#ifdef __CC65__
+
+#define ISLITERAL
+extern void* _heaporg;
+//extern void* _heapptr;
+//extern void* _heapend;
+
+char isliteral(void* p) {
+  return (p < &_heaporg);
 }
+#endif // cc65
+
 
 //int main(int argc, char** argv) {
 int main() {
@@ -1380,6 +1469,12 @@ int main() {
 
   tsystem("cat numbers.txt | head | terminal");
   tsystem("cat numbers.txt | head -3 | terminal");  
+
+  // TODO: gives nothing! LOL
+  tsystem("set $foo fish | print $foo FISH $foo | terminal");  
+
+  // NOTE: FISH ^$foo canNOT write FISH^$foo !
+  tsystem("iota 1 3 | set $foo fish | print $foo $* ^FISH ^$foo Iota: ^$++ None: ^$++| terminal");  
 
   //wsystem("ls | head -3 | terminal");
   

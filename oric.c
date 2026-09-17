@@ -211,6 +211,7 @@ char isliteral(void* p) {
   return (p < &_heaporg);
 }
 
+
 #define HEAPMEM
 size_t _heapmemavail(void);
 size_t _heapmaxavail(void);
