@@ -983,23 +983,35 @@ char* print(printstate* state, char* line) {
 #define SHELL_STATS_COMMAND
 #ifdef SHELL_STATS_COMMAND
 
+// Must be 2^n for bit logic to work
+//#define SAMPLES 16
+#define SAMPLES 32
+ 
 // Inside your stats state handler structure
 typedef struct {
   cmdfun fun;
   char done;
   // TODO: float? oscar64 can do it
   int n;
+  int mask;
   int min;
   int max;
-  int sum;
-  int sqsum;
-  int samples[16];
+
+  // TODO: use isum as "truncated int"
+  long sum, sqsum;
+  int isum, isqsum;
+
+  int samples[SAMPLES];
   // results
   int avg;        // TODO: use 100x to get 2 decimals?
   int median;
   int var;
   int stddev;
 } StatsState;
+
+int cmpint(const void *a, const void *b) {
+  return *(const int*)b - *(const int *)a;
+}
 
 char* stats(StatsState* state, char* line) {
   if (!state) {
@@ -1021,25 +1033,26 @@ char* stats(StatsState* state, char* line) {
   }
   
   // End Of Stream => report
-
-#ifdef SHELLINFO
-//  printf("  LINE:"); shprint(line);
-#endif
-
   if (state->done) return (lfree(line),EOS);
-  
   if (line==EOS) {
-
-    // TODO: only runs during trace" ???
-
     char report[128]= {0};
     state->avg    = state->sum / state->n;
     state->var    = (state->sqsum-((state->sum*state->sum)/state->n))/state->n;
 
-// TODO:
-//    state->stddev = sqrt(var);
+    // TODO: overflow
+    state->isum   = state->sum;
+    state->isqsum = state->sqsum;
+    
+    // TODO: (no have sqrtr!)
+    //    state->stddev = sqrt(var);
 
-    // TODO: median, histogram?
+    // median histogram
+
+//TODO: if  n < SAMPLES...
+    
+    qsort(state->samples, 16, sizeof(int), cmpint);
+    state->median= state->samples[7];
+    
     sprintf(report, "count:\t%u\nmin:\t%d\nmax:\t%d\nsum:\t%d\nsqsum:\t%d\navg:\t%d\nmedian:\t%d\nvar:\t%d\nstddev:\t%d",
       state->n, state->min, state->max, state->sum, state->sqsum, state->avg, state->median, state->var, state->stddev);
     state->done= 1;
@@ -1051,14 +1064,21 @@ char* stats(StatsState* state, char* line) {
   // Process one piece of data
   { 
     int v= atoi(line);
-    ++state->n;
+
     state->sum+= v;
     state->sqsum+= v*v;
     if (v < state->min) state->min= v;
     if (v > state->max) state->max= v;
     
-    //printf("STATS: %u %d\n", state->n, v);
+    // with lower probability: insert at random position for median!
+    // Scale down probability precisely: 1 / (n + 1)
+    if ((state->mask|= state->n) < SAMPLES)
+      state->samples[state->n]= v;
+    else if ((rand() & (state->mask/2)) < SAMPLES) 
+      state->samples[rand()&(SAMPLES-1)]= v;
     
+    ++state->n;
+
     // backgtrack to suck up  more
     lfree(line);
     return NULL;
@@ -1618,7 +1638,7 @@ int main() {
   // NOTE: FISH ^$foo canNOT write FISH^$foo !
   tsystem("iota 1 3 | set $foo fish | print $foo $* ^FISH ^$foo Iota: ^$++ None: ^$++| terminal");  
 
-  tsystem("iota 1 100 | stats | print max= %max sum= %sum $* | terminal");
+  tsystem("iota 1 1000 | stats | print max= %max sum= %sum $* | terminal");
   
   //wsystem("ls | head -3 | terminal");
 
