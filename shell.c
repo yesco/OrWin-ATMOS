@@ -436,8 +436,12 @@ void* ls(lsstate* state, char* line) {
     if (0 != open_dir(&state->dir, (line && *line)? line: ".")) {
       state->dir_open = 1;
       REQUEST_CLEANUP();
+      // all good
+      // TODO: size? more attributes? timestamp"
+      vbind("_name", &state->name);
       return state;
     }
+    // fail
     free(state);
     return NULL;
   }
@@ -458,7 +462,7 @@ void* ls(lsstate* state, char* line) {
   } while(!wildmatch(state->pat, state->entry.name));
 
   // found a matching one
-  return lstrdup(state->entry.name);
+  return lstrdup(state->name= state->entry.name);
 }
 
 #else // UNIX
@@ -471,8 +475,11 @@ void* ls(lsstate* state, char* line) {
  
 typedef struct lsstate {
   cmdfun f;
+
   DIR* dir;
   char* pat;
+
+  char* name;
 } lsstate;
 
 void* ls(lsstate* state, char* line) {
@@ -496,7 +503,10 @@ void* ls(lsstate* state, char* line) {
 
     state->dir = opendir((line && *line)? line: ".");
     REQUEST_CLEANUP();
+    // TODO: size? more attributes? timestamp"
+    vbind("_name", state->name);
     if (state->dir) return state;
+    // fail
     free(state);
     return NULL;
   }
@@ -517,7 +527,7 @@ void* ls(lsstate* state, char* line) {
   } while(!wildmatch(state->pat, de->d_name));
 
   // found a matching one
-  return lstrdup(de->d_name);
+  return lstrdup(state->name= de->d_name);
 }
 
 #endif // CC65 ... UNIX
@@ -999,7 +1009,6 @@ typedef struct {
 
   // TODO: use isum as "truncated int"
   long sum, sqsum;
-  int isum, isqsum;
 
   int samples[SAMPLES];
   // results
@@ -1013,6 +1022,8 @@ int cmpint(const void *a, const void *b) {
   return *(const int*)b - *(const int *)a;
 }
 
+#define LITTLE_ENDIAN (1 == *(unsigned char *)(&(const int){1}))
+
 char* stats(StatsState* state, char* line) {
   if (!state) {
     state= STALLOC(StatsState, stats);
@@ -1022,12 +1033,20 @@ char* stats(StatsState* state, char* line) {
     vbind("%count",  &state->n);
     vbind("%min",    &state->min);
     vbind("%max",    &state->max);
-    vbind("%sum",    &state->sum);
-    vbind("%sqsum",  &state->sqsum);
     vbind("%avg",    &state->avg);
     vbind("%median", &state->median);
     vbind("%var",    &state->var);
     vbind("%stddev", &state->stddev);
+
+    // truncated
+#ifdef LITTLE_ENDIAN
+    vbind("%sum",    &state->sum);
+    vbind("%sqsum",  &state->sqsum);
+#else
+    vbind("%sum",    ((int*)&state->sum)[1]);
+    vbind("%sqsum",  ((int*)&state->sqsum)[1]);
+#endif
+
     return (char*)state;
 
   }
@@ -1039,10 +1058,6 @@ char* stats(StatsState* state, char* line) {
     state->avg    = state->sum / state->n;
     state->var    = (state->sqsum-((state->sum*state->sum)/state->n))/state->n;
 
-    // TODO: overflow
-    state->isum   = state->sum;
-    state->isqsum = state->sqsum;
-    
     // TODO: (no have sqrtr!)
     //    state->stddev = sqrt(var);
 
@@ -1053,7 +1068,7 @@ char* stats(StatsState* state, char* line) {
     qsort(state->samples, 16, sizeof(int), cmpint);
     state->median= state->samples[7];
     
-    sprintf(report, "count:\t%u\nmin:\t%d\nmax:\t%d\nsum:\t%d\nsqsum:\t%d\navg:\t%d\nmedian:\t%d\nvar:\t%d\nstddev:\t%d",
+    sprintf(report, "count:\t%u\nmin:\t%d\nmax:\t%d\nsum:\t%ld\nsqsum:\t%ld\navg:\t%d\nmedian:\t%d\nvar:\t%d\nstddev:\t%d",
       state->n, state->min, state->max, state->sum, state->sqsum, state->avg, state->median, state->var, state->stddev);
     state->done= 1;
     return strdup(report);
@@ -1066,7 +1081,7 @@ char* stats(StatsState* state, char* line) {
     int v= atoi(line);
 
     state->sum+= v;
-    state->sqsum+= v*v;
+    state->sqsum+= ((long)v)*v;
     if (v < state->min) state->min= v;
     if (v > state->max) state->max= v;
     
@@ -1079,7 +1094,7 @@ char* stats(StatsState* state, char* line) {
     
     ++state->n;
 
-    // backgtrack to suck up  more
+    // backtrack to suck up more
     lfree(line);
     return NULL;
   }
@@ -1135,20 +1150,51 @@ char* wstate(char* ret) {
 #include <cc65.h> // for udiv32by16r16
 #endif
  
+typedef struct psstate {
+  cmdfun f;
+  int i;
+  
+  int pid; // "window id"
+  int cpu;
+  int mem;
+  int size;
+  int ticks;
+  int mins;
+  int secs;
+  char* name;
+  char* args;
+} psstate;
+ 
 void* ps(simplestate* state, char* line) {
   char s, p, ln[60]; // ... shell args...
   long packed_result;
   Window *w;
   unsigned int m;
   
-  if (!state) return STALLOC(simplestate, ps);
+  if (!state) {
+    state= STALLOC(psstate, ps);
+    vbind("%pid", &state->pid);
+    vbind("%cpu", &state->cpu);
+    vbind("%mem", &state->mem);
+    vbind("%size", &state->size);
+    vbind("%ticks", &state->ticks);
+    vbind("%mins", &state->mins);
+    vbind("%secs", &state->secs);
+    vbind("_name", &state->name);
+    vbind("_args", &state->args);
+    return state;
+  }
 
+  // return header before data line
   if (state->i++ == 0)
     return strdup(
 //----------------------------------------
  " PID %C #M  SZ  ST  TIME CMD");
 //4203 27 33 437 KEY 27:30 foobar -a"
 
+  // return data lines
+
+  // - walk ot next live window/process structure
   w= NULL;
   p= state->i - 1;
   while(p < nwin+1) {
@@ -1156,14 +1202,15 @@ void* ps(simplestate* state, char* line) {
     if (w->status) break;
     w= NULL; ++p;
   }
-
   state->i= p + 1;
+
+  // done?
   if (!w) return EOS;
   
-#ifdef __CC65__  
+#ifdef __CC65__
+  // TODO: does this actually save time/code?
   // A single assembly loop calculates both values simultaneously
   packed_result = udiv32by16r16(w->ticks/CLOCKS_PER_SEC, 60);
-
   // Extract the pieces from the 32-bit packed register
   m = (unsigned int)(packed_result & 0xFFFF);
   s = (unsigned int)(packed_result >> 16);
@@ -1177,6 +1224,15 @@ void* ps(simplestate* state, char* line) {
   #define snprintf(buf, size, ...) sprintf(buf, __VA_ARGS__)
 #endif
 
+  state->p     = 0x4200 | p;
+  state->cpu   = w->cpu;
+  state->mem   = w->nalloc;
+  state->size  = -1; // w->abytes
+  state->mins  = m;
+  state->secs  = s;
+  state->name  = wname(p);
+  state->args  = w->args;
+  
   // WARNING! sizeof not used!
   snprintf(ln, sizeof(ln), "42%02d %2d %2d%4d %.3s%3d:%02d %s %s"
 	   , p
@@ -1185,14 +1241,14 @@ void* ps(simplestate* state, char* line) {
 	   , -1 //w->abytes,
 	   , wstate(w->ret)
 	   , m, s
-	   , wname(p), w->args
+	   , state->name, w->args
 	   );
 
   // enable if disable shprint, lol
   //puts(ln); return 0;
     
+  lfree(line);
   return lstrdup(ln);
-  (void)line;
 }
 
 #else
@@ -1443,12 +1499,11 @@ int wrunsystrain(cmdtrain* train) {
     traincleanbits<<= 1;
 
     // This calls the INIT for the command!
-    // (state==0)
     arr[++i]= state= (*f)(NULL, line);
 
     if (!state) {
       // TODO: ABORT stderr?
-      printf("%%Command.init \"%s\" gave NULL!\n", cmd);
+      printf("%%command.init \"%s %s\" gave NULL!\n", *n, line);
       return NULL;
     }
 
