@@ -140,6 +140,7 @@ char* lfree(char* line) {
 
   if (isliteral(line)) return 0;
   if (line <= EVENTS) return 0;
+  if (line == ""); return 0;
   
   // TODO: get actual size of allocation!
   len= strlen(line);
@@ -744,11 +745,14 @@ char vnth(char* name) {
 }
 
 void vcleanup() {
-  char i= nvar, *nm;
+  char i= nvar, *name;
   do {
-    if ((nm= vars[i].name)) {
-      if (*nm == '$') free(vars[i].val.ostr);
-      if (!isliteral(nm)) free(nm);
+    if ((name= vars[i].name)) {
+
+      // free $vars strings owned _var is owned by process
+      if (*name == '$') lfree(vars[i].val.ostr);
+      lfree(name);
+
     }
   } while(--i);
 
@@ -820,7 +824,7 @@ char* vsets(char* name, char* val) {
   char n= vnth(name), **sp;
   if (*name == '%') { vseti(name, atoi(val)); return val; }
   if (*name != '$') return "";
-  lfree(*(sp=&vars[n].val.ostr));
+  lfree(*(sp= &vars[n].val.ostr));
   return (*sp= val);
 }
 
@@ -883,9 +887,11 @@ char* vevals(char* x, char** pline) {
 typedef struct varstate {
   cmdfun fun;
   char*  name;   // TODO: make it store (char*)(char)idx
-  char   varidx; // TODO: use
   char*  expr;    // Owned if _VAR
 } varstate;
+
+
+// TODO: only works for $var if not exist, not %var!!!
 
 // "LET - Lexial EnvironmenT binding"
 //(397 : set, NATIVE_CODE:code)
@@ -896,8 +902,12 @@ char* set(varstate* state, char* line) {
     state= STALLOC(varstate, set);
 
     // variable name to set to expr
+    // TODO: shouldn't need this strdup and name?
     name= state->name= strdup(nextStr(&line, (char*)""));
-    state->varidx= vnth(name);
+
+    // TODO: only works for $var if not exist, not %var!!!
+    assert(*name == '$');
+
     state->expr= strdup(nextStr(&line, ""));
     return (char*)state;
 
@@ -909,18 +919,18 @@ char* set(varstate* state, char* line) {
 
   if (line<=EVENTS) return line;
   else {
-    char* oline= line;
-    char* endline= line+strlen(line);
+    char* origline= line;
+    char* endline = line+strlen(line);
     //printf("SET:"); shprint(line);
     //printf("xxx: %s %s\n", state->name, state->expr);
 
     vsetsfrom(state->name, vevals(state->expr, &line));
 
-    if (line==oline) return line;
+    if (line==origline) return line;
     else if (line <= endline) {
       // pass on what's left
       endline= strdup(line); lfree(line); return endline;
-    } else return ""; // something
+    } else return ""; // something, lol
   }
 }
 
@@ -989,6 +999,44 @@ char* print(printstate* state, char* line) {
 
 #endif // ENVVARS
 
+typedef struct varliststate {
+  cmdfun fun;
+  
+  int i;
+  char* name;
+  char* vstr;
+  int   vint;
+} varliststate;
+
+char* varlist(varliststate* state, char* line) {
+  if (!state) {
+    state= STALLOC(varliststate, varlist);
+    vbind("%vindex", &state->i);
+    vbind("_vname",  &state->name);
+    vbind("_vstr",   &state->vstr);
+    vbind("%vint",   &state->vint);
+    return (char*)state;
+  }
+  if (line && line<EVENTS) return line;
+
+  // if done: reset and request next
+  if (state->i >= nvar) { lfree(line); state->i= 0; return NULL; }
+  // if first: return the result
+  if (!state->i++) return line;
+
+  // and then every variable for that line
+  state->name= vars[state->i - 1].name;
+  // slow, lol
+  state->vint= vgeti(state->name);
+  state->vstr= vgets(state->name);
+
+  lfree(line);
+  {
+    char* ln= malloc(1+1+strlen(state->name)+2+5+2+strlen(state->vstr));
+    sprintf(ln, "\t%s\t=%6d  \"%s\"", state->name, state->vint, state->vstr);
+    return ln;
+  }
+}  
 
 #define SHELL_STATS_COMMAND
 #ifdef SHELL_STATS_COMMAND
@@ -1284,11 +1332,11 @@ void* terminal(simplestate* state, char* line) {
 const char* cmdnames[]= {
   "pwd", "grep", "cat", "wc", "ls", "iota", "head", "tail",
   "ps",
-  "set", "print",
+  "set", "print", "varlist",
   "stats",
   "teeterminal", "terminal",
   
-  //  "ls cat find "
+  // "ls cat find "
   //"grep cut tr sed " 
   //"echo "
   //"tail head diff uniq comm "
@@ -1313,7 +1361,7 @@ const char* cmdnames[]= {
 void* commands[]= {
   pwd, grep, cat, wc, ls, iota, head, tail,
   ps,
-  set, print,
+  set, print, varlist,
   stats,
   teeterminal, terminal,
   
@@ -1529,7 +1577,7 @@ int wrunsystrain(cmdtrain* train) {
 }
 
 
-int wsystem(char* command) {
+int wsystem(char* command) { vcleanup(); {
   char* cmd= strdup(command); // for dstructive chopping
   char i;
   unsigned int cleanbits= 0;
@@ -1545,7 +1593,7 @@ int wsystem(char* command) {
 
   shellcleanup(train, i, cleanbits);
   return r;
-}
+} }
 
 
 #define system wsystem
@@ -1693,8 +1741,15 @@ int main() {
   // NOTE: FISH ^$foo canNOT write FISH^$foo !
   tsystem("iota 1 3 | set $foo fish | print $foo $* ^FISH ^$foo Iota: ^$++ None: ^$++| terminal");  
 
-  tsystem("iota 1 1000 | stats | print max= %max sum= %sum $* | terminal");
+  tsystem("iota 1 1000 | stats | print max= %max sum= %sum $* | varlist | print %vindex _vname %vint _vstr | terminal");
+//  tsystem("iota 1 1000 | stats | print max= %max sum= %sum $* | varlist | terminal");
+
+  tsystem("iota 1 1000 | stats | terminal");
   
+  // - not work for %i at least not to define
+  //tsystem("iota 1 3 | set %i $*| varlist | terminal");
+  tsystem("iota 1 3 | set $i $*| varlist | terminal");
+
   //wsystem("ls | head -3 | terminal");
 
   
