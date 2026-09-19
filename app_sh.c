@@ -58,7 +58,7 @@ void* app_sh(void* voidapp, char* line) {
       //   ??? no savings!
       // 11s - reuse but no print (print: 2s)
 
-      wins[wcur].args= line= strdup("iota 1 1000|grep 7|terminal");
+      wins[wcur].args= line= strdup("iota 1 1000|grep 7");
 #else
 
 #if 0      
@@ -111,13 +111,17 @@ void* app_sh(void* voidapp, char* line) {
     // doesn/t do antyhing if already defined
     //    window(-1, -1, 20-6, 10, green, black);
     // TODO: or is it a terminal? LOL
-    wstatus(-1, line? line: "Shell");
+    //window(10, 10, 10, 10, -1, -1);
 
     // may not need store!
     // TODO: it's winp->args!!!!
-    app->origcmd= strdup(line);
-    run(app, line); // consumed!
+    {
+      app->origcmd= malloc(strlen(line)+1+10);
+      sprintf(app->origcmd, "%s |terminal", line);
+    }
 
+    wstatus(-1, app->origcmd? app->origcmd: "Shell");
+    run(app, app->origcmd);
     return app;
 
   } else if (line == CLEANUP) {
@@ -125,6 +129,10 @@ void* app_sh(void* voidapp, char* line) {
     free(app->origcmd); free(app->line); free(app->train);
   }
 #if 0
+// ???
+  
+// TODO: inject in "first"?
+//   or monitor which one request input?
   else if (KEYEVENT(line))
     ;
   else if (line < EOS)
@@ -139,7 +147,7 @@ void* app_sh(void* voidapp, char* line) {
     //  14s wsystem()
     // ~22s one step per call here
     //char n= 1; // ~22s
-    char n= 10; // ~16s 
+    char n= 10; // ~16s
     //char n= 100; // ~14w
 
     // TODO: make it run 2-4 ms, then YIELD
@@ -150,6 +158,7 @@ void* app_sh(void* voidapp, char* line) {
       app->line= wtrainstep(&app->loco, app->line);
       //} while(--n && app->line != EOS);
       ++n;
+      // TODO: move this to wtrainstep loop, to save CPU!
     } while(KEEPRUNNING && app->line != EOS);
     //    putchar('0'+n);
 

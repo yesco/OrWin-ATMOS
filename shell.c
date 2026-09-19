@@ -281,7 +281,7 @@ void shprint(char* line) {
 //          204 vseti, 173 vsets
 //           30 vevals
 //
-#define ENVVARS
+//#define ENVVARS
  
 #ifndef ENVVARS
  
@@ -1371,8 +1371,78 @@ void* ps(psstate* state, char* line) {
 #endif // INCLUDE_PS
 
 ///////////////////////////////////////////////////
+// terminal IO editing
 
+#define MAX_EDIT 80
+ 
+typedef struct editlinestate {
+  cmdfun fun;
+  
+  char* s;
+  char i;
+} editlinestate;
+  
+#ifndef WAITKEY
+  #define WAITKEY 0
+#endif
+ 
+#ifndef KEYEVENT(e)
+  // hack
+  #define KEYEVENT(e) 1
+#endif
 
+void* editline(editlinestate* state, char* line) {
+  if (!state) {
+    return STALLOC(editlinestate, editline);
+  } //else if (!KEYEVENT(line)) return WAITKEY;
+  else {
+    // generealize... dstr?
+    char c, *s= state->s, len= s? strlen(s): 0;
+    state->s= s= realloc(state->s, (len | 15) + 17); // hmmm
+    if (state->i >= MAX_EDIT) return WAITKEY;
+    s[state->i]= 0;
+    
+    lfree(line);
+    
+    // TODO: wraps if too long
+    printf("\r> %s", s);
+    //c= cursorgetc();
+    c= getchar();
+
+    // Key input
+    if (c==27 || c&0x80 || c=='C'-'@') {
+      // ESC RET FUNC- CTRL-C (BREAK)
+      lfree(s);
+      state->s= NULL;
+      state->i= 0;
+      return NULL;
+    } else if (c==10 || c==13 || c=='D'-'@') {
+      // RETURN CTRL-D
+      char *r= s;
+      state->s= NULL;
+      state->i= 0;
+      putchar('\n');
+      return r;
+      // TODO: ^P get previous line (save it!)
+    } else if (c=='U'-'@') {
+      // clear line CTRL-U
+      printf("\\\n");
+      s[state->i= 0]= 0;
+    } else if (c==127 || c==8) {
+      // backspace
+      printf("\b \b");
+    } else {
+      // insert char
+      s[state->i++]= c;
+      s[state->i]= 0;
+
+      putchar(c);
+    }
+
+    return WAITKEY;
+  }
+}
+    
 
 // more like "tee -"
 void* teeterminal(simplestate* state, char* line) {
@@ -1398,7 +1468,7 @@ const char* cmdnames[]= {
   "ps",
   "set", "print", "varlist",
   "stats",
-  "teeterminal", "terminal",
+  "teeterminal", "terminal", "editline", // == readline?
   
   // "ls cat find "
   //"grep cut tr sed " 
@@ -1427,7 +1497,7 @@ void* commands[]= {
   ps,
   set, print, varlist,
   stats,
-  teeterminal, terminal,
+  teeterminal, terminal, editline,
   
 };
 
@@ -1713,6 +1783,9 @@ char isliteral(void* p) {
 
 //int main(int argc, char** argv) {
 int main() {
+  tsystem("editline | print foo $* bar | terminal");
+exit(3);
+
   // Test string binding
   {
     char* bar= "fish";
@@ -1829,7 +1902,8 @@ exit(0);
   //tsystem("iota 1 1000 | wc | terminal");
   tsystem("iota 1 1000 | terminal");
 
-  free("FISH");
+  tsystem("iota 1 17 | terminal");
+
   
   // crash
   // - not work for %i at least not to define

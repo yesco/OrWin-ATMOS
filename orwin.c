@@ -739,6 +739,8 @@ char window(
     while((o=overlap(x, y, w, h)) && y<29-h) {
       // doesn't work
       //gotoxy(28, 27); printf("(%2d %2d)", x, y);
+
+      // TODO: make faster!
       if (++x + w + 4 > 39) { ++y; x= 2; }
     }
     if (o) return 0;
@@ -918,6 +920,8 @@ void apprun() {
     putchar(found? green: white);
     putz(line); wclreol();
 
+    // TODO: ORIC specific k, lol
+    //   only needed as we're modal here
     c= cursorgetc(); k= *(char*)0x209; // TODO: abstract
 
     if (c==13 || c==27 || k==0xa5) break; // RET ESC FUNC
@@ -928,7 +932,8 @@ void apprun() {
       line[--i]= 0; putchar(127); continue;
     } 
 
-    if (i>= 20) continue;
+    // TODO: what? length 20? LOL
+    if ( i>= 20) continue;
     // TODO: some bug where print one char outside of window!
     line[i++]= c;
     putchar(c);
@@ -938,12 +943,14 @@ void apprun() {
   loadwin(tmp);
   setwin(w);
 
-  if (c == 13 && found) {
-    //  printf("\nCHOOSEN: >%s<\n", line);
-
+  if (c == 13) {
     // launch!
     newwin();
-    startline(found->fun, spc? spc+1: NULL);
+
+    if (found)
+      startline(found->fun, spc? spc+1: NULL);
+    else
+      startline(app_sh, line);
 
     //cprintf("\n\n\n\n\n[WIN.%d: %p %p]", wcur, winp->state, winp->fun);
 
@@ -951,15 +958,11 @@ void apprun() {
     if (!winp->w) {
       char bg, fg;
 
-      // pick colors w good contrast
-      do {
-        bg= rand() & 7;
-        fg= rand() & 7;
-      } while(IS_BAD_CONTRAST(fg, bg));
-    
       // default tileable window size
-      window(-1, -1, WMAX, HMAX, bg, fg);
-      wstatus(-1, (char*)found->name);
+      // TODO: WMAX HMAX bad names... lol
+      window(-1, -1, WMAX, HMAX, -1, -1);
+      //wstatus(-1, (char*)found->name);
+      wstatus(-1, winp->args);
       wdecorate();
     }
   }

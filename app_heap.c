@@ -93,13 +93,13 @@ void* app_heap(void* voidapp, char* line) {
   if (!app) {
     window(3, 17, 32, 10, yellow, black);
     wstatus(-1, "Heap Viewer");
-    last_heaporg= 0;
+    last_heaporg= NULL;
     return calloc(sizeof(APP), 1);
   }
   // any key - trigger redraw
   if (KEYEVENT(line)) {
     clrscr();
-    last_heaporg= 0;
+    last_heaporg= NULL;
   }
   
   // check if any change
