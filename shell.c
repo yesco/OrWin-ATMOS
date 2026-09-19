@@ -22,6 +22,11 @@
 #include <assert.h>
 #include <stdio.h>
 
+//#include "malloc-trace.c"
+#ifndef yreport
+  #define yreport() (void)0
+#endif
+
 // TODO: make it a printable string?
 #ifndef EVENTS
 
@@ -36,6 +41,15 @@
 
 #ifdef __CC65__
   extern size_t _heapmemavail(void);
+#else
+  size_t _heapmemavail() {
+    return 4711;
+  }
+
+  char isliteral(void* line) {
+    return 0; // lol not going to work well...
+  }
+
 #endif
 
 typedef void* (*cmdfun)(void* state, char* line);
@@ -135,12 +149,19 @@ char relen=0, *reuse= 0;
 
 // save S if bigger than reuse ptr!
 // Always return 0, to make easy return after disposal
+#ifndef lfree
 char* lfree(char* line) {
   char len;
 
-  if (isliteral(line)) return 0;
   if (line <= EVENTS) return 0;
-  if (line == ""); return 0;
+  if (line == "") return 0;
+  if (isliteral(line)) return 0;
+
+  //putchar('.');
+
+// testing:
+//  return 0;
+//  free(line);  return 0;
   
   // TODO: get actual size of allocation!
   len= strlen(line);
@@ -151,6 +172,7 @@ char* lfree(char* line) {
   }
   return 0;
 }
+#endif
 
 // copy s
 // TODO: make it taken len!
@@ -196,17 +218,387 @@ void shprint(char* line) {
   }
 }
 
+///////////////////////////////////////////////////
+// Variable manipulators
+ 
+// cc65: (- 35460 33462) = 1998 bytes = frickin hell!
+// osc : (- 23802 22061) = 1741 // was 2007 if not used doesn/t count!
+//
+// cc65: 4065 free only... 7370 bytes with NO ENV...
+//
+// cc65: WITH ENV and BINDINGS: 880B free!!! LOL 4KB stuff
+//
+// TODO: idea, manage vbind on higher level - slots!
+  
+// LOC: 85 lines (/ 1733 85) ~ 20 bytes/line
+
+ 
+// oscar64: 106 vnth,   50 vbind
+//          126 vgeti, 202 vgets
+//          204 vseti, 173 vsets
+//           30 vevals
+//
+//#define ENVVARS
+ 
+#ifndef ENVVARS
+ 
+// dummies when not included
+#define set     dummyfun
+#define print   dummyfun 
+#define varlist dummyfun
+
+#define vcleanup() (void)0
+#define vbind(n,p) (void)0
+ 
+#else
+ 
+// TODO: make it part of each "train"
+
+#define MAX_VARS 32
+ 
+// first is emtpy
+struct var {
+  char* name; // %var points to int %str points to string!
+  union {
+    int *  iptr;
+    char** sptr;
+    char*  ostr; 
+   } val; // oscar64 requires a named union!
+} vars[MAX_VARS]; // = {0}; cl65 cannot
+
+unsigned char nvar= 0;
+
+ 
+// 106 : vnth, NATIVE_CODE:code
+char vnth(char* name) {
+  char i= nvar, *nm;
+  if (!((intptr_t)name)>>8) return *name; // 0x80+i
+  do {
+    //printf("vnth: %d/%d %s\n", i, nvar, name);
+    if ((nm= vars[i].name) && 0==strcmp(name, nm)) return i;
+  } while(i--);
+
+  // not found - add var
+  if (nvar >= MAX_VARS-1) return 0;
+  ++nvar;
+
+  // we make a copy if it's not a program literal!
+  vars[nvar].name= isliteral(name)? name: strdup(name);
+  vars[nvar].val.sptr= NULL;
+  return nvar;
+}
+
+void vcleanup() {
+  char i= nvar, *name;
+  assert(i<=MAX_VARS);
+  while(i) {
+    //printf("vcleanup: %d/%d\n", i, nvar);
+    if ((name= vars[i].name)) {
+
+      // free $vars strings owned _var is owned by process
+      if (*name == '$') lfree(vars[i].val.ostr);
+      lfree(name);
+
+    }
+    --i;
+  }
+
+  nvar= 0;
+  memset(vars, 0, sizeof(vars));
+}
+
+// you can bind %var and _var
+// TODO: unbind using ptr=NULL - action: don't want change order...
+
+// 59 : vbind, NATIVE_CODE:code
+char vbind(char* name, void* ptr) {
+  char n= vnth(name);
+
+  //assert(n);
+  //assert(*name != '$');
+
+  vars[n].val.iptr= ptr;
+  return n;
+}
+
+char* vgets(char* name);
+ 
+// 126 : vgeti, NATIVE_CODE:code
+int vgeti(char* name) {
+  char n= vnth(name);
+  return !n? 0:
+    (*name == '%')? *vars[n].val.iptr:
+    atoi(vgets(name));
+}
+ 
+// Depending on $var (can be modified) const _var
+char tmp10char[10]= "(int)"; // TODO: share?
+ 
+// Return string representation of ?VAR
+// It even works for int %VAR but gives a very temporary
+// string that has to be used IMMEDIATELY (strdup maybe).
+//
+// If not var, return NAME! This means it can be used as "expander"
+
+// 202 : vgets, NATIVE_CODE:code
+char* vgets(char* name) {
+  char n= vnth(name), *s= 
+    !n? "":
+    (*name == '_')? *vars[n].val.sptr:
+    (*name == '$')? vars[n].val.ostr:
+    (*name == '%')? (sprintf(tmp10char, "%d", vgeti(name)),tmp10char):
+    name; // lol
+  return s? s: "";
+}
+ 
+char* vsets(char* name, char* val);
+ 
+// 204 : vseti, NATIVE_CODE:code
+int vseti(char* name, int val) {
+  char n= vnth(name);
+  if (*name == '$') {
+    sprintf(tmp10char, "%d", val);
+    vsets(name, strdup(tmp10char));
+    return val;
+  } else if (*name == '_') return 0;
+  return (*(vars[n].val.iptr)= val);
+}
+
+// gives ownershipt to $VAR of VAL string
+
+// 173 : vsets, NATIVE_CODE:code
+char* vsets(char* name, char* val) {
+  char n= vnth(name), **sp;
+  if (*name == '%') { vseti(name, atoi(val)); return val; }
+  if (*name != '$') return "";
+  lfree(*(sp= &vars[n].val.ostr));
+  return (*sp= val);
+}
+
+// set ?VAR from string VAL, copy if $VAR, otherwise convert
+
+//  91 : vsetsfrom, NATIVE_CODE:code
+char* vsetsfrom(char* name, char* val) {
+  return vsets(name, *name=='$'? strdup(val): val);
+}
+ 
+
+////////////////////////////////////////////////////////////
+// variable commands
+
+/*
+  
+1. The Standard $ Special Parameters (The Basics)
+
+In POSIX shells,these are read-only macros maintained natively by the
+shell's state machine.
+
+$* and $@: All positional parameters. (In your code, mapping $* to the remaining raw string line matches classic Bourne shell behavior).
+$#: The number of positional parameters currently set (as a stringified integer).
+$?: The exit status of the last executed foreground command (crucial for && and || chaining).
+$$: The Process ID (PID) of the current shell instance. 
+$!: The Process ID (PID) of the most recently executed background command.
+$0: The name of the shell script or the shell invocation string itself.
+$1 to $9 (and ${10}): The explicit positional arguments.
+
+3. Esoteric Prefixes Found in Other Shells
+
+Depending on how much flavor you want to add to your shell, these
+exist in the wild:
+
+! History Expansion): Used by Bash/Zsh interactively.
+!! repeats the last command, and !$ grabs the last argument of the
+previous command.
+
+^ (Rc Shell / Es): The rc shell (Plan 9) uses ^ as an explicit string
+concatenation operator rather than a variable prefix, turning lists
+into flattened arrays
+
+*/
+
+// TDOO: nextStr quote '$foo' - what about 'foo$foo' - maybe split?
+// TODO: nextStr to break on ^ and do concat
+// TODO: varrevals (take an array and "concat" implicitly)
+//   but if get ^ no space, otherwise space
+    
+char* vevals(char* x, char** pline) {
+  // TODO: make more generic
+       if (0==strcmp(x, "$*"))   return *pline; // TODO: $@ ???
+  else if (0==strcmp(x, "$++"))  return nextStr(pline, ""); // shift
+  else                           return vgets(x);
+}       
+
+// TODO: add formattting %.3foo $-7bar %05i - lol!
+
+
+typedef struct varstate {
+  cmdfun fun;
+  char*  name;   // TODO: make it store (char*)(char)idx
+  char*  expr;    // Owned if _VAR
+} varstate;
+
+
+// TODO: only works for $var if not exist, not %var!!!
+
+// "SET - S(L)exial EnvironmenT binding"
+//(397 : set, NATIVE_CODE:code)
+// 474 : set, NATIVE_CODE:code
+char* set(varstate* state, char* line) {
+  if (!state) {
+    char *name;
+    state= STALLOC(varstate, set);
+
+    // variable name to set to expr
+    // TODO: shouldn't need this strdup and name?
+    name= state->name= strdup(nextStr(&line, (char*)""));
+
+    // TODO: only works for $var if not exist, not %var!!!
+    assert(*name == '$');
+
+    state->expr= strdup(nextStr(&line, ""));
+    return (char*)state;
+
+  } else if (line==CLEANUP) {
+    LFREE(state->name);
+    LFREE(state->expr);
+    return line;
+  }
+
+  if (line<=EVENTS) return line;
+  else {
+    char* origline= line;
+    char* endline = line+strlen(line);
+    //printf("SET:"); shprint(line);
+    //printf("xxx: %s %s\n", state->name, state->expr);
+
+    vsetsfrom(state->name, vevals(state->expr, &line));
+
+    if (line==origline) return line;
+    else if (line <= endline) {
+      // pass on what's left
+      endline= strdup(line); lfree(line); return endline;
+    } else return ""; // something, lol
+  }
+}
+
+// printer
+typedef struct printstate {
+  cmdfun fun;
+  char** params;
+} printstate;
+ 
+// actually, PRINT is CONCAT w spaces, or foo ^bar no space!
+// (SPRINTF, how?) "%03.4foo" lol?
+//
+// 457 : print, NATIVE_CODE:code
+char* print(printstate* state, char* line) {
+  if (!state) {
+    char np= 0, *param[16]= {0}, *p, *endline= line+strlen(line);
+    state= STALLOC(varstate, print);
+    if (!state) return NULL;
+    do {
+      p= param[np++]= strdup(nextStr(&line, NULL));
+      //printf("\tprint %u %s\n", np, p);
+
+// TODO: give "error" at 16
+// TODO: nextStr doesn't know how to terminate!
+
+    //} while(p!=NULL && line < endline);
+    } while(line < endline);
+
+    state->params= memdup(param, (np+1)*sizeof(char*));
+    if (!state->params) { free(state); return NULL; }
+    return (char*)state;
+
+  } else if (line==CLEANUP) {
+    char** p= state->params;
+    while(*p) LFREE(*p++);
+
+    LFREE(state->params);
+    return line;
+  }
+  
+  if (line<=EVENTS) return line;
+  
+  // For every data return, print a line fill in params
+  // TODO: move  to sarrevals()
+  {
+    char tmp[128]= {0}; // TODO: use dstr!
+    char** p= state->params;
+    char* ln= line;
+    char* x;
+    char n= 255;
+
+    // TODO: vevalarrs(p, *line)
+    while(*p) {
+      //printf("\t%p : %s => %s\n", p, *p, vgets(*p));
+      x= *p;
+      if (++n) { if (*x!='^') strcat(tmp, " "); else ++x; }
+      strcat(tmp, vevals(x, &line));
+      ++p;
+    }
+    lfree(ln); // used up!
+
+    // TODO: "current" LINE should be set by system?
+    return strdup(tmp);
+  }
+}
+
+typedef struct varliststate {
+  cmdfun fun;
+  
+  int i;
+  char* name;
+  char* vstr;
+  int   vint;
+} varliststate;
+
+char* varlist(varliststate* state, char* line) {
+  if (!state) {
+    state= STALLOC(varliststate, varlist);
+    vbind("%vindex", &state->i);
+    vbind("_vname",  &state->name);
+    vbind("_vstr",   &state->vstr);
+    vbind("%vint",   &state->vint);
+    return (char*)state;
+  }
+  if (line && line<EVENTS) return line;
+
+  // if done: reset and request next
+  if (state->i >= nvar) { lfree(line); state->i= 0; return NULL; }
+  // if first: return the result
+  if (!state->i++) return line;
+
+  // and then every variable for that line
+  state->name= vars[state->i - 1].name;
+  // slow, lol
+  state->vint= vgeti(state->name);
+  state->vstr= vgets(state->name);
+
+  lfree(line);
+  {
+    char* ln= malloc(1+1+strlen(state->name)+2+5+2+strlen(state->vstr));
+    sprintf(ln, "\t%s\t=%6d  \"%s\"", state->name, state->vint, state->vstr);
+    return ln;
+  }
+}  
+
+#endif // ENVVARS
+
+
+
 ///////////////////////////////////////////////////////////
 // unix "commands"
 
 void* pwd(simplestate* state, char* line) {
   if (!state) return SIMPLEALLOC(pwd);
-
-  if (!line) return EOS;
+  if (!line)  return EOS;
 
   // generate a value on EOS (or any), lol
-  lfree(line);
-  return lstrdup("/home/orwin");
+//  lfree(line);
+//  return lstrdup("/home/orwin"); - hang
+//  return "/home/orwin"; = hang
+  return strdup("/home/orwin");
 }
 
 
@@ -294,16 +686,30 @@ void* cat(filestate* state, char* line) {
 }
 #endif
   
-
-typedef struct wcstate { cmdfun f; unsigned int ln, wn, cn; } wcstate;
+typedef struct wcstate {
+  cmdfun f;
+  unsigned int ln, wn, cn;
+} wcstate;
 
 void* wc(wcstate* state, char* line) {
   char c, *s= line;
   unsigned int n= 0;
   
-  if (!state) return STALLOC(wcstate, wc);
+  if (!state) {
+    state= STALLOC(wcstate, wc);
+    vbind("%lines", &state->ln);
+    vbind("%words", &state->wn);
+    vbind("%bytes", &state->cn);
+    return state;
+  }
 
-  // Output summary at end of file
+  // only generates one value
+  if (!line) return EOS;
+
+  // no other events (except EOS)
+  if (line<EVENTS) return line;
+  
+  // EOS: Output summary at end
   if (line==EOS) {
     line= malloc(25);
     sprintf(line, "%u %u %u", state->ln, state->wn, state->cn);
@@ -320,8 +726,9 @@ void* wc(wcstate* state, char* line) {
   }
   state->cn+= n;
   
-  // returns null (backtracks to get prev line)
-  return lfree(line);
+  // returns null (backtracks to get next line)
+  lfree(line);
+  return NULL;
 }
   
 
@@ -683,361 +1090,6 @@ void* tail(countstate* state, char* line) {
 }
 
 
-///////////////////////////////////////////////////
-// Variable manipulators
- 
-// cc65: (- 35460 33462) = 1998 bytes = frickin hell!
-// osc : (- 23802 22061) = 1741 // was 2007 if not used doesn/t count!
-//
-// cc65: 4065 free only... 7370 bytes with NO ENV...
- 
-// LOC: 85 lines (/ 1733 85) ~ 20 bytes/line
-
- 
-// oscar64: 106 vnth,   50 vbind
-//          126 vgeti, 202 vgets
-//          204 vseti, 173 vsets
-//           30 vevals
-//
-#define ENVVARS
- 
-#ifndef ENVVARS
- 
-// dummies when not included
-#define let   dummyfun
-#define print dummyfun 
-
-#else
- 
-// TODO: make it part of each "train"
-
-#define MAX_VARS 32
- 
-// first is emtpy
-struct var {
-  char* name; // %var points to int %str points to string!
-  union {
-    int *  iptr;
-    char** sptr;
-    char*  ostr; 
-   } val; // oscar64 requires a named union!
-} vars[MAX_VARS]; // = {0}; cl65 cannot
-
-unsigned char nvar= 0;
-
- 
-// 106 : vnth, NATIVE_CODE:code
-char vnth(char* name) {
-  char i= nvar, *nm;
-  if (!((intptr_t)name)>>8) return *name; // 0x80+i
-  do {
-    if ((nm= vars[i].name) && 0==strcmp(name, nm)) return i;
-  } while(--i);
-
-  // not found - add var
-  if (nvar >= MAX_VARS-1) return 0;
-  ++nvar;
-
-  // we make a copy if it's not a program literal!
-  vars[nvar].name= isliteral(name)? name: strdup(name);
-  vars[nvar].val.sptr= NULL;
-  return nvar;
-}
-
-void vcleanup() {
-  char i= nvar, *name;
-  do {
-    if ((name= vars[i].name)) {
-
-      // free $vars strings owned _var is owned by process
-      if (*name == '$') lfree(vars[i].val.ostr);
-      lfree(name);
-
-    }
-  } while(--i);
-
-  nvar= 0;
-  memset(vars, 0, sizeof(vars));
-}
-
-// you can bind %var and _var
-// TODO: unbind using ptr=NULL - action: don't want change order...
-
-// 59 : vbind, NATIVE_CODE:code
-char vbind(char* name, void* ptr) {
-  char n= vnth(name);
-
-  //assert(n);
-  //assert(*name != '$');
-
-  vars[n].val.iptr= ptr;
-  return n;
-}
-
-char* vgets(char* name);
- 
-// 126 : vgeti, NATIVE_CODE:code
-int vgeti(char* name) {
-  char n= vnth(name);
-  return !n? 0:
-    (*name == '%')? *vars[n].val.iptr:
-    atoi(vgets(name));
-}
- 
-// Depending on $var (can be modified) const _var
-char tmp10char[10]= "(int)"; // TODO: share?
- 
-// Return string representation of ?VAR
-// It even works for int %VAR but gives a very temporary
-// string that has to be used IMMEDIATELY (strdup maybe).
-//
-// If not var, return NAME! This means it can be used as "expander"
-
-// 202 : vgets, NATIVE_CODE:code
-char* vgets(char* name) {
-  char n= vnth(name), *s= 
-    !n? "":
-    (*name == '_')? *vars[n].val.sptr:
-    (*name == '$')? vars[n].val.ostr:
-    (*name == '%')? (sprintf(tmp10char, "%d", vgeti(name)),tmp10char):
-    name; // lol
-  return s? s: "";
-}
- 
-char* vsets(char* name, char* val);
- 
-// 204 : vseti, NATIVE_CODE:code
-int vseti(char* name, int val) {
-  char n= vnth(name);
-  if (*name == '$') {
-    sprintf(tmp10char, "%d", val);
-    vsets(name, strdup(tmp10char));
-    return val;
-  } else if (*name == '_') return 0;
-  return (*(vars[n].val.iptr)= val);
-}
-
-// gives ownershipt to $VAR of VAL string
-
-// 173 : vsets, NATIVE_CODE:code
-char* vsets(char* name, char* val) {
-  char n= vnth(name), **sp;
-  if (*name == '%') { vseti(name, atoi(val)); return val; }
-  if (*name != '$') return "";
-  lfree(*(sp= &vars[n].val.ostr));
-  return (*sp= val);
-}
-
-// set ?VAR from string VAL, copy if $VAR, otherwise convert
-
-//  91 : vsetsfrom, NATIVE_CODE:code
-char* vsetsfrom(char* name, char* val) {
-  return vsets(name, *name=='$'? strdup(val): val);
-}
- 
-
-////////////////////////////////////////////////////////////
-// variable commands
-
-/*
-  
-1. The Standard $ Special Parameters (The Basics)
-
-In POSIX shells,these are read-only macros maintained natively by the
-shell's state machine.
-
-$* and $@: All positional parameters. (In your code, mapping $* to the remaining raw string line matches classic Bourne shell behavior).
-$#: The number of positional parameters currently set (as a stringified integer).
-$?: The exit status of the last executed foreground command (crucial for && and || chaining).
-$$: The Process ID (PID) of the current shell instance. 
-$!: The Process ID (PID) of the most recently executed background command.
-$0: The name of the shell script or the shell invocation string itself.
-$1 to $9 (and ${10}): The explicit positional arguments.
-
-3. Esoteric Prefixes Found in Other Shells
-
-Depending on how much flavor you want to add to your shell, these
-exist in the wild:
-
-! History Expansion): Used by Bash/Zsh interactively.
-!! repeats the last command, and !$ grabs the last argument of the
-previous command.
-
-^ (Rc Shell / Es): The rc shell (Plan 9) uses ^ as an explicit string
-concatenation operator rather than a variable prefix, turning lists
-into flattened arrays
-
-*/
-
-// TDOO: nextStr quote '$foo' - what about 'foo$foo' - maybe split?
-// TODO: nextStr to break on ^ and do concat
-// TODO: varrevals (take an array and "concat" implicitly)
-//   but if get ^ no space, otherwise space
-    
-char* vevals(char* x, char** pline) {
-  // TODO: make more generic
-       if (0==strcmp(x, "$*"))   return *pline; // TODO: $@ ???
-  else if (0==strcmp(x, "$++"))  return nextStr(pline, ""); // shift
-  else                           return vgets(x);
-}       
-
-// TODO: add formattting %.3foo $-7bar %05i - lol!
-
-
-typedef struct varstate {
-  cmdfun fun;
-  char*  name;   // TODO: make it store (char*)(char)idx
-  char*  expr;    // Owned if _VAR
-} varstate;
-
-
-// TODO: only works for $var if not exist, not %var!!!
-
-// "LET - Lexial EnvironmenT binding"
-//(397 : set, NATIVE_CODE:code)
-// 474 : set, NATIVE_CODE:code
-char* set(varstate* state, char* line) {
-  if (!state) {
-    char *name;
-    state= STALLOC(varstate, set);
-
-    // variable name to set to expr
-    // TODO: shouldn't need this strdup and name?
-    name= state->name= strdup(nextStr(&line, (char*)""));
-
-    // TODO: only works for $var if not exist, not %var!!!
-    assert(*name == '$');
-
-    state->expr= strdup(nextStr(&line, ""));
-    return (char*)state;
-
-  } else if (line==CLEANUP) {
-    LFREE(state->name);
-    LFREE(state->expr);
-    return line;
-  }
-
-  if (line<=EVENTS) return line;
-  else {
-    char* origline= line;
-    char* endline = line+strlen(line);
-    //printf("SET:"); shprint(line);
-    //printf("xxx: %s %s\n", state->name, state->expr);
-
-    vsetsfrom(state->name, vevals(state->expr, &line));
-
-    if (line==origline) return line;
-    else if (line <= endline) {
-      // pass on what's left
-      endline= strdup(line); lfree(line); return endline;
-    } else return ""; // something, lol
-  }
-}
-
-// printer
-typedef struct printstate {
-  cmdfun fun;
-  char** params;
-} printstate;
- 
-// actually, PRINT is CONCAT w spaces, or foo ^bar no space!
-// (SPRINTF, how?) "%03.4foo" lol?
-//
-// 457 : print, NATIVE_CODE:code
-char* print(printstate* state, char* line) {
-  if (!state) {
-    char np= 0, *param[16]= {0}, *p, *endline= line+strlen(line);
-    state= STALLOC(varstate, print);
-    if (!state) return NULL;
-    do {
-      p= param[np++]= strdup(nextStr(&line, NULL));
-      //printf("\tprint %u %s\n", np, p);
-
-// TODO: give "error" at 16
-// TODO: nextStr doesn't know how to terminate!
-
-    //} while(p!=NULL && line < endline);
-    } while(line < endline);
-
-    state->params= memdup(param, (np+1)*sizeof(char*));
-    if (!state->params) { free(state); return NULL; }
-    return (char*)state;
-
-  } else if (line==CLEANUP) {
-    char** p= state->params;
-    while(*p) LFREE(*p++);
-
-    LFREE(state->params);
-    return line;
-  }
-  
-  if (line<=EVENTS) return line;
-  
-  // For every data return, print a line fill in params
-  // TODO: move  to sarrevals()
-  {
-    char tmp[128]= {0}; // TODO: use dstr!
-    char** p= state->params;
-    char* ln= line;
-    char* x;
-    char n= 255;
-
-    // TODO: vevalarrs(p, *line)
-    while(*p) {
-      //printf("\t%p : %s => %s\n", p, *p, vgets(*p));
-      x= *p;
-      if (++n) if (*x!='^') strcat(tmp, " "); else ++x;
-      strcat(tmp, vevals(x, &line));
-      ++p;
-    }
-    lfree(ln); // used up!
-
-    // TODO: "current" LINE should be set by system?
-    return strdup(tmp);
-  }
-}
-
-#endif // ENVVARS
-
-typedef struct varliststate {
-  cmdfun fun;
-  
-  int i;
-  char* name;
-  char* vstr;
-  int   vint;
-} varliststate;
-
-char* varlist(varliststate* state, char* line) {
-  if (!state) {
-    state= STALLOC(varliststate, varlist);
-    vbind("%vindex", &state->i);
-    vbind("_vname",  &state->name);
-    vbind("_vstr",   &state->vstr);
-    vbind("%vint",   &state->vint);
-    return (char*)state;
-  }
-  if (line && line<EVENTS) return line;
-
-  // if done: reset and request next
-  if (state->i >= nvar) { lfree(line); state->i= 0; return NULL; }
-  // if first: return the result
-  if (!state->i++) return line;
-
-  // and then every variable for that line
-  state->name= vars[state->i - 1].name;
-  // slow, lol
-  state->vint= vgeti(state->name);
-  state->vstr= vgets(state->name);
-
-  lfree(line);
-  {
-    char* ln= malloc(1+1+strlen(state->name)+2+5+2+strlen(state->vstr));
-    sprintf(ln, "\t%s\t=%6d  \"%s\"", state->name, state->vint, state->vstr);
-    return ln;
-  }
-}  
-
 #define SHELL_STATS_COMMAND
 #ifdef SHELL_STATS_COMMAND
 
@@ -1067,7 +1119,8 @@ typedef struct {
 } StatsState;
 
 int cmpint(const void *a, const void *b) {
-  return *(const int*)b - *(const int *)a;
+  return *(const int*)a < *(const int *)b? -1:
+    *(const int*)a == *(const int *)b? 0: +1;
 }
 
 #define LITTLE_ENDIAN (1 == *(unsigned char *)(&(const int){1}))
@@ -1080,9 +1133,9 @@ char* stats(StatsState* state, char* line) {
 
     vbind("%count",  &state->n);
     vbind("%min",    &state->min);
-    vbind("%max",    &state->max);
     vbind("%avg",    &state->avg);
     vbind("%median", &state->median);
+    vbind("%max",    &state->max);
     vbind("%var",    &state->var);
     vbind("%stddev", &state->stddev);
 
@@ -1110,11 +1163,19 @@ char* stats(StatsState* state, char* line) {
     //    state->stddev = sqrt(var);
 
     // median histogram
+    qsort(state->samples, SAMPLES, sizeof(int), cmpint);
 
-//TODO: if  n < SAMPLES...
-    
-    qsort(state->samples, 16, sizeof(int), cmpint);
-    state->median= state->samples[7];
+    #if 0
+    // print samples for debugging
+    {
+      int i;
+      printf("SAMPLES: ");
+      for(i=0; i<SAMPLES; ++i) printf("%d ", state->samples[i]);
+      putchar('\n');
+    }
+    #endif
+        
+    state->median= state->samples[SAMPLES/2-1]; // "middle'
     
     sprintf(report, "count:\t%u\nmin:\t%d\nmax:\t%d\nsum:\t%ld\nsqsum:\t%ld\navg:\t%d\nmedian:\t%d\nvar:\t%d\nstddev:\t%d",
       state->n, state->min, state->max, state->sum, state->sqsum, state->avg, state->median, state->var, state->stddev);
@@ -1127,9 +1188,10 @@ char* stats(StatsState* state, char* line) {
   // Process one piece of data
   { 
     int v= atoi(line);
+    lfree(line);
 
     state->sum+= v;
-    state->sqsum+= ((long)v)*v;
+    state->sqsum+= ((long)v) * v; // increase precision
     if (v < state->min) state->min= v;
     if (v > state->max) state->max= v;
     
@@ -1138,12 +1200,13 @@ char* stats(StatsState* state, char* line) {
     if ((state->mask|= state->n) < SAMPLES)
       state->samples[state->n]= v;
     else if ((rand() & (state->mask/2)) < SAMPLES) 
+      //{ printf("REPLACE %d\n", v);
       state->samples[rand()&(SAMPLES-1)]= v;
+      //}
     
     ++state->n;
 
     // backtrack to suck up more
-    lfree(line);
     return NULL;
   }
 }
@@ -1213,7 +1276,7 @@ typedef struct psstate {
   char* args;
 } psstate;
  
-void* ps(simplestate* state, char* line) {
+void* ps(psstate* state, char* line) {
   char s, p, ln[60]; // ... shell args...
   long packed_result;
   Window *w;
@@ -1272,7 +1335,7 @@ void* ps(simplestate* state, char* line) {
   #define snprintf(buf, size, ...) sprintf(buf, __VA_ARGS__)
 #endif
 
-  state->p     = 0x4200 | p;
+  state->pid   = 0x4200 | p;
   state->cpu   = w->cpu;
   state->mem   = w->nalloc;
   state->size  = -1; // w->abytes
@@ -1711,6 +1774,19 @@ int main() {
     wrunsystrain(mock);
   }
   
+  // test malloc leaks
+#if 0
+  tsystem("iota 1 1000 | terminal");
+  tsystem("iota 1 1000 | terminal");
+  tsystem("iota 1 1000 | terminal");
+  tsystem("iota 1 1    | terminal");
+
+  yreport();
+exit(0);
+#endif
+  
+
+
   // Error codes? How & semantics
 
   printf("---- wsystem: pwd | terminal\n");
@@ -1745,10 +1821,18 @@ int main() {
 //  tsystem("iota 1 1000 | stats | print max= %max sum= %sum $* | varlist | terminal");
 
   tsystem("iota 1 1000 | stats | terminal");
+  tsystem("iota 1 1000 | stats | varlist | terminal");
   
-  // - not work for %i at least not to define
-  //tsystem("iota 1 3 | set %i $*| varlist | terminal");
   tsystem("iota 1 3 | set $i $*| varlist | terminal");
+
+  //tsystem("iota 1 1000 | wc | terminal");
+  tsystem("iota 1 1000 | terminal");
+
+  free("FISH");
+  
+  // crash
+  // - not work for %i at least not to define
+  tsystem("iota 1 3 | set %i $*| varlist | terminal");
 
   //wsystem("ls | head -3 | terminal");
 

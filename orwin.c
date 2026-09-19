@@ -1185,10 +1185,11 @@ void scheduler() {
       if (now-lastupdate > 100) {
         // No display if was in menu
         if (latency < 100) {
-          sprintf(SCREENXY(11,0),
-            "%2u#%3u%4d/s %2u%%"
-            " %2d%%%5d"
-            "%3c"
+          char n;
+          memset(SCREENXY(34,0), ' ', 6);
+          n= sprintf(SCREENXY(11,0),
+            "%2u#%3u%4d/s%2u%%"
+            "%2d%%%4d"
 
             , latency, rounds
             , (int)(runprocs*100L/(now-lastupdate))
@@ -1196,9 +1197,8 @@ void scheduler() {
 
             , (int)(100L*_heapmemavail()/heapstart)
             , _heapmemavail()
-
-            , ' '
           );
+          *SCREENXY(11+n,0)= ' '; // erase \0==BLACK TEXT
 
           // On simulated ORIC we redraw the screen
           // every 100th ish clock pass, on simulated

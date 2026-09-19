@@ -89,12 +89,19 @@ void dumpheap(char all) {
 }
 
 void* app_heap(void* voidapp, char* line) {
+  
   if (!app) {
     window(3, 17, 32, 10, yellow, black);
     wstatus(-1, "Heap Viewer");
+    last_heaporg= 0;
     return calloc(sizeof(APP), 1);
-  } else if (app<EVENTS) return 0;
-
+  }
+  // any key - trigger redraw
+  if (KEYEVENT(line)) {
+    clrscr();
+    last_heaporg= 0;
+  }
+  
   // check if any change
   if (last_heaporg==_heaporg &&
       last_heapptr==_heapptr &&
@@ -109,6 +116,7 @@ void* app_heap(void* voidapp, char* line) {
 	 );
 
   dumpheap(2);
+  // TODO: clreos()l
 
   // update
   last_heaporg= _heaporg;
@@ -118,7 +126,7 @@ void* app_heap(void* voidapp, char* line) {
   last_heapfirst= _heapfirst;
   last_heaplast = _heaplast;
 
-  return 0;
+  return NULL;
   
   (void)line;
 }
