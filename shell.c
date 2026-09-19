@@ -39,8 +39,8 @@
 #endif
 
 
-#ifdef __CC65__
-  extern size_t _heapmemavail(void);
+#ifndef HEAPMEM
+   //extern size_t _heapmemavail(void);
 #else
   size_t _heapmemavail() {
     return 4711;

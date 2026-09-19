@@ -46,6 +46,7 @@
 // have
 #define BZERO
 #define CPUTC
+#define QSORT
 
 
 // TODO: local implementations

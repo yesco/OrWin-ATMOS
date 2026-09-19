@@ -261,7 +261,40 @@ char* strdup(const char* s) {
 
 #endif // ZERO
 
-//////////////////////////////
+// oscar64 doesn't provide qsort in STDLIB
+#define QSORT
+void qsort(void *base, unsigned int num, unsigned int size, int (*compar)(const void *, const void *)) {
+  char c, *a, *b, *arr = (char *)base;
+  unsigned int i, j, k, min_idx;
+    
+  for (i = 0; i < num - 1; i++) {
+    min_idx = i;
+    for (j = i + 1; j < num; j++) {
+      // Compare the element at j with the current minimum element
+      if (compar(arr + (j * size), arr + (min_idx * size)) < 0) {
+        min_idx = j;
+      }
+    }
+        
+    // Swap elements at i and min_idx if a smaller one was found
+    if (min_idx != i) {
+      a = arr + (i * size);
+      b = arr + (min_idx * size);
+      k = size;
+            
+      // Byte-by-byte memory swap
+      while (k--) {
+        c    = *a;
+        *a++ = *b;
+        *b++ = c;
+      }
+    }
+  }
+}
+
+///////////////////////////////////////
+// strided mem fill (graphics/screen)
+
 #ifndef FILL
 
 #define FILL

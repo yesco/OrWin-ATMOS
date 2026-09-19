@@ -11,6 +11,10 @@
 // 
 // This file targets to run under sim65 (cc65).
 
+// have
+#define QSORT
+#define BZERO
+
 // Hmmm, these are the same for ORIC tap (oric.c)
 #define ISLITERAL
 extern void* _heaporg;
