@@ -22,6 +22,15 @@
 #include <assert.h>
 #include <stdio.h>
 
+
+#ifdef __CC65__
+  typedef int intptr_t; // LOL
+#endif
+
+#ifdef OSCAR64
+  typedef int intptr_t;
+#endif
+
 //#include "malloc-trace.c"
 #ifndef yreport
   #define yreport() (void)0
@@ -92,6 +101,7 @@ void* memdup(void* p, unsigned int bytes) {
 #ifdef __CC65__
 //  printf("BYTES=%5d\t%p\tAVAIL=%u\n", bytes, r, _heapmemavail());
 #endif
+  // TODO: give better error message! and don't drop out!
   assert(r != NULL);
   return memcpy(r, p, bytes);
 }
@@ -199,6 +209,39 @@ void xfree(void** pp) {
 }
   
 
+// TODO: move to supporting functions shared w app_
+ 
+///////////////////////////////////////////////////
+// line space delimited parameter choppers
+// If none: returns the DeFauLT value!
+//
+// NOTE: they modify the incoming line
+// NOTE: if you need to keep the string do strdup!
+
+// 123 : nextStr, NATIVE_CODE:code
+char* nextStr(char** line, const char* dflt) {
+  char *r, *p= *line;
+  if (!line || !*line) return (char*)dflt;
+  // skip spaces
+  while(isspace(*p)) ++p;
+  // r points to first non whitespace (or at end)
+  r= p;
+  // skip till end of "word"
+  while(*p && !isspace(*p)) ++p;
+  // truncate string (we either on 0 or whitespace)
+  if (*p) *p++= 0;
+  // move input pointer to rest
+  *line= p;
+  return *r? r: (char*)dflt;
+}
+
+// 68 : nextInt, NATIVE_CODE:code
+int nextInt(char** line, int dflt) {
+  char *r= nextStr(line, NULL);
+  return (r && (isdigit(*r) || *r=='-'))
+    ? atoi(r): dflt;
+}
+
 ////////////////////////////////////////////////////////////
 // printing
 
@@ -238,7 +281,7 @@ void shprint(char* line) {
 //          204 vseti, 173 vsets
 //           30 vevals
 //
-//#define ENVVARS
+#define ENVVARS
  
 #ifndef ENVVARS
  
@@ -943,49 +986,7 @@ void* ls(lsstate* state, char* line) {
 #endif // __ATMOS__
  
 
-// TODO: move to supporting functions shared w app_
- 
 ///////////////////////////////////////////////////
-// line space delimited parameter choppers
-// If none: returns the DeFauLT value!
-//
-// NOTE: they modify the incoming line
-// NOTE: if you need to keep the string do strdup!
-
-// 123 : nextStr, NATIVE_CODE:code
-char* nextStr(char** line, const char* dflt) {
-  char *r, *p= *line;
-  if (!line || !*line) return (char*)dflt;
-  // skip spaces
-  while(isspace(*p)) ++p;
-  // r points to first non whitespace (or at end)
-  r= p;
-  // skip till end of "word"
-  while(*p && !isspace(*p)) ++p;
-  // truncate string (we either on 0 or whitespace)
-  if (*p) *p++= 0;
-  // move input pointer to rest
-  *line= p;
-  return *r? r: (char*)dflt;
-}
-
-// 68 : nextInt, NATIVE_CODE:code
-int nextInt(char** line, int dflt) {
-  char *r= nextStr(line, NULL);
-  return (r && (isdigit(*r) || *r=='-'))
-    ? atoi(r): dflt;
-}
-
-///////////////////////////////////////////////////
-
-#ifdef __CC65__
-  typedef int intptr_t; // LOL
-#endif
-
-#ifdef OSCAR64
-  typedef int intptr_t;
-#endif
-
 typedef struct countstate {
   cmdfun f;
   int n;

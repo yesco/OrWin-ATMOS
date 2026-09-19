@@ -137,7 +137,7 @@ void vt_putc(char c) {
 }
 
 extern void redrawscreen() {
-  char x= 0, y, c, *p= TEXTSCREEN-1;
+  char y, x= 0, *p= TEXTSCREEN-1;
 
   vt_cursoroff();
 
@@ -269,7 +269,7 @@ void qsort(void *base, unsigned int num, unsigned int size, int (*compar)(const 
     
   for (i = 0; i < num - 1; i++) {
     min_idx = i;
-    for (j = i + 1; j < num; j++) {
+     for (j = i + 1; j < num; j++) {
       // Compare the element at j with the current minimum element
       if (compar(arr + (j * size), arr + (min_idx * size)) < 0) {
         min_idx = j;
