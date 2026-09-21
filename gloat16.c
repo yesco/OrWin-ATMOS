@@ -275,8 +275,12 @@ int16_t gtoi(gloat16 a) {
 
 gloat16 atog(const char* str) {
   gloat_cast res;
-  uint8_t digit, dec1, dec2;
-  int8_t exp_val;
+  uint8_t digit = 0, dec1 = 0, dec2 = 0;
+  int8_t exp_val = 0;
+  int8_t exp_adj = 0;
+  bool found_digit = false;
+  bool post_decimal = false;
+  uint8_t dec_count = 0;
   uint8_t digit_idx;
   uint32_t base_frac, next_frac, gap, interpolation;
   uint16_t final_frac16;
@@ -288,24 +292,48 @@ gloat16 atog(const char* str) {
   } else if (*str == '+') {
     str++;
   }
-  digit = *str - '0';
-  str++;
-  if (*str == '.') {
-    str++;
+
+  while (*str) {
+    char c = *str;
+    if (c >= '0' && c <= '9') {
+      uint8_t val = c - '0';
+      if (!found_digit) {
+        digit = val;
+        found_digit = true;
+      } else {
+        if (!post_decimal) {
+          exp_adj++;
+          if (dec_count == 0) { dec1 = val; dec_count++; }
+          else if (dec_count == 1) { dec2 = val; dec_count++; }
+        } else {
+          if (dec_count == 0) { dec1 = val; dec_count++; }
+          else if (dec_count == 1) { dec2 = val; dec_count++; }
+        }
+      }
+      str++;
+    } else if (c == '.') {
+      post_decimal = true;
+      str++;
+    } else if (c == 'e' || c == 'E') {
+      break;
+    } else {
+      post_decimal = true;
+      if (c == 'k') exp_val = 3;
+      else if (c == 'M') exp_val = 6;
+      else if (c == 'G') exp_val = 9;
+      else if (c == 'T') exp_val = 12;
+      else if (c == 'P') exp_val = 15;
+      else if (c == 'm') exp_val = -3;
+      else if (c == 'u') exp_val = -6;
+      else if (c == 'n') exp_val = -9;
+      else if (c == 'p') exp_val = -10;
+      str++;
+    }
   }
-  dec1 = 0, dec2 = 0;
-  if (*str >= '0' && *str <= '9') {
-    dec1 = *str - '0';
-    str++;
-  }
-  if (*str >= '0' && *str <= '9') {
-    dec2 = *str - '0';
-    str++;
-  }
-  exp_val = 0;
+
   if (*str == 'e' || *str == 'E') {
     int8_t exp_sign = 1;
-
+    int8_t parsed_exp = 0;
     str++;
     if (*str == '-') {
       exp_sign = -1;
@@ -314,24 +342,15 @@ gloat16 atog(const char* str) {
       str++;
     }
     while (*str >= '0' && *str <= '9') {
-      exp_val = exp_val * 10 + (*str - '0');
+      parsed_exp = parsed_exp * 10 + (*str - '0');
       str++;
     }
-    exp_val *= exp_sign;
-  } else {
-    char prefix = *str;
-
-    if (prefix == 'k') exp_val = 3;
-    else if (prefix == 'M') exp_val = 6;
-    else if (prefix == 'G') exp_val = 9;
-    else if (prefix == 'T') exp_val = 12;
-    else if (prefix == 'P') exp_val = 15;
-    else if (prefix == 'm') exp_val = -3;
-    else if (prefix == 'u') exp_val = -6;
-    else if (prefix == 'n') exp_val = -9;
-    else if (prefix == 'p') exp_val = -10; 
+    exp_val = parsed_exp * exp_sign;
   }
+
+  exp_val += exp_adj;
   res.bytes.meta |= (exp_val + 32) & 0x3F;
+  
   digit_idx = (digit > 0 && digit <= 9) ? (digit - 1) : 0;
   base_frac = log_thresholds[digit_idx];
   next_frac = (digit < 9) ? log_thresholds[digit_idx + 1] : 65536;
