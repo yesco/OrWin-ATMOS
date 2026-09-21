@@ -44,76 +44,80 @@ static const uint16_t log_thresholds[9] = {
   0, 0x4d10, 0x7a25, 0x9a21, 0xb2f1, 0xc735, 0xd859, 0xe731, 0xf44b
 };
 
-#if 1
-
 gloat16 gmul(gloat16 a, gloat16 b) {
-  gloat_cast ca, cb, res;
-  uint8_t exp_a, exp_b;
-  int16_t true_exp;
-  uint16_t frac_sum;
-  
-  // 1s ee eeee   ffff ffff
-//  return (a+b-(32<<8)) | 0x8000;
-  return (a+b-(32<<8)) | 0x8000;
-}
 
-#else
-gloat16 gmul(gloat16 a, gloat16 b) {
-  gloat_cast ca, cb, res;
-  uint8_t exp_a, exp_b;
-  int16_t true_exp;
-  uint16_t frac_sum;
-  
-  ca.raw = a;
-  cb.raw = b;
-  res.bytes.meta = 0x80;
-  res.bytes.meta |= (ca.bytes.meta ^ cb.bytes.meta) & 0x40;
-  exp_a = ca.bytes.meta & 0x3F;
-  exp_b = cb.bytes.meta & 0x3F;
-  true_exp = (int16_t)(exp_a - 32) + (int16_t)(exp_b - 32);
-  frac_sum = (uint16_t)ca.bytes.fraction + cb.bytes.fraction;
-  if (frac_sum >= 256) {
-    true_exp++;
-  }
-  res.bytes.fraction = (uint8_t)frac_sum;
-  res.bytes.meta |= (uint8_t)(true_exp + 32) & 0x3F;
-  return res.raw;
+  // XOR the sign bits together, extract the combined raw value minus
+  // double bias, and clear out the overlapping upper flags so we can
+  // slam on the 0x8000 marker cleanly
+
+  return (((a + b - (32 << 8)) & 0x3FFF) | 0x8000) ^ ((a ^ b) & 0x4000);
 }
-#endif
 
 gloat16 gdiv(gloat16 num, gloat16 den) {
-  gloat_cast cnum, cden, res;
-  uint8_t exp_num, exp_den;
-  int16_t true_exp;
-  int16_t frac_diff;
-
-  cnum.raw = num;
-  cden.raw = den;
-  res.bytes.meta = 0x80;
-  res.bytes.meta |= (cnum.bytes.meta ^ cden.bytes.meta) & 0x40;
-  exp_num = cnum.bytes.meta & 0x3F;
-  exp_den = cden.bytes.meta & 0x3F;
-  true_exp = (int16_t)(exp_num - 32) - (int16_t)(exp_den - 32);
-  frac_diff = (int16_t)cnum.bytes.fraction - cden.bytes.fraction;
-  if (frac_diff < 0) {
-    true_exp--;
-    frac_diff += 256;
-  }
-  res.bytes.fraction = (uint8_t)frac_diff;
-  res.bytes.meta |= (uint8_t)(true_exp + 32) & 0x3F;
-  return res.raw;
+  
+  // Subtract den from num, add the bias back since we subtracted it
+  // twice, mask out upper trash, restore the 0x8000 flag, and XOR the
+  // sign bit.
+  return (((num - den + (32 << 8)) & 0x3FFF) | 0x8000) ^ ((num ^ den) & 0x4000);
 }
 
 gloat16 glog(gloat16 a) {
   gloat_cast ca;
+  int16_t true_exp;
+  uint16_t frac;
+  int32_t total_frac;
+  int16_t linear_val;
+
   ca.raw = a;
-  ca.bytes.meta &= 0x3F;
-  return ca.raw;
+  true_exp = (ca.bytes.meta & 0x3F) - 32;
+  frac = ca.bytes.fraction;
+
+  // Combine true exponent and 8-bit fraction into a single 24-bit
+  // fixed-point value 
+  total_frac = (true_exp * 256) + frac;
+  total_frac = ((int32_t)true_exp << 8) + frac;
+
+  // Round to the nearest linear integer to pass into itog
+  linear_val = (int16_t)((total_frac + 128) >> 8);
+
+  // Convert the linear integer back into a fresh gloat16 structure layout
+  return itog(linear_val);
 }
 
+// Gemini wrote it and that wouldn't work
+//
+//gloat16 gpow(gloat16 base, gloat16 exponent) {
+//  return gmul(glog(base), exponent);
+//}
+
 gloat16 gpow(gloat16 base, gloat16 exponent) {
-  return gmul(glog(base), exponent);
+  gloat_cast cbase, res;
+  int16_t linear_exp;
+  int16_t base_log;
+  int32_t final_log;
+  int16_t final_exp;
+
+  // . Extract the linear integer value of the exponent
+  linear_exp = gtoi(exponent);
+  if (linear_exp == 0) {
+    return 0xa000; // 1.0 in gloat16 layout
+  }
+
+  cbase.raw = base;
+  // 2. Compute the base's internal fixed-point log value (biased_exp . fraction)
+  base_log = ((int16_t)(cbase.bytes.meta & 0x3F) - 32) * 256 + cbase.bytes.fraction;
+
+  // 3. Scale the log value linearly by the exponent
+  final_log = (int32_t)base_log * linear_exp;
+
+  // 4. Pack the resulting linear fixed-point log directly back into the fields
+  final_exp = (int16_t)(final_log / 256);
+  res.bytes.fraction = (uint8_t)(final_log & 0xFF);
+  res.bytes.meta = 0x80 | ((final_exp + 32) & 0x3F);
+
+  return res.raw;
 }
+
 
 gloat16 gadd(gloat16 a, gloat16 b) {
   gloat_cast ca, cb, final_res, res;
@@ -620,10 +624,9 @@ int numbertests() {
 
 int main(void) {
   char buf[32];
-  gloat16 n1, n2, n3, n4, n5, n6, n7, n8, n9, n10;
+  gloat16 n1, n2, n3, n4, n5, n6, n7, n8, n9;
   gloat16 i1;
   int16_t r1;
-  int i;
 
   n1 = atog("3.14");
   n2 = atog("2.00");
