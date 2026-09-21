@@ -257,7 +257,7 @@ int16_t gtoi(gloat16 a) {
   }
   
   base_frac = log_thresholds[digit - 1];
-  next_frac = (digit < 9) ? log_thresholds[digit] : 65535;
+  next_frac = (digit < 9) ? log_thresholds[digit] : 0xffff;
   rem = full_frac - base_frac;
   gap = next_frac - base_frac;
   interp = 0;
@@ -289,95 +289,97 @@ int16_t gtoi(gloat16 a) {
 
 gloat16 atog(const char* str) {
   gloat_cast res;
-  uint8_t digit = 0, dec1 = 0, dec2 = 0;
+  const char* p = str;
+  const char* end_digits;
+  const char* dec_ptr = NULL;
   int8_t exp_val = 0;
-  int8_t exp_adj = 0;
-  bool found_digit = false;
-  bool post_decimal = false;
-  uint8_t dec_count = 0;
-  uint8_t digit_idx;
-  uint32_t base_frac, next_frac, gap, interpolation;
-  uint16_t final_frac16;
+  bool is_negative = false;
+  signed char post_dec_digits = 0;
+  const char* scan;
+  int16_t final_exp;
+  int32_t linear_mantissa;
+  int32_t multiplier;
+  const char* r;
 
-  res.bytes.meta = 0x80;
-  if (*str == '-') {
-    res.bytes.meta |= 0x40;
-    str++;
-  } else if (*str == '+') {
-    str++;
+  if (*p == '-') {
+    is_negative = true;
+    p++;
+  } else if (*p == '+') {
+    p++;
   }
 
-  while (*str) {
-    char c = *str;
-    if (c >= '0' && c <= '9') {
-      uint8_t val = c - '0';
-      if (!found_digit) {
-        digit = val;
-        found_digit = true;
-      } else {
-        if (!post_decimal) {
-          exp_adj++;
-          if (dec_count == 0) { dec1 = val; dec_count++; }
-          else if (dec_count == 1) { dec2 = val; dec_count++; }
-        } else {
-          if (dec_count == 0) { dec1 = val; dec_count++; }
-          else if (dec_count == 1) { dec2 = val; dec_count++; }
-        }
-      }
-      str++;
-    } else if (c == '.') {
-      post_decimal = true;
-      str++;
-    } else if (c == 'e' || c == 'E') {
+  scan = p;
+  while (*scan) {
+    if (*scan == '.') {
+      dec_ptr = scan;
+    } else if (*scan == 'e' || *scan == 'E' || 
+               *scan == 'k' || *scan == 'M' || *scan == 'G' || *scan == 'T' || *scan == 'P' ||
+               *scan == 'm' || *scan == 'u' || *scan == 'n' || *scan == 'p') {
       break;
-    } else {
-      post_decimal = true;
-      if (c == 'k') exp_val = 3;
-      else if (c == 'M') exp_val = 6;
-      else if (c == 'G') exp_val = 9;
-      else if (c == 'T') exp_val = 12;
-      else if (c == 'P') exp_val = 15;
-      else if (c == 'm') exp_val = -3;
-      else if (c == 'u') exp_val = -6;
-      else if (c == 'n') exp_val = -9;
-      else if (c == 'p') exp_val = -10;
-      str++;
     }
+    scan++;
   }
+  end_digits = scan;
 
-  if (*str == 'e' || *str == 'E') {
+  if (*end_digits == 'e' || *end_digits == 'E') {
     int8_t exp_sign = 1;
     int8_t parsed_exp = 0;
-    str++;
-    if (*str == '-') {
-      exp_sign = -1;
-      str++;
-    } else if (*str == '+') {
-      str++;
-    }
-    while (*str >= '0' && *str <= '9') {
-      parsed_exp = parsed_exp * 10 + (*str - '0');
-      str++;
+    const char* e_scan = end_digits + 1;
+    if (*e_scan == '-') { exp_sign = -1; e_scan++; }
+    else if (*e_scan == '+') { e_scan++; }
+    while (*e_scan >= '0' && *e_scan <= '9') {
+      parsed_exp = parsed_exp * 10 + (*e_scan - '0');
+      e_scan++;
     }
     exp_val = parsed_exp * exp_sign;
+  } else if (*end_digits != '\0') {
+    char prefix = *end_digits;
+    if (prefix == 'k') exp_val = 3;
+    else if (prefix == 'M') exp_val = 6;
+    else if (prefix == 'G') exp_val = 9;
+    else if (prefix == 'T') exp_val = 12;
+    else if (prefix == 'P') exp_val = 15;
+    else if (prefix == 'm') exp_val = -3;
+    else if (prefix == 'u') exp_val = -6;
+    else if (prefix == 'n') exp_val = -9;
+    else if (prefix == 'p') exp_val = -10;
   }
 
-  if (digit == 0 && exp_adj == 0 && dec1 == 0 && dec2 == 0) {
-    res.bytes.meta = 0x80 | 0;
-    res.bytes.fraction = 0;
-    return res.raw;
+  if (dec_ptr != NULL) {
+    post_dec_digits = (signed char)(end_digits - dec_ptr - 1);
+    exp_val -= post_dec_digits;
   }
 
-  exp_val += exp_adj;
-  res.bytes.meta |= (exp_val + 32) & 0x3F;
+  linear_mantissa = 0;
+  multiplier = 1;
+  r = end_digits - 1;
+
+  while (r >= p) {
+    if (*r == '.') {
+      r--;
+      continue;
+    }
+    
+    if (*r >= '0' && *r <= '9') {
+      int8_t digit_val = *r - '0';
+      linear_mantissa += (int32_t)digit_val * multiplier;
+      multiplier *= 10;
+    }
+    r--;
+  }
+
+  /* Core unified conversion via itog to guarantee identical register layouts */
+  res.raw = itog((int16_t)linear_mantissa);
   
-  digit_idx = (digit > 0 && digit <= 9) ? (digit - 1) : 0;
-  base_frac = log_thresholds[digit_idx];
-  next_frac = (digit < 9) ? log_thresholds[digit_idx + 1] : 65536;
-  gap = next_frac - base_frac;
-  interpolation = (dec1 * 10 + dec2) * gap / 100;
-  final_frac16 = (uint16_t)(base_frac + interpolation);
-  res.bytes.fraction = (uint8_t)(final_frac16 / 256);
+  if (is_negative) {
+    res.bytes.meta |= 0x40;
+  }
+  
+  if (linear_mantissa != 0) {
+    final_exp = (int16_t)(res.bytes.meta & 0x3F) - 32 + exp_val;
+    res.bytes.meta = (res.bytes.meta & 0xC0) | ((final_exp + 32) & 0x3F);
+  }
+
   return res.raw;
 }
 
