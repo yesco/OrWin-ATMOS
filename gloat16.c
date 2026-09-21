@@ -106,11 +106,13 @@ gloat16 gadd(gloat16 a, gloat16 b) {
   uint16_t final_frac_sum, f_sum;
   int16_t delta_frac, delta_exp, delta;
   
+  // make A bigger than B
   if ((a & 0x7FFF) > (b & 0x7FFF)) {
     ca.raw = a; cb.raw = b;
   } else {
     ca.raw = b; cb.raw = a;
   }
+
   exp_a = ca.bytes.meta & 0x3F;
   exp_b = cb.bytes.meta & 0x3F;
   delta_exp = (int16_t)exp_a - exp_b;

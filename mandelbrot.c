@@ -18,7 +18,7 @@
   #define FLOAT       gloat16
 
   // unit is "cUnit" (1/100th)
-  #define FIXTOFLOAT(x) (DIV(atog(#x), onehundred))
+  #define FIXTOFLOAT(x) (atog(#x))
 
   #define MUL(a, b)   (gmul(a, b))
   #define DIV(a, b)   (gdiv(a, b))
@@ -26,9 +26,13 @@
   #define ADD(a, b)   (gadd(a, b))
   #define SUB(a, b)   (gsub(a, b))
 
-  // TODO: implement as gcmp in gfloat16.c
-  // signbit is 2nd from top
-  #define CMP(a, b)   (SUB(a, b) & 0x4000)
+  // Inverted sign check: if Bit 14 is 0, the result is positive (a > b)
+
+// TODO: NOT handling alt format...
+
+  #define CMP(a, b)   (((SUB(a, b) & 0x4000)? -1: +1))
+
+//  #define CMP(a, b)   (((SUB(a, b) & 0x4000) == 0) && (SUB(a, b) != 0x8000) ? 1 : -1)
 
 #else
 
@@ -79,10 +83,10 @@ int main(int argc, char** argv) {
 
   FLOAT x_start   = FIXTOFLOAT(-200);  //  -2.00
   FLOAT x_end     = FIXTOFLOAT(  50);  //    0.5
-//  FLOAT y_start   = FIXTOFLOAT(-125);  //  -1.25
-//  FLOAT y_end     = FIXTOFLOAT( 125);  //   1.25
-  FLOAT y_start   = FIXTOFLOAT(-1250);  //  -1.25
-  FLOAT y_end     = FIXTOFLOAT( 1250);  //   1.25
+  FLOAT y_start   = FIXTOFLOAT(-125);  //  -1.25
+  FLOAT y_end     = FIXTOFLOAT( 125);  //   1.25
+//  FLOAT y_start   = FIXTOFLOAT(-1250);  //  -1.25
+//  FLOAT y_end     = FIXTOFLOAT( 1250);  //   1.25
 
   FLOAT rows      = FIXTOFLOAT( 2800); //  28
   FLOAT cols      = FIXTOFLOAT( 4000); //  40
