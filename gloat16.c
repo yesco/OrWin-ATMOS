@@ -1,8 +1,12 @@
+// Must compile under cc65 to 65-2 so comply with C89
+// (variables can only be defined at beginning of scope)
 #ifndef GLOAT16_H
 #define GLOAT16_H
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <stdio.h>
+#include <string.h>
 
 typedef uint16_t gloat16;
 
@@ -19,9 +23,6 @@ gloat16 atog(const char* str);
 char*   gtoa(gloat16 a,    char* buf);
 
 #endif
-
-#include <stdio.h>
-#include <string.h>
 
 typedef union {
   gloat16 raw;
@@ -90,7 +91,6 @@ gloat16 gdiv(gloat16 num, gloat16 den) {
 
 gloat16 glog(gloat16 a) {
   gloat_cast ca;
-
   ca.raw = a;
   ca.bytes.meta &= 0x3F;
   return ca.raw;
@@ -106,7 +106,7 @@ gloat16 gadd(gloat16 a, gloat16 b) {
   uint16_t final_frac_sum, f_sum;
   int16_t delta_frac, delta_exp, delta;
   
-  // make A bigger than B
+  // Make A bigger than B
   if ((a & 0x7FFF) > (b & 0x7FFF)) {
     ca.raw = a; cb.raw = b;
   } else {
@@ -152,7 +152,7 @@ gloat16 gadd(gloat16 a, gloat16 b) {
       displacement_s = 77;
       table_ptr = 0;
     }
-    while (1) {
+    while (table_ptr < 67) { /* Boundary protection safely inside loop condition */
       int16_t test_sub = (int16_t)running_delta - step_widths[table_ptr];
       if (test_sub < 0) break;
       running_delta = (uint8_t)test_sub;
@@ -171,7 +171,6 @@ gloat16 gadd(gloat16 a, gloat16 b) {
 
 gloat16 gsub(gloat16 a, gloat16 b) {
   gloat_cast cb;
-
   cb.raw = b;
   cb.bytes.meta ^= 0x40;
   return gadd(a, cb.raw);
@@ -189,7 +188,7 @@ gloat16 itog(int16_t val) {
   uint32_t log_interp;
 
   if (val == 0) {
-    res.bytes.meta = 0x80 | 0;
+    res.bytes.meta = 0x80;
     res.bytes.fraction = 0;
     return res.raw;
   }
@@ -219,19 +218,16 @@ gloat16 itog(int16_t val) {
   }
   rem -= (int32_t)leading_digit * rem_divisor;
   
-  /* Apply a logarithmic first-order approximation: scale remainder inversely by leading digit */
   if (rem == 0) {
     log_interp = 0;
   } else {
-    /* log10(1 + x) approx equals x * M. We scale against leading_digit to compress upper ranges */
     log_interp = ((uint32_t)rem * gap) / rem_divisor;
     log_interp = (log_interp * leading_digit) / (leading_digit + (rem / rem_divisor));
-    /* Fallback safety override to keep interpolation strictly bounded inside the gap */
     if (log_interp >= gap) log_interp = gap - 1;
   }
   
   frac16 = (uint16_t)(base_frac + log_interp);
-  res.bytes.fraction = (uint8_t)((frac16 + 128) / 256); /* Round-to-nearest byte tick */
+  res.bytes.fraction = (uint8_t)((frac16 + 128) / 256);
   return res.raw;
 }
 
@@ -264,7 +260,6 @@ int16_t gtoi(gloat16 a) {
   gap = next_frac - base_frac;
   interp = 0;
   if (gap > 0) {
-    /* Pure logarithmic reverse-mapping using half-gap rounding adjustments */
     interp = (rem * 100 + (gap / 2)) / gap;
   }
   
@@ -343,7 +338,7 @@ gloat16 atog(const char* str) {
     else if (prefix == 'm') exp_val = -3;
     else if (prefix == 'u') exp_val = -6;
     else if (prefix == 'n') exp_val = -9;
-    else if (prefix == 'p') exp_val = -10;
+    else if (prefix == 'p') exp_val = -12; /* Fixed Pico Prefix */
   }
 
   if (dec_ptr != NULL) {
@@ -362,14 +357,12 @@ gloat16 atog(const char* str) {
     }
     
     if (*r >= '0' && *r <= '9') {
-      int8_t digit_val = *r - '0';
-      linear_mantissa += (int32_t)digit_val * multiplier;
+      linear_mantissa += (int32_t)(*r - '0') * multiplier;
       multiplier *= 10;
     }
     r--;
   }
 
-  /* Core unified conversion via itog to guarantee identical register layouts */
   res.raw = itog((int16_t)linear_mantissa);
   
   if (is_negative) {
@@ -384,10 +377,10 @@ gloat16 atog(const char* str) {
   return res.raw;
 }
 
-#define GFLOAT_DEBUG 1  /* Toggle to 0 to disable extended debug layout padding */
+#define GFLOAT_DEBUG 1
 
 char* gtoa(gloat16 a, char* buf) {
-  char* origbuf= buf;
+  char* origbuf = buf;
   gloat_cast ca;
   int8_t true_exp;
   uint16_t full_frac;
@@ -408,6 +401,7 @@ char* gtoa(gloat16 a, char* buf) {
       break;
     }
   }
+
   base_frac = log_thresholds[digit - 1];
   next_frac = (digit < 9) ? log_thresholds[digit] : 0xffff;
   rem = full_frac - base_frac;
@@ -424,7 +418,6 @@ char* gtoa(gloat16 a, char* buf) {
       }
     }
   }
-  
   prefix = ' ';
   if (true_exp == 0) { prefix = '.'; }
   else if (true_exp == 3) { prefix = 'k'; true_exp = 0; }
@@ -435,8 +428,8 @@ char* gtoa(gloat16 a, char* buf) {
   else if (true_exp == -3) { prefix = 'm'; true_exp = 0; }
   else if (true_exp == -6) { prefix = 'u'; true_exp = 0; }
   else if (true_exp == -9) { prefix = 'n'; true_exp = 0; }
-  else if (true_exp == -10) { prefix = 'p'; true_exp = 0; }
-  
+  else if (true_exp == -12) { prefix = 'p'; true_exp = 0; } /* Fixed prefix match */
+
   if (prefix != ' ' && prefix != '.') {
     sprintf(buf, "%d%c%02d", digit, prefix, (int)interp);
   } else if (prefix == '.') {
@@ -459,15 +452,30 @@ char* gtoa(gloat16 a, char* buf) {
 
 #ifndef MAIN
 
+void testatog(char* a) {
+  char buf[32];
+  gloat16 g= atog(a);
+  printf("atog/gtoa test (%s) => $%04x == %s\n", a, g, gtoa(g, buf));
+}  
+
 int main(void) {
   char buf[32];
-  gloat16 n1, n2, n3, n4, n5, n6, n7, n8, i1, n9;
+  gloat16 n1, n2, n3, n4, n5, n6, n7, n8, n9, n10;
+  gloat16 i1;
   int16_t r1;
   int i;
 
-  n1 = atog("3.14e6");
-  gtoa(n1, buf);
-  printf("atog/gtoa Test 1 (3.14e6): %s\n", buf);
+  testatog("3");
+  testatog("3.");
+  testatog("3.1");
+  testatog("3.14");
+  testatog("3.145");
+  testatog("3.1415");
+  testatog("3.14159");
+  testatog("3.141592");
+  testatog("3.1415926");
+  testatog("3.14159265");
+  testatog("3.141592654");
 
   n2 = atog("2.00");
   n3 = gmul(n1, n2);
@@ -501,7 +509,7 @@ int main(void) {
 
   printf("\nDEC\tBIN:g =>a         =>   i\tASC:g =>a         =>   i\n");
   printf("-----------------------------------------------------------------------\n");
-  for(i=0; i<=256; ++i) {
+  for(i=-16; i<=256; ++i) {
     char str[16], gstr[16], hstr[16];
     gloat16 g, h;
     int16_t gi, hi;
@@ -521,7 +529,7 @@ int main(void) {
       , i
       , g, gstr, (int)gi, i==gi?' ':'~'
       , h, hstr, (int)hi, i==hi?' ':'~'
-      , gi==hi?'=':'/'
+      , gi==hi?' ':'/'
     );
   }
   return 0;

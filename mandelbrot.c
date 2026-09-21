@@ -18,7 +18,8 @@
   #define FLOAT       gloat16
 
   // unit is "cUnit" (1/100th)
-  #define ONEHUNDRED  (0x8200)
+  // a200 == 1010 0010  0000 0000
+  #define ONEHUNDRED  (0a200)
 
   #define FIXTOFLOAT(x) (DIV(atog(#x), ONEHUNDRED))
 
@@ -109,8 +110,9 @@ int main(int argc, char** argv) {
   int x, y;
   int iter;
   int color;
-
+  
 #ifdef USE_GLOAT
+  char buff[32];
   printf("x_end  =%-16s\n", gtoa(x_end, buff));
   printf("x_start=%-16s\n", gtoa(x_start, buff));
   printf("x_step =%-16s\n", gtoa(x_step, buff));
@@ -130,7 +132,6 @@ int main(int argc, char** argv) {
   for (y = 0; y < 28; y++) {
 
 #ifdef USE_GLOAT
-    char buff[32];
     printf("ci=%-16s ", gtoa(ci, buff));
 #else
     printf("ci=%8d ", ci);
