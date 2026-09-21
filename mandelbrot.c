@@ -8,18 +8,35 @@
 #define ONE   256
 
 // Convert a normal number to fixed point at compile time
-#define TO_FIX(x) ((int)((x) * ONE))
+#define TO_FIX(x) ((int)((x) * ONE/10))
 
-//int main() {
+
+#if 1
+
+  #define MUL(a, b)   (((long)(a)*(b))>>SHIFT)
+  #define SQR(a)      (((long)(a)*(a))>>SHIFT)
+  #define ADD(a, b)   ((a)+(b))
+  #define SUB(a, b)   ((a)-(b))
+
+#endif
+
+
+
+#ifndef __CC65__
+int main() {
+  int argc; char** argv;
+#else
 int main(int argc, char** argv) {
+#endif  
+  
   int x, y;
   int max_iter = 16; // Low iterations for fast 8-bit rendering
 
   // Screen bounds mapped to the Mandelbrot complex plane
-  int x_start = TO_FIX(-2.0);
-  int x_end   = TO_FIX(0.5);
-  int y_start = TO_FIX(-1.25);
-  int y_end   = TO_FIX(1.25);
+  int x_start = TO_FIX(-20);
+  int x_end   = TO_FIX(5);
+  int y_start = TO_FIX(-125);
+  int y_end   = TO_FIX(125);
 
   // Calculate step sizes across our 40x28 grid
   int x_step = (x_end - x_start) / 40;
@@ -42,18 +59,16 @@ int main(int argc, char** argv) {
       while (iter < max_iter) {
         // Fixed point multiplication requires shifting down by 8 bits
         // to correct the scale: (A * B) >> 8
-        zr2 = (zr * zr) >> SHIFT;
-        zi2 = (zi * zi) >> SHIFT;
+        zr2 = MUL(zr, zr);
+        zi2 = MUL(zi, zi);
 
         // Escape check: Length squared > 4.0 (4 * 256 = 1024)
-        if ((zr2 + zi2) > 1024) {
-          break;
-        }
+        if ((ADD(zr2, zi2)) > 1024) break;
 
         // Z = Z^2 + C
         // zi = 2*zr*zi + ci -> 2*zr*zi is rewritten as (zr*zi) >> 7
-        zi = ((zr * zi) >> (SHIFT - 1)) + ci;
-        zr = zr2 - zi2 + cr;
+        zi = (MUL(zr, zi) >> (SHIFT - 1)) + ci;
+        zr = ADD(SUB(zr2, zi2), cr);
                 
         iter++;
       }
@@ -62,7 +77,8 @@ int main(int argc, char** argv) {
       if (iter == max_iter) {
         color = 0; // Black inside the set
       } else {
-        color = 1 + (iter % 7); // Iteration maps to 1-7
+        //color = 1 + (iter % 7); // Iteration maps to 1-7
+        color = iter & 7;
       }
 
       // Output the raw single-digit character (0 to 7)
@@ -75,4 +91,5 @@ int main(int argc, char** argv) {
   }
 
   return 0;
+  (void)argc; (void)argv;
 }
