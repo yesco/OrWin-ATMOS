@@ -44,6 +44,20 @@ static const uint16_t log_thresholds[9] = {
   0, 0x4d10, 0x7a25, 0x9a21, 0xb2f1, 0xc735, 0xd859, 0xe731, 0xf44b
 };
 
+#if 1
+
+gloat16 gmul(gloat16 a, gloat16 b) {
+  gloat_cast ca, cb, res;
+  uint8_t exp_a, exp_b;
+  int16_t true_exp;
+  uint16_t frac_sum;
+  
+  // 1s ee eeee   ffff ffff
+//  return (a+b-(32<<8)) | 0x8000;
+  return (a+b-(32<<8)) | 0x8000;
+}
+
+#else
 gloat16 gmul(gloat16 a, gloat16 b) {
   gloat_cast ca, cb, res;
   uint8_t exp_a, exp_b;
@@ -65,6 +79,7 @@ gloat16 gmul(gloat16 a, gloat16 b) {
   res.bytes.meta |= (uint8_t)(true_exp + 32) & 0x3F;
   return res.raw;
 }
+#endif
 
 gloat16 gdiv(gloat16 num, gloat16 den) {
   gloat_cast cnum, cden, res;
@@ -610,10 +625,11 @@ int main(void) {
   int16_t r1;
   int i;
 
+  n1 = atog("3.14");
   n2 = atog("2.00");
   n3 = gmul(n1, n2);
   gtoa(n3, buf);
-  printf("gmul Test (3.14e6 * 2.00): %s\n", buf);
+  printf("gmul Test (3.14e6 * 2.00): %s %04x * %04x = %04x\n", buf, n1, n2, n3);
 
   n4 = gdiv(n3, n2);
   gtoa(n4, buf);
