@@ -225,12 +225,16 @@ int16_t gtoi(gloat16 a) {
   gloat_cast ca;
   int8_t true_exp;
   uint16_t full_frac;
-  int16_t digit, val;
+  int16_t digit;
+  uint16_t base_frac, next_frac;
+  uint32_t rem, gap, interp;
+  int32_t val;
   signed char i;
 
   ca.raw = a;
   true_exp = (ca.bytes.meta & 0x3F) - 32;
   if (true_exp < 0) return 0;
+  
   full_frac = (uint16_t)ca.bytes.fraction * 256;
   digit = 1;
   for (i = 8; i >= 0; i--) {
@@ -239,15 +243,34 @@ int16_t gtoi(gloat16 a) {
       break;
     }
   }
-  val = digit;
-  while (true_exp > 0) {
-    val *= 10;
-    true_exp--;
+  
+  base_frac = log_thresholds[digit - 1];
+  next_frac = (digit < 9) ? log_thresholds[digit] : 65535;
+  rem = full_frac - base_frac;
+  gap = next_frac - base_frac;
+  interp = 0;
+  if (gap > 0) {
+    interp = (rem * 100) / gap;
   }
+  
+  val = ((int32_t)digit * 100) + interp;
+  
+  if (true_exp == 0) {
+    val = (val + 50) / 100; /* Round to nearest integer */
+  } else if (true_exp == 1) {
+    val = (val + 5) / 10;   /* Round to nearest integer */
+  } else {
+    true_exp -= 2;
+    while (true_exp > 0) {
+      val *= 10;
+      true_exp--;
+    }
+  }
+  
   if (ca.bytes.meta & 0x40) {
     val = -val;
   }
-  return val;
+  return (int16_t)val;
 }
 
 gloat16 atog(const char* str) {
@@ -425,9 +448,14 @@ int main(void) {
     h = atog(str);
     gtoa(h, hstr);
     hi = gtoi(h);
-    printf("%3d\t%04x %-8s => %3d\t%04x %-8s => %3d\n", i
-      , g, gstr, (int)gi
-      , h, hstr, (int)hi);
+    printf("%3d"
+      "\t%04x %-8s => %3d %c"
+      "\t%04x %-8s => %3d %c"
+      "\n"
+      , i
+      , g, gstr, (int)gi, i==gi?' ':'~'
+      , h, hstr, (int)hi, i==hi?' ':'~'
+    );
   }
   return 0;
 }
