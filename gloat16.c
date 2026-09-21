@@ -388,32 +388,33 @@ gloat16 atog(const char* str) {
 void gtoa(gloat16 a, char* buf) {
   gloat_cast ca;
   int8_t true_exp;
-  uint16_t full_frac;
   int16_t digit;
-  uint16_t base_frac, next_frac;
-  uint32_t rem, gap, interp;
+  uint32_t interp;
   char prefix;
   signed char i;
-  char* start_ptr = buf;
   
   ca.raw = a;
   if (ca.bytes.meta & 0x40) *buf++ = '-';
   true_exp = (ca.bytes.meta & 0x3F) - 32;
-  full_frac = (uint16_t)ca.bytes.fraction * 256;
+  
+  /* Instantly resolve the leading integer digit using the log threshold array */
   digit = 1;
   for (i = 8; i >= 0; i--) {
-    if (full_frac >= log_thresholds[i]) {
+    if (((uint16_t)ca.bytes.fraction * 256) >= log_thresholds[i]) {
       digit = i + 1;
       break;
     }
   }
-  base_frac = log_thresholds[digit - 1];
-  next_frac = (digit < 9) ? log_thresholds[digit] : 0xffff;
-  rem = full_frac - base_frac;
-  gap = next_frac - base_frac;
-  interp = 0;
-  if (gap > 0) {
-    interp = (rem * 100) / gap;
+
+  /* The raw fraction byte is natively our linear percentage step! */
+  interp = ((uint32_t)ca.bytes.fraction * 100 + 128) / 256;
+  if (interp >= 100) {
+    interp -= 100;
+    digit++;
+    if (digit > 9) {
+      digit = 1;
+      true_exp++;
+    }
   }
   
   prefix = ' ';
@@ -433,7 +434,6 @@ void gtoa(gloat16 a, char* buf) {
   } else if (prefix == '.') {
     sprintf(buf, "%d.%02d", digit, (int)interp);
   } else if (true_exp == 1) {
-    /* Handle tens-decade alignment override (e.g. 34.0 instead of 3.4e1) */
     uint32_t aligned_val = ((uint32_t)digit * 100) + interp;
     sprintf(buf, "%d.%d", (int)(aligned_val / 10), (int)(aligned_val % 10));
   } else {
@@ -441,9 +441,8 @@ void gtoa(gloat16 a, char* buf) {
   }
 
 #if GFLOAT_DEBUG
-  /* Append high-precision parenthetical debug data tracing exactly where the fraction leans */
   buf += strlen(buf);
-  sprintf(buf, "(%u)", (unsigned int)rem);
+  sprintf(buf, "(%u)", (unsigned int)ca.bytes.fraction);
 #endif
 }
 
