@@ -16,7 +16,7 @@ gloat16 gpow(gloat16 base, gloat16 exponent);
 gloat16 itog(int16_t val);
 int16_t gtoi(gloat16 a);
 gloat16 atog(const char* str);
-void    gtoa(gloat16 a,    char* buf);
+char*   gtoa(gloat16 a,    char* buf);
 
 #endif
 
@@ -386,7 +386,8 @@ gloat16 atog(const char* str) {
 
 #define GFLOAT_DEBUG 1  /* Toggle to 0 to disable extended debug layout padding */
 
-void gtoa(gloat16 a, char* buf) {
+char* gtoa(gloat16 a, char* buf) {
+  char* origbuf= buf;
   gloat_cast ca;
   int8_t true_exp;
   uint16_t full_frac;
@@ -448,9 +449,10 @@ void gtoa(gloat16 a, char* buf) {
   }
 
 #if GFLOAT_DEBUG
-  buf += strlen(buf);
-  sprintf(buf, "(%u)", (unsigned int)rem);
+  sprintf(buf+strlen(buf), "(%u)", (unsigned int)rem);
 #endif
+
+  return origbuf;
 }
 
 

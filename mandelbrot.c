@@ -18,7 +18,9 @@
   #define FLOAT       gloat16
 
   // unit is "cUnit" (1/100th)
-  #define FIXTOFLOAT(x) (atog(#x))
+  #define ONEHUNDRED  (0x8200)
+
+  #define FIXTOFLOAT(x) (DIV(atog(#x), ONEHUNDRED))
 
   #define MUL(a, b)   (gmul(a, b))
   #define DIV(a, b)   (gdiv(a, b))
@@ -28,11 +30,9 @@
 
   // Inverted sign check: if Bit 14 is 0, the result is positive (a > b)
 
-// TODO: NOT handling alt format...
+// TODO: NOT handling alt format... probably means FULL 9 bit "fraction"
 
   #define CMP(a, b)   (((SUB(a, b) & 0x4000)? -1: +1))
-
-//  #define CMP(a, b)   (((SUB(a, b) & 0x4000) == 0) && (SUB(a, b) != 0x8000) ? 1 : -1)
 
 #else
 
@@ -46,7 +46,7 @@
   #define FIXTOFLOAT(x)  ((int)((long)(x) * ONE/100))
 
   #define MUL(a, b)   (((long)(a)*(b))>>SHIFT)
-  #define DIV(a, b)   (((((long)(a))<<SHIFT)/(b))>>SHIFT)
+  #define DIV(a, b)   (((((long)(a))<<(2*SHIFT))/(b))>>SHIFT)
   #define SQR(a)      (((long)(a)*(a))>>SHIFT)
   #define ADD(a, b)   ((a)+(b))
   #define SUB(a, b)   ((a)-(b))
@@ -69,8 +69,8 @@ int main(int argc, char** argv) {
   int max_iter = 16; // Low iterations for fast 8-bit rendering
 
   // Generic constants
-  FLOAT onehundred= FIXTOFLOAT(10000); // 100
-  FLOAT two       = FIXTOFLOAT(  200); //   2
+  FLOAT zero       = FIXTOFLOAT(    0); //   0
+  FLOAT two        = FIXTOFLOAT(  200); //   2
 
   // Constants and step bounds right at the beginning of main
 
@@ -83,10 +83,15 @@ int main(int argc, char** argv) {
 
   FLOAT x_start   = FIXTOFLOAT(-200);  //  -2.00
   FLOAT x_end     = FIXTOFLOAT(  50);  //    0.5
+
+//#define BUG
+#ifdef BUG
+  FLOAT y_start   = FIXTOFLOAT(-1250);  //  -1.25
+  FLOAT y_end     = FIXTOFLOAT( 1250);  //   1.25
+#else
   FLOAT y_start   = FIXTOFLOAT(-125);  //  -1.25
   FLOAT y_end     = FIXTOFLOAT( 125);  //   1.25
-//  FLOAT y_start   = FIXTOFLOAT(-1250);  //  -1.25
-//  FLOAT y_end     = FIXTOFLOAT( 1250);  //   1.25
+#endif // BUG
 
   FLOAT rows      = FIXTOFLOAT( 2800); //  28
   FLOAT cols      = FIXTOFLOAT( 4000); //  40
@@ -105,12 +110,36 @@ int main(int argc, char** argv) {
   int iter;
   int color;
 
+#ifdef USE_GLOAT
+  printf("x_end  =%-16s\n", gtoa(x_end, buff));
+  printf("x_start=%-16s\n", gtoa(x_start, buff));
+  printf("x_step =%-16s\n", gtoa(x_step, buff));
+  printf("x_ystep=%-16s\n", gtoa(y_step, buff));
+  printf("rows =%-16s\n",   gtoa(rows, buff));
+  printf("cols =%-16s\n",   gtoa(cols, buff));
+#else
+  printf("x_end  =%8d\n", x_end);
+  printf("x_start=%8d\n", x_start);  
+  printf("x_step =%8d\n", x_step);
+  printf("x_ystep=%8d\n", y_step);
+  printf("rows   =%8d\n", rows);
+  printf("cols   =%8d\n", cols);
+#endif  
+
   ci = y_start;
   for (y = 0; y < 28; y++) {
+
+#ifdef USE_GLOAT
+    char buff[32];
+    printf("ci=%-16s ", gtoa(ci, buff));
+#else
+    printf("ci=%8d ", ci);
+#endif
+      
     cr = x_start;
     for (x = 0; x < 40; x++) {
-      zr = 0;
-      zi = 0;
+      zr = zero;
+      zi = zero;
       iter = 0;
 
       while (iter < max_iter) {
@@ -135,7 +164,7 @@ int main(int argc, char** argv) {
         color = 0; // Black inside the set
       } else {
         //color = 1 + (iter % 7); // Iteration maps to 1-7
-        color = iter & 7;
+        color = iter & 7; // cheaper
       }
 
       // Output the raw single-digit character (0 to 7)
