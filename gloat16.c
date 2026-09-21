@@ -454,13 +454,18 @@ char* gtoa(gloat16 a, char* buf) {
 
 /* Helper to compare string outputs minus the debug suffix like (1234) */
 static bool match_base_string(const char* actual, const char* expected) {
+  const char * origexpected= expected, * origactual= actual;
   while (*expected) {
     if (*actual != *expected) return false;
     actual++;
     expected++;
   }
   /* Ensure the remaining string is just the debug info or empty */
-  return (*actual == '\0' || *actual == '(');
+  if (*actual == '\0' || *actual == '(') return 1;
+  // report error
+  printf("\n\tGOT     : \"%s\"\n", origactual);
+  printf("\n\tEXPECTED: \"%s\"\n", origexpected);
+  return 0;
 }
 
 void testatog(const char* input, const char* expected_base, uint16_t expected_hex) {
