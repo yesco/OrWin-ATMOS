@@ -262,11 +262,10 @@ int16_t gtoi(gloat16 a) {
   gap = next_frac - base_frac;
   interp = 0;
   if (gap > 0) {
-    /* Logarithmic inverse-ratio estimation via fraction weights */
-    interp = (rem * 100) / gap;
+    /* Pure logarithmic reverse-mapping using half-gap rounding adjustments */
+    interp = (rem * 100 + (gap / 2)) / gap;
   }
   
-  /* Reconstruct base using a precise exponential curve step */
   val = ((int32_t)digit * 100) + interp;
   
   if (true_exp == 0) {
@@ -388,32 +387,38 @@ gloat16 atog(const char* str) {
 void gtoa(gloat16 a, char* buf) {
   gloat_cast ca;
   int8_t true_exp;
+  uint16_t full_frac;
   int16_t digit;
-  uint32_t interp;
+  uint16_t base_frac, next_frac;
+  uint32_t rem, gap, interp;
   char prefix;
   signed char i;
   
   ca.raw = a;
   if (ca.bytes.meta & 0x40) *buf++ = '-';
   true_exp = (ca.bytes.meta & 0x3F) - 32;
-  
-  /* Instantly resolve the leading integer digit using the log threshold array */
+  full_frac = (uint16_t)ca.bytes.fraction * 256;
   digit = 1;
   for (i = 8; i >= 0; i--) {
-    if (((uint16_t)ca.bytes.fraction * 256) >= log_thresholds[i]) {
+    if (full_frac >= log_thresholds[i]) {
       digit = i + 1;
       break;
     }
   }
-
-  /* The raw fraction byte is natively our linear percentage step! */
-  interp = ((uint32_t)ca.bytes.fraction * 100 + 128) / 256;
-  if (interp >= 100) {
-    interp -= 100;
-    digit++;
-    if (digit > 9) {
-      digit = 1;
-      true_exp++;
+  base_frac = log_thresholds[digit - 1];
+  next_frac = (digit < 9) ? log_thresholds[digit] : 0xffff;
+  rem = full_frac - base_frac;
+  gap = next_frac - base_frac;
+  interp = 0;
+  if (gap > 0) {
+    interp = (rem * 100 + (gap / 2)) / gap;
+    if (interp >= 100) {
+      interp -= 100;
+      digit++;
+      if (digit > 9) {
+        digit = 1;
+        true_exp++;
+      }
     }
   }
   
@@ -442,7 +447,7 @@ void gtoa(gloat16 a, char* buf) {
 
 #if GFLOAT_DEBUG
   buf += strlen(buf);
-  sprintf(buf, "(%u)", (unsigned int)ca.bytes.fraction);
+  sprintf(buf, "(%u)", (unsigned int)rem);
 #endif
 }
 
