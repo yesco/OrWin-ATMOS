@@ -1,5 +1,8 @@
-./oscar -Os mandelbrot.c -ep | tee mb-oscar.out
-cl65 -Oirs -t sim6502 mandelbrot.c -o mandelbrot.sim && sim65 -c mandelbrot.sim | tee mb-cc65.out
+ARG=-DUSE_GLOAT
+
+./oscar -Os $ARG mandelbrot.c -ep | tee mb-oscar.out
+cl65 -Oirs $ARG -t sim6502 mandelbrot.c -o mandelbrot.sim && sim65 -c mandelbrot.sim | tee mb-cc65.out
+
 echo
 echo "cc65     :             `grep cycles mb-cc65.out`"
 echo "oscar64  : `grep Cycles mb-oscar.out`"

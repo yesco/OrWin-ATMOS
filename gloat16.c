@@ -451,6 +451,10 @@ void gtoa(gloat16 a, char* buf) {
 #endif
 }
 
+
+
+#ifndef MAIN
+
 int main(void) {
   char buf[32];
   gloat16 n1, n2, n3, n4, n5, n6, n7, n8, i1, n9;
@@ -518,3 +522,5 @@ int main(void) {
   }
   return 0;
 }
+
+#endif // !MAIN
