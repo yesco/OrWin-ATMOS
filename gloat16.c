@@ -40,8 +40,6 @@ static const uint8_t step_widths[67] = {
 };
 
 static const uint16_t log_thresholds[9] = {
-  //0, 19728, 31269, 39457, 45809, 50997, 55385, 59185, 62539
-  // avoid cc65 warningof "Constant is long"
   0, 0x4d10, 0x7a25, 0x9a21, 0xb2f1, 0xc735, 0xd859, 0xe731, 0xf44b
 };
 
@@ -329,7 +327,6 @@ void gtoa(gloat16 a, char* buf) {
   gap = next_frac - base_frac;
   interp = 0;
   if (gap > 0) {
-    // TODO: mul 100, wtf?
     interp = (rem * 100) / gap;
   }
   prefix = ' ';
@@ -343,6 +340,7 @@ void gtoa(gloat16 a, char* buf) {
   else if (true_exp == -6) { prefix = 'u'; true_exp = 0; }
   else if (true_exp == -9) { prefix = 'n'; true_exp = 0; }
   else if (true_exp == -10) { prefix = 'p'; true_exp = 0; }
+  
   if (prefix != ' ') {
     sprintf(buf, "%d%c%02d", digit, prefix, (int)interp);
   } else {
@@ -356,7 +354,8 @@ void gtoa(gloat16 a, char* buf) {
 
 int main(void) {
   char buf[32];
-  gloat16 n1, n2, n3, n4, n5, n6, n7, n8, i1, r1, n9;
+  gloat16 n1, n2, n3, n4, n5, n6, n7, n8, i1, n9;
+  int16_t r1;
   int i;
 
   n1 = atog("3.14e6");
@@ -396,24 +395,20 @@ int main(void) {
   printf("\nDEC\tBIN:g =>a     =>   i\tASC:g =>a     =>   i\n");
   printf("----------------------------------------------------\n");
   for(i=0; i<=256; ++i) {
-    char str[10], gstr[10], hstr[10];
+    char str[16], gstr[16], hstr[16];
     gloat16 g, h;
-    int gi, hi;
+    int16_t gi, hi;
 
-    g= itog(i);
+    g = itog((int16_t)i);
     gtoa(g, gstr);
-    gi= gtoi(g);
-
+    gi = gtoi(g);
     sprintf(str, "%d", i);
-    h= atog(str);
+    h = atog(str);
     gtoa(h, hstr);
-    hi= gtoi(h);
-    
+    hi = gtoi(h);
     printf("%3d\t%04x %-8s => %3d\t%04x %-8s => %3d\n", i
-      , g, gstr, gi
-      , h, hstr, hi
-    );
+      , g, gstr, (int)gi
+      , h, hstr, (int)hi);
   }
-
   return 0;
 }
