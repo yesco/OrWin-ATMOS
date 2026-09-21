@@ -383,6 +383,8 @@ gloat16 atog(const char* str) {
   return res.raw;
 }
 
+#define GFLOAT_DEBUG 1  /* Toggle to 0 to disable extended debug layout padding */
+
 void gtoa(gloat16 a, char* buf) {
   gloat_cast ca;
   int8_t true_exp;
@@ -392,6 +394,7 @@ void gtoa(gloat16 a, char* buf) {
   uint32_t rem, gap, interp;
   char prefix;
   signed char i;
+  char* start_ptr = buf;
   
   ca.raw = a;
   if (ca.bytes.meta & 0x40) *buf++ = '-';
@@ -412,6 +415,7 @@ void gtoa(gloat16 a, char* buf) {
   if (gap > 0) {
     interp = (rem * 100) / gap;
   }
+  
   prefix = ' ';
   if (true_exp == 0) { prefix = '.'; }
   else if (true_exp == 3) { prefix = 'k'; true_exp = 0; }
@@ -424,15 +428,23 @@ void gtoa(gloat16 a, char* buf) {
   else if (true_exp == -9) { prefix = 'n'; true_exp = 0; }
   else if (true_exp == -10) { prefix = 'p'; true_exp = 0; }
   
-  if (prefix != ' ') {
+  if (prefix != ' ' && prefix != '.') {
     sprintf(buf, "%d%c%02d", digit, prefix, (int)interp);
+  } else if (prefix == '.') {
+    sprintf(buf, "%d.%02d", digit, (int)interp);
+  } else if (true_exp == 1) {
+    /* Handle tens-decade alignment override (e.g. 34.0 instead of 3.4e1) */
+    uint32_t aligned_val = ((uint32_t)digit * 100) + interp;
+    sprintf(buf, "%d.%d", (int)(aligned_val / 10), (int)(aligned_val % 10));
   } else {
-    if (true_exp == 0) {
-      sprintf(buf, "%d.%02d", digit, (int)interp);
-    } else {
-      sprintf(buf, "%d.%02de%d", digit, (int)interp, true_exp);
-    }
+    sprintf(buf, "%d.%02de%d", digit, (int)interp, true_exp);
   }
+
+#if GFLOAT_DEBUG
+  /* Append high-precision parenthetical debug data tracing exactly where the fraction leans */
+  buf += strlen(buf);
+  sprintf(buf, "(%u)", (unsigned int)rem);
+#endif
 }
 
 int main(void) {
@@ -475,8 +487,8 @@ int main(void) {
   gtoa(n9, buf);
   printf("Schematic Input Test (-3G14): %s\n", buf);
 
-  printf("\nDEC\tBIN:g =>a     =>   i\tASC:g =>a     =>   i\n");
-  printf("----------------------------------------------------\n");
+  printf("\nDEC\tBIN:g =>a         =>   i\tASC:g =>a         =>   i\n");
+  printf("-----------------------------------------------------------------------\n");
   for(i=0; i<=256; ++i) {
     char str[16], gstr[16], hstr[16];
     gloat16 g, h;
@@ -491,8 +503,8 @@ int main(void) {
     gtoa(h, hstr);
     hi = gtoi(h);
     printf("%3d"
-      "\t%04x %-8s => %3d %c"
-      "\t%04x %-8s => %3d %c"
+      "\t%04x %-12s => %3d %c"
+      "\t%04x %-12s => %3d %c"
       "   %c\n"
       , i
       , g, gstr, (int)gi, i==gi?' ':'~'
