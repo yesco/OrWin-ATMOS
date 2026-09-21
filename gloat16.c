@@ -348,6 +348,12 @@ gloat16 atog(const char* str) {
     exp_val = parsed_exp * exp_sign;
   }
 
+  if (digit == 0 && exp_adj == 0 && dec1 == 0 && dec2 == 0) {
+    res.bytes.meta = 0x80 | 0;
+    res.bytes.fraction = 0;
+    return res.raw;
+  }
+
   exp_val += exp_adj;
   res.bytes.meta |= (exp_val + 32) & 0x3F;
   
@@ -470,10 +476,11 @@ int main(void) {
     printf("%3d"
       "\t%04x %-8s => %3d %c"
       "\t%04x %-8s => %3d %c"
-      "\n"
+      "   %c\n"
       , i
       , g, gstr, (int)gi, i==gi?' ':'~'
       , h, hstr, (int)hi, i==hi?' ':'~'
+      , gi==hi?'=':'/'
     );
   }
   return 0;
