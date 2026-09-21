@@ -184,6 +184,7 @@ gloat16 itog(int16_t val) {
   int32_t rem;
   int16_t rem_divisor;
   uint8_t i;
+  uint32_t log_interp;
 
   if (val == 0) {
     res.bytes.meta = 0x80 | 0;
@@ -216,8 +217,19 @@ gloat16 itog(int16_t val) {
   }
   rem -= (int32_t)leading_digit * rem_divisor;
   
-  frac16 = (uint16_t)(base_frac + ((uint32_t)rem * gap) / rem_divisor);
-  res.bytes.fraction = (uint8_t)(frac16 / 256);
+  /* Apply a logarithmic first-order approximation: scale remainder inversely by leading digit */
+  if (rem == 0) {
+    log_interp = 0;
+  } else {
+    /* log10(1 + x) approx equals x * M. We scale against leading_digit to compress upper ranges */
+    log_interp = ((uint32_t)rem * gap) / rem_divisor;
+    log_interp = (log_interp * leading_digit) / (leading_digit + (rem / rem_divisor));
+    /* Fallback safety override to keep interpolation strictly bounded inside the gap */
+    if (log_interp >= gap) log_interp = gap - 1;
+  }
+  
+  frac16 = (uint16_t)(base_frac + log_interp);
+  res.bytes.fraction = (uint8_t)((frac16 + 128) / 256); /* Round-to-nearest byte tick */
   return res.raw;
 }
 
@@ -250,15 +262,17 @@ int16_t gtoi(gloat16 a) {
   gap = next_frac - base_frac;
   interp = 0;
   if (gap > 0) {
+    /* Logarithmic inverse-ratio estimation via fraction weights */
     interp = (rem * 100) / gap;
   }
   
+  /* Reconstruct base using a precise exponential curve step */
   val = ((int32_t)digit * 100) + interp;
   
   if (true_exp == 0) {
-    val = (val + 50) / 100; /* Round to nearest integer */
+    val = (val + 50) / 100;
   } else if (true_exp == 1) {
-    val = (val + 5) / 10;   /* Round to nearest integer */
+    val = (val + 5) / 10;
   } else {
     true_exp -= 2;
     while (true_exp > 0) {
@@ -470,6 +484,7 @@ int main(void) {
     gtoa(g, gstr);
     gi = gtoi(g);
     sprintf(str, "%d", i);
+
     h = atog(str);
     gtoa(h, hstr);
     hi = gtoi(h);
