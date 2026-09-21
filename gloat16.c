@@ -209,7 +209,7 @@ int16_t gtoi(gloat16 a) {
   int8_t true_exp;
   uint16_t full_frac;
   int16_t digit, val;
-  signed int i;
+  signed char i;
 
   ca.raw = a;
   true_exp = (ca.bytes.meta & 0x3F) - 32;
@@ -310,12 +310,10 @@ void gtoa(gloat16 a, char* buf) {
   uint16_t base_frac, next_frac;
   uint32_t rem, gap, interp;
   char prefix;
-  int i;
+  signed char i;
   
   ca.raw = a;
-  if (ca.bytes.meta & 0x40) {
-    *buf++ = '-';
-  }
+  if (ca.bytes.meta & 0x40) *buf++ = '-';
   true_exp = (ca.bytes.meta & 0x3F) - 32;
   full_frac = (uint16_t)ca.bytes.fraction * 256;
   digit = 1;
@@ -331,10 +329,12 @@ void gtoa(gloat16 a, char* buf) {
   gap = next_frac - base_frac;
   interp = 0;
   if (gap > 0) {
+    // TODO: mul 100, wtf?
     interp = (rem * 100) / gap;
   }
   prefix = ' ';
-  if (true_exp == 3) { prefix = 'k'; true_exp = 0; }
+  if (true_exp == 0) { prefix = '.'; }
+  else if (true_exp == 3) { prefix = 'k'; true_exp = 0; }
   else if (true_exp == 6) { prefix = 'M'; true_exp = 0; }
   else if (true_exp == 9) { prefix = 'G'; true_exp = 0; }
   else if (true_exp == 12) { prefix = 'T'; true_exp = 0; }
@@ -357,6 +357,7 @@ void gtoa(gloat16 a, char* buf) {
 int main(void) {
   char buf[32];
   gloat16 n1, n2, n3, n4, n5, n6, n7, n8, i1, r1, n9;
+  int i;
 
   n1 = atog("3.14e6");
   gtoa(n1, buf);
@@ -391,6 +392,28 @@ int main(void) {
   n9 = atog("-3G14");
   gtoa(n9, buf);
   printf("Schematic Input Test (-3G14): %s\n", buf);
+
+  printf("\nDEC\tBIN:g =>a     =>   i\tASC:g =>a     =>   i\n");
+  printf("----------------------------------------------------\n");
+  for(i=0; i<=256; ++i) {
+    char str[10], gstr[10], hstr[10];
+    gloat16 g, h;
+    int gi, hi;
+
+    g= itog(i);
+    gtoa(g, gstr);
+    gi= gtoi(g);
+
+    sprintf(str, "%d", i);
+    h= atog(str);
+    gtoa(h, hstr);
+    hi= gtoi(h);
+    
+    printf("%3d\t%04x %-8s => %3d\t%04x %-8s => %3d\n", i
+      , g, gstr, gi
+      , h, hstr, hi
+    );
+  }
 
   return 0;
 }
