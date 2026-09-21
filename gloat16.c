@@ -179,6 +179,11 @@ gloat16 itog(int16_t val) {
   gloat_cast res;
   uint8_t exp, digit_idx;
   uint16_t frac16;
+  int16_t temp_val, leading_digit;
+  uint32_t base_frac, next_frac, gap;
+  int32_t rem;
+  int16_t rem_divisor;
+  uint8_t i;
 
   if (val == 0) {
     res.bytes.meta = 0x80 | 0;
@@ -191,13 +196,27 @@ gloat16 itog(int16_t val) {
     val = -val;
   }
   exp = 0;
-  while (val >= 10) {
-    val /= 10;
+  temp_val = val;
+  while (temp_val >= 10) {
+    temp_val /= 10;
     exp++;
   }
+  leading_digit = temp_val;
   res.bytes.meta |= (exp + 32) & 0x3F;
-  digit_idx = (val > 0 && val <= 9) ? (val - 1) : 0;
-  frac16 = log_thresholds[digit_idx];
+  
+  digit_idx = (leading_digit > 0 && leading_digit <= 9) ? (leading_digit - 1) : 0;
+  base_frac = log_thresholds[digit_idx];
+  next_frac = (leading_digit < 9) ? log_thresholds[digit_idx + 1] : 65536;
+  gap = next_frac - base_frac;
+  
+  rem = val;
+  rem_divisor = 1;
+  for (i = 0; i < exp; i++) {
+    rem_divisor *= 10;
+  }
+  rem -= (int32_t)leading_digit * rem_divisor;
+  
+  frac16 = (uint16_t)(base_frac + ((uint32_t)rem * gap) / rem_divisor);
   res.bytes.fraction = (uint8_t)(frac16 / 256);
   return res.raw;
 }
