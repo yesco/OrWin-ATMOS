@@ -429,6 +429,7 @@ gloat16 atog(const char* str) {
     
     if (*r >= '0' && *r <= '9') {
       linear_mantissa += (int32_t)(*r - '0') * multiplier;
+// TODO: cheating!!!!
       multiplier *= 10;
     }
     r--;
@@ -520,46 +521,133 @@ char* gtoa(gloat16 a, char* buf) {
 }
 
 
-
-// 9-byte lookup table mapping digits 1-9 to their log10 value.
-// Scaled by 256 to match your 8-bit fractional format.
-// log10(1)*256=0, log10(2)*256=77, ..., log10(10)*256=256
-static const uint16_t LOG10_DIGITS[10] = {
-    0,   77,  122, 154, 179, 199, 216, 231, 244, 256
+// 9-slot lookup table mapping digits 1-9 to their log10 value.
+// Scaled by 65536 to match high-precision 16-bit space.
+static const uint16_t log_digits[9] = {
+  0, 0x4d10, 0x7a25, 0x9a21, 0xb2f1, 0xc735, 0xd859, 0xe731, 0xf44b
 };
+
 
 // Prints the underlying mantissa digits from the 14-bit 
 // (exponent + fraction) field of a gloat16 number.
-// 
-// lower14: The raw lower 14 bits of gloat16 (6-bit exp + 8-bit frac)
-//  num_digits: How many significant digits you want to extract (e.g., 4 or 5)
-void gprint(uint16_t lower14, uint8_t num_digits) {
-  // Extract the 8-bit fraction from the lowest bits
-  uint16_t frac = lower14 & 0x00FF;
+void gprinterh(uint16_t g, uint8_t num_digits) {
+  // Extract 8-bit fraction and shift left by 8 to scale to the 16-bit table
+  uint32_t frac = (uint32_t)(g & 0x00FF) << 8;
+  uint32_t shift_window = 0; // Tracks our position without using math
   uint8_t i, digit;
 
   // Loop to extract digits one by one
-  for (i = 0; i < num_digits; ++i) {
+  for(i = 0; i < num_digits; ++i) {
     // Find the largest digit where log10(digit) <= frac
     for (digit = 9; digit >= 1; --digit) {
-      if (frac >= LOG10_DIGITS[digit - 1]) {
-        break;
-      }
+      // Shift the comparison threshold instead of modifying the fraction
+      if (frac >= (log_digits[digit - 1] << shift_window)) break;
     }
 
     // Output the character immediately 
     putchar('0' + digit);
 
     // Subtract out the logarithm of the extracted digit
-    frac -= LOG10_DIGITS[digit - 0];
+    frac -= (log_digits[digit - 1] << shift_window);
 
-    // Multiply the remainder by 10. 
-    // n LNS, multiplying the value by 10 means adding 1.0 to the exponent. 
-    // Since our fraction is scaled by 256, adding 1.0 means adding 256.
-    // 
-    frac += 256;
+    // Instead of multiplying the fraction by 10 (which is adding 65536),
+    // we advance our comparison window by 16 bits.
+    shift_window += 16;
   }
 }
+
+//  num_digits: How many significant digits you want to extract (e.g., 4 or 5)
+//
+//  print DIGIT11111111 lol
+void nahgprint(uint16_t g, uint8_t num_digits) {
+  // Use a 32-bit workspace so the +65536 shift isn't lost to 16-bit rollover
+  uint32_t frac = (uint32_t)(g & 0x00FF) << 8;
+  uint8_t i, digit;
+
+  // Loop to extract digits one by one
+  for(i=0; i<num_digits; ++i) {
+    // Find the largest digit where log10(digit) <= frac
+    for (digit = 9; digit >= 1; --digit)
+      if (frac >= log_digits[digit - 1]) break;
+
+    // Output the character immediately 
+    putchar('0' + digit);
+
+    // Subtract out the logarithm of the extracted digit
+    //frac -= log_digits[digit - 1];
+    frac= gsub(frac, log_digits[digit - 1]);
+    //frac= (uint32_t)(frac & 0x00FF) << 8;
+    //frac= frac & 0x3fff;
+    printf("\t[%d %ld %04lx]\n", i, frac, frac);
+    frac<<= 8;
+ 
+    // Multiply the remainder value by 10. 
+    // In LNS, multiplying the underlying value by 10 means adding 1.0 (65536) 
+    // to the logarithmic exponent. 
+    frac += 65536;
+    //frac += 256;
+
+    // Keep only the new fractional remainder portion for the next digit loop
+    frac %= 65536; 
+  }
+}
+
+// 512 bytes... lol, so much for small routine...
+
+// 256-word table storing 4 decimal digits packed directly as BCD (0x1234)
+static const uint16_t bcd_digits[256] = {
+  0x1000, 0x1009, 0x1018, 0x1027, 0x1037, 0x1046, 0x1055, 0x1065,
+  0x1075, 0x1084, 0x1094, 0x1010, 0x1114, 0x1124, 0x1134, 0x1144,
+  0x1155, 0x1165, 0x1176, 0x1186, 0x1197, 0x1208, 0x1219, 0x1230,
+  0x1241, 0x1252, 0x1263, 0x1275, 0x1286, 0x1298, 0x1310, 0x1322,
+  0x1334, 0x1346, 0x1358, 0x1370, 0x1382, 0x1395, 0x1407, 0x1420,
+  0x1433, 0x1446, 0x1459, 0x1472, 0x1486, 0x1499, 0x1512, 0x1526,
+  0x1540, 0x1554, 0x1568, 0x1582, 0x1596, 0x1611, 0x1625, 0x1640,
+  0x1655, 0x1670, 0x1685, 0x1700, 0x1715, 0x1731, 0x1747, 0x1762,
+  0x1778, 0x1794, 0x1811, 0x1827, 0x1843, 0x1860, 0x1877, 0x1894,
+  0x1911, 0x1928, 0x1946, 0x1963, 0x1981, 0x1999, 0x2017, 0x2035,
+  0x2054, 0x2072, 0x2091, 0x2110, 0x2129, 0x2148, 0x2167, 0x2187,
+  0x2207, 0x2227, 0x2247, 0x2267, 0x2288, 0x2308, 0x2329, 0x2350,
+  0x2371, 0x2393, 0x2414, 0x2436, 0x2458, 0x2480, 0x2503, 0x2525,
+  0x2548, 0x2571, 0x2595, 0x2618, 0x2642, 0x2666, 0x2690, 0x2714,
+  0x2738, 0x2763, 0x2788, 0x2813, 0x2839, 0x2864, 0x2890, 0x2916,
+  0x2943, 0x2969, 0x2996, 0x3023, 0x3051, 0x3078, 0x3106, 0x3134,
+  0x3162, 0x3191, 0x3220, 0x3249, 0x3278, 0x3308, 0x3338, 0x3368,
+  0x3398, 0x3429, 0x3460, 0x3491, 0x3523, 0x3555, 0x3587, 0x3619,
+  0x3652, 0x3685, 0x3718, 0x3752, 0x3786, 0x3820, 0x3854, 0x3889,
+  0x3924, 0x3960, 0x3995, 0x4032, 0x4068, 0x4105, 0x4142, 0x4179,
+  0x4217, 0x4255, 0x4294, 0x4332, 0x4371, 0x4411, 0x4451, 0x4491,
+  0x4532, 0x4573, 0x4614, 0x4656, 0x4698, 0x4740, 0x4783, 0x4826,
+  0x4870, 0x4914, 0x4958, 0x5003, 0x5048, 0x5094, 0x5140, 0x5186,
+  0x5233, 0x5280, 0x5328, 0x5376, 0x5425, 0x5474, 0x5523, 0x5573,
+  0x5623, 0x5674, 0x5725, 0x5777, 0x5829, 0x5882, 0x5935, 0x5989,
+  0x6043, 0x6098, 0x6153, 0x6208, 0x6264, 0x6321, 0x6378, 0x6436,
+  0x6494, 0x6552, 0x6612, 0x6671, 0x6732, 0x6793, 0x6854, 0x6916,
+  0x6978, 0x7041, 0x7105, 0x7169, 0x7234, 0x7299, 0x7365, 0x7432,
+  0x7499, 0x7567, 0x7635, 0x7704, 0x7774, 0x7844, 0x7915, 0x7986,
+  0x8058, 0x8131, 0x8205, 0x8279, 0x8354, 0x8429, 0x8505, 0x8582,
+  0x8660, 0x8738, 0x8817, 0x8896, 0x8977, 0x9058, 0x9140, 0x9222,
+  0x9306, 0x9390, 0x9475, 0x9560, 0x9647, 0x9734, 0x9822, 0x9910
+};
+
+// Prints the underlying mantissa digits from the 14-bit field
+void gprint(uint16_t g, uint8_t num_digits) {
+  uint16_t bcd = bcd_digits[g & 0xff];
+
+  // Unpack each hex nibble directly via shifts and masks—zero division overhead!
+  if (num_digits > 0) putchar('0' + ((bcd >> 12) & 0xf));
+  if (num_digits > 1) putchar('0' + ((bcd >>  8) & 0xf));
+  if (num_digits > 2) putchar('0' + ((bcd >>  4) & 0xf));
+  if (num_digits > 3) putchar('0' + ((bcd      ) & 0xf));
+
+  // Pad remaining requested places with zero
+  while (num_digits++ < 4) {
+    putchar('0');
+  }
+}
+
+
+
 
 #ifndef MAIN
 
@@ -880,7 +968,7 @@ int main(void) {
 //    + misctests()
 
 // TODO: not finished, have bugs at end of range...
-    + addsubtests(1000)
+//    + addsubtests(1000)
     
     + gprinttest(128)
     + gprinttest(atog("0.5"))
