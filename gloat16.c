@@ -36,13 +36,7 @@ typedef union {
   } bytes;
 } gloat_cast;
 
-static const uint8_t step_widths[67] = {
-  2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 2, 2, 2, 3, 2, 2,
-  3, 2, 3, 2, 3, 2, 3, 2, 3, 3, 2, 3, 3, 3, 3, 3,
-  3, 3, 3, 3, 4, 3, 3, 4, 3, 4, 4, 4, 4, 4, 4, 4,
-  5, 4, 5, 5, 5, 5, 5, 6, 6, 6, 7, 7, 7, 8, 8, 9,
-  9, 10, 11
-};
+
 
 static const uint16_t log_thresholds[9] = {
   0, 0x4d10, 0x7a25, 0x9a21, 0xb2f1, 0xc735, 0xd859, 0xe731, 0xf44b
@@ -143,11 +137,28 @@ gloat16 gpow(gloat16 base, gloat16 exponent) {
   return res.raw;
 }
 
+// Steps subs displacment; each subtracts 1 from 77
+static const uint8_t step_widths_add[77] = {
+  2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 2, 2, 2, 3, 2, 2,
+  3, 2, 3, 2, 3, 2, 3, 2, 3, 3, 2, 3, 3, 3, 3, 3,
+  3, 3, 3, 3, 4, 3, 3, 4, 3, 4, 4, 4, 4, 4, 4, 4,
+  5, 4, 5, 5, 5, 5, 5, 6, 6, 6, 7, 7, 7, 8, 8, 9,
+  9,10,11,12,13,15,17,19,22,26,33,44,76
+};
+
+// Direct sub displacement lookup values for Delta 1 to 36
+static const uint8_t sub_displacement[36] = {
+  255, 192, 147, 116, 91,  72,  55,  41,  28,  17,  7,   254,
+  247, 241, 235, 230, 225, 220, 216, 211, 207, 203, 199, 196,
+  192, 189, 186, 183, 180, 177, 174, 171, 169, 166, 164, 161
+};
+
 gloat16 gadd(gloat16 a, gloat16 b) {
   gloat_cast ca, cb, final_res, res;
-  uint8_t exp_a, exp_b, displacement_s;
+  uint8_t exp_a, exp_b, move_s;
   uint16_t final_frac_sum, f_sum;
   int16_t delta_frac, delta_exp, delta;
+  unsigned int i;
   
   // make A bigger than B
   if ((a & 0x7FFF) > (b & 0x7FFF)) {
@@ -179,44 +190,54 @@ gloat16 gadd(gloat16 a, gloat16 b) {
     return res.raw;
   }
 
-  // calculate delta by "optimized" lookup
-  if (delta >= 256) {
-    if (delta >= 446)      displacement_s = 1;
-    else if (delta >= 401) displacement_s = 2;
-    else if (delta >= 368) displacement_s = 3;
-    else if (delta >= 343) displacement_s = 4;
-    else if (delta >= 322) displacement_s = 5;
-    else if (delta >= 304) displacement_s = 6;
-    else if (delta >= 289) displacement_s = 7;
-    else if (delta >= 275) displacement_s = 8;
-    else if (delta >= 263) displacement_s = 9;
-    else                   displacement_s = 10;
-  } else {
-    uint8_t running_delta = (uint8_t)delta;
-    uint8_t table_ptr;
-    if (running_delta >= 63) {
-      running_delta -= 63;
-      displacement_s = 49;
-      table_ptr = 28;
-    } else {
-      displacement_s = 77;
-      table_ptr = 0;
+  // Determine branch path: Subtraction (Mixed Signs) vs Addition (Same Signs)
+  if ((a ^ b) & 0x4000) {
+    // SUBTRACTION PATH (Linear signs differ)
+    if (delta >= 446)      move_s = 255; // Drops magnitude by 1 tick
+    else if (delta >= 347) move_s = 254; // Drops magnitude by 2 ticks
+    else if (delta >= 256) move_s = 244; // Drops magnitude by 12 ticks
+    else if (delta >= 143) move_s = 214; // Drops magnitude by 42 ticks
+    else if (delta >= 93)  move_s = 163; // Drops magnitude by 93 ticks
+    else if (delta >= 63)  move_s = 131; // Drops magnitude by 125 ticks
+    else if (delta >= 37)  move_s = 114; // Drops magnitude by 142 ticks
+    else {
+      // Razor-steep cliff (Delta 1 to 36): Direct 1-cycle array table fetch
+      move_s = sub_displacement[delta - 1];
     }
-    while (table_ptr < 67) { /* Boundary protection safely inside loop condition */
-      int16_t test_sub = (int16_t)running_delta - step_widths[table_ptr];
+    
+    // Apply displacement subtractively to the larger number's payload
+    final_res = ca;
+    f_sum = (uint16_t)final_res.bytes.fraction + move_s;
+    if (f_sum < 256) {
+      // Underflow occurred: Decrement biased exponent field safely
+      final_res.bytes.meta = (final_res.bytes.meta & 0xC0) | (((final_res.bytes.meta & 0x3F) - 1) & 0x3F);
+    }
+    final_res.bytes.fraction = (uint8_t)f_sum;
+    return final_res.raw;
+
+  } else {
+    // ADDITION PATH (Linear signs match)
+    uint16_t running_delta = (uint16_t)delta;
+    move_s = 77;
+    i = 0;
+
+    // Direct, loop-driven table processing for the entire addition curve
+    while (i < 77) { 
+      int16_t test_sub = (int16_t)running_delta - step_widths_add[i];
       if (test_sub < 0) break;
       running_delta = (uint8_t)test_sub;
-      displacement_s--;
-      table_ptr++;
+      move_s--;
+      ++i;
     }
+
+    final_res = ca;
+    final_frac_sum = (uint16_t)final_res.bytes.fraction + move_s;
+    if (final_frac_sum >= 256) {
+      final_res.bytes.meta = (final_res.bytes.meta & 0xC0) | (((final_res.bytes.meta & 0x3F) + 1) & 0x3F);
+    }
+    final_res.bytes.fraction = (uint8_t)final_frac_sum;
+    return final_res.raw;
   }
-  final_res = ca;
-  final_frac_sum = (uint16_t)final_res.bytes.fraction + displacement_s;
-  if (final_frac_sum >= 256) {
-    final_res.bytes.meta = (final_res.bytes.meta & 0xC0) | (((final_res.bytes.meta & 0x3F) + 1) & 0x3F);
-  }
-  final_res.bytes.fraction = (uint8_t)final_frac_sum;
-  return final_res.raw;
 }
 
 #define GNEG(a) ((a) ^ 0x4000)
@@ -695,7 +716,8 @@ int misctests() {
   g= XTEST(gsub,   NULL, g,    "5.00e2",0,  "1.00e3",0);
 
   g= STEST(gadd,   "42",       "42",        "84"       );
-  g= STEST(gadd,   "42",       "-42",       "0"       );
+//g= STEST(gadd,   "42",       "-42",       "1e-32"    );
+  g= STEST(gadd,   "42",       "-42",       "1.00e-32"    );
 
 
   // TODO: extend STEST/XTEST with single arg op(a) ?
