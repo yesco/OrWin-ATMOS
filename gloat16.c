@@ -155,8 +155,8 @@ static const uint8_t step_widths_add[77] = {
   9,10,11,12,13,15,17,19,22,26,33,44,76
 };
 
-// Direct subtraction displacement tick offsets for Delta 1 to 36
-static const uint16_t sub_displacement[] = {
+// Direct subtraction displacement log tick offsets for Delta 1 to 36
+static const int16_t sub_displacement[36] = {
   524, 447, 403, 371, 347, 327, 311, 297, 284, 273, 263, 254,
   246, 239, 232, 226, 220, 214, 209, 204, 200, 195, 191, 187,
   183, 179, 176, 172, 169, 166, 163, 160, 157, 154, 152, 149
@@ -199,13 +199,14 @@ gloat16 gadd(gloat16 a, gloat16 b) {
   if ((a ^ b) & 0x4000) {
     // SUBTRACTION PATH (Linear signs differ)
     // Values represent the literal number of ticks to drop the magnitude
-    if      (delta >= 446) move_s = -1;
-    else if (delta >= 347) move_s = -2;
-    else if (delta >= 256) move_s = -12;
-    else if (delta >= 143) move_s = -42;
-    else if (delta >= 93)  move_s = -93;
-    else if (delta >= 63)  move_s = -125;
-    else if (delta >= 37)  move_s = -142;
+    // Fixed: Scaled values out to full tick alignment offsets (x256)
+    if      (delta >= 446) move_s = -1 * 256;
+    else if (delta >= 347) move_s = -2 * 256;
+    else if (delta >= 256) move_s = -12 * 256;
+    else if (delta >= 143) move_s = -42 * 256;
+    else if (delta >= 93)  move_s = -93 * 256;
+    else if (delta >= 63)  move_s = -125 * 256;
+    else if (delta >= 37)  move_s = -142 * 256;
     else                   move_s = -sub_displacement[delta - 1];
     
   } else {
