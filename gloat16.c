@@ -8,6 +8,10 @@
 #include <stdio.h>
 #include <string.h>
 
+// TODO: we need to remove the BIAS implementation
+
+ #define NOBIAS
+
 typedef uint16_t gloat16;
 
 gloat16 gmul(gloat16 a,    gloat16 b);
@@ -44,15 +48,35 @@ static const uint16_t log_thresholds[9] = {
   0, 0x4d10, 0x7a25, 0x9a21, 0xb2f1, 0xc735, 0xd859, 0xe731, 0xf44b
 };
 
+#ifdef NOBIAS
 gloat16 gmul(gloat16 a, gloat16 b) {
-
+  gloat16 r = a + b;
+  // Tricky: If raw addition leaves Bit 15 set, an upper overflow
+  // occurred.  We selectively apply XOR 64 (0x4000) to flip the
+  // linear sign slot.
+  if (r & 0x8000) r ^= 0x4000;
+  return r | 0x8000; // Permanently secure Gloat Tag
+}
+#else
+gloat16 gmul(gloat16 a, gloat16 b) {
   // XOR the sign bits together, extract the combined raw value minus
   // double bias, and clear out the overlapping upper flags so we can
   // slam on the 0x8000 marker cleanly
-
   return (((a + b - (32 << 8)) & 0x3FFF) | 0x8000) ^ ((a ^ b) & 0x4000);
 }
+#endif
 
+#ifdef NOBIAS
+gloat16 gdiv(gloat16 num, gloat16 den) {
+  gloat16 r = num - den;
+  /* Tricky: In subtraction, if Bit 15 remains 0, no borrow flipped the upper bits.
+     We selectively apply XOR 64 (0x4000) only when Bit 15 is NOT set. */
+  if (!(r & 0x8000)) {
+    r ^= 0x4000;
+  }
+  return r | 0x8000; /* Permanently secure Gloat Tag */
+}
+#else
 gloat16 gdiv(gloat16 num, gloat16 den) {
   
   // Subtract den from num, add the bias back since we subtracted it
@@ -60,6 +84,7 @@ gloat16 gdiv(gloat16 num, gloat16 den) {
   // sign bit.
   return (((num - den + (32 << 8)) & 0x3FFF) | 0x8000) ^ ((num ^ den) & 0x4000);
 }
+#endif
 
 gloat16 glog(gloat16 a) {
   gloat_cast ca;
@@ -118,14 +143,13 @@ gloat16 gpow(gloat16 base, gloat16 exponent) {
   return res.raw;
 }
 
-
 gloat16 gadd(gloat16 a, gloat16 b) {
   gloat_cast ca, cb, final_res, res;
   uint8_t exp_a, exp_b, displacement_s;
   uint16_t final_frac_sum, f_sum;
   int16_t delta_frac, delta_exp, delta;
   
-  // Make A bigger than B
+  // A<B: swap!
   if ((a & 0x7FFF) > (b & 0x7FFF)) {
     ca.raw = a; cb.raw = b;
   } else {
@@ -188,11 +212,12 @@ gloat16 gadd(gloat16 a, gloat16 b) {
   return final_res.raw;
 }
 
+#define GNEG(a) ((a) ^ 0x4000)
+
+#define GSUB(a, b) gadd((a), ((b) ^ 0x4000))
+
 gloat16 gsub(gloat16 a, gloat16 b) {
-  gloat_cast cb;
-  cb.raw = b;
-  cb.bytes.meta ^= 0x40;
-  return gadd(a, cb.raw);
+  return gadd(a, GNEG(b));
 }
 
 gloat16 itog(int16_t val) {
@@ -647,7 +672,7 @@ int autotests(void) {
 
 int misctests() {
   char buf[32];
-  gloat16 n2, n4, n5, n6, n7, n8, n9;
+  gloat16 n9;
   gloat16 i1;
   int16_t r1;
 
@@ -661,6 +686,10 @@ int misctests() {
   
   g= STEST(gadd,   "1.00e3",   "5.00e2",    "1k58"    );
   g= XTEST(gsub,   NULL, g,    "5.00e2",0,  "1.00e3",0);
+
+  g= STEST(gadd,   "42",       "42",        "84"       );
+  g= STEST(gadd,   "42",       "-42",       "0"       );
+
 
   // TODO: extend STEST/XTEST with single arg op(a) ?
 
