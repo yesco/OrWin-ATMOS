@@ -164,10 +164,9 @@ static const int16_t sub_displacement[36] = {
 
 gloat16 gadd(gloat16 a, gloat16 b) {
   gloat_cast ca, cb;
-  int16_t move_s;
-  int16_t delta;
+  int16_t move_s, delta, running_delta, test_sub;
   uint16_t f_sum;
-  unsigned int i;
+  char i;
   
   // Want abs(A) > abs(b): Swap if not
   if ((a & 0x3FFF) > (b & 0x3FFF)) {
@@ -192,6 +191,8 @@ gloat16 gadd(gloat16 a, gloat16 b) {
   if ((a ^ b) & 0x4000) {
     // SUBTRACTION PATH (Linear signs differ)
     // Values represent the literal number of ticks to drop the magnitude
+
+
 #if 0
     // This is mostly correct excpet for SUB 1..4!
     if      (delta >= 446) move_s = -1;
@@ -213,16 +214,17 @@ gloat16 gadd(gloat16 a, gloat16 b) {
     else if (delta >= 37)  move_s = -142*256;
     else                   move_s = -sub_displacement[delta - 1];
 #endif    
+
     
   } else {
     // ADDITION PATH (Linear signs match)
-    int16_t running_delta = delta;
+    running_delta = delta;
     move_s = 77;
     i = 0;
 
     // walk the steps, small at first
     while (i < 77) { 
-      int16_t test_sub = running_delta - step_widths_add[i];
+      test_sub = running_delta - step_widths_add[i];
       if (test_sub < 0) break;
       running_delta = test_sub;
       --move_s;
