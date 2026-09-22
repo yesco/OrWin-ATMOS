@@ -1,5 +1,14 @@
+// GLOAT16 - Graphics Logarithmic Oric Atmos Topspeed 16-bit Math
+//
+// Designed by Jonas S Karlsson (jsk@yesco.org)
+// Gemini helped write implementations, bad, buggy. lol
+//
+// Most of the test functions and framework by jsk.
+
 // Must compile under cc65 to 65-2 so comply with C89
 // (variables can only be defined at beginning of scope)
+
+
 #ifndef GLOAT16_H
 #define GLOAT16_H
 
@@ -778,11 +787,12 @@ int addsubtests(int base) {
 
   printf("\n============ ADDSUB TESTS\n");
   printf("base= %d  gbase=%-16s", base, gb);
-  printf("\nDEC\t                ADD:g =>a                  =>    i     SUB:g =>a            =>      i\n");
-  printf("------------------------------------------------------------------------------------------------\n");
+  printf("\nDEC\t             | ADD:g =>a             => got want CAN             | SUB:g =>a         =>    got want CAN\n");
+  printf("----------------------------------------------------------------------------------------------------------------------------\n");
   for(i=base; i>=0; --i) {
-    char gstr[16], astr[16], sstr[16];                                                                     
-    gloat16 g, a, s; // Fixed: Removed the local shadowing 'gbase' declaration entirely
+    char gstr[16], astr[16], sstr[16], pastr[16], psstr[16];
+    gloat16 g, a, s;
+    gloat16 pa, ps;
     int16_t ai, si;
 
     g = itog(i);
@@ -792,19 +802,23 @@ int addsubtests(int base) {
     a = gadd(gbase_val, g);
     gtoa(a, astr);
     ai = gtoi(a);
-
+    pa = itog(base+i);
+    gtoa(pa, pastr);
+    
     // SUB
     s = gsub(gbase_val, g);
     gtoa(s, sstr);
     si = gtoi(s);
+    ps = itog(base-i);
+    gtoa(ps, psstr);
 
-    printf("%4d => %-16s"
-      "   %04x = %-16s => %3d %c"
-      "   %04x = %-16s => %3d %c"
+    printf("%4d => %-13s"
+      " | %04x = %-13s =>%4d %4d %-13s %c"
+      " | %04x = %-13s =>%4d %4d %-13s %c"
       "\n"
       , i, gstr
-      , a, astr, ai, ai==(base+i)?' ':'?'
-      , s, sstr, si, si==(base-i)?' ':'?'
+      , a, astr, ai, base+i, pastr, ai==(base+i)?' ':'?'
+      , s, sstr, si, base-i, psstr, si==(base-i)?' ':'?'
     );
   }
   putchar('\n');
