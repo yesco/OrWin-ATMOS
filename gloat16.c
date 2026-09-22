@@ -500,6 +500,61 @@ void testatog(const char* input, const char* expected_base, uint16_t expected_he
   }
 }  
 
+
+typedef gloat16 (*g_op)(gloat16, gloat16);
+
+#define STEST(op,     sa,     sb,     sres) \
+  xtest(#op, op, 0,   sa, 0,  sb, 0,  sres, 0)
+#define XTEST(op,     sa, ha,  sb, hb,  sres, hres)  \
+  xtest(#op, op, 1,   sa, ha,  sb, hb,  sres, hres)
+
+// Extended test validating the exact binary register layouts
+gloat16 xtest(char* name, g_op op, char x,
+  const char* sa,   uint16_t ha,
+  const char* sb,   uint16_t hb,
+  const char* sres, uint16_t hres) {
+
+  gloat16 a = sa? atog(sa): ha;
+  gloat16 b = sb? atog(sb): hb;
+  gloat16 r = op(a, b);
+
+  char buf[32], ba[32], bb[32];
+  char err= 0;
+
+  gtoa(r, buf);
+
+  if (!sa)   sa   = gtoa(ha, ba);
+  if (!sb)   sb   = gtoa(hb, bb);
+  if (!sres) sres = buf;
+             
+  /* Verify both string representations and hardware bit values match */
+  if (sres) {
+    if (err= !match_base_string(buf, sres)) {
+      printf("FAIL.1: %-13s %s   %-13s -> Got %s, Exp %s\n", sa, name, sb, buf, sres);
+    } else {
+      printf("PASS.1: %-13s %s   %-13s -> %s\n", sa, name, sb, sres);
+    }
+  }
+    
+  if (err | (x && (ha && a != ha || hb && b != hb || hres && r != hres))) {
+    printf("FAIL.2 Hex:\n\tA:   %-13s Got $%04x, Exp $%04x  %c\n"
+                        "\tB:   %-13s Got $%04x, Exp $%04x  %c\n"
+                        "\tRes: %-13s Got $%04x, Exp $%04x  %c\n"
+      , sa,  a, ha,   ha  ? a==ha  ?'=':'?' : ' '
+      , sb,  b, hb,   hb  ? b==hb  ?'=':'?' : ' '
+      , buf, r, hres, hres? r==hres?'=':'?' : ' '
+    );
+  } else if (x || !sres) {
+    // TODO: maybe not print
+    //printf("PASS.2 Hex: %s ($%04x) %s %s ($%04x) -> %s ($%04x)\n", 
+    //sa, ha, name, sb, hb, sres, hres);
+  }
+
+  putchar('\n');
+    
+  return r;
+}
+
 int autotests(void) {
   char buf[32];
   gloat16 n1, n2, n3, n4, n5, n6, n7, n8, n9;
@@ -508,18 +563,20 @@ int autotests(void) {
   int i;
   int fail_count = 0;
 
-  /* 1. Verify parsing behavior on critical precision values */
+  printf("\n\n============ AUTO TESTS\n");
+  
+  // 1. Verify parsing behavior on critical precision values
   testatog("3",         "3.00", 0xa07a);
   testatog("3.",        "3.00", 0xa07a);
   testatog("3.1",       "3.09", 0xa07d);
   testatog("3.14",      "3.15", 0xa07f);
   testatog("3.145",     "3.15", 0xa07f);
   testatog("3.1415",    "3.15", 0xa07f);
-  testatog("3.14159",   "3.15", 0xa07f); /* Must pass after left-to-right fix */
+  testatog("3.14159",   "3.15", 0xa07f);
   testatog("3.141592",  "3.15", 0xa07f);
   testatog("3.1415926", "3.15", 0xa07f);
 
-  /* 2. Target operational math regressions */
+  // 2. Target operational math regressions 
   n1 = atog("3.14e6");
   n2 = atog("2.00");
   n3 = gmul(n1, n2);
@@ -552,7 +609,7 @@ int autotests(void) {
     fail_count++;
   }
 
-  /* 3. Integer roundtrip validations */
+  // 3. Integer roundtrip validations
   i1 = itog(42);
   r1 = gtoi(i1);
   if (r1 != 42) {
@@ -567,9 +624,9 @@ int autotests(void) {
     fail_count++;
   }
 
-  /* 4. Complete dynamic range roundtrip integrity verification */
+  // 4. Complete dynamic range roundtrip integrity verification
 
-  // NOTE: ..106 is same!
+  // NOTE: -101..101 is encode "exact"
   for (i = -16; i <= 101; ++i) {
     gloat16 g = itog((int16_t)i);
     int16_t gi = gtoi(g);
@@ -588,10 +645,45 @@ int autotests(void) {
   return fail_count;
 }
 
+int misctests() {
+  char buf[32];
+  gloat16 n2, n4, n5, n6, n7, n8, n9;
+  gloat16 i1;
+  int16_t r1;
+
+  int fails= 0; // TODO: make global?
+  gloat16 g;
+  
+  printf("\n============ MISC TESTS\n");
+
+  g= STEST(gmul,   "3.14",     "2.00",      "6.28"    );
+  g= XTEST(gdiv,   NULL, g,    "2.00", 0,   "3.15",  0);
+  
+  g= STEST(gadd,   "1.00e3",   "5.00e2",    "1k58"    );
+  g= XTEST(gsub,   NULL, g,    "5.00e2",0,  "1.00e3",0);
+
+  // TODO: extend STEST/XTEST with single arg op(a) ?
+
+  // TODO: redundant with listing test
+  i1 = itog(42);
+  gtoa(i1, buf);
+  printf("itog Test (42): %s\n", buf);
+
+  r1 = gtoi(i1);
+  printf("gtoi Test (Converted back): %d\n", r1);
+
+  n9 = atog("-3G14");
+  gtoa(n9, buf);
+  printf("Schematic Input Test (-3G14): %s\n", buf);
+
+  return fails;
+}
+
 // TODO: pick out some random numbers
 int numbertests() {
   int16_t i;
   
+  printf("\n============ NUMBER TESTS\n");
   printf("\nDEC\tBIN:g =>a         =>   i\tASC:g =>a         =>   i\n");
   printf("-----------------------------------------------------------------------\n");
   for(i=-16; i<=256; ++i) {
@@ -623,46 +715,10 @@ int numbertests() {
 }
 
 int main(void) {
-  char buf[32];
-  gloat16 n1, n2, n3, n4, n5, n6, n7, n8, n9;
-  gloat16 i1;
-  int16_t r1;
-
-  n1 = atog("3.14");
-  n2 = atog("2.00");
-  n3 = gmul(n1, n2);
-  gtoa(n3, buf);
-  printf("gmul Test (3.14e6 * 2.00): %s %04x * %04x = %04x\n", buf, n1, n2, n3);
-
-  n4 = gdiv(n3, n2);
-  gtoa(n4, buf);
-  printf("gdiv Test (Result / 2.00): %s\n", buf);
-
-  n5 = atog("1.00e3");
-  n6 = atog("5.00e2");
-  n7 = gadd(n5, n6);
-  gtoa(n7, buf);
-  printf("gadd Test (1.00e3 + 5.00e2): %s\n", buf);
-
-  n8 = gsub(n7, n6);
-  gtoa(n8, buf);
-  printf("gsub Test (Result - 5.00e2): %s\n", buf);
-
-  i1 = itog(42);
-  gtoa(i1, buf);
-  printf("itog Test (42): %s\n", buf);
-
-  r1 = gtoi(i1);
-  printf("gtoi Test (Converted back): %d\n", r1);
-
-  n9 = atog("-3G14");
-  gtoa(n9, buf);
-  printf("Schematic Input Test (-3G14): %s\n", buf);
-
-
-  return numbertests()
+  return 0 
+    + numbertests()
     + autotests()
-    
+    + misctests()
     ;
 }
 
