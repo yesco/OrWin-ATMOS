@@ -149,11 +149,16 @@ gloat16 gadd(gloat16 a, gloat16 b) {
   uint16_t final_frac_sum, f_sum;
   int16_t delta_frac, delta_exp, delta;
   
-  // A<B: swap!
+  // make A bigger than B
   if ((a & 0x7FFF) > (b & 0x7FFF)) {
     ca.raw = a; cb.raw = b;
   } else {
     ca.raw = b; cb.raw = a;
+  }
+
+  // Tricky: If linear signs differ and magnitudes match, they cancel to zero
+  if (((a ^ b) == 0x4000)) {
+    return 0x8000; // Biased representation of true 0
   }
 
   exp_a = ca.bytes.meta & 0x3F;
@@ -173,6 +178,8 @@ gloat16 gadd(gloat16 a, gloat16 b) {
     res.bytes.fraction = (uint8_t)f_sum;
     return res.raw;
   }
+
+  // calculate delta by "optimized" lookup
   if (delta >= 256) {
     if (delta >= 446)      displacement_s = 1;
     else if (delta >= 401) displacement_s = 2;
