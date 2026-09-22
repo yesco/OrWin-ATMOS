@@ -165,72 +165,69 @@ static const uint16_t sub_displacement[] = {
 gloat16 gadd(gloat16 a, gloat16 b) {
   gloat_cast ca, cb;
   uint8_t exp_a, exp_b;
-  uint16_t displacement_s; // Fixed: Must be 16-bit to hold displacements > 255
+  int16_t move_s;
   int16_t delta_frac, delta_exp, delta;
   int16_t running_delta;
   uint16_t f_sum;
   unsigned int i;
   
-  // Guard: Mask strictly by 0x3FFF to sort by absolute log magnitude, ignoring sign bit
+  // Want abs(A) > abs(b): Swap if not
   if ((a & 0x3FFF) > (b & 0x3FFF)) {
     ca.raw = a; cb.raw = b;
   } else {
     ca.raw = b; cb.raw = a;
   }
 
-  // Tricky: If linear signs differ and magnitudes match, they cancel to zero
-  if (((a ^ b) == 0x4000)) {
-    return 0x8000; // Biased representation of true 0
-  }
+  // Same quantity, just opposite sign, cancel to zero
+  if (((a ^ b) == 0x4000)) return 0x8000; // Biased representation of true 0
 
+  // TODO: BS, code as a single 14 bit value...
+  //   there is NO fraction and exponent, it's all the same! It's ONE value
   exp_a = ca.bytes.meta & 0x3F;
   exp_b = cb.bytes.meta & 0x3F;
-  delta_exp = (int16_t)exp_a - exp_b;
+  delta_exp  = (int16_t)exp_a - exp_b;
   delta_frac = (int16_t)ca.bytes.fraction - cb.bytes.fraction;
   delta = (delta_exp * 256) + delta_frac;
-  if (delta >= 524) {
-    return ca.raw;
-  }
-  if (delta == 0) {
-    f_sum = ca.raw;
-    return (((int16_t)(f_sum & 0x3FFF) + 77) & 0x3FFF) | (f_sum & 0xC000);
-  }
+
+  // number too far apart => return "biggest" (A)
+  if (delta >= 524) return ca.raw;
+
+  // they are the same
+  if (delta == 0) { move_s = 77; }
 
   // Determine branch path: Subtraction (Mixed Signs) vs Addition (Same Signs)
   if ((a ^ b) & 0x4000) {
     // SUBTRACTION PATH (Linear signs differ)
     // Values represent the literal number of ticks to drop the magnitude
-    if (delta >= 446)      displacement_s = 1;
-    else if (delta >= 347) displacement_s = 2;
-    else if (delta >= 256) displacement_s = 12;
-    else if (delta >= 143) displacement_s = 42;
-    else if (delta >= 93)  displacement_s = 93;
-    else if (delta >= 63)  displacement_s = 125;
-    else if (delta >= 37)  displacement_s = 142;
-    else {
-      displacement_s = sub_displacement[delta - 1];
-    }
+    if      (delta >= 446) move_s = -1;
+    else if (delta >= 347) move_s = -2;
+    else if (delta >= 256) move_s = -12;
+    else if (delta >= 143) move_s = -42;
+    else if (delta >= 93)  move_s = -93;
+    else if (delta >= 63)  move_s = -125;
+    else if (delta >= 37)  move_s = -142;
+    else                   move_s = -sub_displacement[delta - 1];
     
-    f_sum = ca.raw;
-    return (((int16_t)(f_sum & 0x3FFF) - displacement_s) & 0x3FFF) | (f_sum & 0xC000);
-
   } else {
     // ADDITION PATH (Linear signs match)
     running_delta = delta;
-    displacement_s = 77;
+    move_s = 77;
     i = 0;
 
+    // walk the steps, small at first
     while (i < 77) { 
       int16_t test_sub = running_delta - step_widths_add[i];
       if (test_sub < 0) break;
       running_delta = test_sub;
-      displacement_s--;
+      --move_s;
       ++i;
     }
 
-    f_sum = ca.raw;
-    return (((int16_t)(f_sum & 0x3FFF) + displacement_s) & 0x3FFF) | (f_sum & 0xC000);
   }
+
+  // Apply move_s once
+  f_sum = ca.raw;
+  return (((int16_t)(f_sum & 0x3FFF) + move_s) & 0x3FFF) | (f_sum & 0xC000);
 }
 
 #define GNEG(a) ((a) ^ 0x4000)
