@@ -180,6 +180,7 @@ gloat16 gadd(gloat16 a, gloat16 b) {
 
   // Compute delta directly as a single 14-bit fixed-point value to prevent layout corruption
   delta = (int16_t)(ca.raw & 0x3FFF) - (int16_t)(cb.raw & 0x3FFF);
+  // TODO: do sign extentions???? ^^^^^^^^^^^^^^^^^ ?????? or is it correct?
 
   // number too far apart => return "biggest" (A)
   if (delta >= 524) return ca.raw;
@@ -191,30 +192,30 @@ gloat16 gadd(gloat16 a, gloat16 b) {
   if ((a ^ b) & 0x4000) {
     // SUBTRACTION PATH (Linear signs differ)
     // Values represent the literal number of ticks to drop the magnitude
-
-
+    // All conditions now utilize true continuous log ticks to align with the array scale
 #if 0
-    // This is mostly correct excpet for SUB 1..4!
-    if      (delta >= 446) move_s = -1;
-    else if (delta >= 347) move_s = -2;
-    else if (delta >= 256) move_s = -12;
-    else if (delta >= 143) move_s = -42;
-    else if (delta >= 93)  move_s = -93;
-    else if (delta >= 63)  move_s = -125;
-    else if (delta >= 37)  move_s = -142;
-    else                   move_s = -sub_displacement[delta - 1];
-#else
-    // This fixes the upper half! but gets corupted for SUB: at of 721!
-    if      (delta >= 446) move_s = -1*256;
-    else if (delta >= 347) move_s = -2*256;
-    else if (delta >= 256) move_s = -12*256;
-    else if (delta >= 143) move_s = -42*256;
-    else if (delta >= 93)  move_s = -93*256;
-    else if (delta >= 63)  move_s = -125*256;
-    else if (delta >= 37)  move_s = -142*256;
-    else                   move_s = -sub_displacement[delta - 1];
+    // PROPOSED VALUES THAT MAKE IT EVEN WORSE!
++    if      (delta >= 446) move_s = -5;
++    else if (delta >= 347) move_s = -12;
++    else if (delta >= 256) move_s = -28;
++    else if (delta >= 143) move_s = -82;
++    else if (delta >= 93)  move_s = -151;
++    else if (delta >= 63)  move_s = -223;
++    else if (delta >= 37)  move_s = -326;
 #endif    
 
+     if      (delta >= 446) move_s = -1; // NO: *256;
+     else if (delta >= 347) move_s = -2; // NO: *256 (decode shift towards end shift)
+
+     else if (delta >= 256) move_s = -12*256;
+     // *256 if no have *256 the this corrupts the SUB: 1-4!!!!!
+     // But if enabled w 256 then it fucks up SUB 100... SUB 0 (towards: end of table)
+
+     else if (delta >= 143) move_s = -42; // if *256; fucks up table from 281 down to 0...
+     else if (delta >= 93)  move_s = -93; // NO: *256;
+     else if (delta >= 63)  move_s = -125; // NO: *256
+     else if (delta >= 37)  move_s = -142; // correct: MAGICAL 722 problem
+     else                   move_s = -sub_displacement[delta - 1];
     
   } else {
     // ADDITION PATH (Linear signs match)
