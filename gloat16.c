@@ -155,13 +155,14 @@ static const uint8_t sub_displacement[36] = {
 
 gloat16 gadd(gloat16 a, gloat16 b) {
   gloat_cast ca, cb, final_res, res;
-  uint8_t exp_a, exp_b, move_s;
+  uint8_t exp_a, exp_b, displacement_s;
   uint16_t final_frac_sum, f_sum;
   int16_t delta_frac, delta_exp, delta;
+  int16_t running_delta; // Fixed: Must be 16-bit to preserve deltas > 255
   unsigned int i;
   
-  // make A bigger than B
-  if ((a & 0x7FFF) > (b & 0x7FFF)) {
+  // Guard: Mask strictly by 0x3FFF to sort by absolute log magnitude, ignoring sign bit
+  if ((a & 0x3FFF) > (b & 0x3FFF)) {
     ca.raw = a; cb.raw = b;
   } else {
     ca.raw = b; cb.raw = a;
@@ -193,23 +194,20 @@ gloat16 gadd(gloat16 a, gloat16 b) {
   // Determine branch path: Subtraction (Mixed Signs) vs Addition (Same Signs)
   if ((a ^ b) & 0x4000) {
     // SUBTRACTION PATH (Linear signs differ)
-    if (delta >= 446)      move_s = 255; // Drops magnitude by 1 tick
-    else if (delta >= 347) move_s = 254; // Drops magnitude by 2 ticks
-    else if (delta >= 256) move_s = 244; // Drops magnitude by 12 ticks
-    else if (delta >= 143) move_s = 214; // Drops magnitude by 42 ticks
-    else if (delta >= 93)  move_s = 163; // Drops magnitude by 93 ticks
-    else if (delta >= 63)  move_s = 131; // Drops magnitude by 125 ticks
-    else if (delta >= 37)  move_s = 114; // Drops magnitude by 142 ticks
+    if (delta >= 446)      displacement_s = 255;
+    else if (delta >= 347) displacement_s = 254;
+    else if (delta >= 256) displacement_s = 244;
+    else if (delta >= 143) displacement_s = 214;
+    else if (delta >= 93)  displacement_s = 163;
+    else if (delta >= 63)  displacement_s = 131;
+    else if (delta >= 37)  displacement_s = 114;
     else {
-      // Razor-steep cliff (Delta 1 to 36): Direct 1-cycle array table fetch
-      move_s = sub_displacement[delta - 1];
+      displacement_s = sub_displacement[delta - 1];
     }
     
-    // Apply displacement subtractively to the larger number's payload
     final_res = ca;
-    f_sum = (uint16_t)final_res.bytes.fraction + move_s;
-    if (f_sum < 256) {
-      // Underflow occurred: Decrement biased exponent field safely
+    f_sum = (uint16_t)final_res.bytes.fraction - (256 - displacement_s);
+    if (f_sum >= 256) { // Underflow borrow tracking across 8-bit boundary
       final_res.bytes.meta = (final_res.bytes.meta & 0xC0) | (((final_res.bytes.meta & 0x3F) - 1) & 0x3F);
     }
     final_res.bytes.fraction = (uint8_t)f_sum;
@@ -217,21 +215,20 @@ gloat16 gadd(gloat16 a, gloat16 b) {
 
   } else {
     // ADDITION PATH (Linear signs match)
-    uint16_t running_delta = (uint16_t)delta;
-    move_s = 77;
+    running_delta = delta; // Preserves 16-bit precision layout
+    displacement_s = 77;
     i = 0;
 
-    // Direct, loop-driven table processing for the entire addition curve
     while (i < 77) { 
-      int16_t test_sub = (int16_t)running_delta - step_widths_add[i];
+      int16_t test_sub = running_delta - step_widths_add[i];
       if (test_sub < 0) break;
-      running_delta = (uint8_t)test_sub;
-      move_s--;
+      running_delta = test_sub; // Fixed: Removed 8-bit truncation cast
+      displacement_s--;
       ++i;
     }
 
     final_res = ca;
-    final_frac_sum = (uint16_t)final_res.bytes.fraction + move_s;
+    final_frac_sum = (uint16_t)final_res.bytes.fraction + displacement_s;
     if (final_frac_sum >= 256) {
       final_res.bytes.meta = (final_res.bytes.meta & 0xC0) | (((final_res.bytes.meta & 0x3F) + 1) & 0x3F);
     }
@@ -774,40 +771,40 @@ int numbertests() {
 
 int addsubtests(int base) {
   int16_t i;
-  gloat16 gbase= itog(base);
+  gloat16 gbase_val = itog(base);
   char gb[16];
-  
-  gtoa(gbase, gb);
-  
+
+  gtoa(gbase_val, gb);
+
   printf("\n============ ADDSUB TESTS\n");
   printf("base= %d  gbase=%-16s", base, gb);
-  printf("\nDEC\t                ADD:g =>a               =>   i     SUB:g =>a             =>     i\n");
+  printf("\nDEC\t                ADD:g =>a                  =>    i     SUB:g =>a            =>      i\n");
   printf("------------------------------------------------------------------------------------------------\n");
-  for(i=0; i<=256; ++i) {
-    char gstr[16], astr[16], sstr[16];
-    gloat16 gbase, g, a, s;
+  for(i=base; i>=0; --i) {
+    char gstr[16], astr[16], sstr[16];                                                                     
+    gloat16 g, a, s; // Fixed: Removed the local shadowing 'gbase' declaration entirely
     int16_t ai, si;
 
     g = itog(i);
     gtoa(g, gstr);
-    
+
     // ADD
-    a= gadd(gbase, g);
+    a = gadd(gbase_val, g);
     gtoa(a, astr);
     ai = gtoi(a);
 
     // SUB
-    s= gsub(gbase, g);
+    s = gsub(gbase_val, g);
     gtoa(s, sstr);
     si = gtoi(s);
 
-    printf("%3d => %-16s"
-      "\t%04x = %-16s => %3d %c"
+    printf("%4d => %-16s"
+      "   %04x = %-16s => %3d %c"
       "   %04x = %-16s => %3d %c"
       "\n"
       , i, gstr
-      , a, astr, ai, ai==base+i?' ':'?'
-      , s, sstr, si, si==base-i?' ':'?'
+      , a, astr, ai, ai==(base+i)?' ':'?'
+      , s, sstr, si, si==(base-i)?' ':'?'
     );
   }
   putchar('\n');
