@@ -72,8 +72,9 @@ gloat16 gmul(gloat16 a, gloat16 b) {
 #ifdef NOBIAS
 gloat16 gdiv(gloat16 num, gloat16 den) {
   gloat16 r = num - den;
-  /* Tricky: In subtraction, if Bit 15 remains 0, no borrow flipped the upper bits.
-     We selectively apply XOR 64 (0x4000) only when Bit 15 is NOT set. */
+  // Tricky: In subtraction, if Bit 15 remains 0, no borrow flipped
+  // the upper bits. We selectively apply XOR 64 (0x4000) only when
+  // Bit 15 is NOT set.
   if (!(r & 0x8000)) {
     r ^= 0x4000;
   }
@@ -81,7 +82,6 @@ gloat16 gdiv(gloat16 num, gloat16 den) {
 }
 #else
 gloat16 gdiv(gloat16 num, gloat16 den) {
-  
   // Subtract den from num, add the bias back since we subtracted it
   // twice, mask out upper trash, restore the 0x8000 flag, and XOR the
   // sign bit.
@@ -155,19 +155,20 @@ static const uint8_t step_widths_add[77] = {
   9,10,11,12,13,15,17,19,22,26,33,44,76
 };
 
-// Direct sub displacement lookup values for Delta 1 to 36
-static const uint8_t sub_displacement[36] = {
-  255, 192, 147, 116, 91,  72,  55,  41,  28,  17,  7,   254,
-  247, 241, 235, 230, 225, 220, 216, 211, 207, 203, 199, 196,
-  192, 189, 186, 183, 180, 177, 174, 171, 169, 166, 164, 161
+// Direct subtraction displacement tick offsets for Delta 1 to 36
+static const uint16_t sub_displacement[] = {
+  524, 447, 403, 371, 347, 327, 311, 297, 284, 273, 263, 254,
+  246, 239, 232, 226, 220, 214, 209, 204, 200, 195, 191, 187,
+  183, 179, 176, 172, 169, 166, 163, 160, 157, 154, 152, 149
 };
 
 gloat16 gadd(gloat16 a, gloat16 b) {
-  gloat_cast ca, cb, final_res, res;
-  uint8_t exp_a, exp_b, displacement_s;
-  uint16_t final_frac_sum, f_sum;
+  gloat_cast ca, cb;
+  uint8_t exp_a, exp_b;
+  uint16_t displacement_s; // Fixed: Must be 16-bit to hold displacements > 255
   int16_t delta_frac, delta_exp, delta;
-  int16_t running_delta; // Fixed: Must be 16-bit to preserve deltas > 255
+  int16_t running_delta;
+  uint16_t f_sum;
   unsigned int i;
   
   // Guard: Mask strictly by 0x3FFF to sort by absolute log magnitude, ignoring sign bit
@@ -191,58 +192,44 @@ gloat16 gadd(gloat16 a, gloat16 b) {
     return ca.raw;
   }
   if (delta == 0) {
-    res = ca;
-    f_sum = (uint16_t)res.bytes.fraction + 77;
-    if (f_sum >= 256) {
-      res.bytes.meta = (res.bytes.meta & 0xC0) | (((res.bytes.meta & 0x3F) + 1) & 0x3F);
-    }
-    res.bytes.fraction = (uint8_t)f_sum;
-    return res.raw;
+    f_sum = ca.raw;
+    return (((int16_t)(f_sum & 0x3FFF) + 77) & 0x3FFF) | (f_sum & 0xC000);
   }
 
   // Determine branch path: Subtraction (Mixed Signs) vs Addition (Same Signs)
   if ((a ^ b) & 0x4000) {
     // SUBTRACTION PATH (Linear signs differ)
-    if (delta >= 446)      displacement_s = 255;
-    else if (delta >= 347) displacement_s = 254;
-    else if (delta >= 256) displacement_s = 244;
-    else if (delta >= 143) displacement_s = 214;
-    else if (delta >= 93)  displacement_s = 163;
-    else if (delta >= 63)  displacement_s = 131;
-    else if (delta >= 37)  displacement_s = 114;
+    // Values represent the literal number of ticks to drop the magnitude
+    if (delta >= 446)      displacement_s = 1;
+    else if (delta >= 347) displacement_s = 2;
+    else if (delta >= 256) displacement_s = 12;
+    else if (delta >= 143) displacement_s = 42;
+    else if (delta >= 93)  displacement_s = 93;
+    else if (delta >= 63)  displacement_s = 125;
+    else if (delta >= 37)  displacement_s = 142;
     else {
       displacement_s = sub_displacement[delta - 1];
     }
     
-    final_res = ca;
-    f_sum = (uint16_t)final_res.bytes.fraction - (256 - displacement_s);
-    if (f_sum >= 256) { // Underflow borrow tracking across 8-bit boundary
-      final_res.bytes.meta = (final_res.bytes.meta & 0xC0) | (((final_res.bytes.meta & 0x3F) - 1) & 0x3F);
-    }
-    final_res.bytes.fraction = (uint8_t)f_sum;
-    return final_res.raw;
+    f_sum = ca.raw;
+    return (((int16_t)(f_sum & 0x3FFF) - displacement_s) & 0x3FFF) | (f_sum & 0xC000);
 
   } else {
     // ADDITION PATH (Linear signs match)
-    running_delta = delta; // Preserves 16-bit precision layout
+    running_delta = delta;
     displacement_s = 77;
     i = 0;
 
     while (i < 77) { 
       int16_t test_sub = running_delta - step_widths_add[i];
       if (test_sub < 0) break;
-      running_delta = test_sub; // Fixed: Removed 8-bit truncation cast
+      running_delta = test_sub;
       displacement_s--;
       ++i;
     }
 
-    final_res = ca;
-    final_frac_sum = (uint16_t)final_res.bytes.fraction + displacement_s;
-    if (final_frac_sum >= 256) {
-      final_res.bytes.meta = (final_res.bytes.meta & 0xC0) | (((final_res.bytes.meta & 0x3F) + 1) & 0x3F);
-    }
-    final_res.bytes.fraction = (uint8_t)final_frac_sum;
-    return final_res.raw;
+    f_sum = ca.raw;
+    return (((int16_t)(f_sum & 0x3FFF) + displacement_s) & 0x3FFF) | (f_sum & 0xC000);
   }
 }
 
