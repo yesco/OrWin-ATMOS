@@ -164,10 +164,8 @@ static const int16_t sub_displacement[36] = {
 
 gloat16 gadd(gloat16 a, gloat16 b) {
   gloat_cast ca, cb;
-  uint8_t exp_a, exp_b;
   int16_t move_s;
-  int16_t delta_frac, delta_exp, delta;
-  int16_t running_delta;
+  int16_t delta;
   uint16_t f_sum;
   unsigned int i;
   
@@ -181,13 +179,8 @@ gloat16 gadd(gloat16 a, gloat16 b) {
   // Same quantity, just opposite sign, cancel to zero
   if (((a ^ b) == 0x4000)) return 0x8000; // Biased representation of true 0
 
-  // TODO: BS, code as a single 14 bit value...
-  //   there is NO fraction and exponent, it's all the same! It's ONE value
-  exp_a = ca.bytes.meta & 0x3F;
-  exp_b = cb.bytes.meta & 0x3F;
-  delta_exp  = (int16_t)exp_a - exp_b;
-  delta_frac = (int16_t)ca.bytes.fraction - cb.bytes.fraction;
-  delta = (delta_exp * 256) + delta_frac;
+  // Compute delta directly as a single 14-bit fixed-point value to prevent layout corruption
+  delta = (int16_t)(ca.raw & 0x3FFF) - (int16_t)(cb.raw & 0x3FFF);
 
   // number too far apart => return "biggest" (A)
   if (delta >= 524) return ca.raw;
@@ -199,19 +192,31 @@ gloat16 gadd(gloat16 a, gloat16 b) {
   if ((a ^ b) & 0x4000) {
     // SUBTRACTION PATH (Linear signs differ)
     // Values represent the literal number of ticks to drop the magnitude
-    // Fixed: Scaled values out to full tick alignment offsets (x256)
-    if      (delta >= 446) move_s = -1 * 256;
-    else if (delta >= 347) move_s = -2 * 256;
-    else if (delta >= 256) move_s = -12 * 256;
-    else if (delta >= 143) move_s = -42 * 256;
-    else if (delta >= 93)  move_s = -93 * 256;
-    else if (delta >= 63)  move_s = -125 * 256;
-    else if (delta >= 37)  move_s = -142 * 256;
+#if 0
+    // This is mostly correct excpet for SUB 1..4!
+    if      (delta >= 446) move_s = -1;
+    else if (delta >= 347) move_s = -2;
+    else if (delta >= 256) move_s = -12;
+    else if (delta >= 143) move_s = -42;
+    else if (delta >= 93)  move_s = -93;
+    else if (delta >= 63)  move_s = -125;
+    else if (delta >= 37)  move_s = -142;
     else                   move_s = -sub_displacement[delta - 1];
+#else
+    // This fixes the upper half! but gets corupted for SUB: at of 721!
+    if      (delta >= 446) move_s = -1*256;
+    else if (delta >= 347) move_s = -2*256;
+    else if (delta >= 256) move_s = -12*256;
+    else if (delta >= 143) move_s = -42*256;
+    else if (delta >= 93)  move_s = -93*256;
+    else if (delta >= 63)  move_s = -125*256;
+    else if (delta >= 37)  move_s = -142*256;
+    else                   move_s = -sub_displacement[delta - 1];
+#endif    
     
   } else {
     // ADDITION PATH (Linear signs match)
-    running_delta = delta;
+    int16_t running_delta = delta;
     move_s = 77;
     i = 0;
 
