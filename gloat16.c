@@ -772,11 +772,55 @@ int numbertests() {
   return 0;
 }
 
+int addsubtests(int base) {
+  int16_t i;
+  gloat16 gbase= itog(base);
+  char gb[16];
+  
+  gtoa(gbase, gb);
+  
+  printf("\n============ ADDSUB TESTS\n");
+  printf("base= %d  gbase=%-16s", base, gb);
+  printf("\nDEC\t                ADD:g =>a               =>   i     SUB:g =>a             =>     i\n");
+  printf("------------------------------------------------------------------------------------------------\n");
+  for(i=0; i<=256; ++i) {
+    char gstr[16], astr[16], sstr[16];
+    gloat16 gbase, g, a, s;
+    int16_t ai, si;
+
+    g = itog(i);
+    gtoa(g, gstr);
+    
+    // ADD
+    a= gadd(gbase, g);
+    gtoa(a, astr);
+    ai = gtoi(a);
+
+    // SUB
+    s= gsub(gbase, g);
+    gtoa(s, sstr);
+    si = gtoi(s);
+
+    printf("%3d => %-16s"
+      "\t%04x = %-16s => %3d %c"
+      "   %04x = %-16s => %3d %c"
+      "\n"
+      , i, gstr
+      , a, astr, ai, ai==base+i?' ':'?'
+      , s, sstr, si, si==base-i?' ':'?'
+    );
+  }
+  putchar('\n');
+
+  return 0;
+}
+
 int main(void) {
   return 0 
-    + numbertests()
-    + autotests()
-    + misctests()
+//    + numbertests()
+//    + autotests()
+//    + misctests()
+    + addsubtests(1000)
     ;
 }
 
