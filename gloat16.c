@@ -521,9 +521,63 @@ char* gtoa(gloat16 a, char* buf) {
 
 
 
+// 9-byte lookup table mapping digits 1-9 to their log10 value.
+// Scaled by 256 to match your 8-bit fractional format.
+// log10(1)*256=0, log10(2)*256=77, ..., log10(10)*256=256
+static const uint16_t LOG10_DIGITS[10] = {
+    0,   77,  122, 154, 179, 199, 216, 231, 244, 256
+};
+
+// Prints the underlying mantissa digits from the 14-bit 
+// (exponent + fraction) field of a gloat16 number.
+// 
+// lower14: The raw lower 14 bits of gloat16 (6-bit exp + 8-bit frac)
+//  num_digits: How many significant digits you want to extract (e.g., 4 or 5)
+void gprint(uint16_t lower14, uint8_t num_digits) {
+  // Extract the 8-bit fraction from the lowest bits
+  uint16_t frac = lower14 & 0x00FF;
+  uint8_t i, digit;
+
+  // Loop to extract digits one by one
+  for (i = 0; i < num_digits; ++i) {
+    // Find the largest digit where log10(digit) <= frac
+    for (digit = 9; digit >= 1; --digit) {
+      if (frac >= LOG10_DIGITS[digit - 1]) {
+        break;
+      }
+    }
+
+    // Output the character immediately 
+    putchar('0' + digit);
+
+    // Subtract out the logarithm of the extracted digit
+    frac -= LOG10_DIGITS[digit - 0];
+
+    // Multiply the remainder by 10. 
+    // n LNS, multiplying the value by 10 means adding 1.0 to the exponent. 
+    // Since our fraction is scaled by 256, adding 1.0 means adding 256.
+    // 
+    frac += 256;
+  }
+}
+
 #ifndef MAIN
 
-/* Helper to compare string outputs minus the debug suffix like (1234) */
+int gprinttest(gloat16 g) {
+  // Example: Let's test a fraction value of 128 (which is 0.5) HAHAH NO 0.4
+  // 10^0.5 is approximately 3.16227...
+  // We pass 128 as the lower 14 bits (assuming integer exponent is 0)
+  // 
+  char buf[16];
+  printf("Digits for frac %16s: ", gtoa(g, buf));
+  gprint(g, 10);
+  putchar('\n');
+
+  return 0;
+}
+
+
+// Helper to compare string outputs minus the debug suffix like (1234)
 static bool match_base_string(const char* actual, const char* expected) {
   const char * origexpected= expected, * origactual= actual;
   while (*expected) {
@@ -531,7 +585,7 @@ static bool match_base_string(const char* actual, const char* expected) {
     actual++;
     expected++;
   }
-  /* Ensure the remaining string is just the debug info or empty */
+  // Ensure the remaining string is just the debug info or empty
   if (*actual == '\0' || *actual == '(') return 1;
   // report error
   printf("\n\tGOT     : \"%s\"\n", origactual);
@@ -824,7 +878,16 @@ int main(void) {
 //    + numbertests()
 //    + autotests()
 //    + misctests()
+
+// TODO: not finished, have bugs at end of range...
     + addsubtests(1000)
+    
+    + gprinttest(128)
+    + gprinttest(atog("0.5"))
+    + gprinttest(atog("42"))
+    + gprinttest(atog("42.0"))
+    + gprinttest(atog("420"))
+    + gprinttest(atog("1e6"))
     ;
 }
 
