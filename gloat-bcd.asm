@@ -7,7 +7,7 @@
 .setcpu "6502"
 
 				; --- Zero Page Allocation ---
-.zeropage
+.segment "ZEROPAGE"        ; FIX: Force variables explicitly into ZP segment mapping
 BcdL:          .res 1      ; Low 2 digits of BCD Accumulator (e.g., $00)
 BcdH:          .res 1      ; High 2 digits of BCD Accumulator (e.g., $10)
 Delta:         .res 1      ; Tracking delta step size
@@ -18,21 +18,60 @@ TablePtr:      .res 2      ; 16-bit Zero Page pointer to bitstream data
 
 .segment "CODE"
 
+.import _exit
 .import _putchar
+	
+putchar= _putchar
+	
+nl:	
+	lda #$0a
+;	jsr _putchar
+;	lda #$0d
+	jmp _putchar
+	
+.macro NL
+	jsr nl
+.endmacro
+	
+.macro PUTC char
+	lda #char
+	jsr _putchar
+.endmacro
+	
+
+.export _main
+_main:   
+
+; 1. Main Entry Point
+start:
+        sei
+        cld
+        ldx #$FF
+        txs
+        
+        ;; meat
+        PUTC 'a'
+
+	jsr _mainx
+	
+        PUTC 'z'
+	NL
+
+	jmp _exit
+halt:
+        jmp halt
 
 
 ;;; =========================================================================
 ;;; Main Sweep Harness
 ;;; Runs 0 to 255, computes the 4-digit BCD value, and prints it as X.XXX
 ;;; =========================================================================
-.export _main
+;.export _main			
 	
-.proc _main
+.proc _mainx
 	;; Minimal existing check
-	lda #'A'
-	jsr _putchar
-	lda #$0d
-	jsr _putchar
+	PUTC 'A'
+	NL
 
 	LDA #0
 	STA TestIdx
@@ -50,16 +89,15 @@ SweepLoop:
 	LSR A
 	LSR A 
 	ORA #$30
-	JSR _putchar
+	JSR putchar
 
-	LDA #'.'               ; Print decimal point
-	JSR _putchar
+	PUTC '.'		; Print decimal point
 
 				; Digit 2 (Low Nibble of BcdH)
 	LDA BcdH
 	AND #$0F               
 	ORA #$30
-	JSR _putchar
+	JSR putchar
 
 				; Digit 3 (High Nibble of BcdL)
 	LDA BcdL
@@ -68,26 +106,23 @@ SweepLoop:
 	LSR A
 	LSR A 
 	ORA #$30
-	JSR _putchar
+	JSR putchar
 
 				; Digit 4 (Low Nibble of BcdL)
 	LDA BcdL
 	AND #$0F               
 	ORA #$30
-	JSR _putchar
+	JSR putchar
 
-	LDA #$0D               ; Output Carriage Return / New Line
-	JSR _putchar
+	NL
 
 	INC TestIdx            ; Advance to next index point
 	BNE SweepLoop          ; Run full 256 entries mapping
 	RTS
 
 	;; Minimal existing check
-	lda #'Z'
-	jsr _putchar
-	lda #$0d
-	jsr _putchar
+	PUTC 'Z'
+	NL
 .endproc
 
 ;;; =========================================================================
