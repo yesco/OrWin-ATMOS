@@ -28,6 +28,12 @@ TablePtr:      .res 2      ; 16-bit Zero Page pointer to bitstream data
 .export _main
 	
 .proc _main
+	;; Minimal existing check
+	lda #'A'
+	jsr _putchar
+	lda #$0d
+	jsr _putchar
+
 	LDA #0
 	STA TestIdx
 
@@ -76,6 +82,12 @@ SweepLoop:
 	INC TestIdx            ; Advance to next index point
 	BNE SweepLoop          ; Run full 256 entries mapping
 	RTS
+
+	;; Minimal existing check
+	lda #'Z'
+	jsr _putchar
+	lda #$0d
+	jsr _putchar
 .endproc
 
 ;;; =========================================================================
