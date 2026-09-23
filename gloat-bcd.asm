@@ -4,10 +4,10 @@
 ;;; Target Assembler: ca65
 ;;; =========================================================================
 
-	.setcpu "6502"
+.setcpu "6502"
 
 				; --- Zero Page Allocation ---
-	.zeropage
+.zeropage
 BcdL:          .res 1      ; Low 2 digits of BCD Accumulator (e.g., $00)
 BcdH:          .res 1      ; High 2 digits of BCD Accumulator (e.g., $10)
 Delta:         .res 1      ; Tracking delta step size
@@ -16,7 +16,7 @@ TestIdx:       .res 1      ; Global test sweep counter (0-255)
 TablePtr:      .res 2      ; 16-bit Zero Page pointer to bitstream data
 
 
-	.segment "CODE"
+.segment "CODE"
 
 .import _putchar
 
@@ -178,7 +178,7 @@ AddTwo:
 ;;; 51-Byte Encoded 4-Digit Variable Bitstream Table
 ;;; Compiled precisely to map: 0=Same, 10=+1, 110=-1, 111=+2
 ;;; =========================================================================
-	.segment "RODATA"
+.segment "RODATA"
 
 BitstreamTable:
 	.byte $16, $4D, $02, $D6, $80, $B4, $02, $D0, $59, $02, $D0, $26, $96, $41, $68, $5A
