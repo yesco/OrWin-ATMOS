@@ -14,6 +14,7 @@ Delta:         .res 1      ; Tracking delta step size
 LoopCount:     .res 1      ; Iteration counter
 TestIdx:       .res 1      ; Global test sweep counter (0-255)
 TablePtr:      .res 2      ; 16-bit Zero Page pointer to bitstream data
+BitReg:        .res 1      ; FIX: Safe Zero Page storage for bitstream buffer
 
 
 .segment "CODE"
@@ -73,49 +74,37 @@ halt:
 	PUTC 'A'
 	NL
 
+	; 1. Initial State Initialization (Moved out of subroutine to run ONCE)
+	LDA #$00
+	STA BcdL
+	LDA #$10
+	STA BcdH               ; Start base at 1000 ($10 $00 BCD)
+	LDA #$09
+	STA Delta              ; Initial step delta for 4-digits starts at 9
+
+	; 2. Initialize Data Pointer
+	LDA #<BitstreamTable
+	STA TablePtr
+	LDA #>BitstreamTable
+	STA TablePtr+1
+
+	; 3. Initial Register Configurations
+	LDY #0                 ; Reset stream table index register
 	LDA #0
+	STA BitReg             ; Force bit buffer to 0 to instantly trigger first reload
+
+	; Print the baseline step 0 value manually before entering the loop
+	JSR PrintCurrentBCD
+
+	LDA #1                 ; Start iteration from step 1
 	STA TestIdx
 
 SweepLoop:
-	LDA TestIdx
-	STA LoopCount          ; Set math iteration target steps
-	JSR ConvertLogBcd      ; Compute the 4-digit value
+	; Step forward exactly 1 step through the bitstream data dynamically
+	JSR ConvertLogBcdStep  
 
 				; --- PRINTING PHASE (Formats BCD as X.XXX) ---
-				; Digit 1 (High Nibble of BcdH)
-	LDA BcdH
-	LSR A
-	LSR A
-	LSR A
-	LSR A 
-	ORA #$30
-	JSR putchar
-
-	PUTC ' '
-;	PUTC '.'		; Print decimal point
-
-				; Digit 2 (Low Nibble of BcdH)
-	LDA BcdH
-	AND #$0F               
-	ORA #$30
-	JSR putchar
-
-				; Digit 3 (High Nibble of BcdL)
-	LDA BcdL
-	LSR A
-	LSR A
-	LSR A
-	LSR A 
-	ORA #$30
-	JSR putchar
-
-				; Digit 4 (Low Nibble of BcdL)
-	LDA BcdL
-	AND #$0F               
-	ORA #$30
-	JSR putchar
-
-;	NL
+	JSR PrintCurrentBCD
 
 	INC TestIdx            ; Advance to next index point
 	BNE SweepLoop          ; Run full 256 entries mapping
@@ -126,52 +115,101 @@ SweepLoop:
 	NL
 .endproc
 
+; =========================================================================
+; Helper Subroutine to output BcdH/BcdL
+; =========================================================================
+.proc PrintCurrentBCD
+	PUTC ' '
+
+	; Digit 1 (High Nibble of BcdH)
+	LDA BcdH
+	LSR A
+	LSR A
+	LSR A
+	LSR A 
+	ORA #$30
+	JSR putchar
+
+	; Digit 2 (Low Nibble of BcdH)
+	LDA BcdH
+	AND #$0F               
+	ORA #$30
+	JSR putchar
+
+	; Digit 3 (High Nibble of BcdL)
+	LDA BcdL
+	LSR A
+	LSR A
+	LSR A
+	LSR A 
+	ORA #$30
+	JSR putchar
+
+	; Digit 4 (Low Nibble of BcdL)
+	LDA BcdL
+	AND #$0F               
+	ORA #$30
+	JSR putchar
+	RTS
+.endproc
+
 ;;; =========================================================================
-;;; ConvertLogBcd
-;;; 4-Digit Variable Bitstream Accumulator
-;;; Total Cycle Span (X=255): ~8,751 cycles | Code size: ~36 bytes
+;;; ConvertLogBcdStep
+;;; Processes exactly 1 step forward in the 2-bit fixed stream
 ;;; =========================================================================
 	
-.proc ConvertLogBcd
-				; 1. Initial State Initialization (4-Digit Parameters)
-	LDA #$00
-	STA BcdL
-	LDA #$10
-	STA BcdH               ; Start base at 1000 ($10 $00 BCD)
-	LDA #$09
-	STA Delta              ; Initial step delta for 4-digits starts at 9
+.proc ConvertLogBcdStep
+	SED                    ; ENGAGE PERSISTENT DECIMAL MODE FOR THE STEP
 
-				; 2. Initialize Data Pointer
-	LDA #<BitstreamTable
-	STA TablePtr
-	LDA #>BitstreamTable
-	STA TablePtr+1
-
-				; 3. Initial Register Configurations
-	LDY #0                 ; Reset stream table index register
-	LDX #0                 ; Force X register to 0 to instantly trigger first reload
+				; --- INLINE ZERO CHECK & RELOAD ---
+	LDA BitReg             ; Check if bit register goes empty
+	BNE FetchBits          ; If not zero, skip the reload block
 	
-	LDA LoopCount
-	BEQ Done               ; If target is exactly 0 steps, skip loop completely
-
-	SED                    ; ENGAGE PERSISTENT DECIMAL MODE FOR THE SWEEP
-
-StepLoop:
-				; --- INLINE REGISTER-X ZERO CHECK & RELOAD ---
-	TXA                    ; Check if register goes empty
-	BNE FetchBit           ; If not zero, skip the reload block
-	
-	LDA (TablePtr),Y       ; Pull fresh payload byte from 51-byte data stream
+	LDA (TablePtr),Y       ; Pull fresh payload byte from 64-byte data stream
 	INY                    ; Increment data table array index
-	TAX                    ; Move configuration state directly into register X buffer
-	TXA
+	STA BitReg             ; Save configuration state directly into safe ZP buffer
 
-FetchBit:
-	ASL A                  ; Push next bit pattern directly into Carry status
-	BCS DeltaChanged       ; IF BIT IS 1: Jump out to processing lanes
+FetchBits:
+	LDA BitReg             ; Load active bitstream state
+	; Extract exactly 2 bits from the current stream byte in A
+	ASL A                  ; Bit A into Carry
+	BCS FirstBitSet
+	ASL A                  ; Bit B into Carry
+	BCS DoIncrement        ; %01 -> +1
+	STA BitReg             ; FIX: Save shifted state here before fast path fall-through
+	JMP Accumulate         ; %00 -> Unchanged
+
+FirstBitSet:
+	ASL A                  ; Bit B into Carry
+	BCS DoAddTwo           ; %11 -> +2
+
+DoDecrement:
+	; %10 -> BCD-compliant decrement (-1)
+	STA BitReg             ; FIX: Save shifted state here before clobbering A
+	LDA Delta
+	SEC
+	SBC #1
+	STA Delta
+	JMP Accumulate
+
+DoIncrement:
+	; %01 -> BCD-compliant increment (+1)
+	STA BitReg             ; FIX: Save shifted state here before clobbering A
+	LDA Delta
+	CLC
+	ADC #1
+	STA Delta
+	JMP Accumulate
+
+DoAddTwo:
+	; %11 -> BCD-compliant increment (+2)
+	STA BitReg             ; FIX: Save shifted state here before clobbering A
+	LDA Delta
+	CLC
+	ADC #2
+	STA Delta
 
 Accumulate:
-	TAX                    ; Fast-save remaining shift states back into register X
 	CLC
 	LDA BcdL
 	ADC Delta
@@ -180,66 +218,19 @@ Accumulate:
 	ADC #0                 ; Native BCD carry rippling
 	STA BcdH 
 
-	DEC LoopCount
-	BNE StepLoop           ; Loop structural sweep check
-
 Done:
 	CLD                    ; DISENGAGE DECIMAL MODE AT ROUTINE EXIT
 	RTS
-
-				; --- UNCOMMON BRANCH TARGET PATHWAYS ---
-DeltaChanged:
-				; Bit 1 was '1'. We already have the remaining bits in A. Check Bit 2.
-	BNE FetchBit2          ; If A is not empty, skip reload
-	LDA (TablePtr),Y       ; Reload byte if it split exactly on a byte boundary
-	INY
-FetchBit2:
-	ASL A
-	BCS SpecialAdjust      ; Token is %11 -> Jump to rare cases
-	
-	PHA                    ; Save stream bits
-	LDA Delta
-	CLC
-	ADC #1                 ; BCD-compliant increment (+1)
-	STA Delta
-	PLA                    ; Restore stream bits
-	BCC Accumulate         ; 2-byte short branch fallback into fast path
-
-SpecialAdjust:
-				; Bits were %11. Check Bit 3.
-	BNE FetchBit3          ; If A is not empty, skip reload
-	LDA (TablePtr),Y
-	INY
-FetchBit3:
-	ASL A
-	BCS AddTwo             ; Token is %111 -> Go update step size by +2
-
-	PHA                    ; Save stream bits
-	LDA Delta
-	SEC
-	SBC #1                 ; BCD-compliant decrement (-1)
-	STA Delta
-	PLA                    ; Restore stream bits
-	BNE Accumulate         ; 2-byte branch fallback to fast path
-
-AddTwo:
-	PHA                    ; Temporarily save our active bitstream register
-	LDA Delta
-	CLC
-	ADC #2
-	STA Delta              ; Update step size natively by +2 via BCD
-	PLA                    ; Restore our active bitstream bits to A
-	BCC Accumulate         ; Return control back into main stream loop
 .endproc
 
 ;;; =========================================================================
-;;; 51-Byte Encoded 4-Digit Variable Bitstream Table
-;;; Compiled precisely to map: 0=Same, 10=+1, 110=-1, 111=+2
+;;; 64-Byte Mathematically Accurate 2-Bit Constant Conversion Table
+;;; Maps exactly to the ASL stream logic: %00=Same, %01=+1, %10=-1, %11=+2
 ;;; =========================================================================
 .segment "RODATA"
 
 BitstreamTable:
-	.byte $16, $4D, $02, $D6, $80, $B4, $02, $D0, $59, $02, $D0, $26, $96, $41, $68, $5A
-	.byte $08, $2D, $16, $8B, $4B, $41, $16, $96, $96, $88, $42, $21, $10, $96, $FA, $25
-	.byte $A8, $88, $91, $22, $48, $92, $49, $14, $8F, $B9, $29, $29, $29, $2A, $4A, $93
-	.byte $A7, $4E, $80
+	.byte $01, $92, $42, $41, $14, $14, $11, $11, $14, $11, $14, $14, $14, $14, $14, $14
+	.byte $14, $14, $14, $14, $14, $14, $14, $14, $14, $14, $14, $14, $14, $14, $14, $14
+	.byte $14, $14, $14, $14, $14, $14, $14, $14, $14, $14, $14, $15, $14, $15, $14, $15
+	.byte $15, $15, $15, $15, $15, $15, $15, $15, $15, $15, $15, $15, $15, $15, $15, $14
