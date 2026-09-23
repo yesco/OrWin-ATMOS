@@ -197,7 +197,12 @@ FetchBit2:
 	ASL A
 	BCS SpecialAdjust      ; Token is %11 -> Jump to rare cases
 	
-	INC Delta              ; Token is %10 -> Increment step size (+1)
+	PHA                    ; Save stream bits
+	LDA Delta
+	CLC
+	ADC #1                 ; BCD-compliant increment (+1)
+	STA Delta
+	PLA                    ; Restore stream bits
 	BCC Accumulate         ; 2-byte short branch fallback into fast path
 
 SpecialAdjust:
@@ -209,7 +214,12 @@ FetchBit3:
 	ASL A
 	BCS AddTwo             ; Token is %111 -> Go update step size by +2
 
-	DEC Delta              ; Token is %110 -> Decrement step size by 1 (-1)
+	PHA                    ; Save stream bits
+	LDA Delta
+	SEC
+	SBC #1                 ; BCD-compliant decrement (-1)
+	STA Delta
+	PLA                    ; Restore stream bits
 	BNE Accumulate         ; 2-byte branch fallback to fast path
 
 AddTwo:
