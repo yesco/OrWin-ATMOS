@@ -91,7 +91,8 @@ SweepLoop:
 	ORA #$30
 	JSR putchar
 
-	PUTC '.'		; Print decimal point
+	PUTC ' '
+;	PUTC '.'		; Print decimal point
 
 				; Digit 2 (Low Nibble of BcdH)
 	LDA BcdH
@@ -114,7 +115,7 @@ SweepLoop:
 	ORA #$30
 	JSR putchar
 
-	NL
+;	NL
 
 	INC TestIdx            ; Advance to next index point
 	BNE SweepLoop          ; Run full 256 entries mapping
