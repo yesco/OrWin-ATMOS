@@ -1,1 +1,1 @@
-cl65 -t sim6502 gloat-bcd.asm -o bcd.sim && sim65 -c bcd.sim
+cl65 -t sim6502 gloat-bcd.asm -o bcd.sim -m bcd.map && sim65 -c bcd.sim

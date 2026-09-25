@@ -1,17 +1,28 @@
+// TODO: This is gemini generated code,
+//   it couldn't implement the other opitmized version,
+//   and it keeps failing on this one1 Possibly wrong
+//   code as well as data genereated by bcd-*.py
+	 
 import math
 
+end= 256+2
 # 1. Generate the absolute rounded 4-digit BCD targets
-ideal_vals = [round(1000 * (10 ** (x / 256))) for x in range(256)]
+ideal_vals = [round(1000 * (10 ** (x / 256))) for x in range(end)]
 
 # 2. Extract first-layer step sizes
-deltas = [ideal_vals[x] - ideal_vals[x-1] for x in range(1, 256)]
+deltas = [ideal_vals[x] - ideal_vals[x-1] for x in range(1, end)]
 
 # 3. Model the 6502 loop logic (MSB-first bit-pair streaming)
 current_delta = deltas[0]  # First step size defaults to 9
 encoded_bits = []
 
+run= 1000
+i= 0
 for d in deltas[1:]:
     change = d - current_delta
+    run= run + d
+    print(i, ideal_vals[i], deltas[i], d, change)
+    i= i + 1
     if change == 0:
         encoded_bits.extend([0, 0]) # %00 = Unchanged
     elif change == 1:
@@ -23,6 +34,8 @@ for d in deltas[1:]:
     elif change == 2:
         encoded_bits.extend([1, 1]) # %11 = Increment +2
         current_delta += 2
+
+print("RUN", run)
 
 # Pad out trailing bits to finalize last byte alignment
 while len(encoded_bits) < 512:
