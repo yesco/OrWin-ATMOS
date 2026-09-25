@@ -42,10 +42,10 @@
 //(D: <div - maybe not needed? ... </div>) 
 // E: <em> ... </em>
 // F: <form name='..."    </form>
-// G: <h1>                </h1>
-// H: <h2> - more common? </h2>
-// I: <input name=... type=...  text,checkbox,radio,number,range,date,time,submit
-// J: <i> .. </i> <iframe>
+//(G: <h1>                </h1>)
+// H n: <h1> - more common? </h2>
+// I: <i> .. </i> <iframe>
+// J: <input name=... type=...  text,checkbox,radio,number,range,date,time,submit
 // K: 
 // L: <li> .. </li>
 // M: <iMg> ... 
@@ -53,11 +53,11 @@
 // O: <ol> .. </ol>
 // P: <p> ... </p> or as </p> ?
 // Q: <quote> ... </quote>
-// R: <tr> ... (optional? </tr>)
-// S: <select> ... <option> ... </select> <optgroup???> <span> <strong>
+// R: <tr> ... </tr> (well formed)
+// S: <select> ... <?option> ... </select> <optgroup???> <span> <strong>
 // T: <table> ...  </table>
 // U: <ul> ... </ul>
-// V:  TODO: <label>name</label
+// V: <label> ... </label>
 // W: <textarea name=...>... </textarea>
 // X: <hr/>
 // Y:
@@ -72,4 +72,229 @@
 //
 // 0xff       END-eleemnt
 
+// Minimial 8-bit "CSS":
+//
+// PRE:   string to print before tag content (at push time)
+// POST:  string to print after tag content (at pop time)
+char* prepost[]= {
+  0,
+  0,
+  // A = blue
+  , BLUE
+  , 0
+  // Bold = red
+  , RED
+  , 0
+  // Code = BG+black green
+  , BGBLACK GREEN
+  , 0
+  // Div ...
+  , 0
+  , 0
+  // Em
+  , GREEN
+  , 0
+  // Form
+  , 0
+  , 0
+  // G
+  , 0
+  , 0
+  // H -- see specific 31+n
+  , FLUSHLINE
+  , FLUSHLINE
+  // I = green
+  , YELLOW
+  , 0
+  // J
+  , 0
+  , 0
+  // K
+  , 0
+  , 0
+  // Li
+  , FLUSHLINE
+  , 0
+  // M
+  , "[image: " // description
+  , "]"
+  // N
+  , 0
+  , 0
+  // Ol = indent++
+  , FLUSHLINE
+  , FLUSHLINE
+  // P == 
+  , FLUSHLINE "  "
+  , FLUSHLINE
+  // Q == 
+  , FLUSHLINE
+  , FLUSHLINE
+  // tR =
+  , FLUSHLINE
+  , FLUSHLINE
+  // Select - color?
+  , "|" // lol
+  , 0
+  // Table
+  , FLUSHLINE
+  , FLUSHLINE
+  // U"""
+  , 0
+  // W <textarea>
+  , FLUSHLINE
+  , FLUSHLINE
+  // X <hr>
+  , FLUSHLINE "- - -" NL
+  , FLUSHLINE
+  // Y
+  , 0
+  , 0
+  // Z
+  , 0
+  , 0
+  // - special control
+  // case 0x5b:
+  , 0
+  , 0
+  // case 0x5c:
+  , 0
+  , 0
+  // case 0x5d:
+  , 0
+  , 0
+  // case 0x5e:
+  , 0
+  , 0
+  // case 0x5f:
+  , 0
+  , 0 
+  
+  // H1:
+  , FLUSHLINE DOUBLE EVEN
+  , FLUSHLINE
+  // H2:
+  , FLUSHLINE BGBLACK WHITE
+  , FLUSHLINE
+  // H3:
+  , FLUSHLINE BGGREEN
+  , FLUSHLINE
+  // H4:
+  , FLUSHLINE BGCYAN
+  , FLUSHLINE
+  // H5: foobar ....
+  , FLUSHLINE BGYELLOW
+  , 0
+  // H6: fiefum ...
+  , FLUSHLINE BGRED
+  , 0
+}
 
+
+#define MAX_STACK 32
+
+char stack[MAX_STACK]= {0};
+char nstack= 0;
+
+char peek() {
+  
+}
+
+void skipTill(char c) {
+  while(*s && *s != c) ++s;
+}
+
+void display(char* s) {
+  char c,a;
+  // We use 'X to indicate X with hi-bit set
+  // <n> is a single byte parameter H1...H6
+  // ... is text
+  // $ff is end marker that pops
+  // $ff is
+
+  goto next;
+
+ push:
+  if (nstack >= MAX_STACK) {
+    // TODO: error?
+  } else {
+    stack[nstack++]= a;
+  }
+    
+ next:
+  a= (c= *s) & 0x7f;
+  if (!c) return;
+  ++s;
+
+  if (c == 0xff) {
+
+    // TAG END/POP
+    if (!nstack) {
+      // TODO: error?
+    } else {
+      // end formatting for TAG
+      putz(prepost[stack[--nstack]*2 + 1]);
+    }
+
+    goto next;
+
+  } else if (a >= ' ' || c < ' ') {
+
+    // ASCII printable/control
+    putchar(a);
+
+    // TODO: breakable
+    goto next;
+
+  } else {
+    // a: 0..31
+
+    // TAG ENTER: formatting
+    putz(prepost[a*2]);
+
+    #define TAG(c) case (0x80+(c)-'@')
+
+    // This is a list of TAGs that have special action/data
+    // ... or don't require push/pop
+    switch(a | '@') { 
+    case 0: putchar(0); goto next;
+    case 'A': // <a href="URL">...</a> 'A URL $ff ... $ff
+      goto push;
+    case 'H': // <h1>: 'H n ... $ff
+      a= 31 + *s++; // get "n" char 1--6
+      putz(pre[a]);
+      goto push;
+    case 'J': // <input>: 'J name $ff default $ff // <input>
+      skipTill(0xff); // skip "name"
+      skipTIll(0xff); // skip "defalt"
+      goto push;
+    case 'M': // <img>: 'M' url $ff desc $ff
+      skipTill(0xff); // skip "url"
+      skipTill(0xff); // skip "descr"
+      goto push;
+    case 'S': // delimiter <select> & <option> & <optgroup
+      // 'S ... 'S ... 'S .... $ff
+      skipTill(0xff); // skip all <options> (delimited by 'S)
+
+      // If already inside <select> it means <option> = no push!
+      if (peek()=='S') goto next;
+      else goto push;
+    case 'X': // <hr/>: 'X
+      goto next;
+
+    // - tags can use
+    // case 'D':
+    // case 'K':
+    // case 'Y':
+    // case 'Z':
+    // - special control
+    // case 0x5b:
+    // case 0x5c:
+    // case 0x5d:
+    // case 0x5e:
+    // case 0x5f:
+    default:
+      // All others are structured and require END
+      goto push;
+    }
+}
