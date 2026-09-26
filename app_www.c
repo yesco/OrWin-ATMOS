@@ -78,7 +78,7 @@
 //
 // PRE:   string to print before tag content (at push time)
 // POST:  string to print after tag content (at pop time)
-char* prepost[]= {
+const char* prepost[]= {
   0, 0
   // A = blue
   , BLUE
@@ -277,7 +277,7 @@ void display(char* s) {
 
       // If already inside <select> it means <option> = no push!
       if (stack[nstack-1]=='S') goto next;
-      else goto push;
+      goto push;
     case 'X': // <hr/>: 'X
       goto next;
 
@@ -299,7 +299,7 @@ void display(char* s) {
   }
 }
 
-char* app_www(void* state, char* line) {
+void* app_www(void* state, char* line) {
   return NULL;
   (void)state; (void)line;
 }

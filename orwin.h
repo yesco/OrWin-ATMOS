@@ -39,13 +39,13 @@
 
 // text colours
 #define BLACK    "\xff" // \x0 would terminate the string...
-#define RED      "\x1"
-#define GREEN    "\x2"
-#define YELLOW   "\x3"
-#define BLUE     "\x4"
-#define MAGENTA  "\x5"
-#define CYAN     "\x6"
-#define WHITE    "\x7"
+#define RED      "\x01"
+#define GREEN    "\x02"
+#define YELLOW   "\x03"
+#define BLUE     "\x04"
+#define MAGENTA  "\x05"
+#define CYAN     "\x06"
+#define WHITE    "\x07"
 
 // background colours
 #define BGBLACK    "\x10"
