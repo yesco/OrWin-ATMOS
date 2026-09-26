@@ -35,6 +35,10 @@ char wputc(char c);
 // Otherwise, "fillins.c, will fill them in!
 
 
+#include "misc.c"
+
+
+
 #ifdef OSCAR64
 
   #include "oscar64.c"

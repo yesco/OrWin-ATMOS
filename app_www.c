@@ -197,12 +197,6 @@ const char* prepost[]= {
 char stack[MAX_STACK]= {0};
 char nstack= 0;
 
-// looked at skipTill(char** s...) but not save any bytes?
-char* skipTill(char* s, char c) {
-  while(*s && *s != c) ++s;
-  return s;
-}
-
 void display(char* s) {
   char c,a;
   // We use 'X to indicate X with hi-bit set

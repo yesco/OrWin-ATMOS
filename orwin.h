@@ -286,3 +286,9 @@ extern size_t heapfreex();
 
 #endif // OSCAR64
 
+
+
+// extras
+
+extern char* skipTill(char* s, char c);
+extern char* skipspc(char* s);

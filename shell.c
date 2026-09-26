@@ -222,8 +222,7 @@ void xfree(void** pp) {
 char* nextStr(char** line, const char* dflt) {
   char *r, *p= *line;
   if (!line || !*line) return (char*)dflt;
-  // skip spaces
-  while(isspace(*p)) ++p;
+  p= skipspc(p);
   // r points to first non whitespace (or at end)
   r= p;
   // skip till end of "word"
@@ -764,13 +763,14 @@ void* wc(wcstate* state, char* line) {
 
   // process one line
   state->ln++;
+  state->cn+= strlen(s);
   while((c=*s)) {
-    while(isspace(c)) c=*++s,++n;
-    if (c) state->wn++;
-    while(!isspace(c) && c) c=*++s,++n;
+    s= skipspc(s);
+    state->wn++;
+    --s;
+    while((c= *++s) && !isspace(c));
   }
-  state->cn+= n;
-  
+
   // returns null (backtracks to get next line)
   lfree(line);
   return NULL;
@@ -1636,20 +1636,19 @@ int wrunsystrain(cmdtrain* train) {
   
   while(*cmd) {
     // === extract one separated command
-    // skip spaces
-    while(isspace((c=*cmd))) ++cmd;
+    cmd= skipspc(cmd);
     // skip |
     while((c=*cmd) == '|' && c) ++cmd;
     //printf("...>%s<\n", cmd);
 
     // = extract program name
     p= line;
-    // skip spaces
-    while(isspace((c=*cmd))) ++cmd;
+    cmd= skipspc(cmd);
     // copy name
     while((c=*cmd) && !isspace(c) && c!='|') *p++= c,++cmd;
     *p= 0;
 
+    // TODO: ?
     // done?
     //    if (!*line) return 0;
 
@@ -1675,10 +1674,10 @@ int wrunsystrain(cmdtrain* train) {
 
     // = Extract arguments (how about intial)
     p= line;
-    // skip spaces
-    while(isspace(*cmd)) ++cmd;
+    cmd= skipspc(cmd);
     // copy rest of arguments
     while((c=*cmd) && c != '|') *p++= c,++cmd;
+    // TODO: trim func? only here
     // remove trailing spaces
     while(isspace(p[-1]) && p>line) --p;
     *p= 0;
