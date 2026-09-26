@@ -360,8 +360,12 @@ char wputc(char c) {
   // (9) Tab 8 forward
   case '\t': if ((winp->c= ((winp->c + 8) & 0xf8)) > winp->w) {
       c=10; break; } else updatewinptr(); goto done;
-  case 10: nl(); goto done;      // CTRL-J = \n & wclreol()
-  case 11: nlpure(); goto done;   // CTRL-K = \n but NO wclreol!
+
+  case 24: // CTRL-X  FLSHLINE: NL if "needed" (not "first" pos)
+    if (winp->c) { updatewinptr(); goto done; }
+    // NL: fall-through
+  case 10: nl(); goto done;     // CTRL-J = \n & CLREOL
+  case 11: nlpure(); goto done; // CTRL-K = \n NO clreol
 
   case 12: wclrscr(); goto done;     // CTRL-L = CLRSCR
   case 13: winp->c= 0; updatewinptr(); goto done; // CTRL-M = \r = CR
@@ -377,11 +381,8 @@ char wputc(char c) {
   case 128+12: gotoxy(0,0); goto done; // HOME
   case 128+13: clnl();      goto done; // CLNL
 
-
-  // Graphical/Text-Mode switches
-  case 24: break; // CTRL-X  CANcel (*ix: cancel input, emacs: ...)
-  case 25: break; // CTRL-Y (EM end medium)  (*ix: delay suspend?)
-  case 26: break; // CTRL-Z (SUB substitute) (cp/m: EOF, linux: suspend)
+  case 25: break; // CTRL-Y (EM end medium)  - TODO: indent--
+  case 26: break; // CTRL-Z (SUB substitute) - TODO: indent++
 
   // All other codes are oric attributes (color/blink)
   // https://notes.burke.libbey.me/ansi-escape-codes/
@@ -956,7 +957,7 @@ void apprun() {
 
     // if it didn't open a window
     if (!winp->w) {
-      char bg, fg;
+      //char bg, fg; ??
 
       // default tileable window size
       // TODO: WMAX HMAX bad names... lol

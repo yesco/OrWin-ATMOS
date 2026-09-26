@@ -1,3 +1,8 @@
+// TODO: This is gemini generated code,
+//   it couldn't implement the other opitmized version,
+//   and it keeps failing on this one1 Possibly wrong
+//   code as well as data genereated by bcd-*.py
+	 
 ;;; =========================================================================
 ;;; 6502 4-Digit Exponential Printable Table Generator
 ;;; Optimized with Inverted Fall-Through, Register-X Stream, and Zero-Check

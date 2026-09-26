@@ -18,18 +18,24 @@
 #define BG      16
 
 
+#define HOME     "\x8c" // 'CLRSCR - just homes the cursor NO clear
+#define CLRSCR   "\x0c" // Clear screen
+#define CLREOL   "\x0e" // Clear to end of line
 
-#define NL       "\n"   // 10 \x0a
-#define NLPURE   "\x0b" // 11 \x0b
+#define CR       "\x0d" // Carriage return: Move to start of current line
+#define NL       "\n"   // Newline: wrap screen to newline + clear it (0x0a)
+#define CLNL     "\x8a" // Newline AND CLEAR
+#define NLPURE   "\x0b" // Pure Newline: Scroll if needed, no clearing
 
-#define CLRSCR   "\x0c"
-#define CR       "\x0d"
-#define CLREOL   "\x0e"
-#define RPT      "\x0f"
+#define FLSHLN   "\x18" // Flush Line: Ensure cursor is on a fresh, empty line 
+                        // (No-op if already at column 0 on an empty line)
 
+#define INCIND   "\x19" // TODO: increase indent w 2 (CANcel)
+#define DECIND   "\x1a" // TODO: decrease indent w 2 (SUBstitute)
 
-#define HOME     "\x8c" // 'CLRSCR
-#define CLNL     "\x8a" // 'NL
+#define RPT      "\x0f" // Repeat character
+
+#define ESC      "\x1b" // ESC key and action
 
 // text colours
 #define BLACK    "\xff" // \x0 would terminate the string...

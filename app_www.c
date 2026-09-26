@@ -72,13 +72,14 @@
 //
 // 0xff       END-eleemnt
 
+#include "orwin.h"
+
 // Minimial 8-bit "CSS":
 //
 // PRE:   string to print before tag content (at push time)
 // POST:  string to print after tag content (at pop time)
 char* prepost[]= {
-  0,
-  0,
+  0, 0
   // A = blue
   , BLUE
   , 0
@@ -101,8 +102,8 @@ char* prepost[]= {
   , 0
   , 0
   // H -- see specific 31+n
-  , FLUSHLINE
-  , FLUSHLINE
+  , FLSHLN
+  , FLSHLN
   // I = green
   , YELLOW
   , 0
@@ -113,7 +114,7 @@ char* prepost[]= {
   , 0
   , 0
   // Li
-  , FLUSHLINE
+  , FLSHLN
   , 0
   // M
   , "[image: " // description
@@ -122,31 +123,31 @@ char* prepost[]= {
   , 0
   , 0
   // Ol = indent++
-  , FLUSHLINE
-  , FLUSHLINE
+  , FLSHLN
+  , FLSHLN
   // P == 
-  , FLUSHLINE "  "
-  , FLUSHLINE
+  , FLSHLN "  "
+  , FLSHLN
   // Q == 
-  , FLUSHLINE
-  , FLUSHLINE
+  , FLSHLN
+  , FLSHLN
   // tR =
-  , FLUSHLINE
-  , FLUSHLINE
+  , FLSHLN
+  , FLSHLN
   // Select - color?
   , "|" // lol
   , 0
   // Table
-  , FLUSHLINE
-  , FLUSHLINE
+  , FLSHLN
+  , FLSHLN
   // U"""
   , 0
   // W <textarea>
-  , FLUSHLINE
-  , FLUSHLINE
+  , FLSHLN
+  , FLSHLN
   // X <hr>
-  , FLUSHLINE "- - -" NL
-  , FLUSHLINE
+  , FLSHLN "- - -" NL
+  , FLSHLN
   // Y
   , 0
   , 0
@@ -171,24 +172,24 @@ char* prepost[]= {
   , 0 
   
   // H1:
-  , FLUSHLINE DOUBLE EVEN
-  , FLUSHLINE
+  , FLSHLN // TODO: DOUBLE EVEN
+  , FLSHLN
   // H2:
-  , FLUSHLINE BGBLACK WHITE
-  , FLUSHLINE
+  , FLSHLN BGBLACK WHITE
+  , FLSHLN
   // H3:
-  , FLUSHLINE BGGREEN
-  , FLUSHLINE
+  , FLSHLN BGGREEN
+  , FLSHLN
   // H4:
-  , FLUSHLINE BGCYAN
-  , FLUSHLINE
+  , FLSHLN BGCYAN
+  , FLSHLN
   // H5: foobar ....
-  , FLUSHLINE BGYELLOW
+  , FLSHLN BGYELLOW
   , 0
   // H6: fiefum ...
-  , FLUSHLINE BGRED
+  , FLSHLN BGRED
   , 0
-}
+};
 
 
 #define MAX_STACK 32
@@ -196,12 +197,9 @@ char* prepost[]= {
 char stack[MAX_STACK]= {0};
 char nstack= 0;
 
-char peek() {
-  
-}
-
-void skipTill(char c) {
+char* skipTill(char* s, char c) {
   while(*s && *s != c) ++s;
+  return s;
 }
 
 void display(char* s) {
@@ -262,22 +260,22 @@ void display(char* s) {
       goto push;
     case 'H': // <h1>: 'H n ... $ff
       a= 31 + *s++; // get "n" char 1--6
-      putz(pre[a]);
+      putz(prepost[a*2]); // pre
       goto push;
     case 'J': // <input>: 'J name $ff default $ff // <input>
-      skipTill(0xff); // skip "name"
-      skipTIll(0xff); // skip "defalt"
+      s= skipTill(s, 0xff); // skip "name"
+      s= skipTill(s, 0xff); // skip "defalt"
       goto push;
     case 'M': // <img>: 'M' url $ff desc $ff
-      skipTill(0xff); // skip "url"
-      skipTill(0xff); // skip "descr"
+      s= skipTill(s, 0xff); // skip "url"
+      s= skipTill(s, 0xff); // skip "descr"
       goto push;
     case 'S': // delimiter <select> & <option> & <optgroup
       // 'S ... 'S ... 'S .... $ff
-      skipTill(0xff); // skip all <options> (delimited by 'S)
+      s= skipTill(s, 0xff); // skip all <options> (delimited by 'S)
 
       // If already inside <select> it means <option> = no push!
-      if (peek()=='S') goto next;
+      if (stack[nstack-1]=='S') goto next;
       else goto push;
     case 'X': // <hr/>: 'X
       goto next;
@@ -297,4 +295,5 @@ void display(char* s) {
       // All others are structured and require END
       goto push;
     }
+  }
 }
