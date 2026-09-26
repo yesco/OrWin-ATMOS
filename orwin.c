@@ -398,8 +398,8 @@ char wputc(char c) {
     // TODO: doesNOT do right! ... LOL
 
   case KEYRIGHT: winp->p++; break; // will reach column++
-  case KEYDOWN:  if (++winp->r >= winp->h) winp->r= 0;          break;
-  case KEYUP:    if (winp->r-- >= winp->h) winp->r= winp->h-1;   break;
+  case KEYDOWN:  if (++winp->r >= winp->h) winp->r= 0;  updatewinptr(); goto done;
+  case KEYUP:    if (winp->r-- >= winp->h) winp->r= winp->h-1;  updatewinptr(); goto done;
 
   // TODO: repeat char
   // vt100:     char ESC [ 70 b                   printf "=\e[79b\n"
@@ -427,7 +427,7 @@ char wputc(char c) {
     // change INK or BG color for future, like ANSI!
     if (c<24) {
       if (c<8) {
-        // inkk - use line attribute
+        // ink - use line attribute
         winp->fg= c & 0x7f;
         if (!winp->c) { lastcolor= winp->p[-1]= c; goto done; }
       } else if (c>=16) {

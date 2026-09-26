@@ -299,9 +299,7 @@ void display(char* s) {
   }
 }
 
-#if 0
 char* app_www(void* state, char* line) {
   return NULL;
   (void)state; (void)line;
 }
-#endif

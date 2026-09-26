@@ -281,6 +281,8 @@ void shprint(char* line) {
 //          204 vseti, 173 vsets
 //           30 vevals
 //
+
+// takes 4K makes OrWIN negative heap! lol
 //#define ENVVARS
  
 #ifndef ENVVARS
@@ -1301,7 +1303,8 @@ void* ps(psstate* state, char* line) {
   if (state->i++ == 0)
     return strdup(
 //----------------------------------------
- " PID %C #M  SZ  ST  TIME CMD");
+// " PID %C #M  SZ  ST  TIME CMD");
+" PID #M STT TIME CMD");
 //4203 27 33 437 KEY 27:30 foobar -a"
 
   // return data lines
@@ -1346,15 +1349,17 @@ void* ps(psstate* state, char* line) {
   state->args  = w->args;
   
   // WARNING! sizeof not used!
-  snprintf(ln, sizeof(ln), "42%02d %2d %2d%4d %.3s%3d:%02d %s %s"
-	   , p
+//snprintf(ln, sizeof(ln), "42%02d %2d %2d%4d %.3s%2d:%02d %s %s"
+  snprintf(ln, sizeof(ln), "42%02d %2d %.3s%2d:%02d %s %s"
+    , p
 
-	   , w->cpu, w->nalloc // == w->mem,
-	   , -1 //w->abytes,
-	   , wstate(w->ret)
-	   , m, s
-	   , state->name, w->args
-	   );
+//  , w->cpu
+    , w->nalloc // == w->mem,
+//  , -1 //w->abytes,
+    , wstate(w->ret)
+    , m, s
+    , state->name, w->args
+  );
 
   // enable if disable shprint, lol
   //puts(ln); return 0;

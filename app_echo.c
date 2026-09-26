@@ -13,6 +13,7 @@ void* app_echo(void* voidapp, char* line) {
   
   if (!app) return calloc(sizeof(APP), 1);
     
+  togglecursor();
   c= getc();
 
   // Terminal stuff
@@ -25,6 +26,7 @@ void* app_echo(void* voidapp, char* line) {
     if (c==13) putchar(10); // CR-LF
   }
 
+  togglecursor();
   return WAITKEY;
   (void)app; (void)line;
 }
