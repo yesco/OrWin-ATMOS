@@ -4,20 +4,21 @@
 
 #include <ctype.h>
 
-// TODO: make "parsing primitives" that work on a
-//   pointer in ZP, so no need pass pointer!
+// Parsing primitives using a zero page zptr, so
+// no need passing it back and forth. Saves
+// 148 bytes at least!
+//
+// 36826 (- 36974 36781) = 193! bytes saved
 
-#if 1
-// 36944 (- 36974 36944) = 30 bytes saved
+
 #pragma bss-name (push, "ZEROPAGE")
-
 
 char* zptr;
 
 #pragma bss-name (pop)
 
 
-void skipTill(char c) {
+void skiptill(char c) {
   while(*zptr && *zptr!=c) ++zptr;
 }
 
@@ -25,16 +26,6 @@ void skipspc() {
   while(*zptr && isspace(*zptr)) ++zptr;
 }
 
-#else
-// 36974
-// looked at skipTill(char** s...) but not save any bytes?
-char* skipTill(char* s, char c) {
-  while(*s && *s != c) ++s;
-  return s;
+void skipword() {
+  while(*zptr && (isalnum(*zptr) || *zptr=='_' || *zptr=='-')) ++zptr;
 }
-
-char* skipspc(char* s) {
-  while(*s && isspace(*s)) ++s;
-  return s;
-}
-#endif

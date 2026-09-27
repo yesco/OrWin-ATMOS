@@ -1611,11 +1611,11 @@ int wrunsystrain(cmdtrain* train) {
 
  cmdtrain* wsysparse(char* cmd, char* pi, unsigned int *bitsout) {
   // TODO: check overflow this per command?
-  char *line;
-
-  char c, i, *p, **n;
+  char i, **n;
   cmdfun* f;
   void* state;
+
+  char *name, *args, *dofree;
 
   void* arr[MAX_TRAIN + 2 + 2]; // 2 head, 2 NULL
   unsigned int cleanbits;
@@ -1624,7 +1624,7 @@ int wrunsystrain(cmdtrain* train) {
   if (!cmd) return NULL;
 
   // make copy so we can chop it up!
-  line= strdup(cmd);
+  zptr= dofree= strdup(cmd);
   
   #ifdef SHELLTEST
   printf("\n------ wsystem: \"%s\"\n", cmd);
@@ -1636,73 +1636,68 @@ int wrunsystrain(cmdtrain* train) {
   traincleanbits= 0;
   i= 0;
   
-  while(*cmd) {
-    // === extract one separated command
-    zptr= cmd;
+  while(zptr && *zptr) {
+    // extract command name
     skipspc();
-    cmd= zptr;
-    // skip |
-    while((c=*cmd) == '|' && c) ++cmd;
-    //printf("...>%s<\n", cmd);
+    name= zptr;
+    skipword();
+    *zptr++= 0;
+    //printf("name>%s<\n", name);
 
-    // = extract program name
-    p= line;
-    zptr= cmd;
+    // extract arguments
     skipspc();
-    cmd= zptr;
-    // copy name
-    while((c=*cmd) && !isspace(c) && c!='|') *p++= c,++cmd;
-    *p= 0;
+    args= zptr;
+    skiptill('|');
+    if (!*zptr) zptr= 0; else *zptr++= 0;
 
-    // TODO: ?
-    // done?
-    //    if (!*line) return 0;
+    //printf("args>%s<\n\nn", args);
 
-    // = find command fun
-    // TODO: move to function
-    n= (char**)cmdnames;
+    // find command fun
+    n= (char**) cmdnames;
     f= (cmdfun*)commands;
     while(*n && *f) {
       //printf("  ?  %s %s\n", line, (char*)*n);
-      if (0==strcmp(line, (char*)*n)) goto found;
+      if (0==strcmp(name, (char*)*n)) goto found;
       ++n; ++f;
     }
 
+    // NOT found!
+
     // TODO: how to handle error stderr?
-    printf("%%Error.system: not found >%s< (%s)\n  %p %p %d %d\n",
-	   line, cmd, *n, *f, !*n, !*f);
+    printf("%%Shell: NO >%s< (%s)\n  %p %p %d %d\n",
+      name, cmd, *n, *f, !*n, !*f);
+    free(dofree);
     return NULL;
 
   found:
     #ifdef SHELLINFO
-    printf("\t[%s: ", line);
+    printf("\t[%s: ", name);
     #endif
 
-    // = Extract arguments (how about intial)
-    p= line;
-    zptr= cmd;
-    skipspc();
-    cmd = zptr;
-    // copy rest of arguments
-    while((c=*cmd) && c != '|') *p++= c,++cmd;
     // TODO: trim func? only here
     // remove trailing spaces
-    while(isspace(p[-1]) && p>line) --p;
-    *p= 0;
+    //while(isspace(zptr[-1]) && p>zptr) --p;
+    //*p= 0;
     
+    // TODO: all get's CLENAUP request?
     traincleanbits<<= 1;
 
     // This calls the INIT for the command!
-    arr[++i]= state= (*f)(NULL, line);
+    { // save zptr as it may be used in parsing inside init!
+      char* zsave= zptr;
+      arr[++i]= state= (*f)(NULL, args);
+      zptr= zsave;
+    }
 
     if (!state) {
       // TODO: ABORT stderr?
-      printf("%%command.init \"%s %s\" gave NULL!\n", *n, line);
+      printf("%%command.init \"%s %s\" gave NULL!\n", *n, args);
+      free(dofree);
       return NULL;
     }
 
     #ifdef SHELLINFO
-    printf("\"%s\" %p %p]\n", line, f, state);
+    printf("\"%s\" %p %p]\n", cmd, f, state);
     #endif
   }
   
@@ -1719,6 +1714,8 @@ int wrunsystrain(cmdtrain* train) {
   //putchar('\n'); for(int i=0; i<16; ++i) printf("%2d: %p\n", i, train[i]);
 
   *pi= i; *bitsout= traincleanbits;
+
+  free(dofree);
   return train;
 }
 

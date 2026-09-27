@@ -259,20 +259,20 @@ void display(char* s) {
       goto push;
     case 'J': // <input>: 'J name $ff default $ff // <input>
       zptr= s;
-      skipTill(0xff); // skip "name"
-      skipTill(0xff); // skip "defalt"
+      skiptill(0xff); // skip "name"
+      skiptill(0xff); // skip "defalt"
       s= zptr;
       goto push;
     case 'M': // <img>: 'M' url $ff desc $ff
       zptr= s;
-      skipTill(0xff); // skip "url"
-      skipTill(0xff); // skip "descr"
+      skiptill(0xff); // skip "url"
+      skiptill(0xff); // skip "descr"
       s= zptr;
       goto push;
     case 'S': // delimiter <select> & <option> & <optgroup
       // 'S ... 'S ... 'S .... $ff
       zptr= s;
-      skipTill(0xff); // skip all <options> (delimited by 'S)
+      skiptill(0xff); // skip all <options> (delimited by 'S)
       s=  zptr;
 
       // If already inside <select> it means <option> = no push!
