@@ -290,5 +290,17 @@ extern size_t heapfreex();
 
 // extras
 
+#if 1
+
+extern char* zptr;
+#pragma zpsym ("zptr");
+
+extern void skipTill(char c);
+extern void skipspc();
+
+#else
+
 extern char* skipTill(char* s, char c);
 extern char* skipspc(char* s);
+
+#endif

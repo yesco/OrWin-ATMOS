@@ -220,17 +220,18 @@ void xfree(void** pp) {
 
 // 123 : nextStr, NATIVE_CODE:code
 char* nextStr(char** line, const char* dflt) {
-  char *r, *p= *line;
+  char *r;
   if (!line || !*line) return (char*)dflt;
-  p= skipspc(p);
+  zptr= *line;
+  skipspc();
   // r points to first non whitespace (or at end)
-  r= p;
+  r= zptr;
   // skip till end of "word"
-  while(*p && !isspace(*p)) ++p;
+  while(*zptr && !isspace(*zptr)) ++zptr;
   // truncate string (we either on 0 or whitespace)
-  if (*p) *p++= 0;
+  if (*zptr) *zptr++= 0;
   // move input pointer to rest
-  *line= p;
+  *line= zptr;
   return *r? r: (char*)dflt;
 }
 
@@ -736,7 +737,7 @@ typedef struct wcstate {
 } wcstate;
 
 void* wc(wcstate* state, char* line) {
-  char c, *s= line;
+  char c;
   unsigned int n= 0;
   
   if (!state) {
@@ -762,13 +763,14 @@ void* wc(wcstate* state, char* line) {
   }
 
   // process one line
+  zptr= line;
   state->ln++;
-  state->cn+= strlen(s);
-  while((c=*s)) {
-    s= skipspc(s);
+  state->cn+= strlen(zptr);
+  while((c= *zptr)) {
+    skipspc();
     state->wn++;
-    --s;
-    while((c= *++s) && !isspace(c));
+    --zptr;
+    while((c= *++zptr) && !isspace(c));
   }
 
   // returns null (backtracks to get next line)
@@ -1636,14 +1638,18 @@ int wrunsystrain(cmdtrain* train) {
   
   while(*cmd) {
     // === extract one separated command
-    cmd= skipspc(cmd);
+    zptr= cmd;
+    skipspc();
+    cmd= zptr;
     // skip |
     while((c=*cmd) == '|' && c) ++cmd;
     //printf("...>%s<\n", cmd);
 
     // = extract program name
     p= line;
-    cmd= skipspc(cmd);
+    zptr= cmd;
+    skipspc();
+    cmd= zptr;
     // copy name
     while((c=*cmd) && !isspace(c) && c!='|') *p++= c,++cmd;
     *p= 0;
@@ -1674,7 +1680,9 @@ int wrunsystrain(cmdtrain* train) {
 
     // = Extract arguments (how about intial)
     p= line;
-    cmd= skipspc(cmd);
+    zptr= cmd;
+    skipspc();
+    cmd = zptr;
     // copy rest of arguments
     while((c=*cmd) && c != '|') *p++= c,++cmd;
     // TODO: trim func? only here

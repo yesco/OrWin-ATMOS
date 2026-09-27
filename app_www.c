@@ -258,16 +258,22 @@ void display(char* s) {
       putz(prepost[a*2]); // pre
       goto push;
     case 'J': // <input>: 'J name $ff default $ff // <input>
-      s= skipTill(s, 0xff); // skip "name"
-      s= skipTill(s, 0xff); // skip "defalt"
+      zptr= s;
+      skipTill(0xff); // skip "name"
+      skipTill(0xff); // skip "defalt"
+      s= zptr;
       goto push;
     case 'M': // <img>: 'M' url $ff desc $ff
-      s= skipTill(s, 0xff); // skip "url"
-      s= skipTill(s, 0xff); // skip "descr"
+      zptr= s;
+      skipTill(0xff); // skip "url"
+      skipTill(0xff); // skip "descr"
+      s= zptr;
       goto push;
     case 'S': // delimiter <select> & <option> & <optgroup
       // 'S ... 'S ... 'S .... $ff
-      s= skipTill(s, 0xff); // skip all <options> (delimited by 'S)
+      zptr= s;
+      skipTill(0xff); // skip all <options> (delimited by 'S)
+      s=  zptr;
 
       // If already inside <select> it means <option> = no push!
       if (stack[nstack-1]=='S') goto next;
