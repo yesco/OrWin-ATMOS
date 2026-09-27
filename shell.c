@@ -23,6 +23,18 @@
 #include <stdio.h>
 
 
+// takes 4K makes OrWIN negative heap! lol
+
+#ifndef MAIN
+// We're testing
+#define ENVVARS
+
+#include "misc.c"
+
+#endif
+
+
+
 #ifdef __CC65__
   typedef int intptr_t; // LOL
 #endif
@@ -282,9 +294,9 @@ void shprint(char* line) {
 //           30 vevals
 //
 
-// takes 4K makes OrWIN negative heap! lol
-//#define ENVVARS
- 
+
+  
+  
 #ifndef ENVVARS
  
 // dummies when not included

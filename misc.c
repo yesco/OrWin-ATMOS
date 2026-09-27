@@ -2,6 +2,10 @@
 //
 // (C) 2026 Jonas S Karlsson (jsk@yesco.org)
 
+#ifndef MISC_C
+
+#define MISC_C
+
 #include <ctype.h>
 
 // Parsing primitives using a zero page zptr, so
@@ -29,3 +33,5 @@ void skipspc() {
 void skipword() {
   while(*zptr && (isalnum(*zptr) || *zptr=='_' || *zptr=='-')) ++zptr;
 }
+
+#endif // MISC_C
