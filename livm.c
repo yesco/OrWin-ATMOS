@@ -7,6 +7,16 @@
 // Max 128 different numeric integer,
 // And 128 different managed strings.
 
+// LiVM
+// ====
+// This may sound limited, and it is, but in
+// reality, in global single variables and on
+// the stack, how many VALUES do you think are
+// active at any momment"
+//
+// I'm explicitily talking about "active" values,
+// not values stored in an array.
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <strings.h>
@@ -21,6 +31,10 @@ typedef union ByteProgram {
   word words[];
 } ByteProgram;
   
+// LiVM CPU byte code instructions
+// ===============================
+// BLK:  #: DESCRIPTION
+//
 // 01 : 64: sh6lor - prefix loader
 // 2  : 32: read global
 // 3  :  8: read local
@@ -30,6 +44,34 @@ typedef union ByteProgram {
 // 45 : 64: jmp +/- 32
 // 6  : 32: jsr[]
 // 7  : 32: instructions
+
+
+
+// alternative---
+
+// 0000 iiii JMP +1..16
+// 0001 iiii read local
+// 0010 iiii write local
+// 0011 iiii read --local or local--
+
+// 01ii iiii SHL6LOR constants
+
+// 1000 iiii load   iiii
+// 1001 iiii store  iiii
+// 1010 iiii load  (iiii)
+// 1011 iiii store (iiii)
+
+// 1100 tttt TESTERS:
+//            zero, one, two, three
+//            -1, -2, isspace, ispunct
+//            isdigit, ishex, isalpha, isalphanum
+//            isupper, islower, !isspace, isctrl
+// 1101 00ii  char==char
+// 1101 01
+// 1101 10
+// 1101 11
+// 1110 iiii JSR *i or iiii...
+// 1111 iiii JMP -1..16
 
 #ifdef LIVM
 
