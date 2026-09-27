@@ -15,11 +15,15 @@
 // 36826 (- 36974 36781) = 193! bytes saved
 
 
+#ifdef __CC65__
 #pragma bss-name (push, "ZEROPAGE")
-
 char* zptr;
-
 #pragma bss-name (pop)
+#endif // __CC65__
+
+#ifdef OSCAR
+__zeropage extern char* zptr;
+#endif
 
 
 void skiptill(char c) {

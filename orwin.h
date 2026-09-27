@@ -290,8 +290,17 @@ extern size_t heapfreex();
 
 // extras
 
+#ifdef OSCAR
+__zeropage
+#endif
+
 extern char* zptr;
-#pragma zpsym ("zptr");
+
+#ifdef __cc65__
+  #pragma zpsym ("zptr");
+#endif
+
+
 
 extern void skiptill(char c);
 extern void skipspc();
