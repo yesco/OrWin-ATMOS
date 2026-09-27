@@ -1489,20 +1489,20 @@ const char* cmdnames[]= {
   "stats",
   "teeterminal", "terminal", "editline", // == readline?
   
-  // "ls cat find "
-  //"grep cut tr sed " 
-  //"echo "
-  //"tail head diff uniq comm "
-  //"wc less sort gzip gunzip unzip "
+  // "LS CAT find "
+  // "GREP cut tr sed " 
+  // "echo " - PRINT
+  // "TAIL HEAD diff uniq comm "
+  // "WC less sort gzip gunzip unzip "
 
-  // "xargs "
+  // "xargs " - SHELL redundant
   // "history man "
 
   // "tar paste "
   // "awk "  
-  // "pwd date "
+  // "PWD date "
   // "clear basname dirname "
-  // "ps df top htop kill free whoami uptime uname killall "
+  // "PS df top htop kill free whoami uptime uname killall "
   // "cd rm cp mv mkdir chmod chown touch ln rmdir chgrp "
   // "curl wget rsync scp "
   // "ping ip ss netstat "
