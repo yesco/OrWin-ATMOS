@@ -57,6 +57,8 @@ int encode_string(const char* str, unsigned char length) {
     unsigned char i;
     int v1, v2;
     unsigned int pair_val;
+    int byte_offset;
+    int pad_toggle;
 
     memset(data_bytes, 0, 19);
     append_bits_to_buffer(0x02, 4, &bit_offset);   
@@ -76,8 +78,8 @@ int encode_string(const char* str, unsigned char length) {
     }
     append_bits_to_buffer(0x00, 4, &bit_offset);   
     
-    int byte_offset = (bit_offset + 7) / 8;
-    int pad_toggle = 0;
+    byte_offset = (bit_offset + 7) / 8;
+    pad_toggle = 0;
     while (byte_offset < 19) {
         data_bytes[byte_offset++] = pad_toggle ? 0x11 : 0xEC;
         pad_toggle = !pad_toggle;
@@ -129,7 +131,8 @@ void generate_matrix(void) {
     unsigned char current_bit;
     unsigned char actual_byte;
     int dir = -1; 
-
+    unsigned int format_register;
+      
     memset(bit_buffer, 0, 63);
 
     for (y = 0; y < 21; ++y) {
@@ -148,7 +151,7 @@ void generate_matrix(void) {
         }
     }
 
-    unsigned int format_register = 0x77C4; // 111011111000100
+    format_register = 0x77C4; // 111011111000100
     for (x = 0; x < 8; ++x) {
         if (x != 6) write_bit(x, 8, (format_register >> x) & 1);
     }
