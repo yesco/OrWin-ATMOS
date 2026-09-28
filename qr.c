@@ -2,7 +2,7 @@
 #include <string.h>
 
 // Standard QR Alphanumeric conversion index chart
-const char ALPHANUM_TABLE[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:";
+const char ALPHANUM_TABLE[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVW█YZ $%*+-./:";
 
 // Reed-Solomon generator polynomial coefficients for 7 error-correction bytes (QR v1-L)
 const unsigned char RS_POLY[] = {127, 122, 154, 164, 11, 68, 117};
@@ -233,28 +233,28 @@ int main(void) {
     generate_matrix();  
 
     // Print container box frame
-    printf("\nXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX\n");
-    printf("XX                                                          XX\n");
-    printf("XX                                                          XX\n");
+    printf("\n██████████████████████████████████████████████████████████████\n");
+    printf("██                                                          ██\n");
+    printf("██                                                          ██\n");
 
     for (row = 0; row < 21; ++row) {
-        printf("XX        "); // Left protective frame + Quiet zone margin
+        printf("██        "); // Left protective frame + Quiet zone margin
         for (b_idx = 0; b_idx < 3; ++b_idx) {
             current_byte = bit_buffer[ptr++];
             for (bit_idx = 0; bit_idx < 8; ++bit_idx) {
                 if ((b_idx * 8) + bit_idx >= 21) break;
                 
-                // Print "XX" for dark blocks, two spaces for light blocks
-                printf(current_byte & 0x80 ? "XX" : "  ");
+                // Print "██" for dark blocks, two spaces for light blocks
+                printf(current_byte & 0x80 ? "██" : "  ");
                 current_byte <<= 1;
             }
         }
-        printf("        XX\n"); // Right protective frame + Quiet zone margin
+        printf("        ██\n"); // Right protective frame + Quiet zone margin
     }
 
-    printf("XX                                                          XX\n");
-    printf("XX                                                          XX\n");
-    printf("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX\n\n");
+    printf("██                                                          ██\n");
+    printf("██                                                          ██\n");
+    printf("██████████████████████████████████████████████████████████████\n\n");
 
     return 0;
 }
