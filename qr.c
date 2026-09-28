@@ -131,10 +131,10 @@ void generate_matrix(void) {
     unsigned char current_bit;
     unsigned char actual_byte;
     int dir = -1; 
-    unsigned int format_register;
-      
+
     memset(bit_buffer, 0, 63);
 
+    // Draw Fixed Finder Squares + Timing Patterns
     for (y = 0; y < 21; ++y) {
         for (x = 0; x < 21; ++x) {
             if ((x < 7 && y < 7) || (x > 13 && y < 7) || (x < 7 && y > 13)) {
@@ -151,20 +151,43 @@ void generate_matrix(void) {
         }
     }
 
-    format_register = 0x77C4; // 111011111000100
-    for (x = 0; x < 8; ++x) {
-        if (x != 6) write_bit(x, 8, (format_register >> x) & 1);
-    }
-    write_bit(8, 7, (format_register >> 8) & 1);
-    write_bit(8, 8, (format_register >> 9) & 1);
-    write_bit(7, 8, (format_register >> 10) & 1);
-    for (y = 0; y < 6; ++y) {
-        if (y != 6) write_bit(8, 5 - y, (format_register >> (11 + y)) & 1);
-    }
-    for (y = 0; y < 7; ++y) write_bit(14 + y, 8, (format_register >> y) & 1);
-    for (x = 0; x < 7; ++x) write_bit(8, 20 - x, (format_register >> (7 + x)) & 1);
-    write_bit(8, 13, 1); 
+    // ============================================================
+    // CORRECT Format Information for Level L + Mask Pattern 0
+    // Format string: 111011111000100  (0x77C4)
+    // ============================================================
+    unsigned int format_register = 0b111011111000100;  // 15 bits
 
+    // --- First copy (top-left area) ---
+    // Horizontal: bits 0..5 at (0,8) .. (5,8), skip timing at x=6
+    for (int i = 0; i <= 5; i++) {
+        write_bit(i, 8, (format_register >> (14 - i)) & 1);
+    }
+    write_bit(7, 8, (format_register >> 8) & 1);          // bit 6
+
+    // Vertical: bits 7..14
+    write_bit(8, 8, (format_register >> 7) & 1);          // bit 7
+    write_bit(8, 7, (format_register >> 6) & 1);          // bit 8
+    for (int i = 0; i <= 5; i++) {                       // bits 9..14 → (8,5) down to (8,0)
+        write_bit(8, 5 - i, (format_register >> (5 - i)) & 1);
+    }
+
+    // --- Second copy ---
+    // Horizontal under top-right finder (bits 0..7)
+    for (int i = 0; i <= 7; i++) {
+        write_bit(14 + i, 8, (format_register >> i) & 1);
+    }
+
+    // Vertical right of bottom-left finder (bits 8..14)
+    for (int i = 0; i <= 6; i++) {
+        write_bit(8, 14 + i, (format_register >> (8 + i)) & 1);
+    }
+
+    // Always-dark module
+    write_bit(8, 13, 1);
+
+    // ============================================================
+    // Zigzag data + ECC placement (Mask 0)
+    // ============================================================
     y = 20; 
     for (col = 20; col > 0; col -= 2) {
         if (col == 6) col = 5; 
@@ -183,6 +206,7 @@ void generate_matrix(void) {
                     current_bit = (actual_byte >> (7 - (main_ptr % 8))) & 1;
                     main_ptr++;
 
+                    // Mask pattern 0: invert if (x + y) even
                     if ((current_x + y) % 2 == 0) {
                         current_bit ^= 1; 
                     }
