@@ -7,16 +7,17 @@
 
 // TODO: generalize and make API
 
-// ! oscar64: 0.722s (6370 B) -Os qr.c -ep
-//   cc65   : 2.1s   (6125 B) -Oirs qr.c && sim65 ...
+// ! oscar64: 0.440s (2361 B) -DNOFLOAT -DNOLONG -Os qr.c -ep  --- WRONG!
+//   cc65   : 1.237s (4242 B) -Oirs qr.c && sim65 ...
 
 // A more configurable "more correct" and diverse
 // - https://github.com/sehugg/qrcode_cc65
-// BUT: it takes -Oirs 4.4s on "8BITWORKSHOP.COM" (8766 B)
-// whereas this one takes 2.1s!                   (6125 B)
+// BUT: it takes -Oirs 3.65s on "8BITWORKSHOP.COM" (8838 B)
+// whereas qr.c  takes 2.1s!                       (6125 B)
+//                         no printf using fputs   (4224 B)
 // maybe it's 15% vs 7%, and generality.
 //
-// But with this simple one you save: 2641 bytes!
+// But with this simple one you save: 2641 bytes! (printf
 
 #include <stdio.h>
 #include <string.h>
@@ -25,266 +26,283 @@ const char ALPHANUM_TABLE[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:";
 // Verified coefficients for QR Version 1-L (7 ECC bytes)
 const unsigned char RS_POLY[] = {127, 122, 154, 164, 11, 68, 117};
 
-unsigned char data_bytes[19]; 
-unsigned char ecc_bytes[7];   
-unsigned char bit_buffer[63]; 
+unsigned char data_bytes[19];
+unsigned char ecc_bytes[7];
+unsigned char bit_buffer[63];
 
 unsigned char gf_mul(unsigned char a, unsigned char b) {
-    unsigned char result = 0;
-    while (b > 0) {
-        if (b & 1) result ^= a;
-        a = (a << 1) ^ (a & 0x80 ? 0x1D : 0); 
-        b >>= 1;
-    }
-    return result;
+  unsigned char result = 0;
+
+  while (b > 0) {
+    if (b & 1) result ^= a;
+    a = (a << 1) ^ (a & 0x80 ? 0x1D : 0); 
+    b >>= 1;
+  }
+  return result;
 }
 
 int get_alphanumeric_val(char c) {
-    unsigned char i;
-    if (c >= 'a' && c <= 'z') c -= 32; 
-    for (i = 0; i < 45; ++i) {
-        if (ALPHANUM_TABLE[i] == c) return i;
-    }
-    return -1; 
+  unsigned char i;
+
+  if (c >= 'a' && c <= 'z') c -= 32; 
+  for (i = 0; i < 45; ++i) {
+    if (ALPHANUM_TABLE[i] == c) return i;
+  }
+  return -1; 
 }
 
 void write_bit(unsigned char x, unsigned char y, unsigned char bit) {
-    unsigned int bit_pos = (y * 24) + x;
-    unsigned int byte_idx = bit_pos / 8;
-    unsigned char bit_idx = 7 - (bit_pos % 8);
+  unsigned int bit_pos = (y * 24) + x;
+  unsigned int byte_idx = bit_pos / 8;
+  unsigned char bit_idx = 7 - (bit_pos % 8);
     
-    if (bit) {
-        bit_buffer[byte_idx] |= (1 << bit_idx);
-    } else {
-        bit_buffer[byte_idx] &= ~(1 << bit_idx);
-    }
+  if (bit) {
+    bit_buffer[byte_idx] |= (1 << bit_idx);
+  } else {
+    bit_buffer[byte_idx] &= ~(1 << bit_idx);
+  }
 }
 
 void append_bits_to_buffer(unsigned int value, unsigned char num_bits, unsigned int *bit_offset) {
-    int i;
-    for (i = num_bits - 1; i >= 0; --i) {
-        unsigned int byte_idx = (*bit_offset) / 8;
-        unsigned char bit_idx = 7 - ((*bit_offset) % 8);
-        if ((value >> i) & 1) {
-            data_bytes[byte_idx] |= (1 << bit_idx);
-        }
-        (*bit_offset)++;
+  int i;
+  unsigned int byte_idx;
+  unsigned char bit_idx;
+
+  for (i = num_bits - 1; i >= 0; --i) {
+    byte_idx = (*bit_offset) / 8;
+    bit_idx = 7 - ((*bit_offset) % 8);
+    if ((value >> i) & 1) {
+      data_bytes[byte_idx] |= (1 << bit_idx);
     }
+    (*bit_offset)++;
+  }
 }
 
 int encode_string(const char* str, unsigned char length) {
-    unsigned int bit_offset = 0;
-    unsigned char i;
-    int v1, v2;
-    unsigned int pair_val;
-    int byte_offset;
-    int pad_toggle;
+  unsigned int bit_offset = 0;
+  unsigned char i;
+  int v1, v2;
+  unsigned int pair_val;
+  int byte_offset;
+  int pad_toggle;
 
-    memset(data_bytes, 0, 19);
-    append_bits_to_buffer(0x02, 4, &bit_offset);   
-    append_bits_to_buffer(length, 9, &bit_offset); 
+  memset(data_bytes, 0, 19);
+  append_bits_to_buffer(0x02, 4, &bit_offset);   
+  append_bits_to_buffer(length, 9, &bit_offset); 
 
-    for (i = 0; i < length; i += 2) {
-        v1 = get_alphanumeric_val(str[i]);
-        if (v1 < 0) return 0;
-        if (i + 1 < length) {
-            v2 = get_alphanumeric_val(str[i + 1]);
-            if (v2 < 0) return 0;
-            pair_val = (v1 * 45) + v2;
-            append_bits_to_buffer(pair_val, 11, &bit_offset);
-        } else {
-            append_bits_to_buffer(v1, 6, &bit_offset);
-        }
+  for (i = 0; i < length; i += 2) {
+    v1 = get_alphanumeric_val(str[i]);
+    if (v1 < 0) return 0;
+    if (i + 1 < length) {
+      v2 = get_alphanumeric_val(str[i + 1]);
+      if (v2 < 0) return 0;
+      pair_val = (v1 * 45) + v2;
+      append_bits_to_buffer(pair_val, 11, &bit_offset);
+    } else {
+      append_bits_to_buffer(v1, 6, &bit_offset);
     }
-    append_bits_to_buffer(0x00, 4, &bit_offset);   
+  }
+  append_bits_to_buffer(0x00, 4, &bit_offset);   
     
-    byte_offset = (bit_offset + 7) / 8;
-    pad_toggle = 0;
-    while (byte_offset < 19) {
-        data_bytes[byte_offset++] = pad_toggle ? 0x11 : 0xEC;
-        pad_toggle = !pad_toggle;
-    }
-    return 1;
+  byte_offset = (bit_offset + 7) / 8;
+  pad_toggle = 0;
+  while (byte_offset < 19) {
+    data_bytes[byte_offset++] = pad_toggle ? 0x11 : 0xEC;
+    pad_toggle = !pad_toggle;
+  }
+  return 1;
 }
 
 void calculate_ecc(void) {
-    unsigned char i, j, feedback;
-    // Temp buffer to hold the next state cleanly
-    unsigned char next_ecc[7];
+  unsigned char i, j, feedback;
+  // Temp buffer to hold the next state cleanly
+  unsigned char next_ecc[7];
     
-    memset(ecc_bytes, 0, 7);
+  memset(ecc_bytes, 0, 7);
     
-    for (i = 0; i < 19; ++i) {
-        feedback = data_bytes[i] ^ ecc_bytes[0]; // Feedback comes from HEAD (index 0)
+  for (i = 0; i < 19; ++i) {
+    feedback = data_bytes[i] ^ ecc_bytes[0]; // Feedback comes from HEAD (index 0)
         
-        // Shift left: Index k becomes OLD Index k+1
-        // We must XOR the feedback product into the stream
-        for (j = 0; j < 6; ++j) {
-            // New [j] = Old [j+1] ^ (Feedback * coeff[j])
-            next_ecc[j] = ecc_bytes[j+1] ^ gf_mul(feedback, RS_POLY[j]);
-        }
-        
-        // The last index (6) only gets the feedback product (shifting in 0)
-        next_ecc[6] = gf_mul(feedback, RS_POLY[6]);
-        
-        // Commit state
-        for (j = 0; j < 7; ++j) {
-            ecc_bytes[j] = next_ecc[j];
-        }
+    // Shift left: Index k becomes OLD Index k+1
+    // We must XOR the feedback product into the stream
+    for (j = 0; j < 6; ++j) {
+      // New [j] = Old [j+1] ^ (Feedback * coeff[j])
+      next_ecc[j] = ecc_bytes[j+1] ^ gf_mul(feedback, RS_POLY[j]);
     }
+        
+    // The last index (6) only gets the feedback product (shifting in 0)
+    next_ecc[6] = gf_mul(feedback, RS_POLY[6]);
+        
+    // Commit state
+    for (j = 0; j < 7; ++j) {
+      ecc_bytes[j] = next_ecc[j];
+    }
+  }
 }
 
 unsigned char is_fixed_zone(unsigned char x, unsigned char y) {
-    if (x < 9 && y < 9) return 1;   
-    if (x > 12 && y < 9) return 1;  
-    if (x < 9 && y > 12) return 1;  
-    if (x == 6 || y == 6) return 1; 
-    if (x == 8 && (y <= 8 || y >= 13)) return 1; 
-    if (y == 8 && (x <= 8 || x >= 14)) return 1; 
-    return 0;
+  if (x < 9 && y < 9) return 1;   
+  if (x > 12 && y < 9) return 1;  
+  if (x < 9 && y > 12) return 1;  
+  if (x == 6 || y == 6) return 1; 
+  if (x == 8 && (y <= 8 || y >= 13)) return 1; 
+  if (y == 8 && (x <= 8 || x >= 14)) return 1; 
+  return 0;
 }
 
 void generate_matrix(void) {
-    unsigned char x, y;
-    int col;
-    unsigned int main_ptr = 0;
-    unsigned char current_bit, current_x;
-    unsigned char actual_byte;
-    int i, dir = -1; 
-    unsigned int format_register;
-    unsigned char px, py;
+  unsigned char x, y;
+  int col;
+  unsigned int main_ptr = 0;
+  unsigned char current_bit, current_x;
+  unsigned char actual_byte;
+  int i, dir = -1; 
+  unsigned int format_register;
+  unsigned char px, py;
     
-    memset(bit_buffer, 0, 63);
+  memset(bit_buffer, 0, 63);
 
-    // Draw Fixed Finder Squares + Timing Patterns
-    for (y = 0; y < 21; ++y) {
-        for (x = 0; x < 21; ++x) {
-            if ((x < 7 && y < 7) || (x > 13 && y < 7) || (x < 7 && y > 13)) {
-                px = (x > 13) ? (x - 14) : x;
-                py = (y > 13) ? (y - 14) : y;
-                if (px == 0 || px == 6 || py == 0 || py == 6 || (px >= 2 && px <= 4 && py >= 2 && py <= 4)) {
-                    write_bit(x, y, 1);
-                }
-            } else if (y == 6 && (x >= 8 && x <= 12)) {
-                if ((x & 1) == 0) write_bit(x, y, 1);
-            } else if (x == 6 && (y >= 8 && y <= 12)) {
-                if ((y & 1) == 0) write_bit(x, y, 1);
-            }
+  // Draw Fixed Finder Squares + Timing Patterns
+  for (y = 0; y < 21; ++y) {
+    for (x = 0; x < 21; ++x) {
+      if ((x < 7 && y < 7) || (x > 13 && y < 7) || (x < 7 && y > 13)) {
+        px = (x > 13) ? (x - 14) : x;
+        py = (y > 13) ? (y - 14) : y;
+        if (px == 0 || px == 6 || py == 0 || py == 6 || (px >= 2 && px <= 4 && py >= 2 && py <= 4)) {
+          write_bit(x, y, 1);
         }
+      } else if (y == 6 && (x >= 8 && x <= 12)) {
+        if ((x & 1) == 0) write_bit(x, y, 1);
+      } else if (x == 6 && (y >= 8 && y <= 12)) {
+        if ((y & 1) == 0) write_bit(x, y, 1);
+      }
     }
+  }
 
-    // ============================================================
-    // CORRECT Format Information for Level L + Mask Pattern 0
-    // Format string: 111011111000100  (0x77C4)
-    // ============================================================
-    format_register = 0b111011111000100;  // 15 bits
+  // ============================================================
+  // CORRECT Format Information for Level L + Mask Pattern 0
+  // Format string: 111011111000100  (0x77C4)
+  // ============================================================
+  format_register = 0b111011111000100;  // 15 bits
 
-    // --- First copy (top-left area) ---
-    // Horizontal: bits 0..5 at (0,8) .. (5,8), skip timing at x=6
-    for (i = 0; i <= 5; i++) {
-        write_bit(i, 8, (format_register >> (14 - i)) & 1);
-    }
-    write_bit(7, 8, (format_register >> 8) & 1);          // bit 6
+  // --- First copy (top-left area) ---
+  // Horizontal: bits 0..5 at (0,8) .. (5,8), skip timing at x=6
+  for (i = 0; i <= 5; i++) {
+    write_bit(i, 8, (format_register >> (14 - i)) & 1);
+  }
+  write_bit(7, 8, (format_register >> 8) & 1);          // bit 6
 
-    // Vertical: bits 7..14
-    write_bit(8, 8, (format_register >> 7) & 1);          // bit 7
-    write_bit(8, 7, (format_register >> 6) & 1);          // bit 8
-    for (i = 0; i <= 5; i++) {                       // bits 9..14 → (8,5) down to (8,0)
-        write_bit(8, 5 - i, (format_register >> (5 - i)) & 1);
-    }
+  // Vertical: bits 7..14
+  write_bit(8, 8, (format_register >> 7) & 1);          // bit 7
+  write_bit(8, 7, (format_register >> 6) & 1);          // bit 8
+  for (i = 0; i <= 5; i++) {                       // bits 9..14 → (8,5) down to (8,0)
+    write_bit(8, 5 - i, (format_register >> (5 - i)) & 1);
+  }
 
-    // --- Second copy ---
-    // Horizontal under top-right finder (bits 0..7)
-    for (i = 0; i <= 7; i++) {
-        write_bit(14 + i, 8, (format_register >> i) & 1);
-    }
+  // --- Second copy ---
+  // Horizontal under top-right finder (bits 0..7)
+  for (i = 0; i <= 7; i++) {
+    write_bit(14 + i, 8, (format_register >> i) & 1);
+  }
 
-    // Vertical right of bottom-left finder (bits 8..14)
-    for (i = 0; i <= 6; i++) {
-        write_bit(8, 14 + i, (format_register >> (8 + i)) & 1);
-    }
+  // Vertical right of bottom-left finder (bits 8..14)
+  for (i = 0; i <= 6; i++) {
+    write_bit(8, 14 + i, (format_register >> (8 + i)) & 1);
+  }
 
-    // Always-dark module
-    write_bit(8, 13, 1);
+  // Always-dark module
+  write_bit(8, 13, 1);
 
-    // ============================================================
-    // Zigzag data + ECC placement (Mask 0)
-    // ============================================================
-    y = 20; 
-    for (col = 20; col > 0; col -= 2) {
-        if (col == 6) col = 5; 
-        while (1) {
-            for (x = 0; x < 2; ++x) {
-                current_x = col - x;
-                if (!is_fixed_zone(current_x, y)) {
-                    if (main_ptr < 19 * 8) {
-                        actual_byte = data_bytes[main_ptr / 8];
-                    } else if (main_ptr < 26 * 8) {
-                        actual_byte = ecc_bytes[(main_ptr - (19 * 8)) / 8];
-                    } else {
-                        actual_byte = 0; 
-                    }
+  // ============================================================
+  // Zigzag data + ECC placement (Mask 0)
+  // ============================================================
+  y = 20; 
+  for (col = 20; col > 0; col -= 2) {
+    if (col == 6) col = 5; 
+    while (1) {
+      for (x = 0; x < 2; ++x) {
+        current_x = col - x;
+        if (!is_fixed_zone(current_x, y)) {
+          if (main_ptr < 19 * 8) {
+            actual_byte = data_bytes[main_ptr / 8];
+          } else if (main_ptr < 26 * 8) {
+            actual_byte = ecc_bytes[(main_ptr - (19 * 8)) / 8];
+          } else {
+            actual_byte = 0; 
+          }
                     
-                    current_bit = (actual_byte >> (7 - (main_ptr % 8))) & 1;
-                    main_ptr++;
+          current_bit = (actual_byte >> (7 - (main_ptr % 8))) & 1;
+          main_ptr++;
 
-                    // Mask pattern 0: invert if (x + y) even
-                    if ((current_x + y) % 2 == 0) {
-                        current_bit ^= 1; 
-                    }
-                    write_bit(current_x, y, current_bit);
-                }
-            }
-            if ((dir == -1 && y == 0) || (dir == 1 && y == 20)) {
-                dir = -dir; 
-                break;
-            }
-            y += dir;
+          // Mask pattern 0: invert if (x + y) even
+          if ((current_x + y) % 2 == 0) {
+            current_bit ^= 1; 
+          }
+          write_bit(current_x, y, current_bit);
         }
+      }
+      if ((dir == -1 && y == 0) || (dir == 1 && y == 20)) {
+        dir = -dir; 
+        break;
+      }
+      y += dir;
     }
+  }
 }
 
+#ifdef OSCAR
+  #define putz puts
+#endif
+
+#ifdef __CC65__
+  #define putz(s) fputs((s), stdout)
+#endif
+
 int main(void) {
-// MAX 25 chars, upper case and "some special"
-//
-//   "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:"
+  // most URLs/texts are tested on:
+  // - lens (finicky, seems to prefer URL)
+  // - "QR & Barcode Scanner" (android, works better)
+  //
+  // MAX 25 chars, upper case and "some special"
+  //
+  //   "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:"
 
-//    const char* my_input = "HELLO WORLD"; 
-//    const char* my_input = "YESCO.ORG/FISH"; 
-//    const char* my_input = "ABCDEFGHIJKLMNOPQRSTUVWXY"; 
-  const char* my_input = "8BITWORKSHOP.COM";
+  //const char* my_input = "HELLO WORLD"; 
+  const char* my_input = "YESCO.ORG/FISH"; // works "lens" and "qr code reader" on anroid
+  //const char* my_input = "ABCDEFGHIJKLMNOPQRSTUVWXY"; // lens confused
+  //const char* my_input = "8BITWORKSHOP.COM";
   unsigned char len = strlen(my_input);
-    unsigned char row, b_idx, bit_idx, current_byte;
-    unsigned int ptr = 0;
+  unsigned char row, b_idx, bit_idx, current_byte;
+  unsigned int ptr = 0;
 
-    if (len > 25 || len == 0) return 1;
-    if (!encode_string(my_input, len)) return 2;
+  if (len > 25 || len == 0) return 1;
+  if (!encode_string(my_input, len)) return 2;
 
-    calculate_ecc();          
-    generate_matrix();  
+  calculate_ecc();          
+  generate_matrix();  
 
-    printf("\n██████████████████████████████████████████████████████████");
-    printf("\n██████████████████████████████████████████████████████████\n");
+  putz("██████████████████████████████████████████████████████████\n");
+  putz("██████████████████████████████████████████████████████████\n");
 
-    for (row = 0; row < 21; ++row) {
-        printf("████████"); 
-        for (b_idx = 0; b_idx < 3; ++b_idx) {
-            current_byte = bit_buffer[ptr++];
-            for (bit_idx = 0; bit_idx < 8; ++bit_idx) {
-                if ((b_idx * 8) + bit_idx >= 21) break;
-                if (current_byte & 0x80) {
-                    printf("  ");
-                } else {
-                    printf("██");
-                }
-                current_byte <<= 1;
-            }
+  for (row = 0; row < 21; ++row) {
+    putz("████████"); 
+    for (b_idx = 0; b_idx < 3; ++b_idx) {
+      current_byte = bit_buffer[ptr++];
+      for (bit_idx = 0; bit_idx < 8; ++bit_idx) {
+        if ((b_idx * 8) + bit_idx >= 21) break;
+        if (current_byte & 0x80) {
+          putz("  ");
+        } else {
+          putz("██");
         }
-        printf("████████\n"); 
+        current_byte <<= 1;
+      }
     }
+    putz("████████\n"); 
+  }
 
-    printf("██████████████████████████████████████████████████████████");
-    printf("\n██████████████████████████████████████████████████████████\n\n");
-
-    return 0;
+  putz("██████████████████████████████████████████████████████████\n");
+  putz("██████████████████████████████████████████████████████████\n\n");
+  
+  return 0;
 }
