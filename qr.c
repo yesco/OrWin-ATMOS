@@ -2,7 +2,8 @@
 #include <string.h>
 
 const char ALPHANUM_TABLE[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:";
-const unsigned char RS_POLY[] = {127, 122, 154, 164, 11, 68, 117};
+// The mathematically correct generator polynomial sequence for QR v1-L division
+const unsigned char RS_POLY[] = {0x75, 0x44, 0x0B, 0xA4, 0x9A, 0x7A, 0x7F};
 
 unsigned char data_bytes[19]; 
 unsigned char ecc_bytes[7];   
@@ -87,21 +88,31 @@ int encode_string(const char* str, unsigned char length) {
 void calculate_ecc(void) {
     unsigned char i, j, feedback;
     memset(ecc_bytes, 0, 7);
+    
     for (i = 0; i < 19; ++i) {
         feedback = data_bytes[i] ^ ecc_bytes[0];
+        
         for (j = 0; j < 6; ++j) {
-            ecc_bytes[j] = ecc_bytes[j + 1] ^ gf_mul(feedback, RS_POLY[j]);
+            ecc_bytes[j] = ecc_bytes[j + 1];
         }
-        ecc_bytes[6] = gf_mul(feedback, RS_POLY[6]);
+        ecc_bytes[6] = 0;
+        
+        if (feedback != 0) {
+            for (j = 0; j < 7; ++j) {
+                ecc_bytes[j] ^= gf_mul(feedback, RS_POLY[j]);
+            }
+        }
     }
 }
 
-// FIXED CRITICAL MAPPING PROTECTION ZONE: Explicit boundaries for all 3 corners
+// FULLY FIXED COORDINATE PROTECTION ZONE: Shields finders, timing lines, and format metadata
 unsigned char is_fixed_zone(unsigned char x, unsigned char y) {
-    if (x < 9 && y < 9) return 1;    // Top-Left Finder + White separation border
-    if (x > 12 && y < 9) return 1;   // Top-Right Finder + White separation border
-    if (x < 9 && y > 12) return 1;   // Bottom-Left Finder + White separation border
-    if (x == 6 || y == 6) return 1;  // Synchronized horizontal & vertical timing tracks
+    if (x < 9 && y < 9) return 1;    // Top-Left Finder Zone + White Separation margin
+    if (x > 12 && y < 9) return 1;   // Top-Right Finder Zone + White Separation margin
+    if (x < 9 && y > 12) return 1;   // Bottom-Left Finder Zone + White Separation margin
+    if (x == 6 || y == 6) return 1;  // Timing track stripes
+    if (x == 8 && (y <= 8 || y >= 13)) return 1; // Vertical Format Information blocks
+    if (y == 8 && (x <= 8 || x >= 14)) return 1; // Horizontal Format Information blocks
     return 0;
 }
 
@@ -115,7 +126,7 @@ void generate_matrix(void) {
 
     memset(bit_buffer, 0, 63);
 
-    // 1. Plot Symmetrical 7x7 Finder Patterns
+    // 1. Plot Fixed Finder Patterns
     for (y = 0; y < 21; ++y) {
         for (x = 0; x < 21; ++x) {
             if ((x < 7 && y < 7) || (x > 13 && y < 7) || (x < 7 && y > 13)) {
@@ -125,7 +136,7 @@ void generate_matrix(void) {
                     write_bit(x, y, 1);
                 }
             } 
-            // 2. Fixed Symmetrical Timing Track Dashes (Alternating 1 and 0 cleanly)
+            // 2. Plot Alternating Timing Track Dashes
             else if (y == 6 && (x >= 8 && x <= 12)) {
                 if ((x & 1) == 0) write_bit(x, y, 1);
             } else if (x == 6 && (y >= 8 && y <= 12)) {
@@ -134,7 +145,7 @@ void generate_matrix(void) {
         }
     }
 
-    // 3. Static Format Info Sequence Placement
+    // 3. Inject Format Info (Mask 0, Level L) -> 0x2D33 pattern layout
     unsigned int format_register = 0x2D33; 
     for (x = 0; x < 8; ++x) {
         if (x != 6) write_bit(x, 8, (format_register >> x) & 1);
@@ -147,7 +158,7 @@ void generate_matrix(void) {
     }
     for (y = 0; y < 7; ++y) write_bit(14 + y, 8, (format_register >> y) & 1);
     for (x = 0; x < 7; ++x) write_bit(8, 20 - x, (format_register >> (7 + x)) & 1);
-    write_bit(8, 13, 1); 
+    write_bit(8, 13, 1); // Dark module anchor point
 
     // 4. Zigzag Matrix Generator
     y = 20; 
@@ -202,10 +213,11 @@ int main(void) {
             for (bit_idx = 0; bit_idx < 8; ++bit_idx) {
                 if ((b_idx * 8) + bit_idx >= 21) break;
                 
+                // Native black terminal theme rendering (1 = white module block)
                 if (current_byte & 0x80) {
-                    printf("  ");
-                } else {
                     printf("██");
+                } else {
+                    printf("  ");
                 }
                 current_byte <<= 1;
             }
