@@ -8,7 +8,6 @@ unsigned char data_bytes[19];
 unsigned char ecc_bytes[7];   
 unsigned char bit_buffer[63]; 
 
-// GF(2^8) multiply optimized for minimal 8-bit code execution footprint (no big tables)
 unsigned char gf_mul(unsigned char a, unsigned char b) {
     unsigned char result = 0;
     while (b > 0) {
@@ -19,7 +18,6 @@ unsigned char gf_mul(unsigned char a, unsigned char b) {
     return result;
 }
 
-// Convert a single character to its QR Alphanumeric index value (includes Auto-Uppercase)
 int get_alphanumeric_val(char c) {
     unsigned char i;
     if (c >= 'a' && c <= 'z') c -= 32; 
@@ -29,7 +27,6 @@ int get_alphanumeric_val(char c) {
     return -1; 
 }
 
-// Low-level function to write a single bit into the packed 63-byte frame buffer
 void write_bit(unsigned char x, unsigned char y, unsigned char bit) {
     unsigned int bit_pos = (y * 24) + x;
     unsigned int byte_idx = bit_pos / 8;
@@ -42,13 +39,11 @@ void write_bit(unsigned char x, unsigned char y, unsigned char bit) {
     }
 }
 
-// Appends bits to a raw byte array (fixed to prevent bit shifting alignment corruption)
 void append_bits_to_buffer(unsigned int value, unsigned char num_bits, unsigned int *bit_offset) {
     int i;
     for (i = num_bits - 1; i >= 0; --i) {
         unsigned int byte_idx = (*bit_offset) / 8;
         unsigned char bit_idx = 7 - ((*bit_offset) % 8);
-        
         if ((value >> i) & 1) {
             data_bytes[byte_idx] |= (1 << bit_idx);
         }
@@ -56,7 +51,6 @@ void append_bits_to_buffer(unsigned int value, unsigned char num_bits, unsigned 
     }
 }
 
-// Compiles the string into standard QR 11-bit pairs
 int encode_string(const char* str, unsigned char length) {
     unsigned int bit_offset = 0;
     unsigned char i;
@@ -64,8 +58,8 @@ int encode_string(const char* str, unsigned char length) {
     unsigned int pair_val;
 
     memset(data_bytes, 0, 19);
-    append_bits_to_buffer(0x02, 4, &bit_offset);   // Alphanumeric Mode Indicator
-    append_bits_to_buffer(length, 9, &bit_offset); // Character Length Indicator
+    append_bits_to_buffer(0x02, 4, &bit_offset);   
+    append_bits_to_buffer(length, 9, &bit_offset); 
 
     for (i = 0; i < length; i += 2) {
         v1 = get_alphanumeric_val(str[i]);
@@ -79,9 +73,8 @@ int encode_string(const char* str, unsigned char length) {
             append_bits_to_buffer(v1, 6, &bit_offset);
         }
     }
-    append_bits_to_buffer(0x00, 4, &bit_offset);   // Terminator padding
+    append_bits_to_buffer(0x00, 4, &bit_offset);   
     
-    // Standard QR Padding: fill out remaining space alternating 0xEC and 0x11
     int byte_offset = (bit_offset + 7) / 8;
     int pad_toggle = 0;
     while (byte_offset < 19) {
@@ -91,7 +84,6 @@ int encode_string(const char* str, unsigned char length) {
     return 1;
 }
 
-// Calculates Reed-Solomon error correction bytes dynamically
 void calculate_ecc(void) {
     unsigned char i, j, feedback;
     memset(ecc_bytes, 0, 7);
@@ -104,16 +96,15 @@ void calculate_ecc(void) {
     }
 }
 
-// Checks if a coordinate belongs to fixed structural zones
+// FIXED CRITICAL MAPPING PROTECTION ZONE: Explicit boundaries for all 3 corners
 unsigned char is_fixed_zone(unsigned char x, unsigned char y) {
-    if (x < 8 && y < 8) return 1;   
-    if (x > 12 && y < 8) return 1;  
-    if (x < 8 && y > 12) return 1;  
-    if (x == 6 || y == 6) return 1; 
+    if (x < 9 && y < 9) return 1;    // Top-Left Finder + White separation border
+    if (x > 12 && y < 9) return 1;   // Top-Right Finder + White separation border
+    if (x < 9 && y > 12) return 1;   // Bottom-Left Finder + White separation border
+    if (x == 6 || y == 6) return 1;  // Synchronized horizontal & vertical timing tracks
     return 0;
 }
 
-// Generates structural targets, then walks the zigzag path mapping real data bits
 void generate_matrix(void) {
     unsigned char x, y;
     int col;
@@ -124,7 +115,7 @@ void generate_matrix(void) {
 
     memset(bit_buffer, 0, 63);
 
-    // 1. Draw Fixed Finder Squares
+    // 1. Plot Symmetrical 7x7 Finder Patterns
     for (y = 0; y < 21; ++y) {
         for (x = 0; x < 21; ++x) {
             if ((x < 7 && y < 7) || (x > 13 && y < 7) || (x < 7 && y > 13)) {
@@ -133,15 +124,17 @@ void generate_matrix(void) {
                 if (px == 0 || px == 6 || py == 0 || py == 6 || (px >= 2 && px <= 4 && py >= 2 && py <= 4)) {
                     write_bit(x, y, 1);
                 }
-            } else if (y == 6 && (x & 1) == 0) {
-                write_bit(x, y, 1);
-            } else if (x == 6 && (y & 1) == 0) {
-                write_bit(x, y, 1);
+            } 
+            // 2. Fixed Symmetrical Timing Track Dashes (Alternating 1 and 0 cleanly)
+            else if (y == 6 && (x >= 8 && x <= 12)) {
+                if ((x & 1) == 0) write_bit(x, y, 1);
+            } else if (x == 6 && (y >= 8 && y <= 12)) {
+                if ((y & 1) == 0) write_bit(x, y, 1);
             }
         }
     }
 
-    // 2. Inject Format Metadata Bits (Hardcoded for Mask 0, Level L)
+    // 3. Static Format Info Sequence Placement
     unsigned int format_register = 0x2D33; 
     for (x = 0; x < 8; ++x) {
         if (x != 6) write_bit(x, 8, (format_register >> x) & 1);
@@ -150,13 +143,13 @@ void generate_matrix(void) {
     write_bit(8, 8, (format_register >> 9) & 1);
     write_bit(7, 8, (format_register >> 10) & 1);
     for (y = 0; y < 6; ++y) {
-        write_bit(8, 5 - y, (format_register >> (11 + y)) & 1);
+        if (y != 6) write_bit(8, 5 - y, (format_register >> (11 + y)) & 1);
     }
     for (y = 0; y < 7; ++y) write_bit(14 + y, 8, (format_register >> y) & 1);
     for (x = 0; x < 7; ++x) write_bit(8, 20 - x, (format_register >> (7 + x)) & 1);
     write_bit(8, 13, 1); 
 
-    // 3. Real Zigzag Traverser Mapping Stream Loop
+    // 4. Zigzag Matrix Generator
     y = 20; 
     for (col = 20; col > 0; col -= 2) {
         if (col == 6) col = 5; 
@@ -176,7 +169,7 @@ void generate_matrix(void) {
                     main_ptr++;
 
                     if ((current_x + y) % 2 == 0) {
-                        current_bit ^= 1; // Mask 0 Transform
+                        current_bit ^= 1; 
                     }
                     write_bit(current_x, y, current_bit);
                 }
@@ -191,8 +184,7 @@ void generate_matrix(void) {
 }
 
 int main(void) {
-//    const char* my_input = "HELLO WORLD"; // Change this to test any dynamic string!
-    const char* my_input = "yesco.org/fish"; // Change this to test any dynamic string!
+    const char* my_input = "HELLO WORLD"; 
     unsigned char len = strlen(my_input);
     unsigned char row, b_idx, bit_idx, current_byte;
     unsigned int ptr = 0;
@@ -210,11 +202,10 @@ int main(void) {
             for (bit_idx = 0; bit_idx < 8; ++bit_idx) {
                 if ((b_idx * 8) + bit_idx >= 21) break;
                 
-                // Black terminal layout: 1 maps to solid block, 0 maps to empty space
                 if (current_byte & 0x80) {
-                    printf("██");
-                } else {
                     printf("  ");
+                } else {
+                    printf("██");
                 }
                 current_byte <<= 1;
             }
