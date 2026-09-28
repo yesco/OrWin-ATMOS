@@ -7,7 +7,7 @@ const unsigned char RS_POLY[] = {0x75, 0x44, 0x0B, 0xA4, 0x9A, 0x7A, 0x7F};
 
 unsigned char data_bytes[19]; 
 unsigned char ecc_bytes[7];   
-unsigned char bit_buffer[63]; 
+unsigned char bit_buffer[63]; // Sized perfectly to 21 rows * 3 packed bytes
 
 unsigned char gf_mul(unsigned char a, unsigned char b) {
     unsigned char result = 0;
@@ -59,8 +59,8 @@ int encode_string(const char* str, unsigned char length) {
     unsigned int pair_val;
 
     memset(data_bytes, 0, 19);
-    append_bits_to_buffer(0x02, 4, &bit_offset);   
-    append_bits_to_buffer(length, 9, &bit_offset); 
+    append_bits_to_buffer(0x02, 4, &bit_offset);   // Alphanumeric Mode
+    append_bits_to_buffer(length, 9, &bit_offset); // Length
 
     for (i = 0; i < length; i += 2) {
         v1 = get_alphanumeric_val(str[i]);
@@ -74,7 +74,7 @@ int encode_string(const char* str, unsigned char length) {
             append_bits_to_buffer(v1, 6, &bit_offset);
         }
     }
-    append_bits_to_buffer(0x00, 4, &bit_offset);   
+    append_bits_to_buffer(0x00, 4, &bit_offset);   // Terminator
     
     int byte_offset = (bit_offset + 7) / 8;
     int pad_toggle = 0;
@@ -105,14 +105,13 @@ void calculate_ecc(void) {
     }
 }
 
-// FULLY FIXED COORDINATE PROTECTION ZONE: Shields finders, timing lines, and format metadata
 unsigned char is_fixed_zone(unsigned char x, unsigned char y) {
-    if (x < 9 && y < 9) return 1;    // Top-Left Finder Zone + White Separation margin
-    if (x > 12 && y < 9) return 1;   // Top-Right Finder Zone + White Separation margin
-    if (x < 9 && y > 12) return 1;   // Bottom-Left Finder Zone + White Separation margin
-    if (x == 6 || y == 6) return 1;  // Timing track stripes
-    if (x == 8 && (y <= 8 || y >= 13)) return 1; // Vertical Format Information blocks
-    if (y == 8 && (x <= 8 || x >= 14)) return 1; // Horizontal Format Information blocks
+    if (x < 9 && y < 9) return 1;    // Top-Left Finder + Separation margin
+    if (x > 12 && y < 9) return 1;   // Top-Right Finder + Separation margin
+    if (x < 9 && y > 12) return 1;   // Bottom-Left Finder + Separation margin
+    if (x == 6 || y == 6) return 1;  // Timing tracks
+    if (x == 8 && (y <= 8 || y >= 13)) return 1; // Vertical Format Info Track
+    if (y == 8 && (x <= 8 || x >= 14)) return 1; // Horizontal Format Info Track
     return 0;
 }
 
@@ -126,7 +125,7 @@ void generate_matrix(void) {
 
     memset(bit_buffer, 0, 63);
 
-    // 1. Plot Fixed Finder Patterns
+    // 1. Draw Fixed Finder Squares
     for (y = 0; y < 21; ++y) {
         for (x = 0; x < 21; ++x) {
             if ((x < 7 && y < 7) || (x > 13 && y < 7) || (x < 7 && y > 13)) {
@@ -195,7 +194,8 @@ void generate_matrix(void) {
 }
 
 int main(void) {
-    const char* my_input = "HELLO WORLD"; 
+//    const char* my_input = "HELLO WORLD"; // You can safely change this to test anything now!
+    const char* my_input = "YESCO.ORG/FISH"; // You can safely change this to test anything now!
     unsigned char len = strlen(my_input);
     unsigned char row, b_idx, bit_idx, current_byte;
     unsigned int ptr = 0;
@@ -206,24 +206,33 @@ int main(void) {
     calculate_ecc();          
     generate_matrix();  
 
-    printf("\n");
+    // Mandatory White Quiet Zone Frame for Dark/Black Terminals (58 columns wide)
+    printf("\n██████████████████████████████████████████████████████████");
+    printf("\n██████████████████████████████████████████████████████████\n");
+
     for (row = 0; row < 21; ++row) {
+        printf("████████"); // Left side solid white border margin
         for (b_idx = 0; b_idx < 3; ++b_idx) {
             current_byte = bit_buffer[ptr++];
             for (bit_idx = 0; bit_idx < 8; ++bit_idx) {
                 if ((b_idx * 8) + bit_idx >= 21) break;
                 
-                // Native black terminal theme rendering (1 = white module block)
+                // CORRECT DARK TERMINAL INVERSION:
+                // 1 (Active dark module) = PRINT BLACK EMPTY SPACE ("  ")
+                // 0 (Empty light background) = PRINT WHITE FULL BLOCK ("██")
                 if (current_byte & 0x80) {
-                    printf("██");
-                } else {
                     printf("  ");
+                } else {
+                    printf("██");
                 }
                 current_byte <<= 1;
             }
         }
-        printf("\n"); 
+        printf("████████\n"); // Right side solid white border margin
     }
-    printf("\n");
+
+    printf("██████████████████████████████████████████████████████████");
+    printf("\n██████████████████████████████████████████████████████████\n\n");
+
     return 0;
 }
