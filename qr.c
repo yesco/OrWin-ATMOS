@@ -148,7 +148,7 @@ void generate_matrix(void) {
         }
     }
 
-    unsigned int format_register = 0x2D33; 
+    unsigned int format_register = 0x77C4; // 111011111000100
     for (x = 0; x < 8; ++x) {
         if (x != 6) write_bit(x, 8, (format_register >> x) & 1);
     }
@@ -196,7 +196,8 @@ void generate_matrix(void) {
 }
 
 int main(void) {
-    const char* my_input = "HELLO WORLD"; 
+//    const char* my_input = "HELLO WORLD"; 
+    const char* my_input = "YESCO.ORG/FISH"; 
     unsigned char len = strlen(my_input);
     unsigned char row, b_idx, bit_idx, current_byte;
     unsigned int ptr = 0;
