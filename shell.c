@@ -8,10 +8,10 @@
 // - datamash qsv vsv
 
 // TODO: behaves differently,, like never ends for set/print?
-//#define SHELLTRACE
+#define SHELLTRACE
 
 // prints internal line tokens in plain text
-//#define SHELLINFO
+#define SHELLINFO
 //#define SHELLTEST
 
 #define MAX_TRAIN 16
@@ -88,7 +88,13 @@ unsigned int traincleanbits;
 
 
 
-typedef struct simplestate { cmdfun f; int i; } simplestate;
+typedef struct simplestate {
+// TODO: make stateheader already!!!
+  cmdfun f;
+  char* bound;
+
+  int i;
+} simplestate;
 
 void* stalloc(unsigned int size, void* f) {
   simplestate* state= calloc(size, 1);
@@ -100,7 +106,12 @@ void* stalloc(unsigned int size, void* f) {
 
 #define SIMPLEALLOC(fun) STALLOC(simplestate,fun)
 
-typedef struct pstate { cmdfun f; char* s; } pstate;
+typedef struct pstate {
+  cmdfun f;
+  char* bound;
+
+  char* s;
+} pstate;
 
 #define PSTALLOC(fun, p) (state=STALLOC(pstate, fun), state->s=strdup(p), state)
 
@@ -312,22 +323,29 @@ void shprint(char* line) {
  
 cmdtrain* trainptr;
  
+// TODO: remove
+char* taskname(void* fun);
+ 
 // Returns a pointer to 
 char** vptr(char* name) {
-  char*** loco= trainptr+1;
+  cmdtrain* loco= trainptr+1;
   char** state;
   
   int i= 1;
-  while((state= *loco)) {
-    printf("%d: %04x %04x %s\n", i, state, loco, loco[1]);
-    ++loco;
+
+  while((state= (char**)*loco)) {
+    printf("%d: loco:%04x @%04x %-8s : %s\n",
+             i,      loco,state,
+      taskname(state[0]),  state[1]);
+    ++loco; ++i;
   }
+  putchar('\n');
 
   return NULL;
 }
 
 void vcleanup() {
-  assert(!"foobar");
+  //assert(!"foobar");
   // TODO: walk the train
 }
 
@@ -506,6 +524,7 @@ char* set(varstate* state, char* line) {
  
 typedef struct printstate {
   cmdfun fun;
+  char* bound;
   char** params;
 } printstate;
  
@@ -649,7 +668,11 @@ char* fakefile[]= { "one", "two", "three", "four", "five", NULL };
 
 #define CATSTATE NULL
  
-typedef struct fakefilestate { cmdfun f; char** fil; } fakefilestate;
+typedef struct fakefilestate {
+  cmdfun f;
+  char* bound;
+  char** fil;
+} fakefilestate;
 
 void* cat(fakefilestate* state, char* line) {
   if (!state) {
@@ -669,6 +692,7 @@ void* cat(fakefilestate* state, char* line) {
 
 typedef struct filestate {
   cmdfun f;
+  char* bound;
   FILE* fil;
 } filestate;
 
@@ -727,7 +751,6 @@ void* cat(filestate* state, char* line) {
  
 typedef struct wcstate {
   cmdfun f;
-  // BUND slots:
   char* bound;
   unsigned int ln, wn, cn;
 } wcstate;
@@ -849,6 +872,7 @@ typedef struct lsstate { int x; } lsstate;
 // Dummy
  
 #define ls dummyfun
+#define LSSTATE NULL
 
 #else // !ATMOS && !CC65
  
@@ -862,7 +886,6 @@ typedef struct lsstate { int x; } lsstate;
  
 typedef struct lsstate {
   cmdfun f;
-  // Bound  slots
   char* bound;
   char* name;
   unsigned int size;
@@ -928,8 +951,11 @@ void* ls(lsstate* state, char* line) {
 #include <sys/types.h>
 #include <dirent.h>
  
+#define LSSTATE NULL
+
 typedef struct lsstate {
   cmdfun f;
+  char* bound;
 
   DIR* dir;
   char* pat;
@@ -990,14 +1016,16 @@ void* ls(lsstate* state, char* line) {
 #endif // __ATMOS__
  
 
+
+
 ///////////////////////////////////////////////////
 
 #define IOTASTATE "%%n%e%d"
  
 typedef struct countstate {
   cmdfun f;
-  // Bound
   char* bound;
+
   int n;
   int e;
   intptr_t d; // dual use
@@ -1121,10 +1149,9 @@ void* tail(countstate* state, char* line) {
 
 typedef struct {
   cmdfun fun;
-  // TODO: float? oscar64 can do it
-
-  // Bound:
   char* bound;
+
+  // TODO: float? oscar64 can do it
 
   int n;
   int min;
@@ -1274,8 +1301,6 @@ char* wstate(char* ret) {
  
 typedef struct psstate {
   cmdfun f;
-  
-  // Bound:
   char* bound;
   
   int pid; // "window id"
@@ -1400,8 +1425,6 @@ void* ps(psstate* state, char* line) {
  
 typedef struct editlinestate {
   cmdfun fun;
-  
-  // Bound
   char* bound;
   
   char* s;
@@ -1531,7 +1554,7 @@ void* commands[]= {
 };
 
 char* varnames[]={
-  PWDSTATE, GREPSTATE, CATSTATE, WCSTATE, IOTASTATE, HEADSTATE, TAILSTATE,
+  PWDSTATE, GREPSTATE, CATSTATE, WCSTATE, LSSTATE, IOTASTATE, HEADSTATE, TAILSTATE,
   PSSTATE,
   SETSTATE, PRINTSTATE, VARLISTSTATE,
   STATSSTATE,
@@ -1559,7 +1582,7 @@ char* wtrainstep(cmdtrain** loco, char* line) {
   cmdfun *fp;
   
 #ifdef SHELLINFO
-//  printf(">>> %s\n", taskname(*fp));
+  printf(">>> %s\n", taskname(*fp));
 #endif
 
 //  if (!(fp=**train)) return line; // not rigth? was EOS = not right!
@@ -1607,12 +1630,12 @@ int wrunsystrain(cmdtrain* train) {
 
   // SHELLTRACE
   while((fp=*train)) {
-    printf("\t[%d \"%s\" %p]\n", (int)(long)(train-origtrain),
+    printf("\t  [%d \"%s\" %p]\n", (int)(long)(train-origtrain),
 	   !line? "(NULL)": line==EOS? "*EOS*": line, fp);
 
     line= (*fp)(fp, line);
 
-    printf("\t%p >>>", line); fflush(stdout); shprint(line);
+    printf("\t%s %p:", taskname(*fp), line); fflush(stdout); shprint(line);
 
     if (line) ++train; else --train;
   }    
@@ -1653,7 +1676,7 @@ int wrunsystrain(cmdtrain* train) {
   // TODO: check overflow this per command?
   char i, **n;
   cmdfun* f;
-  void* state;
+  void** state; // treat like slots!
 
   char *name, *args, *dofree;
 
@@ -1724,8 +1747,13 @@ int wrunsystrain(cmdtrain* train) {
 
     // This calls the INIT for the command!
     { // save zptr as it may be used in parsing inside init!
-      char* zsave= zptr;
+      char * zsave= zptr;
+
+      // TODO: let's allocate too!
       arr[++i]= state= (*f)(NULL, args);
+      state[0]= *f;
+      state[1]= varnames[n-cmdnames];
+      
       zptr= zsave;
     }
 
@@ -1803,6 +1831,8 @@ void gti(char* name) {
 // 175 bytes cc65 (oscar removes if not called, lol)
 void vdump() {
   char i= 0, *name;
+  assert(!"to implement");
+#if 0
   while(++i < MAX_VARS) {
     if (!(name= vars[i].name)) continue;
     printf(";%d:%s=", i, name);
@@ -1813,6 +1843,7 @@ void vdump() {
     default:  printf("???"); break;
     }
   }
+#endif
   putchar('\n');
 }
 
@@ -1833,6 +1864,8 @@ char isliteral(void* p) {
 //int main(int argc, char** argv) {
 int main() {
   //tsystem("editline | print foo $* bar | terminal"); exit(3);
+
+  system("iota 1 3 | print $n | terminal"); exit(0);
 
 #if 0  
   // Test string binding
@@ -1889,7 +1922,7 @@ int main() {
 
   printf("---- wrunsystrain: MOCK: pwd | terminal\n");
   
-  if (0)
+#if 0
   {
     cmdtrain mock[4]= {0};
     mock[1]= pwd(0, 0);
@@ -1897,6 +1930,7 @@ int main() {
 
     wrunsystrain(mock);
   }
+#endif
   
   // test malloc leaks
 #if 0
