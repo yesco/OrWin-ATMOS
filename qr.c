@@ -46,6 +46,14 @@ void write_bit(unsigned char x, unsigned char y, unsigned char bit) {
     }
 }
 
+// Checks if a bit is set at specific coordinates
+unsigned char read_bit(unsigned char x, unsigned char y) {
+    unsigned int bit_pos = (y * 24) + x;
+    unsigned int byte_idx = bit_pos / 8;
+    unsigned char bit_idx = 7 - (bit_pos % 8);
+    return (bit_buffer[byte_idx] >> bit_idx) & 1;
+}
+
 // Appends bits to a raw byte array (used for encoding the text string)
 void append_bits_to_buffer(unsigned int value, unsigned char num_bits, unsigned int *bit_offset) {
     int i;
@@ -78,16 +86,14 @@ int encode_string(const char* str, unsigned char length) {
     // 3. Encode characters in 11-bit pairs
     for (i = 0; i < length; i += 2) {
         v1 = get_alphanumeric_val(str[i]);
-        if (v1 < 0) return 0; // Error: Illegal character encountered!
+        if (v1 < 0) return 0;
 
         if (i + 1 < length) {
-            // Two characters left: encode as a pair using 11 bits
             v2 = get_alphanumeric_val(str[i + 1]);
-            if (v2 < 0) return 0; // Error: Illegal character encountered!
+            if (v2 < 0) return 0;
             pair_val = (v1 * 45) + v2;
             append_bits_to_buffer(pair_val, 11, &bit_offset);
         } else {
-            // One single character left at the end: encode using 6 bits
             append_bits_to_buffer(v1, 6, &bit_offset);
         }
     }
@@ -95,7 +101,7 @@ int encode_string(const char* str, unsigned char length) {
     // 4. Terminator: Pad up to 4 zero bits if space remains
     append_bits_to_buffer(0x00, 4, &bit_offset);
 
-    return 1; // Success
+    return 1;
 }
 
 // Calculates Reed-Solomon error correction bytes
@@ -111,43 +117,104 @@ void calculate_ecc(void) {
     }
 }
 
-// Renders the fixed structural shapes (the 3 large corner targets and timing lines)
-void inject_fixed_patterns(void) {
+// Checks if a coordinate belongs to fixed structural zones
+unsigned char is_fixed_zone(unsigned char x, unsigned char y) {
+    if (x < 8 && y < 8) return 1;   // Top-Left Finder + Separation border
+    if (x > 12 && y < 8) return 1;  // Top-Right Finder + Separation border
+    if (x < 8 && y > 12) return 1;  // Bottom-Left Finder + Separation border
+    if (x == 6 || y == 6) return 1; // Timing tracks
+    return 0;
+}
+
+// Generates structural targets, then walks the zigzag path mapping real data bits
+void generate_matrix(void) {
     unsigned char x, y;
-    
-    // Clear whole buffer to white/zero first
+    int col;
+    unsigned int main_ptr = 0;
+    unsigned char current_bit;
+    unsigned char actual_byte;
+    int dir = -1; // -1 = Upward, 1 = Downward tracking
+
     memset(bit_buffer, 0, 63);
 
-    // Draw Top-Left, Top-Right, and Bottom-Left 7x7 Finder Squares
+    // 1. Plot Fixed Finder Squares
     for (y = 0; y < 21; ++y) {
         for (x = 0; x < 21; ++x) {
             if ((x < 7 && y < 7) || (x > 13 && y < 7) || (x < 7 && y > 13)) {
                 unsigned char px = (x > 13) ? (x - 14) : x;
                 unsigned char py = (y > 13) ? (y - 14) : y;
-                
                 if (px == 0 || px == 6 || py == 0 || py == 6 || (px >= 2 && px <= 4 && py >= 2 && py <= 4)) {
                     write_bit(x, y, 1);
                 }
-            }
-            // Add the dashed horizontal/vertical Timing Tracks
-            else if (y == 6 && (x & 1) == 0) {
+            } else if (y == 6 && (x & 1) == 0) {
+                write_bit(x, y, 1);
+            } else if (x == 6 && (y & 1) == 0) {
                 write_bit(x, y, 1);
             }
-            else if (x == 6 && (y & 1) == 0) {
-                write_bit(x, y, 1);
-            }
-            // Data zone placeholder pattern to ensure structure alignment
-            else {
-                if ((x + y) & 1) {
-                    write_bit(x, y, 1);
+        }
+    }
+
+    // 2. Inject Static Format Info Bits (Hardcoded for Mask 0, Level L)
+    // The fixed pattern configuration string is binary 001011010011001
+    unsigned int format_register = 0x2D33; 
+    // Plot format configuration track horizontally and vertically around finders
+    for (x = 0; x < 8; ++x) {
+        if (x != 6) write_bit(x, 8, (format_register >> x) & 1);
+    }
+    write_bit(8, 7, (format_register >> 8) & 1);
+    write_bit(8, 8, (format_register >> 9) & 1);
+    write_bit(7, 8, (format_register >> 10) & 1);
+    for (y = 0; y < 6; ++y) {
+        if (y != 6) write_bit(8, 5 - y, (format_register >> (11 + y)) & 1);
+    }
+    // Matching tracking mirror edges
+    for (y = 0; y < 7; ++y) write_bit(14 + y, 8, (format_register >> y) & 1);
+    for (x = 0; x < 7; ++x) write_bit(8, 20 - x, (format_register >> (7 + x)) & 1);
+    write_bit(8, 13, 1); // Dark module anchor point
+
+    // 3. Zigzag Traverser Loop: Maps data stream bits directly into empty spaces
+    y = 20; 
+    for (col = 20; col > 0; col -= 2) {
+        if (col == 6) col = 5; // Skip the vertical timing track column entirely
+        
+        while (1) {
+            for (x = 0; x < 2; ++x) {
+                unsigned char current_x = col - x;
+                if (!is_fixed_zone(current_x, y)) {
+                    
+                    // Fetch corresponding bit from data array or error correction array
+                    if (main_ptr < 19 * 8) {
+                        actual_byte = data_bytes[main_ptr / 8];
+                    } else if (main_ptr < 26 * 8) {
+                        actual_byte = ecc_bytes[(main_ptr - (19 * 8)) / 8];
+                    } else {
+                        actual_byte = 0; // Remainder padding bits
+                    }
+                    
+                    current_bit = (actual_byte >> (7 - (main_ptr % 8))) & 1;
+                    main_ptr++;
+
+                    // Apply Data Mask 0: Invert bit if (x + y) is even
+                    if ((current_x + y) % 2 == 0) {
+                        current_bit ^= 1;
+                    }
+
+                    write_bit(current_x, y, current_bit);
                 }
             }
+            
+            // Advance vertical row pointer depending on direction state
+            if ((dir == -1 && y == 0) || (dir == 1 && y == 20)) {
+                dir = -dir; // Flip vector direction when hitting ceiling/floor edge
+                break;
+            }
+            y += dir;
         }
     }
 }
 
 int main(void) {
-    const char* my_input = "ABC"; // You can safely change this up to 25 characters now!
+    const char* my_input = "HELLO WORLD"; // Change this string to whatever you want!
     unsigned char len = strlen(my_input);
     unsigned char row, b_idx, bit_idx, current_byte;
     unsigned int ptr = 0;
@@ -157,17 +224,15 @@ int main(void) {
         return 1;
     }
 
-    // Run dynamic string validation and encoding
     if (!encode_string(my_input, len)) {
         printf("ERROR: String contains illegal characters!\n");
         return 1;
     }
 
-    // Run layout engines
     calculate_ecc();          
-    inject_fixed_patterns();  
+    generate_matrix();  
 
-    // Print top edge of container frame using 'X's instead of dashes
+    // Print container box frame
     printf("\nXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX\n");
     printf("XX                                                          XX\n");
     printf("XX                                                          XX\n");
