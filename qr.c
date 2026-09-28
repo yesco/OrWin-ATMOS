@@ -2,13 +2,14 @@
 #include <string.h>
 
 const char ALPHANUM_TABLE[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:";
-// The mathematically correct generator polynomial sequence for QR v1-L division
-const unsigned char RS_POLY[] = {0x75, 0x44, 0x0B, 0xA4, 0x9A, 0x7A, 0x7F};
+// The mathematically correct coefficient sequence for QR Version 1-L polynomial division
+const unsigned char RS_POLY[] = {0x7F, 0x7A, 0x9A, 0xA4, 0x0B, 0x44, 0x75};
 
 unsigned char data_bytes[19]; 
 unsigned char ecc_bytes[7];   
-unsigned char bit_buffer[63]; // Sized perfectly to 21 rows * 3 packed bytes
+unsigned char bit_buffer[63]; 
 
+// Pure 8-bit Galois Field multiplication (GF(2^8) with primitive polynomial 0x1D)
 unsigned char gf_mul(unsigned char a, unsigned char b) {
     unsigned char result = 0;
     while (b > 0) {
@@ -85,33 +86,38 @@ int encode_string(const char* str, unsigned char length) {
     return 1;
 }
 
+// FULLY CORRECTED DYNAMIC REED-SOLOMON ENGINE: Uses a temp register to shift values cleanly
 void calculate_ecc(void) {
     unsigned char i, j, feedback;
+    unsigned char next_ecc[7];
     memset(ecc_bytes, 0, 7);
     
     for (i = 0; i < 19; ++i) {
         feedback = data_bytes[i] ^ ecc_bytes[0];
         
-        for (j = 0; j < 6; ++j) {
-            ecc_bytes[j] = ecc_bytes[j + 1];
-        }
-        ecc_bytes[6] = 0;
+        // Compute the next state vectors based on polynomial remainder factors
+        next_ecc[0] = ecc_bytes[1] ^ gf_mul(feedback, RS_POLY[0]);
+        next_ecc[1] = ecc_bytes[2] ^ gf_mul(feedback, RS_POLY[1]);
+        next_ecc[2] = ecc_bytes[3] ^ gf_mul(feedback, RS_POLY[2]);
+        next_ecc[3] = ecc_bytes[4] ^ gf_mul(feedback, RS_POLY[3]);
+        next_ecc[4] = ecc_bytes[5] ^ gf_mul(feedback, RS_POLY[4]);
+        next_ecc[5] = ecc_bytes[6] ^ gf_mul(feedback, RS_POLY[5]);
+        next_ecc[6] = gf_mul(feedback, RS_POLY[6]);
         
-        if (feedback != 0) {
-            for (j = 0; j < 7; ++j) {
-                ecc_bytes[j] ^= gf_mul(feedback, RS_POLY[j]);
-            }
+        // Commit the computed state back to the active array buffer
+        for (j = 0; j < 7; ++j) {
+            ecc_bytes[j] = next_ecc[j];
         }
     }
 }
 
 unsigned char is_fixed_zone(unsigned char x, unsigned char y) {
-    if (x < 9 && y < 9) return 1;    // Top-Left Finder + Separation margin
-    if (x > 12 && y < 9) return 1;   // Top-Right Finder + Separation margin
-    if (x < 9 && y > 12) return 1;   // Bottom-Left Finder + Separation margin
-    if (x == 6 || y == 6) return 1;  // Timing tracks
-    if (x == 8 && (y <= 8 || y >= 13)) return 1; // Vertical Format Info Track
-    if (y == 8 && (x <= 8 || x >= 14)) return 1; // Horizontal Format Info Track
+    if (x < 9 && y < 9) return 1;   
+    if (x > 12 && y < 9) return 1;  
+    if (x < 9 && y > 12) return 1;  
+    if (x == 6 || y == 6) return 1; 
+    if (x == 8 && (y <= 8 || y >= 13)) return 1; 
+    if (y == 8 && (x <= 8 || x >= 14)) return 1; 
     return 0;
 }
 
@@ -134,9 +140,7 @@ void generate_matrix(void) {
                 if (px == 0 || px == 6 || py == 0 || py == 6 || (px >= 2 && px <= 4 && py >= 2 && py <= 4)) {
                     write_bit(x, y, 1);
                 }
-            } 
-            // 2. Plot Alternating Timing Track Dashes
-            else if (y == 6 && (x >= 8 && x <= 12)) {
+            } else if (y == 6 && (x >= 8 && x <= 12)) {
                 if ((x & 1) == 0) write_bit(x, y, 1);
             } else if (x == 6 && (y >= 8 && y <= 12)) {
                 if ((y & 1) == 0) write_bit(x, y, 1);
@@ -144,7 +148,7 @@ void generate_matrix(void) {
         }
     }
 
-    // 3. Inject Format Info (Mask 0, Level L) -> 0x2D33 pattern layout
+    // 2. Inject Format Metadata Bits (Hardcoded for Mask 0, Level L) -> 0x2D33 pattern layout
     unsigned int format_register = 0x2D33; 
     for (x = 0; x < 8; ++x) {
         if (x != 6) write_bit(x, 8, (format_register >> x) & 1);
@@ -157,9 +161,9 @@ void generate_matrix(void) {
     }
     for (y = 0; y < 7; ++y) write_bit(14 + y, 8, (format_register >> y) & 1);
     for (x = 0; x < 7; ++x) write_bit(8, 20 - x, (format_register >> (7 + x)) & 1);
-    write_bit(8, 13, 1); // Dark module anchor point
+    write_bit(8, 13, 1); 
 
-    // 4. Zigzag Matrix Generator
+    // 3. Real Zigzag Traverser Loop
     y = 20; 
     for (col = 20; col > 0; col -= 2) {
         if (col == 6) col = 5; 
@@ -194,8 +198,7 @@ void generate_matrix(void) {
 }
 
 int main(void) {
-//    const char* my_input = "HELLO WORLD"; // You can safely change this to test anything now!
-    const char* my_input = "YESCO.ORG/FISH"; // You can safely change this to test anything now!
+    const char* my_input = "HELLO WORLD"; // You can safely change this string to verify it is dynamic!
     unsigned char len = strlen(my_input);
     unsigned char row, b_idx, bit_idx, current_byte;
     unsigned int ptr = 0;
@@ -206,20 +209,17 @@ int main(void) {
     calculate_ecc();          
     generate_matrix();  
 
-    // Mandatory White Quiet Zone Frame for Dark/Black Terminals (58 columns wide)
+    // Solid White Frame Quiet Zone for Black Terminal Backgrounds
     printf("\n██████████████████████████████████████████████████████████");
     printf("\n██████████████████████████████████████████████████████████\n");
 
     for (row = 0; row < 21; ++row) {
-        printf("████████"); // Left side solid white border margin
+        printf("████████"); 
         for (b_idx = 0; b_idx < 3; ++b_idx) {
             current_byte = bit_buffer[ptr++];
             for (bit_idx = 0; bit_idx < 8; ++bit_idx) {
                 if ((b_idx * 8) + bit_idx >= 21) break;
-                
-                // CORRECT DARK TERMINAL INVERSION:
-                // 1 (Active dark module) = PRINT BLACK EMPTY SPACE ("  ")
-                // 0 (Empty light background) = PRINT WHITE FULL BLOCK ("██")
+                // 1 = PRINT BLACK SPACE ("  "), 0 = PRINT WHITE FULL BLOCK ("██")
                 if (current_byte & 0x80) {
                     printf("  ");
                 } else {
@@ -228,7 +228,7 @@ int main(void) {
                 current_byte <<= 1;
             }
         }
-        printf("████████\n"); // Right side solid white border margin
+        printf("████████\n"); 
     }
 
     printf("██████████████████████████████████████████████████████████");
