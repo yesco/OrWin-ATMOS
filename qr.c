@@ -49,8 +49,6 @@ void append_bits_to_buffer(unsigned int value, unsigned char num_bits, unsigned 
         unsigned int byte_idx = (*bit_offset) / 8;
         unsigned char bit_idx = 7 - ((*bit_offset) % 8);
         
-        // Explicitly clear bit target area first to avoid garbage accumulation leaks
-        data_bytes[byte_idx] &= ~(1 << bit_idx);
         if ((value >> i) & 1) {
             data_bytes[byte_idx] |= (1 << bit_idx);
         }
@@ -82,10 +80,18 @@ int encode_string(const char* str, unsigned char length) {
         }
     }
     append_bits_to_buffer(0x00, 4, &bit_offset);   // Terminator padding
+    
+    // Standard QR Padding: fill out remaining space alternating 0xEC and 0x11
+    int byte_offset = (bit_offset + 7) / 8;
+    int pad_toggle = 0;
+    while (byte_offset < 19) {
+        data_bytes[byte_offset++] = pad_toggle ? 0x11 : 0xEC;
+        pad_toggle = !pad_toggle;
+    }
     return 1;
 }
 
-// Calculates Reed-Solomon error correction bytes
+// Calculates Reed-Solomon error correction bytes dynamically
 void calculate_ecc(void) {
     unsigned char i, j, feedback;
     memset(ecc_bytes, 0, 7);
@@ -185,7 +191,8 @@ void generate_matrix(void) {
 }
 
 int main(void) {
-    const char* my_input = "HELLO WORLD"; 
+//    const char* my_input = "HELLO WORLD"; // Change this to test any dynamic string!
+    const char* my_input = "yesco.org/fish"; // Change this to test any dynamic string!
     unsigned char len = strlen(my_input);
     unsigned char row, b_idx, bit_idx, current_byte;
     unsigned int ptr = 0;
@@ -197,16 +204,13 @@ int main(void) {
     generate_matrix();  
 
     printf("\n");
-
     for (row = 0; row < 21; ++row) {
         for (b_idx = 0; b_idx < 3; ++b_idx) {
             current_byte = bit_buffer[ptr++];
             for (bit_idx = 0; bit_idx < 8; ++bit_idx) {
                 if ((b_idx * 8) + bit_idx >= 21) break;
                 
-                // NATIVE BLACK TERMINAL DISPLAY:
-                // 1 = Active module prints Solid White Full Block ("██")
-                // 0 = Inactive module prints Native Blank Space ("  ")
+                // Black terminal layout: 1 maps to solid block, 0 maps to empty space
                 if (current_byte & 0x80) {
                     printf("██");
                 } else {
@@ -217,7 +221,6 @@ int main(void) {
         }
         printf("\n"); 
     }
-
     printf("\n");
     return 0;
 }
