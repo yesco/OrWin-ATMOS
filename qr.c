@@ -8,7 +8,7 @@
 // TODO: generalize and make API
 
 // ! oscar64: 0.440s (2361 B) -DNOFLOAT -DNOLONG -Os qr.c -ep  --- WRONG!
-//   cc65   : 1.237s (4242 B) -Oirs qr.c && sim65 ...
+//   cc65   : 1.209s (4239 B) -Oirs qr.c && sim65 ...
 
 // A more configurable "more correct" and diverse
 // - https://github.com/sehugg/qrcode_cc65
@@ -267,8 +267,8 @@ int main(void) {
   //
   //   "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:"
 
-  //const char* my_input = "HELLO WORLD"; 
-  const char* my_input = "YESCO.ORG/FISH"; // works "lens" and "qr code reader" on anroid
+  const char* my_input = "HELLO WORLD"; 
+  //const char* my_input = "YESCO.ORG/FISH"; // works "lens" and "qr code reader" on anroid
   //const char* my_input = "ABCDEFGHIJKLMNOPQRSTUVWXY"; // lens confused
   //const char* my_input = "8BITWORKSHOP.COM";
   unsigned char len = strlen(my_input);
