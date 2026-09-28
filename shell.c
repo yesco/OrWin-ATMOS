@@ -305,86 +305,40 @@ void shprint(char* line) {
 #define varlist dummyfun
 
 #define vcleanup() (void)0
-#define vbind(n,p) (void)0
  
 #else
  
-// TODO: make it part of each "train"
-
-#define MAX_VARS 32
+// global train start pointer must be set before calling wtrainstep
  
-// first is emtpy
-struct var {
-  char* name; // %var points to int %str points to string!
-  union {
-    int *  iptr;
-    char** sptr;
-    char*  ostr; 
-   } val; // oscar64 requires a named union!
-} vars[MAX_VARS]; // = {0}; cl65 cannot
-
-unsigned char nvar= 0;
-
+cmdtrain* trainptr;
  
-// 106 : vnth, NATIVE_CODE:code
-char vnth(char* name) {
-  char i= nvar, *nm;
-  if (!((intptr_t)name)>>8) return *name; // 0x80+i
-  do {
-    //printf("vnth: %d/%d %s\n", i, nvar, name);
-    if ((nm= vars[i].name) && 0==strcmp(name, nm)) return i;
-  } while(i--);
+// Returns a pointer to 
+char** vptr(char* name) {
+  char*** loco= trainptr+1;
+  char** state;
+  
+  int i= 1;
+  while((state= *loco)) {
+    printf("%d: %04x %04x %s\n", i, state, loco, loco[1]);
+    ++loco;
+  }
 
-  // not found - add var
-  if (nvar >= MAX_VARS-1) return 0;
-  ++nvar;
-
-  // we make a copy if it's not a program literal!
-  vars[nvar].name= isliteral(name)? name: strdup(name);
-  vars[nvar].val.sptr= NULL;
-  return nvar;
+  return NULL;
 }
 
 void vcleanup() {
-  char i= nvar, *name;
-  assert(i<=MAX_VARS);
-  while(i) {
-    //printf("vcleanup: %d/%d\n", i, nvar);
-    if ((name= vars[i].name)) {
-
-      // free $vars strings owned _var is owned by process
-      if (*name == '$') lfree(vars[i].val.ostr);
-      lfree(name);
-
-    }
-    --i;
-  }
-
-  nvar= 0;
-  memset(vars, 0, sizeof(vars));
-}
-
-// you can bind %var and _var
-// TODO: unbind using ptr=NULL - action: don't want change order...
-
-// 59 : vbind, NATIVE_CODE:code
-char vbind(char* name, void* ptr) {
-  char n= vnth(name);
-
-  //assert(n);
-  //assert(*name != '$');
-
-  vars[n].val.iptr= ptr;
-  return n;
+  assert(!"foobar");
+  // TODO: walk the train
 }
 
 char* vgets(char* name);
  
 // 126 : vgeti, NATIVE_CODE:code
 int vgeti(char* name) {
-  char n= vnth(name);
-  return !n? 0:
-    (*name == '%')? *vars[n].val.iptr:
+  char** p= vptr(name);
+  return !p? 0:
+    (*name == '%')? *(int*)p:
+    // TODO: lookup twice... optimize
     atoi(vgets(name));
 }
  
@@ -399,10 +353,10 @@ char tmp10char[10]= "(int)"; // TODO: share?
 
 // 202 : vgets, NATIVE_CODE:code
 char* vgets(char* name) {
-  char n= vnth(name), *s= 
-    !n? "":
-    (*name == '_')? *vars[n].val.sptr:
-    (*name == '$')? vars[n].val.ostr:
+  char** p= vptr(name), *s= 
+    !p? "":
+    (*name == '_')? *p:
+    (*name == '$')? *p:
     (*name == '%')? (sprintf(tmp10char, "%d", vgeti(name)),tmp10char):
     name; // lol
   return s? s: "";
@@ -412,24 +366,28 @@ char* vsets(char* name, char* val);
  
 // 204 : vseti, NATIVE_CODE:code
 int vseti(char* name, int val) {
-  char n= vnth(name);
   if (*name == '$') {
     sprintf(tmp10char, "%d", val);
     vsets(name, strdup(tmp10char));
     return val;
   } else if (*name == '_') return 0;
-  return (*(vars[n].val.iptr)= val);
+  else {
+    int* p= *(int**)vptr(name);
+    return (*p= val);
+  }
 }
 
-// gives ownershipt to $VAR of VAL string
+// gives ownership to $VAR of VAL string
 
 // 173 : vsets, NATIVE_CODE:code
 char* vsets(char* name, char* val) {
-  char n= vnth(name), **sp;
   if (*name == '%') { vseti(name, atoi(val)); return val; }
   if (*name != '$') return "";
-  lfree(*(sp= &vars[n].val.ostr));
-  return (*sp= val);
+  else {
+    char** p= vptr(name);
+    lfree(*p);
+    return (*p= val);
+  }
 }
 
 // set ?VAR from string VAL, copy if $VAR, otherwise convert
@@ -488,8 +446,13 @@ char* vevals(char* x, char** pline) {
 // TODO: add formattting %.3foo $-7bar %05i - lol!
 
 
+#define VARSTATE "$name%expr"
+#define SETSTATE "$name%expr"
+
 typedef struct varstate {
   cmdfun fun;
+  // Bound
+  // (notice how name slots into the bound position!)
   char*  name;   // TODO: make it store (char*)(char)idx
   char*  expr;    // Owned if _VAR
 } varstate;
@@ -539,6 +502,8 @@ char* set(varstate* state, char* line) {
 }
 
 // printer
+#define PRINTSTATE NULL
+ 
 typedef struct printstate {
   cmdfun fun;
   char** params;
@@ -601,8 +566,12 @@ char* print(printstate* state, char* line) {
   }
 }
 
+#define VARLISTSTATE "%%vindex_name_vstr%vint"
+ 
 typedef struct varliststate {
   cmdfun fun;
+  // Bound:
+  char* bound;
   
   int i;
   char* name;
@@ -613,27 +582,28 @@ typedef struct varliststate {
 char* varlist(varliststate* state, char* line) {
   if (!state) {
     state= STALLOC(varliststate, varlist);
-    vbind("%vindex", &state->i);
-    vbind("_vname",  &state->name);
-    vbind("_vstr",   &state->vstr);
-    vbind("%vint",   &state->vint);
     return (char*)state;
   }
+
+// TODO: implement
+  assert(!"not implmeneted");
+  
   if (line && line<EVENTS) return line;
 
   // if done: reset and request next
-  if (state->i >= nvar) { lfree(line); state->i= 0; return NULL; }
+//  if (state->i >= nvar) { lfree(line); state->i= 0; return NULL; }
   // if first: return the result
   if (!state->i++) return line;
 
   // and then every variable for that line
-  state->name= vars[state->i - 1].name;
+//  state->name= vars[state->i - 1].name;
   // slow, lol
   state->vint= vgeti(state->name);
   state->vstr= vgets(state->name);
 
   lfree(line);
   {
+    // LOL
     char* ln= malloc(1+1+strlen(state->name)+2+5+2+strlen(state->vstr));
     sprintf(ln, "\t%s\t=%6d  \"%s\"", state->name, state->vint, state->vstr);
     return ln;
@@ -647,6 +617,8 @@ char* varlist(varliststate* state, char* line) {
 ///////////////////////////////////////////////////////////
 // unix "commands"
 
+#define PWDSTATE NULL
+ 
 void* pwd(simplestate* state, char* line) {
   if (!state) return SIMPLEALLOC(pwd);
   if (!line)  return EOS;
@@ -658,6 +630,9 @@ void* pwd(simplestate* state, char* line) {
   return strdup("/home/orwin");
 }
 
+
+// TODO: maybe make it count line numbers? matches etc
+#define GREPSTATE NULL
 
 void* grep(pstate* state, char* line) {
   if (!state) return PSTALLOC(grep, line);
@@ -672,6 +647,8 @@ void* grep(pstate* state, char* line) {
 // fake file
 char* fakefile[]= { "one", "two", "three", "four", "five", NULL };
 
+#define CATSTATE NULL
+ 
 typedef struct fakefilestate { cmdfun f; char** fil; } fakefilestate;
 
 void* cat(fakefilestate* state, char* line) {
@@ -687,6 +664,8 @@ void* cat(fakefilestate* state, char* line) {
 }
 
 #else
+
+#define CATSTATE NULL
 
 typedef struct filestate {
   cmdfun f;
@@ -743,8 +722,13 @@ void* cat(filestate* state, char* line) {
 }
 #endif
   
+
+#define WCSTATE "%lines%words%bytes"
+ 
 typedef struct wcstate {
   cmdfun f;
+  // BUND slots:
+  char* bound;
   unsigned int ln, wn, cn;
 } wcstate;
 
@@ -754,9 +738,6 @@ void* wc(wcstate* state, char* line) {
   
   if (!state) {
     state= STALLOC(wcstate, wc);
-    vbind("%lines", &state->ln);
-    vbind("%words", &state->wn);
-    vbind("%bytes", &state->cn);
     return state;
   }
 
@@ -877,8 +858,15 @@ typedef struct lsstate { int x; } lsstate;
 //   doesn't have on sim65 :-(
 #include <dirent.h>
 
+#define LSSTATE "%_name%size"
+ 
 typedef struct lsstate {
   cmdfun f;
+  // Bound  slots
+  char* bound;
+  char* name;
+  unsigned int size;
+  
   unsigned char dir_open;
   struct directory dir;
   struct direntry entry;
@@ -905,7 +893,7 @@ void* ls(lsstate* state, char* line) {
       REQUEST_CLEANUP();
       // all good
       // TODO: size? more attributes? timestamp"
-      vbind("_name", &state->name);
+      //vbind("_name", &state->name);
       return state;
     }
     // fail
@@ -1003,8 +991,13 @@ void* ls(lsstate* state, char* line) {
  
 
 ///////////////////////////////////////////////////
+
+#define IOTASTATE "%%n%e%d"
+ 
 typedef struct countstate {
   cmdfun f;
+  // Bound
+  char* bound;
   int n;
   int e;
   intptr_t d; // dual use
@@ -1034,6 +1027,8 @@ void* iota(countstate* state, char* line) {
   return EOS;
 }
         
+#define HEADSTATE NULL
+ 
 void* head(countstate* state, char* line) {
   if (!state) {
     state = STALLOC(countstate, head);
@@ -1055,6 +1050,8 @@ void* head(countstate* state, char* line) {
   lfree(line);
   return EOS;
 }
+
+#define TAILSTATE NULL
 
 void* tail(countstate* state, char* line) {
   unsigned int start;
@@ -1115,24 +1112,36 @@ void* tail(countstate* state, char* line) {
 #define SAMPLES 32
  
 // Inside your stats state handler structure
+    // truncated
+#ifdef LITTLE_ENDIAN
+  #define STATSSTATE "%%n%min%max%sumlo%sumhi%sqsumlo%sqsumhi%avg%median%var%stddev"
+#else
+  #define STATSSTATE "%%n%min%max%sumhi%sumlo%sqsumhi%sqsumlo%avg%median%var%stddev"
+#endif
+
 typedef struct {
   cmdfun fun;
-  char done;
   // TODO: float? oscar64 can do it
+
+  // Bound:
+  char* bound;
+
   int n;
-  int mask;
   int min;
   int max;
 
   // TODO: use isum as "truncated int"
   long sum, sqsum;
 
-  int samples[SAMPLES];
   // results
   int avg;        // TODO: use 100x to get 2 decimals?
   int median;
   int var;
   int stddev;
+
+  int samples[SAMPLES];
+  int mask;
+  char done;
 } StatsState;
 
 int cmpint(const void *a, const void *b) {
@@ -1147,23 +1156,6 @@ char* stats(StatsState* state, char* line) {
     state= STALLOC(StatsState, stats);
     state->min= 0x7fff;
     state->max= 0x8000;
-
-    vbind("%count",  &state->n);
-    vbind("%min",    &state->min);
-    vbind("%avg",    &state->avg);
-    vbind("%median", &state->median);
-    vbind("%max",    &state->max);
-    vbind("%var",    &state->var);
-    vbind("%stddev", &state->stddev);
-
-    // truncated
-#ifdef LITTLE_ENDIAN
-    vbind("%sum",    &state->sum);
-    vbind("%sqsum",  &state->sqsum);
-#else
-    vbind("%sum",    ((int*)&state->sum)[1]);
-    vbind("%sqsum",  ((int*)&state->sqsum)[1]);
-#endif
 
     return (char*)state;
 
@@ -1278,9 +1270,13 @@ char* wstate(char* ret) {
 #include <cc65.h> // for udiv32by16r16
 #endif
  
+#define PSSTATE "%%pid%cpu%mem%size%ticks%mins%secs_name_args"
+ 
 typedef struct psstate {
   cmdfun f;
-  int i;
+  
+  // Bound:
+  char* bound;
   
   int pid; // "window id"
   int cpu;
@@ -1291,6 +1287,9 @@ typedef struct psstate {
   int secs;
   char* name;
   char* args;
+
+  // internal
+  int i;
 } psstate;
  
 void* ps(psstate* state, char* line) {
@@ -1385,6 +1384,7 @@ void* ps(psstate* state, char* line) {
 #else
  
 // Dummy
+#define PSSTATE NULL
 #define ps dummyfun
    
 #endif // INCLUDE_PS
@@ -1392,10 +1392,17 @@ void* ps(psstate* state, char* line) {
 ///////////////////////////////////////////////////
 // terminal IO editing
 
+// TODO: make dynamic?
+ 
 #define MAX_EDIT 80
+ 
+#define EDITLINESTATE "%%line%pos"
  
 typedef struct editlinestate {
   cmdfun fun;
+  
+  // Bound
+  char* bound;
   
   char* s;
   char i;
@@ -1463,6 +1470,8 @@ void* editline(editlinestate* state, char* line) {
 }
     
 
+#define TEETERMINALSTATE NULL
+ 
 // more like "tee -"
 void* teeterminal(simplestate* state, char* line) {
   if (!state) return STALLOC(wcstate, wc);
@@ -1470,6 +1479,8 @@ void* teeterminal(simplestate* state, char* line) {
   shprint(line);
   return line;
 }
+
+#define TERMINALSTATE NULL
 
 // can only be last in chain!
 void* terminal(simplestate* state, char* line) {
@@ -1517,7 +1528,14 @@ void* commands[]= {
   set, print, varlist,
   stats,
   teeterminal, terminal, editline,
-  
+};
+
+char* varnames[]={
+  PWDSTATE, GREPSTATE, CATSTATE, WCSTATE, IOTASTATE, HEADSTATE, TAILSTATE,
+  PSSTATE,
+  SETSTATE, PRINTSTATE, VARLISTSTATE,
+  STATSSTATE,
+  TEETERMINALSTATE, TERMINALSTATE, EDITLINESTATE,
 };
 
 ////////////////////////////////////////////////////////////
@@ -1534,7 +1552,10 @@ char* taskname(void* fun) {
 }  
 #endif
 
-char* wtrainstep(cmdtrain** train, char* line) {
+// Moves a LOCOMOTIVE one step feeding it LINE
+// Ends on start/end of train (NULL)
+// Returns: next LINE or NULL for back
+char* wtrainstep(cmdtrain** loco, char* line) {
   cmdfun *fp;
   
 #ifdef SHELLINFO
@@ -1542,9 +1563,9 @@ char* wtrainstep(cmdtrain** train, char* line) {
 #endif
 
 //  if (!(fp=**train)) return line; // not rigth? was EOS = not right!
-  if (!(fp=**train)) return EOS;
+  if (!(fp=**loco)) return EOS;
   line= (*fp)(fp, line);
-  if (line) ++*train; else --*train;
+  if (line) ++*loco; else --*loco;
 
 #ifdef SHELLINFO
   printf("> %s => ", taskname(*fp));
@@ -1559,20 +1580,27 @@ int wrunsystrain(cmdtrain* train) {
   char* line= EOS;
   cmdtrain *origtrain= train;
 
+  // used to find variables!
+  trainptr= train;
+  
   ++train; // skip initial 0
 
 #ifndef SHELLTRACE
   // Beatifully simple!
   
 #if 1
+
   do {
     line= wtrainstep(&train, line);
   } while(*train);
+
 #else
+
   while((fp=*train)) {
     line= (*fp)(fp, line);
     if (line) ++train; else --train;
   }    
+
 #endif
 
 #else
@@ -1804,9 +1832,9 @@ char isliteral(void* p) {
 
 //int main(int argc, char** argv) {
 int main() {
-  tsystem("editline | print foo $* bar | terminal");
-exit(3);
+  //tsystem("editline | print foo $* bar | terminal"); exit(3);
 
+#if 0  
   // Test string binding
   {
     char* bar= "fish";
@@ -1857,6 +1885,7 @@ exit(3);
   }
 
   vcleanup();
+#endif
 
   printf("---- wrunsystrain: MOCK: pwd | terminal\n");
   

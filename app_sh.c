@@ -155,6 +155,7 @@ void* app_sh(void* voidapp, char* line) {
 
     n= 0;
     do {
+      trainptr= app->train;
       app->line= wtrainstep(&app->loco, app->line);
       //} while(--n && app->line != EOS);
       ++n;
