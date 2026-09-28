@@ -4,12 +4,10 @@
 const char ALPHANUM_TABLE[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:";
 const unsigned char RS_POLY[] = {127, 122, 154, 164, 11, 68, 117};
 
-// Explicitly sized arrays to prevent pointer/stack overflow errors
 unsigned char data_bytes[19]; 
 unsigned char ecc_bytes[7];   
 unsigned char bit_buffer[63]; 
 
-// GF(2^8) multiply optimized for minimal 8-bit code execution footprint (no big tables)
 unsigned char gf_mul(unsigned char a, unsigned char b) {
     unsigned char result = 0;
     while (b > 0) {
@@ -20,7 +18,6 @@ unsigned char gf_mul(unsigned char a, unsigned char b) {
     return result;
 }
 
-// Convert a single character to its QR Alphanumeric index value (includes Auto-Uppercase)
 int get_alphanumeric_val(char c) {
     unsigned char i;
     if (c >= 'a' && c <= 'z') c -= 32; 
@@ -30,7 +27,6 @@ int get_alphanumeric_val(char c) {
     return -1; 
 }
 
-// Low-level function to write a single bit into the packed 63-byte frame buffer
 void write_bit(unsigned char x, unsigned char y, unsigned char bit) {
     unsigned int bit_pos = (y * 24) + x;
     unsigned int byte_idx = bit_pos / 8;
@@ -43,7 +39,6 @@ void write_bit(unsigned char x, unsigned char y, unsigned char bit) {
     }
 }
 
-// Appends bits to a raw byte array (used for encoding the text string)
 void append_bits_to_buffer(unsigned int value, unsigned char num_bits, unsigned int *bit_offset) {
     int i;
     for (i = num_bits - 1; i >= 0; --i) {
@@ -56,7 +51,6 @@ void append_bits_to_buffer(unsigned int value, unsigned char num_bits, unsigned 
     }
 }
 
-// Compiles the string into standard QR 11-bit pairs
 int encode_string(const char* str, unsigned char length) {
     unsigned int bit_offset = 0;
     unsigned char i;
@@ -64,8 +58,8 @@ int encode_string(const char* str, unsigned char length) {
     unsigned int pair_val;
 
     memset(data_bytes, 0, 19);
-    append_bits_to_buffer(0x02, 4, &bit_offset);   // Alphanumeric Mode
-    append_bits_to_buffer(length, 9, &bit_offset); // Length
+    append_bits_to_buffer(0x02, 4, &bit_offset);   
+    append_bits_to_buffer(length, 9, &bit_offset); 
 
     for (i = 0; i < length; i += 2) {
         v1 = get_alphanumeric_val(str[i]);
@@ -79,11 +73,10 @@ int encode_string(const char* str, unsigned char length) {
             append_bits_to_buffer(v1, 6, &bit_offset);
         }
     }
-    append_bits_to_buffer(0x00, 4, &bit_offset);   // Terminator
+    append_bits_to_buffer(0x00, 4, &bit_offset);   
     return 1;
 }
 
-// Calculates Reed-Solomon error correction bytes
 void calculate_ecc(void) {
     unsigned char i, j, feedback;
     memset(ecc_bytes, 0, 7);
@@ -96,7 +89,6 @@ void calculate_ecc(void) {
     }
 }
 
-// Checks if a coordinate belongs to fixed structural zones
 unsigned char is_fixed_zone(unsigned char x, unsigned char y) {
     if (x < 8 && y < 8) return 1;   
     if (x > 12 && y < 8) return 1;  
@@ -105,7 +97,6 @@ unsigned char is_fixed_zone(unsigned char x, unsigned char y) {
     return 0;
 }
 
-// Generates structural targets, then walks the zigzag path mapping real data bits
 void generate_matrix(void) {
     unsigned char x, y;
     int col;
@@ -116,7 +107,6 @@ void generate_matrix(void) {
 
     memset(bit_buffer, 0, 63);
 
-    // 1. Draw Fixed Finder Squares
     for (y = 0; y < 21; ++y) {
         for (x = 0; x < 21; ++x) {
             if ((x < 7 && y < 7) || (x > 13 && y < 7) || (x < 7 && y > 13)) {
@@ -133,7 +123,6 @@ void generate_matrix(void) {
         }
     }
 
-    // 2. Inject Format Metadata Bits (Hardcoded for Mask 0, Level L)
     unsigned int format_register = 0x2D33; 
     for (x = 0; x < 8; ++x) {
         if (x != 6) write_bit(x, 8, (format_register >> x) & 1);
@@ -148,7 +137,6 @@ void generate_matrix(void) {
     for (x = 0; x < 7; ++x) write_bit(8, 20 - x, (format_register >> (7 + x)) & 1);
     write_bit(8, 13, 1); 
 
-    // 3. Real Zigzag Traverser Mapping Stream Loop
     y = 20; 
     for (col = 20; col > 0; col -= 2) {
         if (col == 6) col = 5; 
@@ -168,7 +156,7 @@ void generate_matrix(void) {
                     main_ptr++;
 
                     if ((current_x + y) % 2 == 0) {
-                        current_bit ^= 1; // Mask 0 Transform
+                        current_bit ^= 1; 
                     }
                     write_bit(current_x, y, current_bit);
                 }
@@ -194,33 +182,28 @@ int main(void) {
     calculate_ecc();          
     generate_matrix();  
 
-    // Print Solid Horizontal Top Frame + Quiet Zone Margin
-    printf("\n██████████████████████████████████████████████████████████");
-    printf("\n██████████████████████████████████████████████████████████\n");
+    printf("\n");
 
     for (row = 0; row < 21; ++row) {
-        printf("████████"); // Left side solid border block pairs
         for (b_idx = 0; b_idx < 3; ++b_idx) {
             current_byte = bit_buffer[ptr++];
             for (bit_idx = 0; bit_idx < 8; ++bit_idx) {
                 if ((b_idx * 8) + bit_idx >= 21) break;
-                // INVERTED LOOKUP FOR DARK TERMINALS: 
-                // 1 (Data bit present) = BLANK SPACE ("  ")
-                // 0 (Empty bit background) = FULL UNICODE BLOCK ("██")
+                
+                // NATIVE BLACK TERMINAL DISPLAY:
+                // 1 = Active module prints Solid White Full Block ("██")
+                // 0 = Inactive module prints Native Blank Space ("  ")
                 if (current_byte & 0x80) {
-                    printf("  ");
-                } else {
                     printf("██");
+                } else {
+                    printf("  ");
                 }
                 current_byte <<= 1;
             }
         }
-        printf("████████\n"); // Right side solid border block pairs
+        printf("\n"); 
     }
 
-    // Print Solid Horizontal Bottom Frame + Quiet Zone Margin
-    printf("██████████████████████████████████████████████████████████");
-    printf("\n██████████████████████████████████████████████████████████\n\n");
-
+    printf("\n");
     return 0;
 }
