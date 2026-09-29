@@ -1,4 +1,4 @@
-cl65 -t sim6502 shell.c -o shell.sim && sim65 shell.sim
+cl65 -t sim6502 shell.c -o shell.sim && sim65 -c shell.sim
 
 echo
 ls -l shell.sim

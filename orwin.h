@@ -296,7 +296,7 @@ __zeropage
 
 extern char* zptr;
 
-#ifdef __cc65__
+#ifdef __CC65__
   #pragma zpsym ("zptr");
 #endif
 

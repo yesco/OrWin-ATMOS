@@ -116,11 +116,13 @@ void* app_sh(void* voidapp, char* line) {
     // may not need store!
     // TODO: it's winp->args!!!!
     {
+      // TODO: orig? lol modified...
       app->origcmd= malloc(strlen(line)+1+10);
-      sprintf(app->origcmd, "%s |terminal", line);
+      sprintf(app->origcmd, "%s|terminal", line);
     }
 
     wstatus(-1, app->origcmd? app->origcmd: "Shell");
+
     run(app, app->origcmd);
     return app;
 
@@ -144,23 +146,21 @@ void* app_sh(void* voidapp, char* line) {
   
   // running command
   if (app->train) {
-    //  14s wsystem()
-    // ~22s one step per call here
-    //char n= 1; // ~22s
-    char n= 10; // ~16s
-    //char n= 100; // ~14w
+    //             // TOTAL TIME
+    //  wsystem()  //    14s
+    //  char n= 1; //   ~22s
+    char n= 10;    //   ~16s   // Hard limit, OK overhead
+    //char n= 100; //   ~14w
 
     // TODO: make it run 2-4 ms, then YIELD
     // TODO: since it's in FOREGROUND, should get MORE cycles!
 
-    n= 0;
     do {
       trainptr= app->train;
       app->line= wtrainstep(&app->loco, app->line);
       //} while(--n && app->line != EOS);
-      ++n;
       // TODO: move this to wtrainstep loop, to save CPU!
-    } while(KEEPRUNNING && app->line != EOS);
+    } while(KEEPRUNNING && app->line != EOS && --n);
     //    putchar('0'+n);
 
     // TODO: also crashes if run a second time+

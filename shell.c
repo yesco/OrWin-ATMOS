@@ -12,6 +12,7 @@
 
 // prints internal line tokens in plain text
 //#define SHELLINFO
+//#define VARINFO
 //#define SHELLTEST
 
 #define MAX_TRAIN 16
@@ -53,7 +54,7 @@
 
   // TODO: should come from shared orwin.c?
   #define WAITKEY ((char*)0x300)
-  #define CLEANUP	((char*)0x4fe)
+  #define CLEANUP ((char*)0x4fe)
   #define EVENTS  ((char*)0x500)
   #define EOS     ((char*)0x500)
 
@@ -87,11 +88,17 @@ unsigned int traincleanbits;
 #define REQUEST_CLEANUP() (traincleanbits|=1)
 
 
+#ifdef ENVVAR
+  #define BOUNDSTART char* bound;
+#else
+  #define BOUNDSTART 
+#endif
+
 
 typedef struct simplestate {
 // TODO: make stateheader already!!!
   cmdfun f;
-  char* bound;
+  BOUNDSTART
 
   int i;
 } simplestate;
@@ -108,7 +115,7 @@ void* stalloc(unsigned int size, void* f) {
 
 typedef struct pstate {
   cmdfun f;
-  char* bound;
+  BOUNDSTART
 
   char* s;
 } pstate;
@@ -327,7 +334,9 @@ cmdtrain* trainptr;
 #else
  
 // TODO: remove
+#ifdef VARINFO
 char* taskname(void* fun);
+#endif
  
 // TODO: remove
 // Returns a pointer to 
@@ -340,9 +349,11 @@ char** vptr(char* name) {
   int i= 1;
 
   while((state= (char**)*loco)) {
+#ifdef VARINFO
     printf("%d: loco:%04x @%04x %-8s : %s\n",
              i,      loco,state,
       taskname(state[0]),  state[1]);
+#endif
     p= state[1]; // TODO: use header.bound
     if (p) {
       n= 0;
@@ -500,6 +511,7 @@ char* vevals(char* x, char** pline) {
 typedef struct varstate {
   cmdfun fun;
   // Bound
+  // BOUNDSTART:
   // (notice how name slots into the bound position!)
   char*  name;   // TODO: make it store (char*)(char)idx
   char*  expr;    // Owned if _VAR
@@ -554,7 +566,8 @@ char* set(varstate* state, char* line) {
  
 typedef struct printstate {
   cmdfun fun;
-  char* bound;
+  BOUNDSTART
+
   char** params;
 } printstate;
  
@@ -620,7 +633,7 @@ char* print(printstate* state, char* line) {
 typedef struct varliststate {
   cmdfun fun;
   // Bound:
-  char* bound;
+  BOUNDSTART
   
   int i;
   char* name;
@@ -689,6 +702,7 @@ void* grep(pstate* state, char* line) {
   // pass-through backtracking
   if (!line || line==EOS) return line;
 
+//  printf("  GREP: %s\n", line);
   return strstr(line, state->s)? line: lfree(line);
 }
 
@@ -700,7 +714,8 @@ char* fakefile[]= { "one", "two", "three", "four", "five", NULL };
  
 typedef struct fakefilestate {
   cmdfun f;
-  char* bound;
+  BOUNDSTART
+
   char** fil;
 } fakefilestate;
 
@@ -722,7 +737,8 @@ void* cat(fakefilestate* state, char* line) {
 
 typedef struct filestate {
   cmdfun f;
-  char* bound;
+  BOUNDSTART
+
   FILE* fil;
 } filestate;
 
@@ -781,7 +797,8 @@ void* cat(filestate* state, char* line) {
  
 typedef struct wcstate {
   cmdfun f;
-  char* bound;
+  BOUNDSTART
+
   unsigned int ln, wn, cn;
 } wcstate;
 
@@ -916,8 +933,8 @@ typedef struct lsstate { int x; } lsstate;
  
 typedef struct lsstate {
   cmdfun f;
-  char* bound;
-  char* name;
+  // BOUNDSTART:
+  char* name; // this takes the place of bound!
   unsigned int size;
   
   unsigned char dir_open;
@@ -985,7 +1002,7 @@ void* ls(lsstate* state, char* line) {
 
 typedef struct lsstate {
   cmdfun f;
-  char* bound;
+  BOUNDSTART
 
   DIR* dir;
   char* pat;
@@ -1053,7 +1070,7 @@ void* ls(lsstate* state, char* line) {
  
 typedef struct countstate {
   cmdfun f;
-  char* bound;
+  BOUNDSTART
 
   int n;
   int e;
@@ -1181,7 +1198,7 @@ void* tail(countstate* state, char* line) {
 
 typedef struct {
   cmdfun fun;
-  char* bound;
+  BOUNDSTART
 
   // TODO: float? oscar64 can do it
 
@@ -1333,7 +1350,7 @@ char* wstate(char* ret) {
  
 typedef struct psstate {
   cmdfun f;
-  char* bound;
+  BOUNDSTART
   
   int pid; // "window id"
   int cpu;
@@ -1448,7 +1465,7 @@ void* ps(psstate* state, char* line) {
  
 typedef struct editlinestate {
   cmdfun fun;
-  char* bound;
+  BOUNDSTART
   
   char* s;
   char i;
@@ -1576,6 +1593,7 @@ void* commands[]= {
   teeterminal, terminal, editline,
 };
 
+#ifdef ENVVAR
 char* varnames[]={
   PWDSTATE, GREPSTATE, CATSTATE, WCSTATE, LSSTATE, IOTASTATE, HEADSTATE, TAILSTATE,
   PSSTATE,
@@ -1583,7 +1601,8 @@ char* varnames[]={
   STATSSTATE,
   TEETERMINALSTATE, TERMINALSTATE, EDITLINESTATE,
 };
-
+#endif
+ 
 ////////////////////////////////////////////////////////////
 
 #ifdef SHELLINFO
@@ -1641,7 +1660,8 @@ int wrunsystrain(cmdtrain* train) {
   } while(*train);
 
 #else
-
+  // inline
+  
   while((fp=*train)) {
     line= (*fp)(fp, line);
     if (line) ++train; else --train;
@@ -1658,7 +1678,9 @@ int wrunsystrain(cmdtrain* train) {
 
     line= (*fp)(fp, line);
 
+#ifdef VARINFO
     printf("\t%s %p:", taskname(*fp), line); fflush(stdout); shprint(line);
+#endif
 
     if (line) ++train; else --train;
   }    
@@ -1697,7 +1719,7 @@ int wrunsystrain(cmdtrain* train) {
 
  cmdtrain* wsysparse(char* cmd, char* pi, unsigned int *bitsout) {
   // TODO: check overflow this per command?
-  char i, **n;
+  char i, l, **n;
   cmdfun* f;
   void** state; // treat like slots!
 
@@ -1734,7 +1756,12 @@ int wrunsystrain(cmdtrain* train) {
     skipspc();
     args= zptr;
     skiptill('|');
+    // TODO: overwrite?
     if (!*zptr) zptr= 0; else *zptr++= 0;
+    // trim args
+    while((l= strlen(args)) && args[l-1]==' ') args[l-1]= 0;
+
+//printf("PARSEtillBAR: >%s< ARGS=>%s<\n", zptr?zptr:"(nUll)", args);
 
     //printf("args>%s<\n\nn", args);
 
@@ -1774,13 +1801,19 @@ int wrunsystrain(cmdtrain* train) {
 
       // TODO: let's allocate too!
       arr[++i]= state= (*f)(NULL, args);
-      state[0]= *f;
-      state[1]= varnames[n-cmdnames];
-      
       zptr= zsave;
     }
 
-    if (!state) {
+    if (state) {
+      // TODO: remove from "init"
+      state[0]= *f;
+
+      #ifdef ENVVAR
+      state[1]= varnames[n-cmdnames];
+      #endif      
+
+    } else {
+
       // TODO: ABORT stderr?
       printf("%%command.init \"%s %s\" gave NULL!\n", *n, args);
       free(dofree);
@@ -1817,7 +1850,8 @@ int wsystem(char* command) { vcleanup(); {
   unsigned int cleanbits= 0;
   cmdtrain* train= wsysparse(cmd, &i, &cleanbits);
   int r;
-  
+
+  // already used by parser
   free(cmd);
 
   // TODO: what error is appropriate?
@@ -1888,7 +1922,10 @@ char isliteral(void* p) {
 int main() {
   //tsystem("editline | print foo $* bar | terminal"); exit(3);
 
-  system("iota 1 3 | print %n | terminal"); exit(0);
+  //system("iota 1 3 | print %n | terminal"); exit(0);
+  //system("iota 1 1000|grep 7|terminal"); exit(0);
+//  system("iota 1 17|grep 7|terminal"); exit(0);
+  system("iota 1 17|grep 7 |terminal"); exit(0);
 
 #if 0  
   // Test string binding
