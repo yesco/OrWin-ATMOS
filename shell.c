@@ -8,10 +8,10 @@
 // - datamash qsv vsv
 
 // TODO: behaves differently,, like never ends for set/print?
-#define SHELLTRACE
+//#define SHELLTRACE
 
 // prints internal line tokens in plain text
-#define SHELLINFO
+//#define SHELLINFO
 //#define SHELLTEST
 
 #define MAX_TRAIN 16
@@ -306,7 +306,9 @@ void shprint(char* line) {
 //
 
 
-  
+// global train start pointer must be set before calling wtrainstep
+ 
+cmdtrain* trainptr;
   
 #ifndef ENVVARS
  
@@ -315,13 +317,14 @@ void shprint(char* line) {
 #define print   dummyfun 
 #define varlist dummyfun
 
+#define VARSTATE NULL
+#define SETSTATE NULL
+#define PRINTSTATE NULL
+#define VARLISTSTATE NULL
+
 #define vcleanup() (void)0
  
 #else
- 
-// global train start pointer must be set before calling wtrainstep
- 
-cmdtrain* trainptr;
  
 // TODO: remove
 char* taskname(void* fun);
@@ -1012,7 +1015,6 @@ void* ls(lsstate* state, char* line) {
     state->dir = opendir((line && *line)? line: ".");
     REQUEST_CLEANUP();
     // TODO: size? more attributes? timestamp"
-    vbind("_name", state->name);
     if (state->dir) return state;
     // fail
     free(state);
@@ -1355,15 +1357,6 @@ void* ps(psstate* state, char* line) {
   
   if (!state) {
     state= STALLOC(psstate, ps);
-    vbind("%pid", &state->pid);
-    vbind("%cpu", &state->cpu);
-    vbind("%mem", &state->mem);
-    vbind("%size", &state->size);
-    vbind("%ticks", &state->ticks);
-    vbind("%mins", &state->mins);
-    vbind("%secs", &state->secs);
-    vbind("_name", &state->name);
-    vbind("_args", &state->args);
     return state;
   }
 
