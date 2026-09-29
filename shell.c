@@ -326,10 +326,13 @@ cmdtrain* trainptr;
 // TODO: remove
 char* taskname(void* fun);
  
+// TODO: remove
 // Returns a pointer to 
+//static char vptrtype;
+ 
 char** vptr(char* name) {
   cmdtrain* loco= trainptr+1;
-  char** state;
+  char ** state, *p, c, n, *pn;
   
   int i= 1;
 
@@ -337,6 +340,30 @@ char** vptr(char* name) {
     printf("%d: loco:%04x @%04x %-8s : %s\n",
              i,      loco,state,
       taskname(state[0]),  state[1]);
+    p= state[1]; // TODO: use header.bound
+    if (p) {
+      n= 0;
+      while((c= *p++)) {
+        if (c > '@' || isdigit(c)) continue; // TODO: or just isalnum?
+
+        // we have % | _ | $ | @ (or any non apha)
+        //vptrtype= c;
+        ++n;
+
+        // check if string match
+        printf("compare: %s '%c' %s\n", name, c, p);
+        pn= name;
+// TODO: ouit of sync because of %% ?
+        while(c == *pn++ && isalnum(c= *p)) ++p;
+
+        // match if at end of both
+        printf("  HERE: *pn=%d '%c' c=%d '%c' \n", *pn, *pn, c, c);
+        if (*pn || isalnum(c)) continue;
+        // found!
+        printf("FOUND: %d %d %04x == #%d\n", i, n, state+n, state[n]);
+        return state+n;
+      }
+    }
     ++loco; ++i;
   }
   putchar('\n');
@@ -1039,16 +1066,19 @@ void* iota(countstate* state, char* line) {
     state->n = nextInt(&line, 1);
     state->e = nextInt(&line, 10);
     state->d = nextInt(&line, 1);
+    // we need to compensate for first
+    state->n-= state->d;
+
     return state;
   }
 
   lfree(line);
+  state->n+= state->d;
   if ((state->d > 0 && state->n <= state->e) ||
       (state->d < 0 && state->n >= state->e)) {
     char s[10];
     // TODO: use returned length:
     sprintf(s, "%d", state->n);
-    state->n+= state->d;
     return lstrdup(s);
   }
 
@@ -1865,7 +1895,7 @@ char isliteral(void* p) {
 int main() {
   //tsystem("editline | print foo $* bar | terminal"); exit(3);
 
-  system("iota 1 3 | print $n | terminal"); exit(0);
+  system("iota 1 3 | print %n | terminal"); exit(0);
 
 #if 0  
   // Test string binding
