@@ -38,11 +38,11 @@
 //      if (line) loco++; else loco--;
 //   }
 //
-// For an interactive shell you'd wrap it like this:
+// For an interactive shell you'd wrap it something like this:
 //
 //   editline | sh -C $line | terminal
 //
-// This may be done by there terminal user app.
+// This may be done by the terminal user app.
 //
 // For more info see SHELL.md
 
@@ -1924,13 +1924,13 @@ void tsystem(char* cmd) {
   system(cmd);
 }
   
-void gts(char* name) {
-  printf("%s: \"%s\"\n", name, vgets(name));
-}
+//void gts(char* name) {
+//  printf("%s: \"%s\"\n", name, vgets(name));
+//}
 
-void gti(char* name) {
-  printf("%s: %d\n", name, vgeti(name));
-}
+//void gti(char* name) {
+//  printf("%s: %d\n", name, vgeti(name));
+//}
 
 #include "qputs.c"
 
