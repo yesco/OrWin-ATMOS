@@ -1,11 +1,6 @@
-// TDOO:
-//
-// magically, it gained 200 bytes from:
-//   git checkout 427179348ead7ca5cb56f077fef03c1d0b1e14e7
-
 // OrWIN Shell pipeline execute
 // 
-// (c) 2026 Jonas S Karlsson (jsk@yesco.org)
+// (C) 2026 Jonas S Karlsson (jsk@yesco.org)
 
 // Implements unix style shell processing with "pipes".
 // This implements it extemly efficiently but still keeping
@@ -1772,7 +1767,7 @@ int wrunsystrain(cmdtrain* train) {
 
  cmdtrain* wsysparse(char* cmd, char* pi, unsigned int *bitsout) {
   // TODO: check overflow this per command?
-  char i, l, **n;
+  char i, l, **n, *p;
   cmdfun* f;
   void** state; // treat like slots!
 
@@ -1798,23 +1793,24 @@ int wrunsystrain(cmdtrain* train) {
   i= 0;
   
   while(zptr && *zptr) {
-    // extract command name
+
+    // TODO: same as getNext!?
+    
+    // - extract command name
     skipspc();
     name= zptr;
     skipword();
     *zptr++= 0;
     //printf("name>%s<\n", name);
 
-    // extract arguments
+    // - extract arguments
     skipspc();
     args= zptr;
     skiptill('|');
-    // TODO: overwrite?
+    // trim args end
+    p= zptr;
     if (!*zptr) zptr= 0; else *zptr++= 0;
-    // trim args
-    while((l= strlen(args)) && args[l-1]==' ') args[l-1]= 0;
-
-//printf("PARSEtillBAR: >%s< ARGS=>%s<\n", zptr?zptr:"(nUll)", args);
+    do { *p= 0; } while(*--p == ' ');
 
     //printf("args>%s<\n\nn", args);
 
@@ -1977,8 +1973,8 @@ int main() {
 
   //system("iota 1 3 | print %n | terminal"); exit(0);
   //system("iota 1 1000|grep 7|terminal"); exit(0);
-//  system("iota 1 17|grep 7|terminal"); exit(0);
-  system("iota 1 17|grep 7 |terminal"); exit(0);
+  system("iota 1 17|grep 7|terminal"); exit(0);
+//  system("iota 1 17|grep 7 |terminal"); exit(0);
 
 #if 0  
   // Test string binding
