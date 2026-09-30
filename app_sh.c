@@ -156,7 +156,7 @@ void* app_sh(void* voidapp, char* line) {
     // TODO: since it's in FOREGROUND, should get MORE cycles!
 
     do {
-      trainptr= app->train;
+      trainptr= app->train; // 30 bytes almost!
       app->line= wtrainstep(&app->loco, app->line);
       //} while(--n && app->line != EOS);
       // TODO: move this to wtrainstep loop, to save CPU!

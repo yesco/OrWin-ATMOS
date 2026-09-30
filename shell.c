@@ -1,11 +1,64 @@
+// TDOO:
+//
+// magically, it gained 200 bytes from:
+//   git checkout 427179348ead7ca5cb56f077fef03c1d0b1e14e7
+
 // OrWIN Shell pipeline execute
+// 
+// (c) 2026 Jonas S Karlsson (jsk@yesco.org)
+
+// Implements unix style shell processing with "pipes".
+// This implements it extemly efficiently but still keeping
+// it superficially equivalent.
+//
+// This is achieved by these specifics:
+// - no real processes, just "task" with a "run"-method
+// - no buffers: only a single line "passed around"
+// - run: input a line from previous process; output a new line to next
+// - backtracking: grep: if no match return NULL
+//
+// Extentions:
+// - generic backtracking, more like database generators
+// - event-driven, can wait on KEYEVENTS, WAITMS (:TODO) etc..
+// - EOS marker, other "out-of-band" events: CLEANUP
+// - named typed variables (%int _conststr $str)
+// - results can be structured/named
+
+// Implementation:
+// 
+// A TRAIN of commands delimited by | each are initialized
+// to each own state-structure. A train is a list of pointers
+// wrapped in a leading NULL and ending NULL. If go to either 
+// end, we're done!
+//
+// A result from like "grep" is passed to the next process in
+// the chain. If no result (==NULL) the locomotive backtracks.
+//
+// This simply implements a SINGLE LINE buffered shell pipeline
+// runner:
+//
+//   line= EOS;
+//   while(*loco) {
+//      line=(**loco)(*loco, line);
+//      if (line) loco++; else loco--;
+//   }
+//
+// For an interactive shell you'd wrap it like this:
+//
+//   editline | sh -C $line | terminal
+//
+// This may be done by there terminal user app.
+//
+// For more info see SHELL.md
+
+
 
 // TODO:
 // - uniq
 // - sort (-u)
 // - freq or huniq
 // - bc
-// - datamash qsv vsv
+// - datamash qsv vsv from
 
 // TODO: behaves differently,, like never ends for set/print?
 //#define SHELLTRACE
