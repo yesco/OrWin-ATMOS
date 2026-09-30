@@ -672,7 +672,7 @@ void startline(runptr fun, const char* line) {
   winp->status= 1;
   winp->args= strdup(line);
   
-  winp->fun=   (void*)fun;
+  winp->fun= (void*)fun;
   dorun((char*)line);
   
   // TODO: glue (fun,state) together? (like the train)
@@ -825,7 +825,7 @@ char wkbhit(char win) {
       newwin();
       // TODO: terminal overrides, hardcodes black...
       window(3, 17, 40-7, 10, yellow, black);
-      startline(app_sh, "ps|terminal");
+      startline(app_sh, "ps");
       break; }
     case 'H': help(); break;
 

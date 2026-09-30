@@ -118,7 +118,8 @@ void* app_sh(void* voidapp, char* line) {
     {
       // TODO: orig? lol modified...
       app->origcmd= malloc(strlen(line)+1+10);
-      sprintf(app->origcmd, "%s|terminal", line);
+// TODO: space before |terminal needed for "ps"
+      sprintf(app->origcmd, "%s |terminal", line);
     }
 
     wstatus(-1, app->origcmd? app->origcmd: "Shell");

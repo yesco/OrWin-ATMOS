@@ -1794,24 +1794,28 @@ int wrunsystrain(cmdtrain* train) {
   
   while(zptr && *zptr) {
 
-    // TODO: same as getNext!?
+
+    args= NULL;
     
+    // TODO: same as getNext!? - make this better!
     // - extract command name
     skipspc();
     name= zptr;
     skipword();
-    *zptr++= 0;
-    //printf("name>%s<\n", name);
-
-    // - extract arguments
     skipspc();
-    args= zptr;
-    skiptill('|');
-    // trim args end
-    p= zptr;
-    if (!*zptr) zptr= 0; else *zptr++= 0;
-    do { *p= 0; } while(*--p == ' ');
+    if (*zptr!='|')  {
+      *zptr++= 0;
 
+      // - extract arguments
+      args= zptr;
+      skiptill('|');
+      // trim args end
+      p= zptr;
+      if (!*zptr) zptr= 0; else *zptr++; //= 0;
+      do { *p= 0; } while(*--p == ' ');
+    } else *zptr++= 0;
+
+    //printf("name>%s<\n", name);
     //printf("args>%s<\n\nn", args);
 
     // find command fun
@@ -1973,8 +1977,8 @@ int main() {
 
   //system("iota 1 3 | print %n | terminal"); exit(0);
   //system("iota 1 1000|grep 7|terminal"); exit(0);
-  system("iota 1 17|grep 7|terminal"); exit(0);
-//  system("iota 1 17|grep 7 |terminal"); exit(0);
+//  system("iota 1 17|grep 7|terminal"); exit(0);
+  system("iota 1 17 |grep 7 |terminal"); exit(0);
 
 #if 0  
   // Test string binding
