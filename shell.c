@@ -82,6 +82,9 @@
 // (- 36675 36389) == 286 bytes saved by zline!
 //
 // these are probably equal to what oscar64 does, LOL
+//
+// (- 36389 36281) == 108 saved by not passing in fun in alloc
+
 
 #ifdef __CC65__
 #pragma bss-name (push, "ZEROPAGE")
@@ -175,15 +178,12 @@ typedef struct simplestate {
   int i;
 } simplestate;
 
-void* stalloc(unsigned int size, void* f) {
-  simplestate* state= calloc(size, 1);
-  state->f= f;
-  return state;
+void* stalloc(unsigned int size) {
+  return calloc(size, 1);
 }
 
-#define STALLOC(strct, fun) stalloc(sizeof(strct), fun)
-
-#define SIMPLEALLOC(fun) STALLOC(simplestate,fun)
+#define STALLOC(strct) stalloc(sizeof(strct))
+#define SIMPLEALLOC() STALLOC(simplestate)
 
 typedef struct pstate {
   cmdfun f;
@@ -192,7 +192,7 @@ typedef struct pstate {
   char* s;
 } pstate;
 
-#define PSTALLOC(fun, p) (app=STALLOC(pstate, fun), app->s=strdup(p), app)
+#define PSTALLOC(p) (app=STALLOC(pstate), app->s=strdup(p), app)
 
 void* memdup(void* p, unsigned int bytes) {
 
@@ -601,7 +601,7 @@ typedef struct varstate {
 char* set() {
   if (!zapp) {
     char *name;
-    zapp= STALLOC(varstate, set);
+    zapp= STALLOC(varstate);
 
     // variable name to set to expr
     // TODO: shouldn't need this strdup and name?
@@ -656,7 +656,7 @@ typedef struct printstate {
 char* print() {
   if (!app) {
     char np= 0, *param[16]= {0}, *p, *endline= zline+strlen(zline);
-    app= STALLOC(varstate, print);
+    app= STALLOC(varstate);
     if (!app) return NULL;
     do {
       p= param[np++]= strdup(nextStr(&zline, NULL));
@@ -723,7 +723,7 @@ typedef struct varliststate {
 #define APP varliststate
 char* varlist() {
   if (!app) {
-    app= STALLOC(varliststate, varlist);
+    app= STALLOC(varliststate);
     return (char*)app;
   }
 
@@ -764,7 +764,7 @@ char* varlist() {
  
 #define APP simplestate
 void* pwd() {
-  if (!app) return SIMPLEALLOC(pwd);
+  if (!app) return SIMPLEALLOC();
   if (!zline) return EOS;
 
   // generate a value on EOS (or any), lol
@@ -780,7 +780,7 @@ void* pwd() {
 
 #define APP pstate
 void* grep() {
-  if (!app) return PSTALLOC(grep, zline);
+  if (!app) return PSTALLOC(zline);
 
   // pass-through backtracking
   if (!zline || zline==EOS) return zline;
@@ -806,7 +806,7 @@ typedef struct fakefilestate {
 #define APP fakefilestate
 void* cat() {
   if (!app) {
-    app= STALLOC(fakefilestate, cat);
+    app= STALLOC(fakefilestate);
     if (!app) return NULL;
     app->fil= fakefile;
     return app;
@@ -838,7 +838,7 @@ void* cat() {
 // TODO: haha
     
     return NULL;
-    app= STALLOC(filestate, cat);
+    app= STALLOC(filestate);
     if (!app) return NULL;
 
     REQUEST_CLEANUP();
@@ -899,7 +899,7 @@ void* wc() {
   unsigned int n= 0;
   
   if (!app) {
-    app= STALLOC(wcstate, wc);
+    app= STALLOC(wcstate);
     return app;
   }
 
@@ -1038,7 +1038,7 @@ typedef struct lsstate {
 #define APP lsstate
 void* ls() {
   if (!app) {
-    app = STALLOC(lsstate, ls);
+    app = STALLOC(lsstate);
     if (!app) return NULL;
     
     if (zline && *zline) {
@@ -1110,7 +1110,7 @@ void* ls() {
   char* p;
   
   if (!app) {
-    app = STALLOC(lsstate, ls);
+    app = STALLOC(lsstate);
     if (!app) return NULL;
 
     if (zline && *zline) {
@@ -1176,7 +1176,7 @@ typedef struct countstate {
 #define APP countstate
 void* iota() {
   if (!app) {
-    app = STALLOC(countstate, iota);
+    app = STALLOC(countstate);
     if (!app) return NULL;
 
     app->n = nextInt(&zline, 1);
@@ -1207,7 +1207,7 @@ void* iota() {
 #define APP countstate
 void* head() {
   if (!app) {
-    app = STALLOC(countstate, head);
+    app = STALLOC(countstate);
     if (!app) return NULL;
 
     app->n= 10; // default
@@ -1236,7 +1236,7 @@ void* tail() {
   char** ring;
   
   if (!app) {
-    app = STALLOC(countstate, tail);
+    app = STALLOC(countstate);
     if (!app) return NULL;
 
     // +3 means skip 3 lines, -3 means last 3
@@ -1331,7 +1331,7 @@ int cmpint(const void *a, const void *b) {
 #define APP StatsState
 char* stats() {
   if (!app) {
-    app= STALLOC(StatsState, stats);
+    app= STALLOC(StatsState);
     app->min= 0x7fff;
     app->max= 0x8000;
 
@@ -1477,7 +1477,7 @@ void* ps() {
   unsigned int m;
   
   if (!app) {
-    app= STALLOC(psstate, ps);
+    app= STALLOC(psstate);
     return app;
   }
 
@@ -1588,7 +1588,7 @@ typedef struct editlinestate {
 #define APP editlinestate
 void* editline() {
   if (!app) {
-    return STALLOC(editlinestate, editline);
+    return STALLOC(editlinestate);
   } //else if (!KEYEVENT(zline)) return WAITKEY;
   else {
     // generealize... dstr?
@@ -1644,7 +1644,7 @@ void* editline() {
 // more like "tee -"
 #define APP simplestate
 void* teeterminal() {
-  if (!app) return STALLOC(wcstate, wc);
+  if (!app) return STALLOC(wcstate);
 
   shprint(zline);
   return zline;
@@ -1656,7 +1656,7 @@ void* teeterminal() {
 // can only be last in chain!
 #define APP simplestate
 void* terminal() {
-  if (!app) return STALLOC(simplestate, terminal);
+  if (!app) return STALLOC(simplestate);
 
   shprint(zline);
   lfree(zline);
