@@ -30,7 +30,7 @@
 // the chain. If no result (==NULL) the locomotive backtracks.
 //
 // This simply implements a SINGLE LINE buffered shell pipeline
-// runner:
+// runner, like this (in principle):
 //
 //   line= EOS;
 //   while(*loco) {
@@ -44,6 +44,14 @@
 //
 // This may be done by the terminal user app.
 //
+// Init is done as:
+// 1. if have size, preallocate size => zapp (or NULL)
+// 2. if have "init"(), call it; if return NULL free zapp and fail
+// 3. otherwise call "run"() zapp= NULL, zlien= args
+//
+// Note: using zero page globals: zapp, zline, (zptr) saves
+//   something like 15xx bytes!
+ 
 // For more info see SHELL.md
 
 
@@ -85,11 +93,13 @@
 // (- 36389 36281) == 108 saved by not passing in fun in alloc
 // (- 36281 36153) == 128 saved by implicit zline in nextStr/nextInt
 // (- 36153 35824) == 329 saved by simplier init!
+// (- 35824 35568) == 256 saved by prealloc sizes & init!
 
+// (+ 308 286 108 128 329 256) = 1415 saved total!
 
 #ifdef __CC65__
 #pragma bss-name (push, "ZEROPAGE")
-char* zapp;
+void* zapp;
 char* zline;
 #pragma bss-name (pop)
 #endif // __CC65__
@@ -193,21 +203,22 @@ typedef struct pstate {
   char* s;
 } pstate;
 
+// TODO: alias w linestate?
+
+#define APP pstate
+void* initline() {
+  app->s= strdup(zline);
+  return app;
+}
+#undef APP
+
 #define PSTALLOC(p) (app=STALLOC(pstate), app->s=strdup(p), app)
 
 void* memdup(void* p, unsigned int bytes) {
-
-// TODO: wtf? (2 bytes fail!)
-
-//  char* r= malloc(bytes+2);
   char* r= malloc(bytes);
-#ifdef __CC65__
-//  printf("BYTES=%5d\t%p\tAVAIL=%u\n", bytes, r, _heapmemavail());
-#endif
-  // TODO: give better error message! and don't drop out!
-  assert(r != NULL);
-  return memcpy(r, p, bytes);
+  return r? memcpy(r, p, bytes): NULL;
 }
+
 
 // TODO: ugly, use my fillins.c?
 
@@ -399,6 +410,16 @@ cmdtrain* trainptr;
 #define SETSTATE NULL
 #define PRINTSTATE NULL
 #define VARLISTSTATE NULL
+
+#define SETSIZE 0
+#define SETINIT NULL
+
+#define PRINTSIZE 0
+#define PRINTINIT NULL
+
+#define VARLISTSIZE 0
+#define VARLISTINIT NULL
+
 
 #define vcleanup() (void)0
  
@@ -594,29 +615,26 @@ typedef struct varstate {
 //(397 : set, NATIVE_CODE:code)
 // 474 : set, NATIVE_CODE:code
 #define APP varstate
+#define SETSIZE sizeof(varstate)
+#define SETINIT set_init
+void* set_init() {
+  // variable name to set to expr
+  // TODO: shouldn't need this strdup and name?
+  // TODO: capture whole line!
+  app->name= strdup(nextStr(""));
+  // TODO: only works for $var if not exist, not %var!!!
+  assert(*app->name == '$');
+
+  app->expr= strdup(nextStr(""));
+  return app;
+}
+
 char* set() {
-  if (!zapp) {
-    char *name;
-    zapp= STALLOC(varstate);
-
-    // variable name to set to expr
-    // TODO: shouldn't need this strdup and name?
-    // TODO: capture whole line!
-    name= app->name= strdup(nextStr(""));
-
-    // TODO: only works for $var if not exist, not %var!!!
-    assert(*name == '$');
-
-    app->expr= strdup(nextStr(""));
-// TODO: reconsider
-    return (char*)app;
-
-  } else if (zline==CLEANUP) {
+  if (zline==CLEANUP) {
     LFREE(app->name);
     LFREE(app->expr);
     return zline;
   }
-
   if (zline<=EVENTS) return zline;
   else {
     char* origline= zline;
@@ -651,27 +669,28 @@ typedef struct printstate {
 //
 // 457 : print, NATIVE_CODE:code
 #define APP printstate
-char* print() {
-  if (!app) {
-    char np= 0, *param[16]= {0}, *p, *endline= zline+strlen(zline);
-    app= STALLOC(varstate);
-    if (!app) return NULL;
-    do {
-      p= param[np++]= strdup(nextStr(NULL));
-      //printf("\tprint %u %s\n", np, p);
-
-// TODO: give "error" at 16
-// TODO: nextStr doesn't know how to terminate!
+#define PRINTSIZE sizeof(printstate)
+#define PRINTINIT print_init
+void* print_init() {
+  char np= 0, *param[16]= {0}, *p, *endline= zline+strlen(zline);
+  do {
+    p= param[np++]= strdup(nextStr(NULL));
+    //printf("\tprint %u %s\n", np, p);
+    
+    // TODO: give "error" at 16
+    // TODO: nextStr doesn't know how to terminate!
 
     //} while(p!=NULL && zline < endline);
-      // TODO: maybe capture this outside for nextStr?
-    } while(zline < endline);
+    // TODO: maybe capture this outside for nextStr?
+  } while(zline < endline);
+  
+  app->params= memdup(param, (np+1)*sizeof(char*));
+  // auto-deallocs app if return NULL
+  return app->params? app: NULL;
+}
 
-    app->params= memdup(param, (np+1)*sizeof(char*));
-    if (!app->params) { free(app); return NULL; }
-    return (char*)app;
-
-  } else if (zline==CLEANUP) {
+char* print() {
+  if (zline==CLEANUP) {
     char** p= app->params;
     while(*p) LFREE(*p++);
 
@@ -720,11 +739,9 @@ typedef struct varliststate {
 } varliststate;
 
 #define APP varliststate
+#define VARLISTSIZE sizeof(varliststate)
+#define VARLISTINIT NULL
 char* varlist() {
-  if (!app) {
-    app= STALLOC(varliststate);
-    return (char*)app;
-  }
 
 // TODO: re-implement since we changed VARS...
   assert(!"not implmeneted");
@@ -762,8 +779,9 @@ char* varlist() {
 #define PWDSTATE NULL
  
 #define APP simplestate
+#define PWDSIZE sizeof(simplestate)
+#define PWDINIT NULL 
 void* pwd() {
-  if (!app) return SIMPLEALLOC();
   if (!zline) return EOS;
 
   return strdup("/home/orwin");
@@ -774,12 +792,10 @@ void* pwd() {
 #define GREPSTATE NULL
 
 #define APP pstate
+#define GREPSIZE sizeof(pstate)
+#define GREPINIT initline
 void* grep() {
-  // TODO: make generic init (copyargs/copyline)
-  if (!app) return PSTALLOC(zline);
-
-  // pass-through backtracking
-  if (!zline || zline==EOS) return zline;
+  if (zline<=EVENTS) return zline;
 
 //  printf("  GREP: %s\n", line);
   return strstr(zline, app->s)? zline: lfree(zline);
@@ -893,11 +909,11 @@ typedef struct wcstate {
 } wcstate;
 
 #define APP wcstate
+#define WCSIZE sizeof(wcstate)
+#define WCINIT NULL 
 void* wc() {
   char c;
   unsigned int n= 0;
-  
-  if (!app) return STALLOC(wcstate);
 
   // only generates one value
   if (!zline) return EOS;
@@ -1169,20 +1185,17 @@ typedef struct countstate {
 } countstate;
 
 #define APP countstate
-void* iota() {
-  if (!app) {
-    app = STALLOC(countstate);
-    if (!app) return NULL;
-
-    app->n = nextInt(1);
-    app->e = nextInt(10);
-    app->d = nextInt(1);
-    // we need to compensate for first
-    app->n-= app->d;
-
-    return app;
-  }
-
+#define IOTASIZE sizeof(countstate)
+#define IOTAINIT iota_init
+void* iota_init() {
+  app->n = nextInt(1);
+  app->e = nextInt(10);
+  app->d = nextInt(1);
+  // we need to compensate for first
+  app->n-= app->d;
+  return app;
+}
+char* iota() {
   lfree(zline);
   app->n+= app->d;
   if ((app->d > 0 && app->n <= app->e) ||
@@ -1198,16 +1211,14 @@ void* iota() {
 #undef APP
         
 #define HEADSTATE NULL
- 
 #define APP countstate
+#define HEADSIZE sizeof(countstate)
+#define HEADINIT head_init
+void* head_init() {
+  app->n= -nextInt(-10);
+  return app;
+}
 void* head() {
-  if (!app) {
-    app = STALLOC(countstate);
-    if (!app) return NULL;
-    app->n= -nextInt(-10);
-    return app;
-  }
-
   if (!zline || zline==EOS) return zline;
   if (app->n-- > 0) return zline;
 
@@ -1220,22 +1231,20 @@ void* head() {
 #define TAILSTATE NULL
 
 #define APP countstate
+#define TAILSIZE sizeof(countstate)
+#define TAILINIT tail_init 
+void* tail_init() {
+  // +3 means skip 3 lines, -3 means last 3
+  app->n= 0;
+  if (*zline=='+') ++zline;
+  app->e= -nextInt(10);
+  //    if (state->e < -2) state->e+= 2;
+  if (app->e > 0) app->d= (intptr_t)calloc(app->e, sizeof(char*));
+  return app;
+}
 void* tail() {
   unsigned int start;
   char** ring;
-  
-  if (!app) {
-    app = STALLOC(countstate);
-    if (!app) return NULL;
-
-    // +3 means skip 3 lines, -3 means last 3
-    app->n= 0;
-    if (*zline=='+') ++zline;
-    app->e= -nextInt(10);
-    //    if (state->e < -2) state->e+= 2;
-    if (app->e > 0) app->d= (intptr_t)calloc(app->e, sizeof(char*));
-    return app;
-  }
 
   #ifdef SHELLTRACE
   printf("\n\t  [TAIL %d %d %d %p]\n", app->n, app->e, (int)app->d, (void*)app->d);
@@ -1318,14 +1327,14 @@ int cmpint(const void *a, const void *b) {
 #define LITTLE_ENDIAN (1 == *(unsigned char *)(&(const int){1}))
 
 #define APP StatsState
+#define STATSSIZE sizeof(StatsState)
+#define STATSINIT stats_init
+void* stats_init() {
+  app->min= 0x7fff;
+  app->max= 0x8000;
+  return app;
+}
 char* stats() {
-  if (!app) {
-    app= STALLOC(StatsState);
-    app->min= 0x7fff;
-    app->max= 0x8000;
-    return (char*)app;
-  }
-  
   // End Of Stream => report
   if (app->done) return (lfree(zline),EOS);
   if (zline==EOS) {
@@ -1457,14 +1466,14 @@ typedef struct psstate {
 } psstate;
  
 #define APP psstate
+#define PSSIZE sizeof(psstate)
+#define PSINIT NULL
 void* ps() {
   char s, p, ln[60]; // ... shell args...
   long packed_result;
   Window *w;
   unsigned int m;
   
-  if (!app) return STALLOC(psstate);
-
   // return header before data line
   if (app->i++ == 0)
     return strdup(
@@ -1570,56 +1579,55 @@ typedef struct editlinestate {
 #endif
 
 #define APP editlinestate
+#define EDITLINESIZE sizeof(editlinestate)
+#define EDITLINEINIT NULL
 void* editline() {
-  if (!app) return STALLOC(editlinestate);
   // TODO: ?
   //else if (!KEYEVENT(zline)) return WAITKEY;
-  else {
-    // generealize... dstr?
-    char c, *s= app->s, len= s? strlen(s): 0;
-    app->s= s= realloc(app->s, (len | 15) + 17); // hmmm
-    if (app->i >= MAX_EDIT) return WAITKEY;
+  // generealize... dstr?
+  char c, *s= app->s, len= s? strlen(s): 0;
+  app->s= s= realloc(app->s, (len | 15) + 17); // hmmm
+  if (app->i >= MAX_EDIT) return WAITKEY;
+  s[app->i]= 0;
+    
+  lfree(zline);
+    
+  // TODO: wraps if too long
+  printf("\r> %s", s);
+  //c= cursorgetc();
+  c= getchar();
+
+  // Key input
+  if (c==27 || c&0x80 || c=='C'-'@') {
+    // ESC RET FUNC- CTRL-C (BREAK)
+    lfree(s);
+    app->s= NULL;
+    app->i= 0;
+    return NULL;
+  } else if (c==10 || c==13 || c=='D'-'@') {
+    // RETURN CTRL-D
+    char *r= s;
+    app->s= NULL;
+    app->i= 0;
+    putchar('\n');
+    return r;
+    // TODO: ^P get previous line (save it!)
+  } else if (c=='U'-'@') {
+    // clear line CTRL-U
+    printf("\\\n");
+    s[app->i= 0]= 0;
+  } else if (c==127 || c==8) {
+    // backspace
+    printf("\b \b");
+  } else {
+    // insert char
+    s[app->i++]= c;
     s[app->i]= 0;
-    
-    lfree(zline);
-    
-    // TODO: wraps if too long
-    printf("\r> %s", s);
-    //c= cursorgetc();
-    c= getchar();
 
-    // Key input
-    if (c==27 || c&0x80 || c=='C'-'@') {
-      // ESC RET FUNC- CTRL-C (BREAK)
-      lfree(s);
-      app->s= NULL;
-      app->i= 0;
-      return NULL;
-    } else if (c==10 || c==13 || c=='D'-'@') {
-      // RETURN CTRL-D
-      char *r= s;
-      app->s= NULL;
-      app->i= 0;
-      putchar('\n');
-      return r;
-      // TODO: ^P get previous line (save it!)
-    } else if (c=='U'-'@') {
-      // clear line CTRL-U
-      printf("\\\n");
-      s[app->i= 0]= 0;
-    } else if (c==127 || c==8) {
-      // backspace
-      printf("\b \b");
-    } else {
-      // insert char
-      s[app->i++]= c;
-      s[app->i]= 0;
-
-      putchar(c);
-    }
-
-    return WAITKEY;
+    putchar(c);
   }
+
+  return WAITKEY;
 }
 #undef APP    
 
@@ -1629,9 +1637,9 @@ void* editline() {
  
 // more like "tee -"
 #define APP simplestate
+#define TEETERMINALSIZE sizeof(simplestate)
+#define TEETERMINALINIT NULL
 void* teeterminal() {
-  if (!app) return STALLOC(wcstate);
-
   shprint(zline);
   return zline;
 }
@@ -1643,13 +1651,13 @@ void* teeterminal() {
 
 // can only be last in chain!
 #define APP simplestate
+#define TERMINALSIZE sizeof(simplestate)
+#define TERMINALINIT NULL
 void* terminal() {
-  if (!app) return STALLOC(simplestate);
-
   shprint(zline);
   lfree(zline);
   
-  // force backtracking, why different?
+  // force backtracking
   return zline==EOS? EOS: NULL;
 }
 #undef APP
@@ -1693,6 +1701,25 @@ void* commands[]= {
   teeterminal, terminal, editline,
 };
 
+// limited to 256 bytes = it's "fine"!
+char appsizes[]= {
+  PWDSIZE, GREPSIZE, 0, WCSIZE, 0, IOTASIZE, HEADSIZE, TAILSIZE,
+  PSSIZE,
+  SETSIZE, PRINTSIZE, VARLISTSIZE,
+  STATSSIZE,
+  TEETERMINALSIZE, TERMINALSIZE, EDITLINESIZE,
+};
+
+typedef void* (*initfun)();
+ 
+initfun appinits[]= {
+  PWDINIT, GREPINIT, NULL, WCINIT, NULL, IOTAINIT, HEADINIT, TAILINIT,
+  PSINIT,
+  SETINIT, PRINTINIT, VARLISTINIT,
+  STATSINIT,
+  TEETERMINALINIT, TERMINALINIT, EDITLINEINIT,
+};
+  
 #ifdef ENVVAR
 char* varnames[]={
   PWDSTATE, GREPSTATE, CATSTATE, WCSTATE, LSSTATE, IOTASTATE, HEADSTATE, TAILSTATE,
@@ -1777,7 +1804,7 @@ cmdtrain* wsysparse(char* cmd, char* pi, unsigned int *bitsout) {
   cmdfun* f;
   void** state; // treat like slots!
 
-  char *name, *args, *dofree;
+  char iapp, *name, *args, *dofree;
 
   void* arr[MAX_TRAIN + 2 + 2]; // 2 head, 2 NULL
   unsigned int cleanbits;
@@ -1844,6 +1871,8 @@ cmdtrain* wsysparse(char* cmd, char* pi, unsigned int *bitsout) {
     return NULL;
 
   found:
+    iapp= n-cmdnames;
+    
     #ifdef SHELLINFO
     printf("\t[%s: ", name);
     #endif
@@ -1859,31 +1888,36 @@ cmdtrain* wsysparse(char* cmd, char* pi, unsigned int *bitsout) {
     // This calls the INIT for the command!
     { // save zptr as it may be used in parsing inside init!
       char * zsave= zptr;
-
+      char    size= appsizes[iapp];
+      initfun init= appinits[iapp];
+      
       // TODO: let's allocate too!
-      zapp= NULL;
-      // Quirk, nextStr/zline, nextArg are implicit
-      // TODO: get rid of zline usage during init?
+      zapp= size? calloc(size, 1): NULL;
       zptr= zline= args;
-// TODO: capture zapp, maybe default init/mgr
-      arr[++i]= state= (*f)();
+      arr[++i]= state= init? init(): size? (void*)zapp: (*f)();
 
       zptr= zsave;
     }
 
     if (state) {
-      // TODO: remove from "init"
+      // init "run" method at 0 slot!
       state[0]= *f;
 
       #ifdef ENVVAR
-      state[1]= varnames[n-cmdnames];
+      // var names in 1 slot
+      state[1]= varnames[iapp];
       #endif      
 
     } else {
+      // failed init - deallocate preallocated state
+      lfree(zapp);
 
       // TODO: ABORT stderr?
       printf("%%command.init \"%s %s\" gave NULL!\n", *n, args);
       free(dofree);
+
+// TODO: call clean!
+
       return NULL;
     }
 
