@@ -75,19 +75,24 @@
 // 20459 Bytes before
 // 20294 Bytes after ... not much diff
 
-// orwin: 36978 byte before 
-//        36675 byte after
+// orwin: 36978 byte before       36675 before zline
+//        36675 byte after        36389 ....
+//
 // (- 36978 36675) == 308 bytes saved by zapp!
-
+// (- 36675 36389) == 286 bytes saved by zline!
+//
+// these are probably equal to what oscar64 does, LOL
 
 #ifdef __CC65__
 #pragma bss-name (push, "ZEROPAGE")
 char* zapp;
+char* zline;
 #pragma bss-name (pop)
 #endif // __CC65__
 
 #ifdef OSCAR
 __zeropage extern char* zapp;
+__zeropage extern char* zline;
 #endif
 
 #define voidapp zapp
@@ -142,11 +147,10 @@ __zeropage extern char* zapp;
 
 #endif
 
-typedef void* (*cmdfun)(char* line);
+typedef void* (*cmdfun)();
 
-char* dummyfun(char* line) {
+char* dummyfun() {
   return NULL;
-  (void)line;
 }
  
 typedef cmdfun* cmdtrain;
@@ -234,6 +238,8 @@ extern char isliteral(void* p);
 // 
 
 // 14s iota ... 
+
+// TODO: also implicit"
 
 void lfree(char* line) {
   if (line > EVENTS) free(line);
@@ -592,41 +598,41 @@ typedef struct varstate {
 //(397 : set, NATIVE_CODE:code)
 // 474 : set, NATIVE_CODE:code
 #define APP varstate
-char* set(char* line) {
+char* set() {
   if (!zapp) {
     char *name;
     zapp= STALLOC(varstate, set);
 
     // variable name to set to expr
     // TODO: shouldn't need this strdup and name?
-    name= app->name= strdup(nextStr(&line, (char*)""));
+    name= app->name= strdup(nextStr(&zline, (char*)""));
 
     // TODO: only works for $var if not exist, not %var!!!
     assert(*name == '$');
 
-    app->expr= strdup(nextStr(&line, ""));
+    app->expr= strdup(nextStr(&zline, ""));
 // TODO: reconsider
     return (char*)app;
 
-  } else if (line==CLEANUP) {
+  } else if (zline==CLEANUP) {
     LFREE(app->name);
     LFREE(app->expr);
-    return line;
+    return zline;
   }
 
-  if (line<=EVENTS) return line;
+  if (zline<=EVENTS) return zline;
   else {
-    char* origline= line;
-    char* endline = line+strlen(line);
+    char* origline= zline;
+    char* endline = zline+strlen(zline);
     //printf("SET:"); shprint(line);
     //printf("xxx: %s %s\n", app->name, app->expr);
 
-    vsetsfrom(app->name, vevals(app->expr, &line));
+    vsetsfrom(app->name, vevals(app->expr, &zline));
 
-    if (line==origline) return line;
-    else if (line <= endline) {
+    if (zline==origline) return line;
+    else if (zline <= endline) {
       // pass on what's left
-      endline= strdup(line); lfree(line); return endline;
+      endline= strdup(zline); lfree(zline); return endline;
     } else return ""; // something, lol
   }
 }
@@ -647,50 +653,50 @@ typedef struct printstate {
 //
 // 457 : print, NATIVE_CODE:code
 #define APP printstate
-char* print(char* line) {
+char* print() {
   if (!app) {
-    char np= 0, *param[16]= {0}, *p, *endline= line+strlen(line);
+    char np= 0, *param[16]= {0}, *p, *endline= zline+strlen(zline);
     app= STALLOC(varstate, print);
     if (!app) return NULL;
     do {
-      p= param[np++]= strdup(nextStr(&line, NULL));
+      p= param[np++]= strdup(nextStr(&zline, NULL));
       //printf("\tprint %u %s\n", np, p);
 
 // TODO: give "error" at 16
 // TODO: nextStr doesn't know how to terminate!
 
-    //} while(p!=NULL && line < endline);
-    } while(line < endline);
+    //} while(p!=NULL && zline < endline);
+    } while(zline < endline);
 
     app->params= memdup(param, (np+1)*sizeof(char*));
     if (!app->params) { free(app); return NULL; }
     return (char*)app;
 
-  } else if (line==CLEANUP) {
+  } else if (zline==CLEANUP) {
     char** p= app->params;
     while(*p) LFREE(*p++);
 
     LFREE(app->params);
-    return line;
+    return zline;
   }
   
-  if (line<=EVENTS) return line;
+  if (zline<=EVENTS) return zline;
   
   // For every data return, print a line fill in params
   // TODO: move  to sarrevals()
   {
     char tmp[128]= {0}; // TODO: use dstr!
     char** p= app->params;
-    char* ln= line;
+    char* ln= zline;
     char* x;
     char n= 255;
 
-    // TODO: vevalarrs(p, *line)
+    // TODO: vevalarrs(p, *zline)
     while(*p) {
       //printf("\t%p : %s => %s\n", p, *p, vgets(*p));
       x= *p;
       if (++n) { if (*x!='^') strcat(tmp, " "); else ++x; }
-      strcat(tmp, vevals(x, &line));
+      strcat(tmp, vevals(x, &zline));
       ++p;
     }
     lfree(ln); // used up!
@@ -715,7 +721,7 @@ typedef struct varliststate {
 } varliststate;
 
 #define APP varliststate
-char* varlist(char* line) {
+char* varlist() {
   if (!app) {
     app= STALLOC(varliststate, varlist);
     return (char*)app;
@@ -724,12 +730,12 @@ char* varlist(char* line) {
 // TODO: implement
   assert(!"not implmeneted");
   
-  if (line && line<EVENTS) return line;
+  if (zline && zline<EVENTS) return zline;
 
   // if done: reset and request next
-//  if (state->i >= nvar) { lfree(line); state->i= 0; return NULL; }
+//  if (state->i >= nvar) { lfree(zline); state->i= 0; return NULL; }
   // if first: return the result
-  if (!app->i++) return line;
+  if (!app->i++) return zline;
 
   // and then every variable for that line
 //  state->name= vars[state->i - 1].name;
@@ -737,7 +743,7 @@ char* varlist(char* line) {
   app->vint= vgeti(app->name);
   app->vstr= vgets(app->name);
 
-  lfree(line);
+  lfree(zline);
   {
     // LOL
     char* ln= malloc(1+1+strlen(app->name)+2+5+2+strlen(app->vstr));
@@ -757,9 +763,9 @@ char* varlist(char* line) {
 #define PWDSTATE NULL
  
 #define APP simplestate
-void* pwd(char* line) {
+void* pwd() {
   if (!app) return SIMPLEALLOC(pwd);
-  if (!line)  return EOS;
+  if (!zline) return EOS;
 
   // generate a value on EOS (or any), lol
 //  lfree(line);
@@ -773,14 +779,14 @@ void* pwd(char* line) {
 #define GREPSTATE NULL
 
 #define APP pstate
-void* grep(char* line) {
-  if (!app) return PSTALLOC(grep, line);
+void* grep() {
+  if (!app) return PSTALLOC(grep, zline);
 
   // pass-through backtracking
-  if (!line || line==EOS) return line;
+  if (!zline || zline==EOS) return zline;
 
 //  printf("  GREP: %s\n", line);
-  return strstr(line, app->s)? line: lfree(line);
+  return strstr(zline, app->s)? zline: lfree(zline);
 }
 #undef APP
  
@@ -798,7 +804,7 @@ typedef struct fakefilestate {
 } fakefilestate;
 
 #define APP fakefilestate
-void* cat(char* line) {
+void* cat() {
   if (!app) {
     app= STALLOC(fakefilestate, cat);
     if (!app) return NULL;
@@ -806,7 +812,7 @@ void* cat(char* line) {
     return app;
   }
 
-  lfree(line);
+  lfree(zline);
   return *app->fil? strdup(*appe->fil++): EOS;
 }
 #undef APP
@@ -823,7 +829,7 @@ typedef struct filestate {
 } filestate;
 
 #define APP filestate
-void* cat(char* line) {
+void* cat() {
   char* ln= NULL;
   size_t sz= 0;
 
@@ -836,17 +842,17 @@ void* cat(char* line) {
     if (!app) return NULL;
 
     REQUEST_CLEANUP();
-    if ((app->fil= fopen(line, "r"))) return app;
+    if ((app->fil= fopen(zline, "r"))) return app;
 
     // errors
     free(app);
     return NULL; // TODO: logic?
-  } else if (line==CLEANUP) {
+  } else if (zline==CLEANUP) {
     if (app->fil) fclose(app->fil); app->fil= NULL;
     return NULL;
   }
 
-  lfree(line);
+  lfree(zline);
 
   // EOF if eof or error?
 
@@ -888,7 +894,7 @@ typedef struct wcstate {
 } wcstate;
 
 #define APP wcstate
-void* wc(char* line) {
+void* wc() {
   char c;
   unsigned int n= 0;
   
@@ -898,21 +904,21 @@ void* wc(char* line) {
   }
 
   // only generates one value
-  if (!line) return EOS;
+  if (!zline) return EOS;
 
   // no other events (except EOS)
-  if (line<EVENTS) return line;
+  if (zline<EVENTS) return zline;
   
   // EOS: Output summary at end
-  if (line==EOS) {
-    line= malloc(25);
-    sprintf(line, "%u %u %u", app->ln, app->wn, app->cn);
-    return line;
+  if (zline==EOS) {
+    zline= malloc(25);
+    sprintf(zline, "%u %u %u", app->ln, app->wn, app->cn);
+    return zline;
     // TODO: do we need to put code to give EOF?
   }
 
   // process one line
-  zptr= line;
+  zptr= zline;
   app->ln++;
   app->cn+= strlen(zptr);
   while((c= *zptr)) {
@@ -923,7 +929,7 @@ void* wc(char* line) {
   }
 
   // returns null (backtracks to get next line)
-  lfree(line);
+  lfree(zline);
   return NULL;
 }
 #undef APP  
@@ -1030,22 +1036,22 @@ typedef struct lsstate {
 } lsstate;
 
 #define APP lsstate
-void* ls(char* line) {
+void* ls() {
   if (!app) {
     app = STALLOC(lsstate, ls);
     if (!app) return NULL;
     
-    if (line && *line) {
+    if (zline && *zline) {
       // If it contains a wildcard or is an explicit filename, save it as a filter pattern
-      if (strchr(line, '*')) {
-        char* p= strrchr(line, '/');
+      if (strchr(zline, '*')) {
+        char* p= strrchr(zline, '/');
         if (p) { *p= 0; app->pat = strdup(p+1); }
         // TODO: simplify duplication
-        else { app->pat = strdup(line); line = 0; }
-      }	else { app->pat = strdup(line); line = 0; }
+        else { app->pat = strdup(zline); zline = 0; }
+      }	else { app->pat = strdup(zline); zline = 0; }
     }
 
-    if (0 != open_dir(&app->dir, (line && *line)? line: ".")) {
+    if (0 != open_dir(&app->dir, (zline && *zline)? zline: ".")) {
       app->dir_open = 1;
       REQUEST_CLEANUP();
       // all good
@@ -1058,12 +1064,12 @@ void* ls(char* line) {
     return NULL;
   }
 
-  lfree(line);
+  lfree(zline);
   if (!app->dir_open) return EOS;
 
   do {
     if (0==read_dir(&app->dir, &app->entry)
-      || line == CLEANUP) {
+      || zline == CLEANUP) {
       if (app->dir_open) {
         close_dir(&app->dir);
         app->dir_open = 0;
@@ -1099,7 +1105,7 @@ typedef struct lsstate {
 } lsstate;
 
 #define APP lstate
-void* ls(char* line) {
+void* ls() {
   struct dirent* de;
   char* p;
   
@@ -1107,18 +1113,18 @@ void* ls(char* line) {
     app = STALLOC(lsstate, ls);
     if (!app) return NULL;
 
-    if (line && *line) {
+    if (zline && *zline) {
       // If it contains a wildcard or is an explicit filename, save it as a filter pattern
-      if (strchr(line, '*')) {
+      if (strchr(zline, '*')) {
 
-        p= strrchr(line, '/');
+        p= strrchr(zline, '/');
         if (p) { *p= 0; app->pat = strdup(p+1); }
         // TODO: simplify duplication
-        else { app->pat = strdup(line); line = 0; }
-      }	else { app->pat = strdup(line); line = 0; }
+        else { app->pat = strdup(zline); zline = 0; }
+      }	else { app->pat = strdup(zline); zline = 0; }
     }
 
-    app->dir = opendir((line && *line)? line: ".");
+    app->dir = opendir((zline && *zline)? zline: ".");
     REQUEST_CLEANUP();
     // TODO: size? more attributes? timestamp"
     if (app->dir) return app;
@@ -1127,11 +1133,11 @@ void* ls(char* line) {
     return NULL;
   }
 
-  lfree(line);
+  lfree(zline);
   if (!app->dir) return EOS;
 
   do {
-    if (!(de=readdir(app->dir)) || line == CLEANUP) {
+    if (!(de=readdir(app->dir)) || zline == CLEANUP) {
       if (app->dir) {
         closedir(app->dir);
         app->dir = NULL;
@@ -1168,21 +1174,21 @@ typedef struct countstate {
 } countstate;
 
 #define APP countstate
-void* iota(char* line) {
+void* iota() {
   if (!app) {
     app = STALLOC(countstate, iota);
     if (!app) return NULL;
 
-    app->n = nextInt(&line, 1);
-    app->e = nextInt(&line, 10);
-    app->d = nextInt(&line, 1);
+    app->n = nextInt(&zline, 1);
+    app->e = nextInt(&zline, 10);
+    app->d = nextInt(&zline, 1);
     // we need to compensate for first
     app->n-= app->d;
 
     return app;
   }
 
-  lfree(line);
+  lfree(zline);
   app->n+= app->d;
   if ((app->d > 0 && app->n <= app->e) ||
     (app->d < 0 && app->n >= app->e)) {
@@ -1199,25 +1205,25 @@ void* iota(char* line) {
 #define HEADSTATE NULL
  
 #define APP countstate
-void* head(char* line) {
+void* head() {
   if (!app) {
     app = STALLOC(countstate, head);
     if (!app) return NULL;
 
     app->n= 10; // default
-    if (line && *line) {
-      if (*line=='-') ++line;
-      app->n= atoi(line);
+    if (zline && *zline) {
+      if (*zline=='-') ++zline;
+      app->n= atoi(zline);
     }
     return app;
   }
 
-  if (!line || line==EOS) return line;
+  if (!zline || zline==EOS) return zline;
 
-  if (app->n-- > 0) return line;
+  if (app->n-- > 0) return zline;
 
   // This "cuts-off" the consumer
-  lfree(line);
+  lfree(zline);
   return EOS;
 }
 #undef APP
@@ -1225,7 +1231,7 @@ void* head(char* line) {
 #define TAILSTATE NULL
 
 #define APP countstate
-void* tail(char* line) {
+void* tail() {
   unsigned int start;
   char** ring;
   
@@ -1235,8 +1241,8 @@ void* tail(char* line) {
 
     // +3 means skip 3 lines, -3 means last 3
     app->n= 0;
-    if (*line=='+') ++line;
-    app->e= -nextInt(&line, 10);
+    if (*zline=='+') ++zline;
+    app->e= -nextInt(&zline, 10);
     //    if (state->e < -2) state->e+= 2;
     if (app->e > 0) app->d= (intptr_t)calloc(app->e, sizeof(char*));
     return app;
@@ -1248,15 +1254,15 @@ void* tail(char* line) {
   
   // skip lines code
   if (!app->d) {
-    if (app->e++ >= 0) return line;
-    lfree(line);
+    if (app->e++ >= 0) return zline;
+    lfree(zline);
     return NULL;
   }
 
   // tail code (keep ring buffer)
   ring= (char**)app->d;
 
-  if (line && line != EOS) { 
+  if (zline && zline != EOS) { 
     // insert
     if (++app->n >= app->e) app->n= 0;
     LFREE(ring[app->n]);
@@ -1267,9 +1273,9 @@ void* tail(char* line) {
   start= app->n;
   do {
     if (++app->n >= app->e) app->n= 0;
-    line= ring[app->n];
+    zline= ring[app->n];
     ring[app->n]= NULL;
-    if (line) return line;
+    if (zline) return zline;
   } while (app->n != start);
 
   return EOS;
@@ -1323,7 +1329,7 @@ int cmpint(const void *a, const void *b) {
 #define LITTLE_ENDIAN (1 == *(unsigned char *)(&(const int){1}))
 
 #define APP StatsState
-char* stats(char* line) {
+char* stats() {
   if (!app) {
     app= STALLOC(StatsState, stats);
     app->min= 0x7fff;
@@ -1334,8 +1340,8 @@ char* stats(char* line) {
   }
   
   // End Of Stream => report
-  if (app->done) return (lfree(line),EOS);
-  if (line==EOS) {
+  if (app->done) return (lfree(zline),EOS);
+  if (zline==EOS) {
     char report[128]= {0};
     app->avg    = app->sum / app->n;
     app->var    = (app->sqsum-((app->sum*app->sum)/app->n))/app->n;
@@ -1364,12 +1370,13 @@ char* stats(char* line) {
     return strdup(report);
   }
   
-  if (line < EVENTS) return line;
+  if (zline < EVENTS) return zline;
   
   // Process one piece of data
   { 
-    int v= atoi(line);
-    lfree(line);
+    // TODO: consider a iline var set by... how about args?
+    int v= atoi(zline);
+    lfree(zline);
 
     app->sum+= v;
     app->sqsum+= ((long)v) * v; // increase precision
@@ -1463,7 +1470,7 @@ typedef struct psstate {
 } psstate;
  
 #define APP psstate
-void* ps(char* line) {
+void* ps() {
   char s, p, ln[60]; // ... shell args...
   long packed_result;
   Window *w;
@@ -1539,7 +1546,7 @@ void* ps(char* line) {
   // enable if disable shprint, lol
   //puts(ln); return 0;
     
-  lfree(line);
+  lfree(zline);
   return lstrdup(ln);
 }
 #undef APP
@@ -1579,10 +1586,10 @@ typedef struct editlinestate {
 #endif
 
 #define APP editlinestate
-void* editline(char* line) {
+void* editline() {
   if (!app) {
     return STALLOC(editlinestate, editline);
-  } //else if (!KEYEVENT(line)) return WAITKEY;
+  } //else if (!KEYEVENT(zline)) return WAITKEY;
   else {
     // generealize... dstr?
     char c, *s= app->s, len= s? strlen(s): 0;
@@ -1590,7 +1597,7 @@ void* editline(char* line) {
     if (app->i >= MAX_EDIT) return WAITKEY;
     s[app->i]= 0;
     
-    lfree(line);
+    lfree(zline);
     
     // TODO: wraps if too long
     printf("\r> %s", s);
@@ -1636,11 +1643,11 @@ void* editline(char* line) {
  
 // more like "tee -"
 #define APP simplestate
-void* teeterminal(char* line) {
+void* teeterminal() {
   if (!app) return STALLOC(wcstate, wc);
 
-  shprint(line);
-  return line;
+  shprint(zline);
+  return zline;
 }
 #undef APP
 
@@ -1648,14 +1655,14 @@ void* teeterminal(char* line) {
 
 // can only be last in chain!
 #define APP simplestate
-void* terminal(char* line) {
+void* terminal() {
   if (!app) return STALLOC(simplestate, terminal);
 
-  shprint(line);
-  lfree(line);
+  shprint(zline);
+  lfree(zline);
   
   // force backtracking, why different?
-  return line==EOS? EOS: NULL;
+  return zline==EOS? EOS: NULL;
 }
 #undef APP
 
@@ -1734,26 +1741,26 @@ char* wtrainstep(cmdtrain** loco, char* line) {
   if (!(fp=**loco)) return EOS;
 // TODO: maybe not need fp? just make speical app define
   zapp= (void*)fp;
-  line= (*fp)(line);
-  if (line) ++*loco; else --*loco;
+  zline= line;
+  zline= (*fp)();
+  if (zline) ++*loco; else --*loco;
 
 #ifdef SHELLINFO
   printf("> %s => ", taskname(*fp));
-  shprint(line); 
+  shprint(zline); 
 #endif  
 
-  return line;
+  return zline;
 }
 
 int wrunsystrain(cmdtrain* train) {
   cmdfun *fp;
-  char* line= EOS;
   cmdtrain *origtrain= train;
 
   // used to find variables!
   trainptr= train;
-  
   ++train; // skip initial 0
+  zline= EOS;
 
 #ifndef SHELLTRACE
   // Beatifully simple!
@@ -1761,7 +1768,8 @@ int wrunsystrain(cmdtrain* train) {
 #if 1
 
   do {
-    line= wtrainstep(&train, line);
+    // passing around zline, redundant LOL
+    zline= wtrainstep(&train, zline);
   } while(*train);
 
 #else
@@ -1769,8 +1777,8 @@ int wrunsystrain(cmdtrain* train) {
   
   while((fp=*train)) {
     zapp= fp;
-    line= (*fp)(line);
-    if (line) ++train; else --train;
+    zline= (*fp)();
+    if (zline) ++train; else --train;
   }    
 
 #endif
@@ -1780,15 +1788,16 @@ int wrunsystrain(cmdtrain* train) {
   // SHELLTRACE
   while((fp=*train)) {
     printf("\t  [%d \"%s\" %p]\n", (int)(long)(train-origtrain),
-	   !line? "(NULL)": line==EOS? "*EOS*": line, fp);
+	   !zline? "(NULL)": zline==EOS? "*EOS*": zline, fp);
 
-    line= (*fp)(fp, line);
+    zapp= fp;
+    zline= (*fp)();
 
 #ifdef VARINFO
-    printf("\t%s %p:", taskname(*fp), line); fflush(stdout); shprint(line);
+    printf("\t%s %p:", taskname(*fp), zline); fflush(stdout); shprint(zline);
 #endif
 
-    if (line) ++train; else --train;
+    if (zline) ++train; else --train;
   }    
 
   printf("\t[**SYSTRAIN**: DONE]\n");
@@ -1812,7 +1821,8 @@ int wrunsystrain(cmdtrain* train) {
 	printf("\t[**CLEANUP**: %d %p]\n", n, train[n]);
         #endif
         zapp= (void*)f;
-        (*f)(CLEANUP);
+        zline= CLEANUP;
+        (*f)();
       }
       // remove that state
       free(f);
@@ -1919,8 +1929,10 @@ cmdtrain* wsysparse(char* cmd, char* pi, unsigned int *bitsout) {
 
       // TODO: let's allocate too!
       zapp= NULL;
-// TODO: capture zapp      
-      arr[++i]= state= (*f)(args);
+      zline= args;
+// TODO: capture zapp, maybe default init/mgr
+      arr[++i]= state= (*f)();
+
       zptr= zsave;
     }
 
@@ -1986,6 +1998,8 @@ int wsystem(char* command) { vcleanup(); {
 
 #define system wsystem
 
+
+// cleanup magic macros
 
 
 #undef voidapp
