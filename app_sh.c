@@ -159,6 +159,7 @@ void* app_sh(void* voidapp, char* line) {
     do {
       trainptr= app->train; // 30 bytes almost!
       app->line= wtrainstep(&app->loco, app->line);
+      ++runprocs;
       //} while(--n && app->line != EOS);
       // TODO: move this to wtrainstep loop, to save CPU!
     } while(KEEPRUNNING && app->line != EOS && --n);

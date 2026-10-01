@@ -263,6 +263,8 @@ extern char wcur;
 extern char wfocus;
 extern char nwin;
 
+extern clock_t runprocs;
+
 extern char* wname(char winid);
 
 // APP hack...
