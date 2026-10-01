@@ -84,6 +84,7 @@
 // these are probably equal to what oscar64 does, LOL
 //
 // (- 36389 36281) == 108 saved by not passing in fun in alloc
+// (- 36281 36153) == 128 saved by implicit zline in nextStr/nextInt
 
 
 #ifdef __CC65__
@@ -323,25 +324,21 @@ void xfree(void** pp) {
 // NOTE: if you need to keep the string do strdup!
 
 // 123 : nextStr, NATIVE_CODE:code
-char* nextStr(char** line, const char* dflt) {
+char* nextStr(const char* dflt) {
   char *r;
-  if (!line || !*line) return (char*)dflt;
-  zptr= *line;
+  if (!zptr || !*zptr) return (char*)dflt;
   skipspc();
   // r points to first non whitespace (or at end)
   r= zptr;
-  // skip till end of "word"
-  while(*zptr && !isspace(*zptr)) ++zptr;
+  skiptill(' ');
   // truncate string (we either on 0 or whitespace)
   if (*zptr) *zptr++= 0;
-  // move input pointer to rest
-  *line= zptr;
   return *r? r: (char*)dflt;
 }
 
 // 68 : nextInt, NATIVE_CODE:code
-int nextInt(char** line, int dflt) {
-  char *r= nextStr(line, NULL);
+int nextInt(int dflt) {
+  char *r= nextStr(NULL);
   return (r && (isdigit(*r) || *r=='-'))
     ? atoi(r): dflt;
 }
@@ -605,12 +602,12 @@ char* set() {
 
     // variable name to set to expr
     // TODO: shouldn't need this strdup and name?
-    name= app->name= strdup(nextStr(&zline, (char*)""));
+    name= app->name= strdup(nextStr((char*)""));
 
     // TODO: only works for $var if not exist, not %var!!!
     assert(*name == '$');
 
-    app->expr= strdup(nextStr(&zline, ""));
+    app->expr= strdup(nextStr(""));
 // TODO: reconsider
     return (char*)app;
 
@@ -659,7 +656,7 @@ char* print() {
     app= STALLOC(varstate);
     if (!app) return NULL;
     do {
-      p= param[np++]= strdup(nextStr(&zline, NULL));
+      p= param[np++]= strdup(nextStr(NULL));
       //printf("\tprint %u %s\n", np, p);
 
 // TODO: give "error" at 16
@@ -1179,9 +1176,9 @@ void* iota() {
     app = STALLOC(countstate);
     if (!app) return NULL;
 
-    app->n = nextInt(&zline, 1);
-    app->e = nextInt(&zline, 10);
-    app->d = nextInt(&zline, 1);
+    app->n = nextInt(1);
+    app->e = nextInt(10);
+    app->d = nextInt(1);
     // we need to compensate for first
     app->n-= app->d;
 
@@ -1242,7 +1239,7 @@ void* tail() {
     // +3 means skip 3 lines, -3 means last 3
     app->n= 0;
     if (*zline=='+') ++zline;
-    app->e= -nextInt(&zline, 10);
+    app->e= -nextInt(10);
     //    if (state->e < -2) state->e+= 2;
     if (app->e > 0) app->d= (intptr_t)calloc(app->e, sizeof(char*));
     return app;
@@ -1929,7 +1926,9 @@ cmdtrain* wsysparse(char* cmd, char* pi, unsigned int *bitsout) {
 
       // TODO: let's allocate too!
       zapp= NULL;
-      zline= args;
+      // Quirk, nextStr/zline, nextArg are implicit
+      // TODO: get rid of zline usage during init?
+      zptr= zline= args;
 // TODO: capture zapp, maybe default init/mgr
       arr[++i]= state= (*f)();
 
