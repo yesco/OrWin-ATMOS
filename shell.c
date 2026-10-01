@@ -78,13 +78,13 @@
 // orwin: 36978 byte before       36675 before zline
 //        36675 byte after        36389 ....
 //
+// these are probably equal to what oscar64 does: (LOL)
 // (- 36978 36675) == 308 bytes saved by zapp!
 // (- 36675 36389) == 286 bytes saved by zline!
 //
-// these are probably equal to what oscar64 does, LOL
-//
 // (- 36389 36281) == 108 saved by not passing in fun in alloc
 // (- 36281 36153) == 128 saved by implicit zline in nextStr/nextInt
+// (- 36153 35824) == 329 saved by simplier init!
 
 
 #ifdef __CC65__
@@ -581,7 +581,6 @@ char* vevals(char* x, char** pline) {
 
 typedef struct varstate {
   cmdfun fun;
-  // Bound
   // BOUNDSTART:
   // (notice how name slots into the bound position!)
   char*  name;   // TODO: make it store (char*)(char)idx
@@ -602,7 +601,8 @@ char* set() {
 
     // variable name to set to expr
     // TODO: shouldn't need this strdup and name?
-    name= app->name= strdup(nextStr((char*)""));
+    // TODO: capture whole line!
+    name= app->name= strdup(nextStr(""));
 
     // TODO: only works for $var if not exist, not %var!!!
     assert(*name == '$');
@@ -642,6 +642,7 @@ typedef struct printstate {
   cmdfun fun;
   BOUNDSTART
 
+  // TODO: maker it an @bound that will auto-dealloc!
   char** params;
 } printstate;
  
@@ -663,6 +664,7 @@ char* print() {
 // TODO: nextStr doesn't know how to terminate!
 
     //} while(p!=NULL && zline < endline);
+      // TODO: maybe capture this outside for nextStr?
     } while(zline < endline);
 
     app->params= memdup(param, (np+1)*sizeof(char*));
@@ -724,7 +726,7 @@ char* varlist() {
     return (char*)app;
   }
 
-// TODO: implement
+// TODO: re-implement since we changed VARS...
   assert(!"not implmeneted");
   
   if (zline && zline<EVENTS) return zline;
@@ -764,10 +766,6 @@ void* pwd() {
   if (!app) return SIMPLEALLOC();
   if (!zline) return EOS;
 
-  // generate a value on EOS (or any), lol
-//  lfree(line);
-//  return lstrdup("/home/orwin"); - hang
-//  return "/home/orwin"; = hang
   return strdup("/home/orwin");
 }
 #undef APP
@@ -777,6 +775,7 @@ void* pwd() {
 
 #define APP pstate
 void* grep() {
+  // TODO: make generic init (copyargs/copyline)
   if (!app) return PSTALLOC(zline);
 
   // pass-through backtracking
@@ -838,6 +837,7 @@ void* cat() {
     app= STALLOC(filestate);
     if (!app) return NULL;
 
+    // TODO: remove, make cleanup function pointer
     REQUEST_CLEANUP();
     if ((app->fil= fopen(zline, "r"))) return app;
 
@@ -867,6 +867,8 @@ void* cat() {
 
   if (EOF==getline(&ln, &sz, app->fil)) {
 #endif
+
+
     //printf("==eof==\n");
     lfree(ln);
     fclose(app->fil); app->fil= NULL;
@@ -895,10 +897,7 @@ void* wc() {
   char c;
   unsigned int n= 0;
   
-  if (!app) {
-    app= STALLOC(wcstate);
-    return app;
-  }
+  if (!app) return STALLOC(wcstate);
 
   // only generates one value
   if (!zline) return EOS;
@@ -911,10 +910,9 @@ void* wc() {
     zline= malloc(25);
     sprintf(zline, "%u %u %u", app->ln, app->wn, app->cn);
     return zline;
-    // TODO: do we need to put code to give EOF?
   }
 
-  // process one line
+  // process counts in one line
   zptr= zline;
   app->ln++;
   app->cn+= strlen(zptr);
@@ -1206,17 +1204,11 @@ void* head() {
   if (!app) {
     app = STALLOC(countstate);
     if (!app) return NULL;
-
-    app->n= 10; // default
-    if (zline && *zline) {
-      if (*zline=='-') ++zline;
-      app->n= atoi(zline);
-    }
+    app->n= -nextInt(-10);
     return app;
   }
 
   if (!zline || zline==EOS) return zline;
-
   if (app->n-- > 0) return zline;
 
   // This "cuts-off" the consumer
@@ -1260,13 +1252,13 @@ void* tail() {
   ring= (char**)app->d;
 
   if (zline && zline != EOS) { 
-    // insert
+    // insert, and ask for more
     if (++app->n >= app->e) app->n= 0;
     LFREE(ring[app->n]);
     return NULL;
   }
 
-  // generate output
+  // EOS: generate output
   start= app->n;
   do {
     if (++app->n >= app->e) app->n= 0;
@@ -1331,9 +1323,7 @@ char* stats() {
     app= STALLOC(StatsState);
     app->min= 0x7fff;
     app->max= 0x8000;
-
     return (char*)app;
-
   }
   
   // End Of Stream => report
@@ -1473,10 +1463,7 @@ void* ps() {
   Window *w;
   unsigned int m;
   
-  if (!app) {
-    app= STALLOC(psstate);
-    return app;
-  }
+  if (!app) return STALLOC(psstate);
 
   // return header before data line
   if (app->i++ == 0)
@@ -1584,9 +1571,9 @@ typedef struct editlinestate {
 
 #define APP editlinestate
 void* editline() {
-  if (!app) {
-    return STALLOC(editlinestate);
-  } //else if (!KEYEVENT(zline)) return WAITKEY;
+  if (!app) return STALLOC(editlinestate);
+  // TODO: ?
+  //else if (!KEYEVENT(zline)) return WAITKEY;
   else {
     // generealize... dstr?
     char c, *s= app->s, len= s? strlen(s): 0;
@@ -1636,6 +1623,8 @@ void* editline() {
 }
 #undef APP    
 
+
+
 #define TEETERMINALSTATE NULL
  
 // more like "tee -"
@@ -1647,6 +1636,8 @@ void* teeterminal() {
   return zline;
 }
 #undef APP
+
+
 
 #define TERMINALSTATE NULL
 
@@ -1662,6 +1653,8 @@ void* terminal() {
   return zline==EOS? EOS: NULL;
 }
 #undef APP
+
+////////////////////////////////////////////////////////////
 
 const char* cmdnames[]= {
   "pwd", "grep", "cat", "wc", "ls", "iota", "head", "tail",
@@ -1749,63 +1742,6 @@ char* wtrainstep(cmdtrain** loco, char* line) {
 
   return zline;
 }
-
-int wrunsystrain(cmdtrain* train) {
-  cmdfun *fp;
-  cmdtrain *origtrain= train;
-
-  // used to find variables!
-  trainptr= train;
-  ++train; // skip initial 0
-  zline= EOS;
-
-#ifndef SHELLTRACE
-  // Beatifully simple!
-  
-#if 1
-
-  do {
-    // passing around zline, redundant LOL
-    zline= wtrainstep(&train, zline);
-  } while(*train);
-
-#else
-  // inline
-  
-  while((fp=*train)) {
-    zapp= fp;
-    zline= (*fp)();
-    if (zline) ++train; else --train;
-  }    
-
-#endif
-
-#else
-
-  // SHELLTRACE
-  while((fp=*train)) {
-    printf("\t  [%d \"%s\" %p]\n", (int)(long)(train-origtrain),
-	   !zline? "(NULL)": zline==EOS? "*EOS*": zline, fp);
-
-    zapp= fp;
-    zline= (*fp)();
-
-#ifdef VARINFO
-    printf("\t%s %p:", taskname(*fp), zline); fflush(stdout); shprint(zline);
-#endif
-
-    if (zline) ++train; else --train;
-  }    
-
-  printf("\t[**SYSTRAIN**: DONE]\n");
-#endif // SHELLRTRACE
-
-  
-  // TODO: address of last program
-  return 0;
-  (void)fp;
-}
-
 
  void shellcleanup(cmdtrain* train, int n, unsigned int cleanbits) {
   // CLEANUP
@@ -1975,6 +1911,71 @@ cmdtrain* wsysparse(char* cmd, char* pi, unsigned int *bitsout) {
 }
 
 
+// cleanup magic macros
+
+
+#undef voidapp
+
+
+#ifndef MAIN
+
+
+int wrunsystrain(cmdtrain* train) {
+  cmdfun *fp;
+  cmdtrain *origtrain= train;
+
+  // used to find variables!
+  trainptr= train;
+  ++train; // skip initial 0
+  zline= EOS;
+
+#ifndef SHELLTRACE
+  // Beatifully simple!
+  
+#if 1
+
+  do {
+    // passing around zline, redundant LOL
+    zline= wtrainstep(&train, zline);
+  } while(*train);
+
+#else
+  // inline
+  
+  while((fp=*train)) {
+    zapp= fp;
+    zline= (*fp)();
+    if (zline) ++train; else --train;
+  }    
+
+#endif
+
+#else
+
+  // SHELLTRACE
+  while((fp=*train)) {
+    printf("\t  [%d \"%s\" %p]\n", (int)(long)(train-origtrain),
+	   !zline? "(NULL)": zline==EOS? "*EOS*": zline, fp);
+
+    zapp= fp;
+    zline= (*fp)();
+
+#ifdef VARINFO
+    printf("\t%s %p:", taskname(*fp), zline); fflush(stdout); shprint(zline);
+#endif
+
+    if (zline) ++train; else --train;
+  }    
+
+  printf("\t[**SYSTRAIN**: DONE]\n");
+#endif // SHELLRTRACE
+
+  
+  // TODO: address of last program
+  return 0;
+  (void)fp;
+}
+
 int wsystem(char* command) { vcleanup(); {
   char* cmd= strdup(command); // for dstructive chopping
   char i;
@@ -1998,14 +1999,6 @@ int wsystem(char* command) { vcleanup(); {
 #define system wsystem
 
 
-// cleanup magic macros
-
-
-#undef voidapp
-
-
-#ifndef MAIN
- 
 void tsystem(char* cmd) {
   printf("\n\n----(%u) %s\n", _heapmemavail(), cmd);
   system(cmd);
