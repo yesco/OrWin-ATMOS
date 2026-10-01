@@ -645,22 +645,22 @@ void windraw(Window* w) {
 
 // Statistics for IDLE %CPU %MEM
 
-static clock_t latency, lastlatency;
-static clock_t run, runsum, runprocs, timesum;
-static clock_t rounds, lastupdate;
+clock_t latency, lastlatency;
+clock_t trun, runsum, runprocs, timesum;
+clock_t rounds, lastupdate;
 
 // Run and accumulate time/ticks/statistics
 void dorun(char* line) {
-  run= clock();
+  trun= clock();
 
   wtime= HITIME;
   // oscar64 function expeted for call
   //                       xxxxxxxxxxxxxxxx
   winp->ret= wret= (char*)((*winp->fun)(winp->state, line));
 
-  winp->ticks+= run= clock()-run;
-  winp->cpu= run*rounds;
-  runsum+= (run<<3) + 1;
+  winp->ticks+= trun= clock()-trun;
+  winp->cpu= trun*rounds;
+  runsum+= (trun<<3) + 1;
   ++runprocs;
 }
 
