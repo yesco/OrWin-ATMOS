@@ -72,6 +72,26 @@
 #include <stdio.h>
 
 
+// 20459 Bytes before
+// 20294 Bytes after ... not much diff
+
+// orwin: 36978 byte before 
+//        36675 byte after
+// (- 36978 36675) == 308 bytes saved by zapp!
+
+
+#ifdef __CC65__
+#pragma bss-name (push, "ZEROPAGE")
+char* zapp;
+#pragma bss-name (pop)
+#endif // __CC65__
+
+#ifdef OSCAR
+__zeropage extern char* zapp;
+#endif
+
+#define voidapp zapp
+
 // takes 4K makes OrWIN negative heap! lol
 
 #ifndef MAIN
@@ -122,11 +142,11 @@
 
 #endif
 
-typedef void* (*cmdfun)(void* state, char* line);
+typedef void* (*cmdfun)(char* line);
 
-char* dummyfun(void* state, char* line) {
+char* dummyfun(char* line) {
   return NULL;
-  (void)state; (void)line;
+  (void)line;
 }
  
 typedef cmdfun* cmdtrain;
@@ -168,7 +188,7 @@ typedef struct pstate {
   char* s;
 } pstate;
 
-#define PSTALLOC(fun, p) (state=STALLOC(pstate, fun), state->s=strdup(p), state)
+#define PSTALLOC(fun, p) (app=STALLOC(pstate, fun), app->s=strdup(p), app)
 
 void* memdup(void* p, unsigned int bytes) {
 
@@ -571,24 +591,26 @@ typedef struct varstate {
 // "SET - S(L)exial EnvironmenT binding"
 //(397 : set, NATIVE_CODE:code)
 // 474 : set, NATIVE_CODE:code
-char* set(varstate* state, char* line) {
-  if (!state) {
+#define APP varstate
+char* set(char* line) {
+  if (!zapp) {
     char *name;
-    state= STALLOC(varstate, set);
+    zapp= STALLOC(varstate, set);
 
     // variable name to set to expr
     // TODO: shouldn't need this strdup and name?
-    name= state->name= strdup(nextStr(&line, (char*)""));
+    name= app->name= strdup(nextStr(&line, (char*)""));
 
     // TODO: only works for $var if not exist, not %var!!!
     assert(*name == '$');
 
-    state->expr= strdup(nextStr(&line, ""));
-    return (char*)state;
+    app->expr= strdup(nextStr(&line, ""));
+// TODO: reconsider
+    return (char*)app;
 
   } else if (line==CLEANUP) {
-    LFREE(state->name);
-    LFREE(state->expr);
+    LFREE(app->name);
+    LFREE(app->expr);
     return line;
   }
 
@@ -597,9 +619,9 @@ char* set(varstate* state, char* line) {
     char* origline= line;
     char* endline = line+strlen(line);
     //printf("SET:"); shprint(line);
-    //printf("xxx: %s %s\n", state->name, state->expr);
+    //printf("xxx: %s %s\n", app->name, app->expr);
 
-    vsetsfrom(state->name, vevals(state->expr, &line));
+    vsetsfrom(app->name, vevals(app->expr, &line));
 
     if (line==origline) return line;
     else if (line <= endline) {
@@ -608,6 +630,7 @@ char* set(varstate* state, char* line) {
     } else return ""; // something, lol
   }
 }
+#undef APP
 
 // printer
 #define PRINTSTATE NULL
@@ -623,11 +646,12 @@ typedef struct printstate {
 // (SPRINTF, how?) "%03.4foo" lol?
 //
 // 457 : print, NATIVE_CODE:code
-char* print(printstate* state, char* line) {
-  if (!state) {
+#define APP printstate
+char* print(char* line) {
+  if (!app) {
     char np= 0, *param[16]= {0}, *p, *endline= line+strlen(line);
-    state= STALLOC(varstate, print);
-    if (!state) return NULL;
+    app= STALLOC(varstate, print);
+    if (!app) return NULL;
     do {
       p= param[np++]= strdup(nextStr(&line, NULL));
       //printf("\tprint %u %s\n", np, p);
@@ -638,15 +662,15 @@ char* print(printstate* state, char* line) {
     //} while(p!=NULL && line < endline);
     } while(line < endline);
 
-    state->params= memdup(param, (np+1)*sizeof(char*));
-    if (!state->params) { free(state); return NULL; }
-    return (char*)state;
+    app->params= memdup(param, (np+1)*sizeof(char*));
+    if (!app->params) { free(app); return NULL; }
+    return (char*)app;
 
   } else if (line==CLEANUP) {
-    char** p= state->params;
+    char** p= app->params;
     while(*p) LFREE(*p++);
 
-    LFREE(state->params);
+    LFREE(app->params);
     return line;
   }
   
@@ -656,7 +680,7 @@ char* print(printstate* state, char* line) {
   // TODO: move  to sarrevals()
   {
     char tmp[128]= {0}; // TODO: use dstr!
-    char** p= state->params;
+    char** p= app->params;
     char* ln= line;
     char* x;
     char n= 255;
@@ -675,7 +699,8 @@ char* print(printstate* state, char* line) {
     return strdup(tmp);
   }
 }
-
+#undef APP
+ 
 #define VARLISTSTATE "%%vindex_name_vstr%vint"
  
 typedef struct varliststate {
@@ -689,10 +714,11 @@ typedef struct varliststate {
   int   vint;
 } varliststate;
 
-char* varlist(varliststate* state, char* line) {
-  if (!state) {
-    state= STALLOC(varliststate, varlist);
-    return (char*)state;
+#define APP varliststate
+char* varlist(char* line) {
+  if (!app) {
+    app= STALLOC(varliststate, varlist);
+    return (char*)app;
   }
 
 // TODO: implement
@@ -703,22 +729,23 @@ char* varlist(varliststate* state, char* line) {
   // if done: reset and request next
 //  if (state->i >= nvar) { lfree(line); state->i= 0; return NULL; }
   // if first: return the result
-  if (!state->i++) return line;
+  if (!app->i++) return line;
 
   // and then every variable for that line
 //  state->name= vars[state->i - 1].name;
   // slow, lol
-  state->vint= vgeti(state->name);
-  state->vstr= vgets(state->name);
+  app->vint= vgeti(app->name);
+  app->vstr= vgets(app->name);
 
   lfree(line);
   {
     // LOL
-    char* ln= malloc(1+1+strlen(state->name)+2+5+2+strlen(state->vstr));
-    sprintf(ln, "\t%s\t=%6d  \"%s\"", state->name, state->vint, state->vstr);
+    char* ln= malloc(1+1+strlen(app->name)+2+5+2+strlen(app->vstr));
+    sprintf(ln, "\t%s\t=%6d  \"%s\"", app->name, app->vint, app->vstr);
     return ln;
   }
 }  
+#undef APP
 
 #endif // ENVVARS
 
@@ -729,8 +756,9 @@ char* varlist(varliststate* state, char* line) {
 
 #define PWDSTATE NULL
  
-void* pwd(simplestate* state, char* line) {
-  if (!state) return SIMPLEALLOC(pwd);
+#define APP simplestate
+void* pwd(char* line) {
+  if (!app) return SIMPLEALLOC(pwd);
   if (!line)  return EOS;
 
   // generate a value on EOS (or any), lol
@@ -739,21 +767,23 @@ void* pwd(simplestate* state, char* line) {
 //  return "/home/orwin"; = hang
   return strdup("/home/orwin");
 }
-
+#undef APP
 
 // TODO: maybe make it count line numbers? matches etc
 #define GREPSTATE NULL
 
-void* grep(pstate* state, char* line) {
-  if (!state) return PSTALLOC(grep, line);
+#define APP pstate
+void* grep(char* line) {
+  if (!app) return PSTALLOC(grep, line);
 
   // pass-through backtracking
   if (!line || line==EOS) return line;
 
 //  printf("  GREP: %s\n", line);
-  return strstr(line, state->s)? line: lfree(line);
+  return strstr(line, app->s)? line: lfree(line);
 }
-
+#undef APP
+ 
 #ifdef FAKE
 // fake file
 char* fakefile[]= { "one", "two", "three", "four", "five", NULL };
@@ -767,17 +797,19 @@ typedef struct fakefilestate {
   char** fil;
 } fakefilestate;
 
-void* cat(fakefilestate* state, char* line) {
-  if (!state) {
-    state= STALLOC(fakefilestate, cat);
-    if (!state) return NULL;
-    state->fil= fakefile;
-    return state;
+#define APP fakefilestate
+void* cat(char* line) {
+  if (!app) {
+    app= STALLOC(fakefilestate, cat);
+    if (!app) return NULL;
+    app->fil= fakefile;
+    return app;
   }
 
   lfree(line);
-  return *state->fil? strdup(*state->fil++): EOS;
+  return *app->fil? strdup(*appe->fil++): EOS;
 }
+#undef APP
 
 #else
 
@@ -790,23 +822,27 @@ typedef struct filestate {
   FILE* fil;
 } filestate;
 
-void* cat(filestate* state, char* line) {
+#define APP filestate
+void* cat(char* line) {
   char* ln= NULL;
   size_t sz= 0;
 
-  if (!state) {
+  if (!app) {
+
+// TODO: haha
+    
     return NULL;
-    state= STALLOC(filestate, cat);
-    if (!state) return NULL;
+    app= STALLOC(filestate, cat);
+    if (!app) return NULL;
 
     REQUEST_CLEANUP();
-    if ((state->fil= fopen(line, "r"))) return state;
+    if ((app->fil= fopen(line, "r"))) return app;
 
     // errors
-    free(state);
+    free(app);
     return NULL; // TODO: logic?
   } else if (line==CLEANUP) {
-    if (state->fil) fclose(state->fil); state->fil= NULL;
+    if (app->fil) fclose(app->fil); app->fil= NULL;
     return NULL;
   }
 
@@ -823,14 +859,14 @@ void* cat(filestate* state, char* line) {
 
 
   ln= calloc(81,1);
-  if (NULL!=fgets(ln, sz, state->fil)) {
+  if (NULL!=fgets(ln, sz, app->fil)) {
 #else
 
-  if (EOF==getline(&ln, &sz, state->fil)) {
+  if (EOF==getline(&ln, &sz, app->fil)) {
 #endif
     //printf("==eof==\n");
     lfree(ln);
-    fclose(state->fil); state->fil= NULL;
+    fclose(app->fil); app->fil= NULL;
     return EOS;
   } else {
     //printf("==line==>%s< %p\n", ln, ln);
@@ -838,6 +874,7 @@ void* cat(filestate* state, char* line) {
     return ln;
   }
 }
+#undef APP
 #endif
   
 
@@ -850,13 +887,14 @@ typedef struct wcstate {
   unsigned int ln, wn, cn;
 } wcstate;
 
-void* wc(wcstate* state, char* line) {
+#define APP wcstate
+void* wc(char* line) {
   char c;
   unsigned int n= 0;
   
-  if (!state) {
-    state= STALLOC(wcstate, wc);
-    return state;
+  if (!app) {
+    app= STALLOC(wcstate, wc);
+    return app;
   }
 
   // only generates one value
@@ -868,18 +906,18 @@ void* wc(wcstate* state, char* line) {
   // EOS: Output summary at end
   if (line==EOS) {
     line= malloc(25);
-    sprintf(line, "%u %u %u", state->ln, state->wn, state->cn);
+    sprintf(line, "%u %u %u", app->ln, app->wn, app->cn);
     return line;
     // TODO: do we need to put code to give EOF?
   }
 
   // process one line
   zptr= line;
-  state->ln++;
-  state->cn+= strlen(zptr);
+  app->ln++;
+  app->cn+= strlen(zptr);
   while((c= *zptr)) {
     skipspc();
-    state->wn++;
+    app->wn++;
     --zptr;
     while((c= *++zptr) && !isspace(c));
   }
@@ -888,7 +926,7 @@ void* wc(wcstate* state, char* line) {
   lfree(line);
   return NULL;
 }
-  
+#undef APP  
 
 #define LS
 // ============================================================================
@@ -991,52 +1029,54 @@ typedef struct lsstate {
   char* pat;
 } lsstate;
 
-void* ls(lsstate* state, char* line) {
-  if (!state) {
-    state = STALLOC(lsstate, ls);
-    if (!state) return NULL;
+#define APP lsstate
+void* ls(char* line) {
+  if (!app) {
+    app = STALLOC(lsstate, ls);
+    if (!app) return NULL;
     
     if (line && *line) {
       // If it contains a wildcard or is an explicit filename, save it as a filter pattern
       if (strchr(line, '*')) {
         char* p= strrchr(line, '/');
-        if (p) { *p= 0; state->pat = strdup(p+1); }
+        if (p) { *p= 0; app->pat = strdup(p+1); }
         // TODO: simplify duplication
-        else { state->pat = strdup(line); line = 0; }
-      }	else { state->pat = strdup(line); line = 0; }
+        else { app->pat = strdup(line); line = 0; }
+      }	else { app->pat = strdup(line); line = 0; }
     }
 
-    if (0 != open_dir(&state->dir, (line && *line)? line: ".")) {
-      state->dir_open = 1;
+    if (0 != open_dir(&app->dir, (line && *line)? line: ".")) {
+      app->dir_open = 1;
       REQUEST_CLEANUP();
       // all good
       // TODO: size? more attributes? timestamp"
       //vbind("_name", &state->name);
-      return state;
+      return app;
     }
     // fail
-    free(state);
+    free(app);
     return NULL;
   }
 
   lfree(line);
-  if (!state->dir_open) return EOS;
+  if (!app->dir_open) return EOS;
 
   do {
-    if (0==read_dir(&state->dir, &state->entry)
+    if (0==read_dir(&app->dir, &app->entry)
       || line == CLEANUP) {
-      if (state->dir_open) {
-        close_dir(&state->dir);
-        state->dir_open = 0;
-        free(state->pat);
+      if (app->dir_open) {
+        close_dir(&app->dir);
+        app->dir_open = 0;
+        free(app->pat);
       }
       return EOS;
     }
-  } while(!wildmatch(state->pat, state->entry.name));
+  } while(!wildmatch(app->pat, app->entry.name));
 
   // found a matching one
-  return lstrdup(state->name= state->entry.name);
+  return lstrdup(app->name= app->entry.name);
 }
+#undef APP
 
 #else // UNIX
  
@@ -1058,52 +1098,54 @@ typedef struct lsstate {
   char* name;
 } lsstate;
 
-void* ls(lsstate* state, char* line) {
+#define APP lstate
+void* ls(char* line) {
   struct dirent* de;
   char* p;
   
-  if (!state) {
-    state = STALLOC(lsstate, ls);
-    if (!state) return NULL;
+  if (!app) {
+    app = STALLOC(lsstate, ls);
+    if (!app) return NULL;
 
     if (line && *line) {
       // If it contains a wildcard or is an explicit filename, save it as a filter pattern
       if (strchr(line, '*')) {
 
         p= strrchr(line, '/');
-        if (p) { *p= 0; state->pat = strdup(p+1); }
+        if (p) { *p= 0; app->pat = strdup(p+1); }
         // TODO: simplify duplication
-        else { state->pat = strdup(line); line = 0; }
-      }	else { state->pat = strdup(line); line = 0; }
+        else { app->pat = strdup(line); line = 0; }
+      }	else { app->pat = strdup(line); line = 0; }
     }
 
-    state->dir = opendir((line && *line)? line: ".");
+    app->dir = opendir((line && *line)? line: ".");
     REQUEST_CLEANUP();
     // TODO: size? more attributes? timestamp"
-    if (state->dir) return state;
+    if (app->dir) return app;
     // fail
-    free(state);
+    free(app);
     return NULL;
   }
 
   lfree(line);
-  if (!state->dir) return EOS;
+  if (!app->dir) return EOS;
 
   do {
-    if (!(de=readdir(state->dir)) || line == CLEANUP) {
-      if (state->dir) {
-        closedir(state->dir);
-        state->dir = NULL;
-        free(state->pat);
+    if (!(de=readdir(app->dir)) || line == CLEANUP) {
+      if (app->dir) {
+        closedir(app->dir);
+        app->dir = NULL;
+        free(app->pat);
       }
       return EOS;
     }
 
-  } while(!wildmatch(state->pat, de->d_name));
+  } while(!wildmatch(app->pat, de->d_name));
 
   // found a matching one
-  return lstrdup(state->name= de->d_name);
+  return lstrdup(app->name= de->d_name);
 }
+#undef APP
 
 #endif // CC65 ... UNIX
 
@@ -1125,109 +1167,114 @@ typedef struct countstate {
   intptr_t d; // dual use
 } countstate;
 
-void* iota(countstate* state, char* line) {
-  if (!state) {
-      state = STALLOC(countstate, iota);
-    if (!state) return NULL;
+#define APP countstate
+void* iota(char* line) {
+  if (!app) {
+    app = STALLOC(countstate, iota);
+    if (!app) return NULL;
 
-    state->n = nextInt(&line, 1);
-    state->e = nextInt(&line, 10);
-    state->d = nextInt(&line, 1);
+    app->n = nextInt(&line, 1);
+    app->e = nextInt(&line, 10);
+    app->d = nextInt(&line, 1);
     // we need to compensate for first
-    state->n-= state->d;
+    app->n-= app->d;
 
-    return state;
+    return app;
   }
 
   lfree(line);
-  state->n+= state->d;
-  if ((state->d > 0 && state->n <= state->e) ||
-      (state->d < 0 && state->n >= state->e)) {
+  app->n+= app->d;
+  if ((app->d > 0 && app->n <= app->e) ||
+    (app->d < 0 && app->n >= app->e)) {
     char s[10];
     // TODO: use returned length:
-    sprintf(s, "%d", state->n);
+    sprintf(s, "%d", app->n);
     return lstrdup(s);
   }
 
   return EOS;
 }
+#undef APP
         
 #define HEADSTATE NULL
  
-void* head(countstate* state, char* line) {
-  if (!state) {
-    state = STALLOC(countstate, head);
-    if (!state) return NULL;
+#define APP countstate
+void* head(char* line) {
+  if (!app) {
+    app = STALLOC(countstate, head);
+    if (!app) return NULL;
 
-    state->n= 10; // default
+    app->n= 10; // default
     if (line && *line) {
       if (*line=='-') ++line;
-      state->n= atoi(line);
+      app->n= atoi(line);
     }
-    return state;
+    return app;
   }
 
   if (!line || line==EOS) return line;
 
-  if (state->n-- > 0) return line;
+  if (app->n-- > 0) return line;
 
   // This "cuts-off" the consumer
   lfree(line);
   return EOS;
 }
-
+#undef APP
+ 
 #define TAILSTATE NULL
 
-void* tail(countstate* state, char* line) {
+#define APP countstate
+void* tail(char* line) {
   unsigned int start;
   char** ring;
   
-  if (!state) {
-    state = STALLOC(countstate, tail);
-    if (!state) return NULL;
+  if (!app) {
+    app = STALLOC(countstate, tail);
+    if (!app) return NULL;
 
     // +3 means skip 3 lines, -3 means last 3
-    state->n= 0;
+    app->n= 0;
     if (*line=='+') ++line;
-    state->e= -nextInt(&line, 10);
+    app->e= -nextInt(&line, 10);
     //    if (state->e < -2) state->e+= 2;
-    if (state->e > 0) state->d= (intptr_t)calloc(state->e, sizeof(char*));
-    return state;
+    if (app->e > 0) app->d= (intptr_t)calloc(app->e, sizeof(char*));
+    return app;
   }
 
   #ifdef SHELLTRACE
-  printf("\n\t  [TAIL %d %d %d %p]\n", state->n, state->e, (int)state->d, (void*)state->d);
+  printf("\n\t  [TAIL %d %d %d %p]\n", app->n, app->e, (int)app->d, (void*)app->d);
   #endif
   
   // skip lines code
-  if (!state->d) {
-    if (state->e++ >= 0) return line;
+  if (!app->d) {
+    if (app->e++ >= 0) return line;
     lfree(line);
     return NULL;
   }
 
   // tail code (keep ring buffer)
-  ring= (char**)state->d;
+  ring= (char**)app->d;
 
   if (line && line != EOS) { 
     // insert
-    if (++state->n >= state->e) state->n= 0;
-    LFREE(ring[state->n]);
+    if (++app->n >= app->e) app->n= 0;
+    LFREE(ring[app->n]);
     return NULL;
   }
 
   // generate output
-  start= state->n;
+  start= app->n;
   do {
-    if (++state->n >= state->e) state->n= 0;
-    line= ring[state->n];
-    ring[state->n]= NULL;
+    if (++app->n >= app->e) app->n= 0;
+    line= ring[app->n];
+    ring[app->n]= NULL;
     if (line) return line;
-  } while (state->n != start);
+  } while (app->n != start);
 
   return EOS;
 }
-
+#undef APP
 
 #define SHELL_STATS_COMMAND
 #ifdef SHELL_STATS_COMMAND
@@ -1275,44 +1322,45 @@ int cmpint(const void *a, const void *b) {
 
 #define LITTLE_ENDIAN (1 == *(unsigned char *)(&(const int){1}))
 
-char* stats(StatsState* state, char* line) {
-  if (!state) {
-    state= STALLOC(StatsState, stats);
-    state->min= 0x7fff;
-    state->max= 0x8000;
+#define APP StatsState
+char* stats(char* line) {
+  if (!app) {
+    app= STALLOC(StatsState, stats);
+    app->min= 0x7fff;
+    app->max= 0x8000;
 
-    return (char*)state;
+    return (char*)app;
 
   }
   
   // End Of Stream => report
-  if (state->done) return (lfree(line),EOS);
+  if (app->done) return (lfree(line),EOS);
   if (line==EOS) {
     char report[128]= {0};
-    state->avg    = state->sum / state->n;
-    state->var    = (state->sqsum-((state->sum*state->sum)/state->n))/state->n;
+    app->avg    = app->sum / app->n;
+    app->var    = (app->sqsum-((app->sum*app->sum)/app->n))/app->n;
 
     // TODO: (no have sqrtr!)
-    //    state->stddev = sqrt(var);
+    //    app->stddev = sqrt(app->var);
 
     // median histogram
-    qsort(state->samples, SAMPLES, sizeof(int), cmpint);
+    qsort(app->samples, SAMPLES, sizeof(int), cmpint);
 
     #if 0
     // print samples for debugging
     {
       int i;
       printf("SAMPLES: ");
-      for(i=0; i<SAMPLES; ++i) printf("%d ", state->samples[i]);
+      for(i=0; i<SAMPLES; ++i) printf("%d ", app->samples[i]);
       putchar('\n');
     }
     #endif
         
-    state->median= state->samples[SAMPLES/2-1]; // "middle'
+    app->median= app->samples[SAMPLES/2-1]; // "middle'
     
     sprintf(report, "count:\t%u\nmin:\t%d\nmax:\t%d\nsum:\t%ld\nsqsum:\t%ld\navg:\t%d\nmedian:\t%d\nvar:\t%d\nstddev:\t%d",
-      state->n, state->min, state->max, state->sum, state->sqsum, state->avg, state->median, state->var, state->stddev);
-    state->done= 1;
+      app->n, app->min, app->max, app->sum, app->sqsum, app->avg, app->median, app->var, app->stddev);
+    app->done= 1;
     return strdup(report);
   }
   
@@ -1323,27 +1371,27 @@ char* stats(StatsState* state, char* line) {
     int v= atoi(line);
     lfree(line);
 
-    state->sum+= v;
-    state->sqsum+= ((long)v) * v; // increase precision
-    if (v < state->min) state->min= v;
-    if (v > state->max) state->max= v;
+    app->sum+= v;
+    app->sqsum+= ((long)v) * v; // increase precision
+    if (v < app->min) app->min= v;
+    if (v > app->max) app->max= v;
     
     // with lower probability: insert at random position for median!
     // Scale down probability precisely: 1 / (n + 1)
-    if ((state->mask|= state->n) < SAMPLES)
-      state->samples[state->n]= v;
-    else if ((rand() & (state->mask/2)) < SAMPLES) 
+    if ((app->mask|= app->n) < SAMPLES)
+      app->samples[app->n]= v;
+    else if ((rand() & (app->mask/2)) < SAMPLES) 
       //{ printf("REPLACE %d\n", v);
-      state->samples[rand()&(SAMPLES-1)]= v;
+      app->samples[rand()&(SAMPLES-1)]= v;
       //}
     
-    ++state->n;
+    ++app->n;
 
     // backtrack to suck up more
     return NULL;
   }
 }
- 
+#undef APP 
 
 // Sort sample_buffer and grab the middle index for the median approximation!
 
@@ -1414,19 +1462,20 @@ typedef struct psstate {
   int i;
 } psstate;
  
-void* ps(psstate* state, char* line) {
+#define APP psstate
+void* ps(char* line) {
   char s, p, ln[60]; // ... shell args...
   long packed_result;
   Window *w;
   unsigned int m;
   
-  if (!state) {
-    state= STALLOC(psstate, ps);
-    return state;
+  if (!app) {
+    app= STALLOC(psstate, ps);
+    return app;
   }
 
   // return header before data line
-  if (state->i++ == 0)
+  if (app->i++ == 0)
     return strdup(
 //----------------------------------------
 // " PID %C #M  SZ  ST  TIME CMD");
@@ -1437,13 +1486,13 @@ void* ps(psstate* state, char* line) {
 
   // - walk ot next live window/process structure
   w= NULL;
-  p= state->i - 1;
+  p= app->i - 1;
   while(p < nwin+1) {
     w= wins + p;
     if (w->status) break;
     w= NULL; ++p;
   }
-  state->i= p + 1;
+  app->i= p + 1;
 
   // done?
   if (!w) return EOS;
@@ -1465,14 +1514,14 @@ void* ps(psstate* state, char* line) {
   #define snprintf(buf, size, ...) sprintf(buf, __VA_ARGS__)
 #endif
 
-  state->pid   = 0x4200 | p;
-  state->cpu   = w->cpu;
-  state->mem   = w->nalloc;
-  state->size  = -1; // w->abytes
-  state->mins  = m;
-  state->secs  = s;
-  state->name  = wname(p);
-  state->args  = w->args;
+  app->pid   = 0x4200 | p;
+  app->cpu   = w->cpu;
+  app->mem   = w->nalloc;
+  app->size  = -1; // w->abytes
+  app->mins  = m;
+  app->secs  = s;
+  app->name  = wname(p);
+  app->args  = w->args;
   
   // WARNING! sizeof not used!
 //snprintf(ln, sizeof(ln), "42%02d %2d %2d%4d %.3s%2d:%02d %s %s"
@@ -1484,7 +1533,7 @@ void* ps(psstate* state, char* line) {
 //  , -1 //w->abytes,
     , wstate(w->ret)
     , m, s
-    , state->name, w->args
+    , app->name, w->args
   );
 
   // enable if disable shprint, lol
@@ -1493,7 +1542,8 @@ void* ps(psstate* state, char* line) {
   lfree(line);
   return lstrdup(ln);
 }
-
+#undef APP
+ 
 #else
  
 // Dummy
@@ -1528,16 +1578,17 @@ typedef struct editlinestate {
   #define KEYEVENT(e) 1
 #endif
 
-void* editline(editlinestate* state, char* line) {
-  if (!state) {
+#define APP editlinestate
+void* editline(char* line) {
+  if (!app) {
     return STALLOC(editlinestate, editline);
   } //else if (!KEYEVENT(line)) return WAITKEY;
   else {
     // generealize... dstr?
-    char c, *s= state->s, len= s? strlen(s): 0;
-    state->s= s= realloc(state->s, (len | 15) + 17); // hmmm
-    if (state->i >= MAX_EDIT) return WAITKEY;
-    s[state->i]= 0;
+    char c, *s= app->s, len= s? strlen(s): 0;
+    app->s= s= realloc(app->s, (len | 15) + 17); // hmmm
+    if (app->i >= MAX_EDIT) return WAITKEY;
+    s[app->i]= 0;
     
     lfree(line);
     
@@ -1550,28 +1601,28 @@ void* editline(editlinestate* state, char* line) {
     if (c==27 || c&0x80 || c=='C'-'@') {
       // ESC RET FUNC- CTRL-C (BREAK)
       lfree(s);
-      state->s= NULL;
-      state->i= 0;
+      app->s= NULL;
+      app->i= 0;
       return NULL;
     } else if (c==10 || c==13 || c=='D'-'@') {
       // RETURN CTRL-D
       char *r= s;
-      state->s= NULL;
-      state->i= 0;
+      app->s= NULL;
+      app->i= 0;
       putchar('\n');
       return r;
       // TODO: ^P get previous line (save it!)
     } else if (c=='U'-'@') {
       // clear line CTRL-U
       printf("\\\n");
-      s[state->i= 0]= 0;
+      s[app->i= 0]= 0;
     } else if (c==127 || c==8) {
       // backspace
       printf("\b \b");
     } else {
       // insert char
-      s[state->i++]= c;
-      s[state->i]= 0;
+      s[app->i++]= c;
+      s[app->i]= 0;
 
       putchar(c);
     }
@@ -1579,23 +1630,26 @@ void* editline(editlinestate* state, char* line) {
     return WAITKEY;
   }
 }
-    
+#undef APP    
 
 #define TEETERMINALSTATE NULL
  
 // more like "tee -"
-void* teeterminal(simplestate* state, char* line) {
-  if (!state) return STALLOC(wcstate, wc);
+#define APP simplestate
+void* teeterminal(char* line) {
+  if (!app) return STALLOC(wcstate, wc);
 
   shprint(line);
   return line;
 }
+#undef APP
 
 #define TERMINALSTATE NULL
 
 // can only be last in chain!
-void* terminal(simplestate* state, char* line) {
-  if (!state) return STALLOC(simplestate, terminal);
+#define APP simplestate
+void* terminal(char* line) {
+  if (!app) return STALLOC(simplestate, terminal);
 
   shprint(line);
   lfree(line);
@@ -1603,6 +1657,7 @@ void* terminal(simplestate* state, char* line) {
   // force backtracking, why different?
   return line==EOS? EOS: NULL;
 }
+#undef APP
 
 const char* cmdnames[]= {
   "pwd", "grep", "cat", "wc", "ls", "iota", "head", "tail",
@@ -1677,7 +1732,9 @@ char* wtrainstep(cmdtrain** loco, char* line) {
 
 //  if (!(fp=**train)) return line; // not rigth? was EOS = not right!
   if (!(fp=**loco)) return EOS;
-  line= (*fp)(fp, line);
+// TODO: maybe not need fp? just make speical app define
+  zapp= (void*)fp;
+  line= (*fp)(line);
   if (line) ++*loco; else --*loco;
 
 #ifdef SHELLINFO
@@ -1711,7 +1768,8 @@ int wrunsystrain(cmdtrain* train) {
   // inline
   
   while((fp=*train)) {
-    line= (*fp)(fp, line);
+    zapp= fp;
+    line= (*fp)(line);
     if (line) ++train; else --train;
   }    
 
@@ -1753,21 +1811,26 @@ int wrunsystrain(cmdtrain* train) {
         #ifdef SHELLINFO
 	printf("\t[**CLEANUP**: %d %p]\n", n, train[n]);
         #endif
-        (*f)(f, CLEANUP);
+        zapp= (void*)f;
+        (*f)(CLEANUP);
       }
       // remove that state
       free(f);
     }
 
+// TODO: vclearvars
+
+// TODO: remove
     cleanbits>>= 1;
+
   } while(--n);
   
   free(train);
 }
 
- cmdtrain* wsysparse(char* cmd, char* pi, unsigned int *bitsout) {
+cmdtrain* wsysparse(char* cmd, char* pi, unsigned int *bitsout) {
   // TODO: check overflow this per command?
-  char i, l, **n, *p;
+  char i, **n, *p;
   cmdfun* f;
   void** state; // treat like slots!
 
@@ -1802,9 +1865,11 @@ int wrunsystrain(cmdtrain* train) {
     skipspc();
     name= zptr;
     skipword();
-    skipspc();
     if (*zptr!='|')  {
       *zptr++= 0;
+
+      // TODO: this may give empty string...
+      skipspc();
 
       // - extract arguments
       args= zptr;
@@ -1853,7 +1918,9 @@ int wrunsystrain(cmdtrain* train) {
       char * zsave= zptr;
 
       // TODO: let's allocate too!
-      arr[++i]= state= (*f)(NULL, args);
+      zapp= NULL;
+// TODO: capture zapp      
+      arr[++i]= state= (*f)(args);
       zptr= zsave;
     }
 
@@ -1919,6 +1986,9 @@ int wsystem(char* command) { vcleanup(); {
 
 #define system wsystem
 
+
+
+#undef voidapp
 
 
 #ifndef MAIN
