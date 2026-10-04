@@ -1,0 +1,9 @@
+# 1. Compile the assembly file into a standard object block
+ca65 bootdisk.asm -o bootdisk.o
+
+# 2. Link using your custom sector map config to output a flat disk file
+ld65 -C bootdisk.cfg bootdisk.o -o bootdisk.dsk
+
+ls -l bootdisk.dsk
+cp bootdisk.dsk ~/ORIC/
+
