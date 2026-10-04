@@ -8,7 +8,7 @@
 ; SEGMENT 1: THE MAGIC MFM_DISK GEOMETRY HEADER (Exactly 256 Bytes)
 ; -------------------------------------------------------------------------
 .segment "DSKHDR"
-    .byte "MFM_DISK"     ; 8-Byte Format Signature
+    .byte "ORICDISK"     ; 8-Byte Format Signature
     .dword 2             ; Number of Sides (Double Sided)
     .dword 80            ; Number of Tracks (80 Cylinders)
     .dword 1             ; Geometry Type 1 (Tracks sequential by side)

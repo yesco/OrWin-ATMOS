@@ -7,15 +7,23 @@ ld65 -C bootdisk.cfg bootdisk.o -o boot_raw.bin
 
 # 3. Create a perfectly sized blank track padding block (1,392,128 bytes)
 # filled with the correct standard blank formatting data ($E5)
-dd if=/dev/zero bs=1 count=1392128 2>/dev/null | tr '\000' '\345' > pad_raw.bin
+dd if=/dev/zero bs=1 count=1392128 2>/dev/null of=pad.bin
+
+#BULLSHIT!
 
 # 4. Combine the boot signature header, code, and valid formatting bytes together
-cat boot_raw.bin pad_raw.bin > bootdisk.dsk
+cat boot_raw.bin pad.bin > bootdisk.dsk
 
 # 5. Clean up temporary files
-rm boot_raw.bin pad_raw.bin bootdisk.o
+#rm boot_raw.bin pad_raw.bin bootdisk.o
 
 # 6. Verify total file footprint
+ls -l bootdisk.dsk
+
+# 7. convert
+./old2mfm bootdisk.dsk
+
+# 8. list final result
 ls -l bootdisk.dsk
 
 cp bootdisk.dsk ~/ORIC/
