@@ -1,5 +1,5 @@
 ; =========================================================================
-; NATIVE BARE-METAL BOOTABLE ORIC ATMOS `.DSK` IMAGE LAYOUT
+; NATIVE BARE-METAL BOOTABLE ORIC ATMOS .DSK IMAGE LAYOUT
 ; =========================================================================
 
 .setcpu "6502"          
@@ -15,74 +15,74 @@
     .res 232, 0          ; Pad out the rest of the 256-byte header with zeros
 
 ; -------------------------------------------------------------------------
-; SEGMENT 2: BARE-METAL BBOOOT DISK LOADER (Track 0, Sector 1)
+; SEGMENT 2: BARE-METAL BOOT DISK LOADER (Track 0, Sector 1)
 ; Loads your data loops starting right at 0x0500 inside Oric memory!
 ; -------------------------------------------------------------------------
 .segment "BOOTCODE"
 
 Entry:
-    sei                  ; Absolute 1st byte (\$78) required by Microdisc ROM
+    sei                  ; Absolute 1st byte ($78) required by Microdisc ROM
     cld                  
-    ldx #\$FF
+    ldx #$FF
     txs                  
 
-    ; Print simple loading message directly to Oric Screen memory map (\$BB80)
+    ; Print simple loading message directly to Oric Screen memory map ($BB80)
     ldx #0
 print_msg:
     lda BootMsg,x
     beq load_system
-    sta \$BB80,x          ; Write straight to the top line of the screen display
+    sta $BB80,x          ; Write straight to the top line of the screen display
     inx
     bne print_msg
 
 load_system:
     ; Configure the FDC to stream the rest of our application blocks
-    lda #\$80             ; Select Drive 0, Side 0
-    sta \$0314
+    lda #$80             ; Select Drive 0, Side 0
+    sta $0314
     
     lda #0               ; Start loading from Track 0
-    sta \$0311
+    sta $0311
     lda #2               ; Sector 1 was us! Start streaming from Sector 2
-    sta \$0312
+    sta $0312
 
-    ; NEW POSITION REQUIREMENT: Load your pipeline program starting at 0x0500!
-    lda #\$00
-    sta \$00              ; Target Dest Low (\$00)
-    lda #\$05
-    sta \$01              ; Target Dest High (\$05) -> Target = 0x0500
+    ; POSITION REQUIREMENT: Load your pipeline program starting at 0x0500!
+    lda #$00
+    sta $00              ; Target Dest Low ($00)
+    lda #$05
+    sta $01              ; Target Dest High ($05) -> Target = 0x0500
 
     ldx #16              ; Load 16 continuous sectors (8 Kilobytes of space)
 
 read_sector_loop:
-    lda #\$80             ; Trigger FDC Read Command
-    sta \$0310
+    lda #$80             ; Trigger FDC Read Command
+    sta $0310
 
     ldy #0
 p1_wait:
-    lda \$0310
+    lda $0310
     bmi p1_wait          ; Spin on FDC busy flag
-    lda \$0313
-    sta (\$00),y          ; Push byte directly into Oric system RAM
+    lda $0313
+    sta ($00),y          ; Push byte directly into Oric system RAM
     iny
     bne p1_wait
 
-    inc \$01              ; Jump destination high-byte pointer forward
+    inc $01              ; Jump destination high-byte pointer forward
 p2_wait:
-    lda \$0310
+    lda $0310
     bmi p2_wait
-    lda \$0313
-    sta (\$00),y
+    lda $0313
+    sta ($00),y
     iny
     bne p2_wait
-    inc \$01              ; Finished 512-byte block pass
+    inc $01              ; Finished 512-byte block pass
 
-    inc \$0312            ; Advance FDC Sector targeting
+    inc $0312            ; Advance FDC Sector targeting
     dex
     bne read_sector_loop
 
 boot_complete:
     cli                  ; Restore base interrupt systems
-    jmp \$0500            ; JUMP DIRECTLY INTO YOUR SMALLTABLE APP AT 0x0500!
+    jmp $0500            ; JUMP DIRECTLY INTO YOUR SMALLTABLE APP AT 0x0500!
 
 BootMsg:
     .asciiz "LOADING SMALLTABLE OS TO 0x0500..."
