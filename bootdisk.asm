@@ -1,8 +1,8 @@
 ; =========================================================================
-; NATIVE CA65 BOOTABLE ORIC ATMOS DISK LAYOUT
+; VALID BARE-METAL BOOTABLE ORIC ATMOS DISK LAYOUT
 ; =========================================================================
 
-.setcpu "6502"          ; Correct ca65 CPU directive
+.setcpu "6502"          ; Explicit target instruction set
 
 ; -------------------------------------------------------------------------
 ; SEGMENT 1: THE MAGIC ORIC DSK GEOMETRY HEADER (Exactly 256 Bytes)
@@ -15,13 +15,13 @@
     .res 232, 0          ; Pad out the rest of the 256-byte header with zeros
 
 ; -------------------------------------------------------------------------
-; SEGMENT 2: THE BOOT SECTOR APPLICATION CODE (Exactly 512 Bytes)
-; This code runs mapped at memory location $B000 at startup
+; SEGMENT 2: THE BOOT SECTOR (Track 0, Sector 1 - Exactly 512 Bytes)
+; Mapped to run at memory address $B000 at startup
 ; -------------------------------------------------------------------------
 .segment "BOOTCODE"
 
 Entry:
-    sei                  ; Inhibit baseline system vectors
+    sei                  ; CRITICAL: Must be the absolute 1st byte ($78) to pass verification!
     cld                  ; Clear decimal execution bounds
     ldx #$FF
     txs                  ; Reset Stack Pointer position
@@ -89,7 +89,7 @@ BootMsg:
     .asciiz "LOADING SMALLTABLE OS..." ; Automatically null-terminates string
 
 ; -------------------------------------------------------------------------
-; PAD OUT SECTOR 1
+; PAD OUT SECTOR 1 TO EXACTLY 512 BYTES
 ; Calculate current size of BOOTCODE and pad to exactly 512 bytes
 ; -------------------------------------------------------------------------
 .res 512 - (* - Entry), 0
