@@ -1,22 +1,22 @@
 ; =========================================================================
-; NATIVE BARE-METAL BOOTABLE ORIC ATMOS .DSK IMAGE LAYOUT
+; BARE-METAL BOOTABLE ORIC ATMOS DISK
 ; =========================================================================
 
 .setcpu "6502"          
 
 ; -------------------------------------------------------------------------
-; SEGMENT 1: THE MAGIC MFM_DISK GEOMETRY HEADER (Exactly 256 Bytes)
+; SEGMENT 1: THE CORRECT FORMAT SECTOR DUMP HEADER (Exactly 256 Bytes)
 ; -------------------------------------------------------------------------
 .segment "DSKHDR"
-    .byte "ORICDISK"     ; 8-Byte Format Signature
-    .dword 2             ; Number of Sides (Double Sided)
-    .dword 80            ; Number of Tracks (80 Cylinders)
-    .dword 1             ; Geometry Type 1 (Tracks sequential by side)
+    .byte "ORICDISK"     
+    .dword 2             ; Number of Sides
+    .dword 80            ; Number of Tracks
+    .dword 17            ; Number of Sectors per Track
     .res 232, 0          ; Pad out the rest of the 256-byte header with zeros
 
 ; -------------------------------------------------------------------------
-; SEGMENT 2: BARE-METAL BOOT DISK LOADER (Track 0, Sector 1)
-; Loads your data loops starting right at 0x0500 inside Oric memory!
+; SEGMENT 2: BARE-METAL BOOT DISK LOADER (Track 0, Sector 1 - Exactly 512 Bytes)
+; Mapped to run at memory address $B000 at startup
 ; -------------------------------------------------------------------------
 .segment "BOOTCODE"
 
@@ -89,3 +89,12 @@ BootMsg:
 
 ; Pad Sector 1 out to exactly 512 bytes
 .res 512 - (* - Entry), 0
+
+; -------------------------------------------------------------------------
+; SEGMENT 3: THE MANDATORY SYSTEM MAP SIGNATURE (Track 0, Sector 4)
+; This forces the Microdisc controller ROM to pass the system validation check!
+; -------------------------------------------------------------------------
+.segment "SYSMAP"
+    ; Sedoric / Microdisc Boot Signature pattern block
+    .byte $00, $01, $00, $00, $53, $45, $44, $4F, $52, $49, $43, $20  ; "SEDORIC "
+    .res 500, 0          ; Pad out Sector 4 to exactly 512 bytes

@@ -1,29 +1,26 @@
 #!/bin/bash
+
+rm bootdisk.dsk
+rm ~/ORIC/bootdisk.dsk
+
 # 1. Compile the assembly file into a standard object block
 ca65 bootdisk.asm -o bootdisk.o
 
-# 2. Link the core boot codes to a temporary scratchpad file
-ld65 -C bootdisk.cfg bootdisk.o -o boot_raw.bin
+# 2. Link using the complete geometry config to produce the full-sized file
+ld65 -C bootdisk.cfg bootdisk.o -o bootdisk.dsk
 
-# 3. Create a perfectly sized blank track padding block (1,392,128 bytes)
-# filled with the correct standard blank formatting data ($E5)
-dd if=/dev/zero bs=1 count=1392128 2>/dev/null of=pad.bin
+# 3. Clean up the object file
+rm bootdisk.o
 
-#BULLSHIT!
-
-# 4. Combine the boot signature header, code, and valid formatting bytes together
-cat boot_raw.bin pad.bin > bootdisk.dsk
-
-# 5. Clean up temporary files
-#rm boot_raw.bin pad_raw.bin bootdisk.o
-
-# 6. Verify total file footprint
 ls -l bootdisk.dsk
 
-# 7. convert
+# 4. Convert the valid ORICDISK layout to final MFM format
 ./old2mfm bootdisk.dsk
 
-# 8. list final result
 ls -l bootdisk.dsk
 
+# 5. Copy to your target testing directory
 cp bootdisk.dsk ~/ORIC/
+
+ls -pl ~/ORIC/bootdisk.dsk
+
