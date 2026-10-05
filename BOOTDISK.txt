@@ -1,0 +1,20 @@
+SmallTable Microdisc boot layout (256-byte sectors)
+====================================================
+
+Track 0 side 0
+  S1  ROM signature / version     (required, from SEDORIC)
+  S2  Boot code                   (required – ROM runs this)
+        0..22  SEDORIC prefix
+        23+    boot_payload.asm
+  S3  Fake SYSTEMDOS directory    (required)
+  S4  free
+  S5  SmallTable directory        <--- your FS starts here
+  S6+ SmallTable program / files  <--- yours
+
+Rebuild
+  python3 build_bootdisk.py
+  -> bootdisk_mfm.dsk
+
+All sector bytes are either taken from the real SEDORIC template (S1/S3)
+or generated from the documented payload in build_bootdisk.py / boot_payload.asm.
+No hand-patched mystery bytes.

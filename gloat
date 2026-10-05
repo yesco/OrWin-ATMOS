@@ -1,0 +1,1 @@
+cl65 -t sim6502 gloat16.c -o gloat16.sim && sim65 gloat16.sim

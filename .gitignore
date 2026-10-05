@@ -24,3 +24,10 @@ fil
 
 diff
 diff.c
+fish
+*.out
+*.bin
+*.tmp
+foo.*
+
+*.dsk
