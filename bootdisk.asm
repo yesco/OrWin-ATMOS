@@ -77,7 +77,7 @@ Entry:
         lda     #'D'
         sta     $BB86
 
-        ; FDC drive 0 side 0 DD
+        ; FDC drive 0 side 0 DD ; ROMDIS=0
         lda     #%10000100
         sta     FDC_CTRL
 
