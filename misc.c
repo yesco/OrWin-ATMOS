@@ -21,7 +21,7 @@ char* zptr;
 #pragma bss-name (pop)
 #endif // __CC65__
 
-#ifdef OSCAR
+#ifdef OSCAR64
 __zeropage extern char* zptr;
 #endif
 

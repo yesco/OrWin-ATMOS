@@ -104,7 +104,7 @@ char* zline;
 #pragma bss-name (pop)
 #endif // __CC65__
 
-#ifdef OSCAR
+#ifdef OSCAR64
 __zeropage extern char* zapp;
 __zeropage extern char* zline;
 #endif
@@ -1258,7 +1258,7 @@ void* tail() {
   }
 
   // tail code (keep ring buffer)
-  ring= (char**)app->d;
+  ring= (char**)(app->d);
 
   if (zline && zline != EOS) { 
     // insert, and ask for more
@@ -1846,7 +1846,7 @@ cmdtrain* wsysparse(char* cmd, char* pi, unsigned int *bitsout) {
       skiptill('|');
       // trim args end
       p= zptr;
-      if (!*zptr) zptr= 0; else *zptr++; //= 0;
+      if (!*zptr) zptr= NULL; else *zptr++;
       do { *p= 0; } while(*--p == ' ');
     } else *zptr++= 0;
 
@@ -1871,7 +1871,7 @@ cmdtrain* wsysparse(char* cmd, char* pi, unsigned int *bitsout) {
     return NULL;
 
   found:
-    iapp= n-cmdnames;
+    iapp= n-(char**)cmdnames;
     
     #ifdef SHELLINFO
     printf("\t[%s: ", name);

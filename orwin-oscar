@@ -4,7 +4,10 @@
 rm -f orwin.prg
 
 #./oscar -dNOLONG -dNOFLOAT -dOSCAR64 orwin.c app_*.c
+# stdbug: disabled buffering...
+
 stdbuf -o0 ./oscar -Os -dNOFLOAT -dOSCAR64 orwin.c app_*.c -e
+
 
 # byte code only
 #./oscar -v2 -bc -dNOLONG -dNOFLOAT -dOSCAR64 orwin.c app_*.c
