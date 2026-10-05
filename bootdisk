@@ -1,38 +1,42 @@
 #!/bin/bash
+# Build SmallTable bootable ORICDISK from bootdisk.asm + program.bin
 set -e
-
 cd "$(dirname "$0")"
 
-rm -f bootdisk.dsk bootdisk.o
+rm -f bootdisk.o bootdisk.dsk
 
-# 1. Assemble
-ca65 bootdisk.asm -o bootdisk.o
-
-# 2. Link to full-sized ORICDISK image
-ld65 -C bootdisk.cfg bootdisk.o -o bootdisk.dsk
-
-# 3. Cleanup
-rm -f bootdisk.o
-
-echo "=== ORICDISK image ==="
-ls -l bootdisk.dsk
-echo
-echo "Header check:"
-hexdump -C -n 32 bootdisk.dsk
-echo
-echo "Boot sector (first 64 bytes of T0S1):"
-hexdump -C -s 256 -n 64 bootdisk.dsk
-echo
-echo "SYSMAP signature (T0S4):"
-hexdump -C -s $((256 + 3*512)) -n 32 bootdisk.dsk
-
-# Optional: convert to MFM if old2mfm is present
-if [ -x ./old2mfm ]; then
-    echo
-    echo "=== Converting to MFM_DISK ==="
-    ./old2mfm bootdisk.dsk
-    ls -l bootdisk.dsk
+if [ -f program.bin ]; then
+  PROG_SIZE=$(wc -c < program.bin)
+else
+  echo "Creating stub program.bin (prints P, hangs)"
+  printf '\x78\xd8\xa2\xff\x9a\xa9\x50\x8d\x80\xbb\x38\xb0\xfe' > program.bin
+  dd if=/dev/zero bs=1 count=243 >> program.bin 2>/dev/null
+  PROG_SIZE=256
 fi
 
-echo
-echo "Done. Copy bootdisk.dsk to your emulator / Gotek folder."
+LOAD_SECTORS=$(( (PROG_SIZE + 255) / 256 ))
+echo "program.bin: $PROG_SIZE bytes -> $LOAD_SECTORS sector(s) from S6"
+
+ca65 -D LOAD_SECTORS=$LOAD_SECTORS bootdisk.asm -o bootdisk.o
+ld65 -C bootdisk.cfg bootdisk.o -o bootdisk.dsk
+
+# S6 starts at: header(256) + 5 sectors(1280) = 1536
+OFFSET=$((256 + 5 * 256))
+dd if=program.bin of=bootdisk.dsk bs=1 seek=$OFFSET conv=notrunc status=none
+
+echo "ORICDISK size: $(wc -c < bootdisk.dsk)"
+
+ls -l bootdisk.dsk
+if [ -x ./old2mfm ]; then
+  ./old2mfm bootdisk.dsk
+  echo "After old2mfm: $(wc -c < bootdisk.dsk)"
+fi
+
+ls -l bootdisk.dsk
+
+echo "Copying."
+
+cp bootdisk.dsk ~/ORIC/
+ls -lp ~/ORIC/bootdisk.dsk
+
+echo "Done."
