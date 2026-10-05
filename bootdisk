@@ -8,7 +8,7 @@ rm -f bootdisk.o bootdisk.dsk
 NAME=$1
 
 if [ -f "$NAME" ]; then
-  cp $NAME program.bin
+  cp -f $NAME program.bin
   PROG_SIZE=$(wc -c < program.bin)
 else
   echo "Creating stub program.bin (prints P, hangs)"

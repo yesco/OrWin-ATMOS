@@ -1,19 +1,31 @@
 ; =============================================================================
 ; SmallTable Microdisc boot disk  (ca65 + ld65 → ORICDISK)
 ;
-; Track 0: S1 signature, S2 boot, S3 SYSTEMDOS, S4 free, S5 dir, S6+ program
+; Track 0:
+;    Sector 1 : signature
+;    Sector 2 : BOOT
+;    Sector 3 : SYSTEMDOS
+;    Sector 4 : free
+;    Sector 5 : SmallTable Directory
+;    Sector 6+: program.bin loaded at LOAD_ADDR and called
+; 	
 ; program.bin is injected at S6 by build.sh and loaded to $0500 by this boot.
 ; =============================================================================
 
 .setcpu "6502"
 
+;;; LOAD_SECTORS is set when building the disk doing ca65
+;;; in ./bootdisk
+	
 .ifndef LOAD_SECTORS
 LOAD_SECTORS = 1
 .endif
 
-FIRST_DATA_SECTOR = 6
+
 LOAD_ADDR         = $0500
-SPT               = 17
+
+FIRST_DATA_SECTOR = 6
+SECTORS_PER_TRACK = 17
 
 FDC_CMD   = $0310
 FDC_TRACK = $0311
@@ -22,7 +34,17 @@ FDC_DATA  = $0313
 FDC_CTRL  = $0314
 FDC_DRQ   = $0318
 
-; ---------------------------------------------------------------------------
+;;; ---------------------------------------------------------------------------
+;;; Zero Page usage
+	
+;;; $00, $01: load_addr start and counter
+	
+;;; track the current track
+track     = $02
+
+;;; ---------------------------------------------------------------------------
+;;; Sector 1 : signature
+	
 .segment "DSKHDR"
         .byte   "ORICDISK"
         .dword  2
@@ -30,7 +52,9 @@ FDC_DRQ   = $0318
         .dword  17
         .res    232, 0
 
-; ---------------------------------------------------------------------------
+;;; ---------------------------------------------------------------------------
+;;; Sector 2 : BOOT
+
 .segment "SEC1"
         .byte   $01,$00,$00,$00,$00,$00,$00,$00
         .byte   $20,$20,$20,$20,$20,$20,$20,$20
@@ -40,21 +64,29 @@ FDC_DRQ   = $0318
         .byte   "SEDORIC V3.006 01/01/96"
         .res    161, 0
 
-; ---------------------------------------------------------------------------
+;;; ---------------------------------------------------------------------------
+;;; Sector 2 : BOOT
+	
 .segment "SEC2"
         ; SEDORIC prefix – required by Microdisc ROM
         .byte   $00,$00,$FF,$00,$D0,$9F,$D0,$9F
         .byte   $02,$B9,$01,$00,$FF,$00,$00,$B9
         .byte   $E4,$B9,$00,$00,$E6,$12,$00
 
+;; TODO: Not clear where this code is loaded and executed
+
 Entry:
+	;; disable interrupts, not decimal, init stack
         sei
         cld
         ldx     #$FF
         txs
+
+	;; ORIC: cursor blink off, no keyclick etc
         lda     #0
         sta     $026A
 
+	;; ORIC: clears status line
         ldx     #0
         lda     #' '
 @c:     sta     $BB80,x
@@ -62,6 +94,7 @@ Entry:
         cpx     #40
         bne     @c
 
+	;; ORIC: print loading message "ST LOAD"
         lda     #'S'
         sta     $BB80
         lda     #'T'
@@ -77,63 +110,88 @@ Entry:
         lda     #'D'
         sta     $BB86
 
-        ; FDC drive 0 side 0 DD ; ROMDIS=0
+	;; FDC drive 0 side 0 DD
+	;; ORIC: ROMDIS=0 (unmaps ROM/BASIC making it RAM)
         lda     #%10000100
         sta     FDC_CTRL
 
-        ; Restore track 0
+        ;; Move head to track 0
         lda     #$0C
         sta     FDC_CMD
 @wr:    lda     FDC_CMD
         and     #1
         bne     @wr
 
-        ; dest pointer
+	;; load dest pointer start pointer
         lda     #<LOAD_ADDR
         sta     $00
         lda     #>LOAD_ADDR
         sta     $01
 
-        ; sector / track / count
+	;; sector / track / count
         ldx     #FIRST_DATA_SECTOR  ; X = sector
         lda     #0
-        sta     $02                 ; $02 = track
+        sta     track
         ldy     #LOAD_SECTORS       ; Y = remaining
 
+	;; Track 2: load next of 256 bytes at ($00)
+	;; from;
+	;;   track == track to load
+	;;   X     == sector
+	;;   Y     == sector counting down
 @next:
-        lda     $02
+        lda     track
         sta     FDC_TRACK
         stx     FDC_SECT
-        lda     #$88
+        lda     #$88		; set destination
         sta     FDC_CMD
 
+	;;  prepare to read one sector
         tya
         pha
         ldy     #0
+
+	;; wait for data ready
 @rd:    lda     FDC_DRQ
         bmi     @rd
+
+	;; read byte, stuff it
         lda     FDC_DATA
         sta     ($00),y
         iny
+
         bne     @rd
+
+	;; done with 256 bytes (Y wrapped)
         inc     $01
 
         pla
         tay
 
+	;; move to next track?
         inx
-        cpx     #SPT+1
-        bcc     @same
+        cpx     #SECTORS_PER_TRACK+1
+        bcc     @sametrack
         ldx     #1
-        inc     $02
-@same:
+        inc     track
+@sametrack:
+	;; more pages to load?
         dey
         bne     @next
 
+	;; All LOAD_SECTORS loaded
+	;; Jump to it!
         jmp     LOAD_ADDR
 
 
-; ---------------------------------------------------------------------------
+	;; ^- about 159 bytes!
+
+
+
+;;; ---------------------------------------------------------------------------
+;;; Sector 3 : SYSTEMDOS
+;;;   - fake directory data to make boot happy
+	
 .segment "SEC3"
         .byte   $00,$00,$02
         .byte   "SYSTEMDOS"
@@ -141,8 +199,14 @@ Entry:
         .byte   "BOOTUPCOM"
         .res    228, 0
 
+;;; ---------------------------------------------------------------------------
+;;; Sector 4 : free - reserved
+
 .segment "SEC4"
         .res    256, 0
+
+;;; ---------------------------------------------------------------------------
+;;; Sector 5 : SmallTable Directory
 
 .segment "SEC5"
         .res    256, 0
