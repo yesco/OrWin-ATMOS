@@ -1,7 +1,13 @@
 # this script needs to be run after running ./orwin for cc65
 # for the gen files...
 
-rm -f orwin.prg
+rm -f orwin.prg orwin.bin
+
+# -- build orwin.bin to build disk...
+./oscar -n -tf=bin -o=orwin.bin -rt=include/oric_crt.c -i=include -Os -dNOFLOAT -dOSCAR64 orwin.c app_*.c 
+
+
+# -- build .prg and emulate interactive
 
 #./oscar -dNOLONG -dNOFLOAT -dOSCAR64 orwin.c app_*.c
 # stdbug: disabled buffering...
