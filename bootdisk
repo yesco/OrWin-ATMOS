@@ -1,26 +1,38 @@
 #!/bin/bash
+set -e
 
-rm bootdisk.dsk
-rm ~/ORIC/bootdisk.dsk
+cd "$(dirname "$0")"
 
-# 1. Compile the assembly file into a standard object block
+rm -f bootdisk.dsk bootdisk.o
+
+# 1. Assemble
 ca65 bootdisk.asm -o bootdisk.o
 
-# 2. Link using the complete geometry config to produce the full-sized file
+# 2. Link to full-sized ORICDISK image
 ld65 -C bootdisk.cfg bootdisk.o -o bootdisk.dsk
 
-# 3. Clean up the object file
-rm bootdisk.o
+# 3. Cleanup
+rm -f bootdisk.o
 
+echo "=== ORICDISK image ==="
 ls -l bootdisk.dsk
+echo
+echo "Header check:"
+hexdump -C -n 32 bootdisk.dsk
+echo
+echo "Boot sector (first 64 bytes of T0S1):"
+hexdump -C -s 256 -n 64 bootdisk.dsk
+echo
+echo "SYSMAP signature (T0S4):"
+hexdump -C -s $((256 + 3*512)) -n 32 bootdisk.dsk
 
-# 4. Convert the valid ORICDISK layout to final MFM format
-./old2mfm bootdisk.dsk
+# Optional: convert to MFM if old2mfm is present
+if [ -x ./old2mfm ]; then
+    echo
+    echo "=== Converting to MFM_DISK ==="
+    ./old2mfm bootdisk.dsk
+    ls -l bootdisk.dsk
+fi
 
-ls -l bootdisk.dsk
-
-# 5. Copy to your target testing directory
-cp bootdisk.dsk ~/ORIC/
-
-ls -pl ~/ORIC/bootdisk.dsk
-
+echo
+echo "Done. Copy bootdisk.dsk to your emulator / Gotek folder."
