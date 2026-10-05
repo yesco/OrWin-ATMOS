@@ -21,6 +21,9 @@
 LOAD_SECTORS = 1
 .endif
 
+;; ORIC screen address
+SCREEN            = $BB80
+	
 
 LOAD_ADDR         = $0500
 
@@ -89,27 +92,41 @@ Entry:
 	;; ORIC: clears status line
         ldx     #0
         lda     #' '
-@c:     sta     $BB80,x
+@c:     sta     SCREEN,x
         inx
         cpx     #40
         bne     @c
 
-	;; ORIC: print loading message "ST LOAD"
-        lda     #'S'
-        sta     $BB80
-        lda     #'T'
-        sta     $BB81
-        lda     #' '
-        sta     $BB82
-        lda     #'L'
-        sta     $BB83
-        lda     #'O'
-        sta     $BB84
-        lda     #'A'
-        sta     $BB85
-        lda     #'D'
-        sta     $BB86
+	;; ORIC: print loading bootmessage
+	lda     #'O'
+	sta     SCREEN+0
+	lda     #'r'
+	sta     SCREEN+1
+	lda     #'W'
+	sta     SCREEN+2
+	lda     #'i'
+	sta     SCREEN+3
+	lda     #'n'
+	sta     SCREEN+4
+	lda     #'-'
+	sta     SCREEN+5
+	lda     #'A'
+	sta     SCREEN+6
+	lda     #'T'
+	sta     SCREEN+7
+	lda     #'M'
+	sta     SCREEN+8
+	lda     #'O'
+	sta     SCREEN+9
+	lda     #'S'
+	sta     SCREEN+10
+	lda     #':'
+	sta     SCREEN+11
+	lda     #' '
+	sta     SCREEN+12
 
+;;; TODO: show "VOLUME NAME from Sector4"
+	
 	;; FDC drive 0 side 0 DD
 	;; ORIC: ROMDIS=0 (unmaps ROM/BASIC making it RAM)
         lda     #%10000100
@@ -140,6 +157,16 @@ Entry:
 	;;   X     == sector
 	;;   Y     == sector counting down
 @next:
+	;; update screen counter at status line end
+        lda     track
+	adc     #'0'
+        sta     SCREEN+37
+
+	tya 			; get sector count down
+	adc     #'0'
+        sta     SCREEN+38
+
+	;; move to next track/sector
         lda     track
         sta     FDC_TRACK
         stx     FDC_SECT
@@ -186,7 +213,9 @@ Entry:
 
 	;; ^- about 159 bytes!
 
-
+bootmsg:
+	.byte "AtmOS: diskVol3", 0
+	
 
 ;;; ---------------------------------------------------------------------------
 ;;; Sector 3 : SYSTEMDOS

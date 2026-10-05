@@ -32,20 +32,20 @@ static void boot(void) {
   char floppy  = 1; // it's ona a floppy
 
   if (mia_call_boot((uint8_t)(0x80 | (autoload << 4) | (bit << 3) | (b11 << 2) | (tap << 1) | floppy)) < 0)
-    sprintf(TEXTSCREEN+40*2, "%% Boot failed!\n");
+    sprintf(TEXTSCREEN+40*3, "%% Boot failed!\n");
 }
 
 
 // fm_getkey() is polled and
 int main(void) {
 
-  sprintf(TEXTSCREEN, "Hello APP!\n");
+  sprintf(TEXTSCREEN+40*1, "Hello APP!\n");
 
   //printf("Hello APP!\n");
 
   // LOCI required for overlay RAM save/restore; gracefully absent in Oricutron
   if (!loci_present())
-    sprintf(TEXTSCREEN+40, "%%No loci\n");
+    sprintf(TEXTSCREEN+40*2, "%%No loci\n");
 
   return 0;
 }
