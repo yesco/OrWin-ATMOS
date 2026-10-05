@@ -5,11 +5,15 @@ cd "$(dirname "$0")"
 
 rm -f bootdisk.o bootdisk.dsk
 
-if [ -f program.bin ]; then
+NAME=$1
+
+if [ -f "$NAME" ]; then
+  cp $NAME program.bin
   PROG_SIZE=$(wc -c < program.bin)
 else
   echo "Creating stub program.bin (prints P, hangs)"
-  printf '\x78\xd8\xa2\xff\x9a\xa9\x50\x8d\x80\xbb\x38\xb0\xfe' > program.bin
+#  printf '\x78\xd8\xa2\xff\x9a\xa9\x50\x8d\x80\xbb\x38\xb0\xfe' > program.bin
+  printf '\x78\xd8\xa2\xff\x9a\xa9?\x8d\x80\xbb\x38\xb0\xfe' > program.bin  
   dd if=/dev/zero bs=1 count=243 >> program.bin 2>/dev/null
   PROG_SIZE=256
 fi
