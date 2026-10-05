@@ -1,0 +1,65 @@
+#!/usr/bin/env python3
+"""Build SmallTable ORICDISK (raw sectors). Host/LOCI friendly."""
+import struct, pathlib
+
+SECTOR, SIDES, TRACKS, SPT = 256, 2, 80, 17
+HEADER = 256
+TOTAL = SIDES * TRACKS * SPT * SECTOR
+OUT = pathlib.Path("smalltable.dsk")
+
+SEC1 = bytes([
+    0x01,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+    0x20,0x20,0x20,0x20,0x20,0x20,0x20,0x20,
+    0x00,0x00,0x03,0x00,0x00,0x00,0x01,0x00,
+    0x53,0x45,0x44,0x4F,0x52,0x49,0x43,0x20,
+]) + b" "*40 + b"SEDORIC V3.006 01/01/96" + bytes(161)
+
+SEC3 = (bytes([0x00,0x00,0x02]) + b"SYSTEMDOS" +
+        bytes([0x01,0x00,0x02,0x00,0x02,0x00,0x00]) +
+        b"BOOTUPCOM" + bytes(228))
+
+PREFIX = bytes([
+    0x00,0x00,0xFF,0x00,0xD0,0x9F,0xD0,0x9F,
+    0x02,0xB9,0x01,0x00,0xFF,0x00,0x00,0xB9,
+    0xE4,0xB9,0x00,0x00,0xE6,0x12,0x00,
+])
+
+def boot_payload():
+    c = bytearray()
+    e = c.extend
+    e([0x78,0xD8,0xA2,0xFF,0x9A])
+    e([0xA9,0x00,0x8D,0x6A,0x02])
+    e([0xA2,0x00,0xA9,0x20])
+    e([0x9D,0x80,0xBB,0xE8,0xE0,0x28,0xD0,0xF8])
+    for i, ch in enumerate(b"SMALLTABLE BOOT OK"):
+        e([0xA9, ch, 0x8D, (0x80+i)&0xFF, 0xBB])
+    e([0x38,0xB0,0xFE])
+    return bytes(c)
+
+SEC2 = PREFIX + boot_payload() + bytes(256 - 23 - len(boot_payload()))
+
+# Demo program for S6 (replace with your 35KB binary split)
+PROG = bytes([0x78,0xD8,0xA2,0xFF,0x9A, 0xA9,0x50,0x8D,0x80,0xBB, 0x38,0xB0,0xFE])
+SEC6 = PROG + bytes(256 - len(PROG))
+
+def put(data, track, sector, side, blob):
+    off = (side*TRACKS + track)*SPT*SECTOR + (sector-1)*SECTOR
+    data[off:off+SECTOR] = blob[:SECTOR]
+
+def main():
+    assert len(SEC1)==256 and len(SEC2)==256 and len(SEC3)==256
+    hdr = bytearray(HEADER)
+    hdr[0:8] = b"ORICDISK"
+    struct.pack_into("<III", hdr, 8, SIDES, TRACKS, SPT)
+    data = bytearray(TOTAL)
+    put(data, 0, 1, 0, SEC1)
+    put(data, 0, 2, 0, SEC2)
+    put(data, 0, 3, 0, SEC3)
+    put(data, 0, 6, 0, SEC6)
+    OUT.write_bytes(bytes(hdr) + bytes(data))
+    print(f"Wrote {OUT} ({HEADER+TOTAL} bytes) ORICDISK")
+    print("S5 = directory slot (zero), S6 = demo program, S7+ free")
+    print("Convert for Oricutron:  ./old2mfm smalltable.dsk")
+
+if __name__ == "__main__":
+    main()
