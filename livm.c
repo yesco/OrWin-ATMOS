@@ -2,20 +2,48 @@
 //
 // (C) 2026 Jonas S Karlsson
 
-// A virtual machine with managed storage.
-// There can only by 256 values!
-// Max 128 different numeric integer,
-// And 128 different managed strings.
+// TODO: not sure if this gives any savings,
+// - speed
+// - storage
+// - but it "manageds" strings! lol
 
+// A virtual machine with managed ByteStore.
+//
+// Basically all values are represented by a byte.
+//
+// The byte value is interpreted as follows:
+//   0-127   = inline small ints
+//   128-195 = 64 stored word sized shared ints
+//   196-254 = 64 managed shared strings
+//   196     = "" shared empty string
+//   255     = -1 and EOS
+//
 // LiVM
 // ====
 // This may sound limited, and it is, but in
-// reality, in global single variables and on
-// the stack, how many VALUES do you think are
-// active at any momment"
+// reality, values in global (non-array) variables and
+// on the stack, how many VALUES do you think are
+// active at any momment in most programs?
 //
 // I'm explicitily talking about "active" values,
-// not values stored in an array.
+// not values stored in an array or other storage
+// containers. Those are extracted and when stored
+// in a variable is "insert" into the value space.
+//
+// A running process is:
+// - a program in token byte codes
+// - it's own (couild be shared!) ByteStorage
+// - a ReturnStack with addresses and frame-pointers
+// - and a DataSpace storing globals, and data stack
+
+// The DataSpace is the only place for data values.
+// Most integers will be 0-127, the others are
+// references to instances. The same goes for strings.
+//
+// The Dataspace contains all refernces to values
+// thus a simple garbage collection can clean it up
+// and reclaim unused strings as well as larger ints.
+
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -27,8 +55,13 @@
 typedef uint16_t word;
 
 typedef union ByteProgram {
-  char bytes[];
+  // words are offset into bytes when loaded
+  // they are resolved by the offset to the record
+  int nwords;
   word words[];
+
+  // these are packed program bytes.
+  char bytes[];
 } ByteProgram;
   
 // LiVM CPU byte code instructions
@@ -77,7 +110,7 @@ typedef union ByteProgram {
 
 void livm(ByteProgram* bp) {
   static char c, f, i, n, *fp, *sp, pre, t;
-  word tos, tmp;
+  static word tos, tmp;
 
   // s points to index of current tos
   #define PUSH (t= bs->idx[--s]= Num(tos), tos)
@@ -87,10 +120,14 @@ void livm(ByteProgram* bp) {
   // TODO: these are in ByteStorage
   i= bs->i-1; n= 0; fp= bp->bytes + bp->words[f= bs->f];
 
-  // TODO: and for string? (t is the BYTE)
+  // sometimes a new value is computed and then pushed
+ push:
+  //
+
+  // most common shrink the stack one value
  pop:
   POP;
-
+  // fall-through
  next:
   pre= 0;
 
@@ -188,7 +225,7 @@ void livm(ByteProgram* bp) {
       goto POP;
 
     // Arith
-    // TODO: string safe
+    // TODO: string safe, or define string op? lol
     case 16: tmp= tos; POP; tos+= tmp; goto next; // ADD
     case 17: tmp= tos; POP; tos-= tmp; goto next; // SUB
     case 18: tmp= tos; POP; tos*= tmp; goto next; // MUL
@@ -227,6 +264,8 @@ typedef struct ByteStore {
   // probably do striped!
   word  num[64];
   char* str[64];
+
+  // stack added according to NewBS
   char  nix;
   char  idx[0];
 } ByteStore;
@@ -239,7 +278,7 @@ ByteStore* NewBS(char n) {
   ByteStore* bs= calloc(sizeof(ByteStore) + n*sizeof(word), 1);
   if (!bs) return bs;
   bs->str[0]= (char*)&bs->num; // LOL, 2 zeroes!
-  bs->str[63]= (char*)-1; // EOS
+  bs->str[63]= (char*)-1;      // EOS
   return bs;
 }
 
@@ -309,27 +348,38 @@ int main() {
 
   bs= NewBS(64);
   
-  for(v=-1; v<1024; ++v) {
+  switch(2) {
+
+    // numtests
+  case 1: 
+    for(v=-1; v<1024; ++v) {
     i= Num(v); vv= num(i);
     printf("Num(%5lu) => %3d : %5lu -- %s\n",
-	   v, i, vv, v==vv? "OK": "FAIL");
+      v, i, vv, v==vv? "OK": "FAIL");
+    }
+
+    do {
+      int len;
+      // TODO: use getline()
+      // last line will get null
+      s= fgets(line, sizeof(line), stdin);
+      if (!s) break;
+      #if 0
+        printf("%s", s);
+      #else
+        // chop
+        len= strlen(s); if (len && s[--len]==10) s[len]= 0;
+
+      i= Str(s); ss= str(i);
+      printf("Str(\"%s\") => %3d : \"%s\" -- %s\n",
+        s?s:"(NULL)", i, ss?ss:"(NULL)", (s && ss && !strcmp(s,ss)) || s==ss? "OK": "FAIL");
+      #endif
+    } while(1);
+    break;
+    
+    // arith test
+  case 2: {
+    livm(
+    break; }
   }
-
-  do {
-    int len;
-    // TODO: use getline()
-    // last line will get null
-    s= fgets(line, sizeof(line), stdin);
-    if (!s) break;
-#if 0
-    printf("%s", s);
-#else
-    // chop
-    len= strlen(s); if (len && s[--len]==10) s[len]= 0;
-
-    i= Str(s); ss= str(i);
-    printf("Str(\"%s\") => %3d : \"%s\" -- %s\n",
-	   s?s:"(NULL)", i, ss?ss:"(NULL)", (s && ss && !strcmp(s,ss)) || s==ss? "OK": "FAIL");
-#endif
-  } while(1);
 }

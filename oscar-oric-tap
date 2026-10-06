@@ -2,7 +2,7 @@ NAME=$1
 rm -f $NAME.bin $NAME.tap ~ORIC/$NAME.tap
 echo 
 echo "oscar64 compiling..."
-./oscar -n -tf=bin -rt=include/oric_crt.c -i=include -O2 -dNOFLOAT -o=$NAME.bin $NAME.c
+./oscar -D__ATMOS__ -n -tf=bin -rt=include/oric_crt.c -i=include -O2 -dNOFLOAT -o=$NAME.bin $NAME.c
 python3 mktap.py $NAME.bin $NAME.tap $NAME 0x0500
 echo
 ls -l $NAME.bin $NAME.tap

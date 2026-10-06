@@ -3,7 +3,9 @@
 // inspired by locifilemanagerv2
 // - https://github.com/xahmol/locifilemanager-v2
 
+#include "conio.h"
 #include <stdio.h>
+
 #include <string.h>
 
 #include "keyboard.h"
@@ -11,6 +13,8 @@
 
 //#include "oric.h"
 //#include "ijk.h"
+
+
 
 #define TEXTSCREEN ((char*)0xBB80) // $BB80-BF3F
 
@@ -35,9 +39,28 @@ static void boot(void) {
     sprintf(TEXTSCREEN+40*3, "%% Boot failed!\n");
 }
 
+// It seems that the bs routines are "lowcode" and can be overridden
+#define TEXTSCREEN ((char*)0xbb80)
+
+//char screeni= 0;
+
+//void putchar(char c) { TEXTSCREEN[screeni++]= c; }
 
 // fm_getkey() is polled and
 int main(void) {
+  int i;
+
+#if 1
+
+  for(i= 0; i<32; ++i) 
+   putchar('a'+i);
+//    bsout('a'+i);
+  
+  printf("ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+  
+  return 0;
+  
+#else
 
   sprintf(TEXTSCREEN+40*1, "Hello APP!\n");
 
@@ -46,6 +69,9 @@ int main(void) {
   // LOCI required for overlay RAM save/restore; gracefully absent in Oricutron
   if (!loci_present())
     sprintf(TEXTSCREEN+40*2, "%%No loci\n");
-
+#endif
+  
   return 0;
 }
+
+#endif // dummy
