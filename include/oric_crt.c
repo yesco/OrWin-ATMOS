@@ -67,7 +67,13 @@ void StackStart, StackEnd, BSSStart, BSSEnd, CodeStart, CodeEnd, ZeroStart, Zero
 #pragma region(startup, 0x0500, 0x0580, , , {})
 
 // Main program region: starts at $0580 (after startup region)
+// The compiler now successfully registers that 'heap' lives here!
 #pragma region(main, 0x0580, 0xB200, , , {code, data, bss, heap})
+
+// -------------------------------------------------------------------------
+// Runtime/Heap include MUST go after the regions are declared
+// -------------------------------------------------------------------------
+#include "heap_crt.c"
 
 // -------------------------------------------------------------------------
 // Startup

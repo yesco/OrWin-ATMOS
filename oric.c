@@ -109,10 +109,9 @@ void init() {
   // 32 – columns 0 and 1 protected when set.
   #define SCREENSTATE *((char*)0x26a)
   SCREENSTATE= 0+2+0+8+0;
-  
- 
-  
 }
+
+// TODO: why these? just use nl nlpure clnl from fillins
 
 
 // doesn't scroll, just wraps around, no wclreol()

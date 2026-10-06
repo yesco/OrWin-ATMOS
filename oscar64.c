@@ -43,3 +43,39 @@ size_t heapfreex() {
 #define _heapmemavail heapfreex
 #define _heapmaxavail heapfreex
 
+// ------------------------------------------------
+// we have two variants, both require OSCAR64 symbol
+// the default is to run it simulated using ANSI
+
+#ifdef ORIC
+
+// duplicated from atmos.c
+
+/// ORIC ------------------------------------
+// oric charset addresses
+
+#define CHARSET    ((char*)0xB400) // $B400-B7FF
+#define CHARDEF(C) ((char*)(CHARSET+(C)*8))
+#define ALTSET     ((char*)0xB800) // $B800-BB7F
+
+// text screen direct addresses macros
+
+#define TEXTSCREEN ((char*)0xBB80) // $BB80-BF3F
+#define SCREENROWS 28
+#define SCREENCOLS 40
+
+#define SCREENSIZE (SCREENROWS*SCREENCOLS)
+#define SCREENLAST (TEXTSCREEN+SCREENSIZE-1)
+
+// LOL
+#define curscr TEXTSCREEN
+#define SCREENXY(x, y) ((char*)(curscr+(5*(y))*8+(x)))
+
+#ifdef printf
+   fish: TODO: capture
+#endif
+
+// cc65 missing \e
+#define ESC "\x1b"
+
+#endif // ORIC

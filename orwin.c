@@ -21,7 +21,6 @@
 
 #include <assert.h>
 
-
 char wputc(char c);
 
 #define HELPTEXT "FUNCT-3 Prev spc Next List Run Kill Shll"
@@ -41,9 +40,26 @@ char wputc(char c);
 
 #ifdef OSCAR64
 
+  // increase from locifilemanager default
+  #pragma stacksize(2000)
+  // allocate, locifilemanager has none!
+  #pragma heapsize(0x1000) 
+
+  // enable for simple see where it crashed Trace
+  #if 1
+    #define T(c) (*(volatile char*)SCREENXY(39,27)= (c))
+  #else
+    #define T(c) 0
+  #endif
+
+  // This one have two targets depending on 
+  // if ORIC is set! If not ORIC it's drawing
+  // in memory and refreshing an ANSI screen!
   #include "oscar64.c"
 
 #else
+
+  #define T(c) (void)0
 
   #ifdef __CC65__
     #ifdef __ATMOS__
@@ -594,9 +610,15 @@ void setfocus(signed char new) {
 
 char newwin() {
   // TODO: reuse empty entries
+  T('a');
   if (nwin==WIN_MAX) return 0;
+
+  T('b');
   setwin(++nwin);
+  T('c');
+
   setfocus(nwin);
+  T('d');
   return nwin;
 }
 
@@ -651,17 +673,24 @@ clock_t rounds, lastupdate;
 
 // Run and accumulate time/ticks/statistics
 void dorun(char* line) {
+T('f');
   trun= clock();
-
+T('g');
   wtime= HITIME;
   // oscar64 function expeted for call
   //                       xxxxxxxxxxxxxxxx
+T('h');
   winp->ret= wret= (char*)((*winp->fun)(winp->state, line));
 
+T('i');
   winp->ticks+= trun= clock()-trun;
+T('k');
   winp->cpu= trun*rounds;
+T('l');
   runsum+= (trun<<3) + 1;
+T('m');
   ++runprocs;
+T('n');
 }
 
 // start/exec process w parameters (line) in current window
@@ -669,15 +698,21 @@ void dorun(char* line) {
 // TODO: possibly rename "exec".
 // 
 void startline(runptr fun, const char* line) {
+  T('a');
   winp->status= 1;
+  T('b');
   winp->args= strdup(line);
+  T('c');
   
   winp->fun= (void*)fun;
   dorun((char*)line);
+
+  T('d');
   
   // TODO: glue (fun,state) together? (like the train)
   winp->state= winp->ret;
   winp->ret= NULL;
+  T('e');
 }
 
 void start(runptr fun) { startline(fun, 0); }
@@ -1281,24 +1316,34 @@ int main(int argc, char** argv) {
 
   int i= 0, j= 0, z= 0;
   
+  T('I');
   init();
 
-#ifdef xOSCAR64
+#ifdef OAFS
+  T('O');
   {
     unsigned int n;
     n= insertlines((char*)"-");
     printf("Pages: %d\n", n);
   }
-  
-#endif 
-
-#ifdef OAFS
   readsector(0, 0);
   printPage();
   insertlines(argc>2? argv[2]: "-");
+  T('A');
 #endif // OAFS
   
+  {
+    char *c;
+    T('?');
+    c= malloc(100);
+    T(c? '+': '-');
+  //done:goto done;
+  }
+    
+  
+
   heapstart= _heapmemavail();
+  T('H');
   
   // clear background to "gray" checkerboard
   fill(0, 0, SCREENCOLS, SCREENROWS, 126);
@@ -1337,30 +1382,44 @@ int main(int argc, char** argv) {
 
   //memset(win, 0, sizeof(win));
 
+  T('U');
   updatewinptr();
   
   wins[0].status= 255;
 
 #define DEMO
+  T('D');
 #ifdef DEMO  
 
+  T('0');
   newwin();
+  T('1');
   window(-1, -1, 5, 3, blue, white);
+  T('2');
   start(app_ascii);
+  T('3');
   wstatus(-1, "ASCII");
   
+  T('4');
   newwin();
+  T('5');
   start(app_charset);
+  T('6');
 
 // TODO: open in -sim -oscar and crash, but can run later?
 #ifdef CRASH
+  T('7');
   newwin();
+  T('8');
   window(1, -1, 20-7, 10, green, black);
+  T('9');
   start(app_sh);
 #endif
+  T('-');
   
 #endif // DEMO
   
+  T('S');
   scheduler();
 
   return 0;

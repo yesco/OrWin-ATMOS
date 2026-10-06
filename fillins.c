@@ -230,8 +230,15 @@ void initscreen() {
 #define STRDUP
 char* strdup(const char* s) {
   char* r;
+T('p');
   if (!s) return 0;
-  if (!(r= calloc(strlen(s)+1, 1))) return 0;
+T('q');
+  if (!(r= calloc(strlen(s)+1, 1)))
+{
+T('Q');
+      return 0;
+}
+T('r');
   return strcpy(r, s);
 }
 

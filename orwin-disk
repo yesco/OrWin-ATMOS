@@ -1,0 +1,17 @@
+# -- build an hardware ORIC orwin.bin to build disk...
+
+rm -f orwin.bin orwin.dsk ~/ORIC/orwin.dsk
+
+./oscar -DORIC -n -tf=bin -o=orwin.bin -rt=include/oric_crt.c -i=include -Os -dNOFLOAT -dOSCAR64 orwin.c app_*.c 
+
+ls -l orwin.bin
+
+./bootdisk orwin.bin
+
+ls -l bootdisk.dsk
+
+cp bootdisk.dsk orwin.dsk
+cp orwin.dsk ~/ORIC/
+
+ls -l orwin.dsk ~/ORIC/orwin.dsk
+
