@@ -306,8 +306,8 @@ void qsort(void *base, unsigned int num, unsigned int size, int (*compar)(const 
 
 #define FILL
 void fill(char x, char y, char w, char h, char c) {
-  T('a');
   char* p= SCREENXY(x, y);
+  T('a');
   // strided
   while(h--) {
     T('b');

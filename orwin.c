@@ -1331,8 +1331,8 @@ void scheduler() {
 
     // TODO: move out, or make it an APP!
     if (!--wcur) {
-      T('m');
       clock_t now= clock();
+      T('m');
       latency= now-lastlatency;
       lastlatency= now;
       ++rounds;
@@ -1417,9 +1417,28 @@ extern void printPage();
 
 #define MAIN
 
-
 // TODO: shitty!
 #ifdef OSCAR64
+
+
+char* put1h(char* p, char x) {
+  *p= (x<10? x: 'a'-'0'-10+x) + '0';
+  return p+1;
+}
+
+char* put2h(char* p, char xx) {
+  return put1h(put1h(p, xx>>4), xx & 0xf);
+}
+
+char* puth(char* p, unsigned int xxxx) {
+  return put2h(put2h(p, xxxx >> 8), xxxx & 0xff);
+}
+
+char* xputc(char* p, char c) {
+  *p= c;
+  return p+1;
+}
+
 
     // 1. Reference the real linker symbols calculated by Oscar64
     extern void HeapStart;
@@ -1472,6 +1491,31 @@ int main(int argc, char** argv) {
   init();
   T('K');
   
+#ifdef OSCAR64
+/* First byte of pages $0500, $0600, … $1400 (16 sectors) */
+{
+  int n;
+  char *line = TEXTSCREEN+40;
+  for (n = 0; n < 16; n++) {
+    unsigned char v = *(unsigned char *)(0x0500 + n * 256);
+    /* two hex digits + space */
+    line[n * 3]     = "0123456789ABCDEF"[v >> 4];
+    line[n * 3 + 1] = "0123456789ABCDEF"[v & 15];
+    line[n * 3 + 2] = ' ';
+  }
+}
+
+  j= 0;
+  for(i=0x2529; i<=0x2529+16; ++i) {
+    put2h(
+      xputc(
+        puth(TEXTSCREEN+(j+3)*40, i),
+        ':'),
+      *(char*)i);
+    ++j;
+  }
+#endif 
+  
 #ifdef OAFS
   T('O');
   {
@@ -1521,7 +1565,8 @@ int main(int argc, char** argv) {
   
   // clear background to "gray" checkerboard
 T('H');
-fill(0, 0, 0, 0, 126);  // one short row only
+//fill(0, 0, 0, 0, 126);  // one short row only
+fill(0, 0, SCREENCOLS, SCREENROWS, 126);  // one short row only
 T('I');
 
  //fill(0, 0, SCREENCOLS, SCREENROWS, 126);

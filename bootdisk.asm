@@ -168,11 +168,8 @@ Entry:
         adc     #'0'
         sta     SCREEN+38
 
-	;; move to next track/sector
-        lda     track
-        sta     FDC_TRACK
         stx     FDC_SECT
-        lda     #$88		; set destination
+        lda     #$88
         sta     FDC_CMD
 
 	;;  prepare to read one sector
@@ -194,6 +191,10 @@ Entry:
 	;; done with 256 bytes (Y wrapped)
         inc     $01
 
+@busy:  lda     FDC_CMD
+        and     #1
+        bne     @busy
+
         pla
         tay
 
@@ -203,6 +204,13 @@ Entry:
         bcc     @sametrack
         ldx     #1
         inc     track
+        lda     track
+        sta     FDC_DATA            ; WD1793: target track in DATA reg
+        lda     #$18                ; Seek
+        sta     FDC_CMD
+@seek:  lda     FDC_CMD
+        and     #1
+        bne     @seek
 @sametrack:
 	;; more pages to load?
         dey

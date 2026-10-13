@@ -31,6 +31,8 @@ dd if=program.bin of=bootdisk.dsk bs=1 seek=$OFFSET conv=notrunc status=none
 echo "ORICDISK size: $(wc -c < bootdisk.dsk)"
 
 ls -l bootdisk.dsk
+cp bootdisk.dsk bootdisk.dsk.old
+
 if [ -x ./old2mfm ]; then
   ./old2mfm bootdisk.dsk
   echo "After old2mfm: $(wc -c < bootdisk.dsk)"

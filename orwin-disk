@@ -29,11 +29,24 @@ cp orwin-oscar.tap ~/ORIC/
 
 ./bootdisk orwin.bin
 
+python3 - <<'PY'
+from pathlib import Path
+b = Path('orwin.bin').read_bytes()
+d = Path('bootdisk.dsk.old').read_bytes()
+assert len(d) == 696576, len(d)
+for name, bo, do in [
+    ('start', 0, 0x600),
+    ('fillpg', 0x2000, 0x2600),
+    ('fill', 0x2029, 0x2629),
+]:
+    print(name, d[do:do+16] == b[bo:bo+16], b[bo:bo+16].hex(), d[do:do+16].hex())
+PY
+
 ls -l bootdisk.dsk
 
 cp bootdisk.dsk orwin-oscar.dsk
 cp orwin-oscar.dsk ~/ORIC/
 
-ls -l orwin-oscar.dsk ~/ORIC/orwin-oscar.dsk ~/ORIC/orwin-oscar.tap
+ls -l ~/ORIC/orwin-oscar.dsk ~/ORIC/orwin-oscar.tap
 
 
