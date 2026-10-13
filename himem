@@ -1,0 +1,28 @@
+rm -f himem.tap himem.dsk himem.bin ~/ORIC/himem*.*
+
+#./oscar -dSTARTUP -dORIC -dOSCAR64 -dNOFLOAT -n -Os -tf=bin   -rt=include/crt_math.c -o=himem.bin himem.c
+#
+#ls -l himem.bin
+
+
+cl65 -r -t atmos -Oirs himem.c -o himem.tap
+
+cat himem.tap | sed '1 s/^\(.......\)./\1\xc7/' > fil ; cp fil ~/ORIC/himem.tap ; hexdump -C ~/ORIC/himem.tap | head -1 ; hexdump -C ~/ORIC/himem.tap | head -1 ; ls -l himem.tap ~/ORIC/himem.tap
+
+# 0x500-
+tail -c +1281 himem.tap > himem.bin
+
+./bootdisk himem.bin
+cp bootdisk.dsk ~/ORIC/himem-boot.dsk
+
+./tap2dsk himem.tap himem.dsk
+./old2mfm himem.dsk
+cp himem.dsk ~/ORIC/
+
+./tap2dsk orwin.tap orwin.dsk
+./old2mfm orwin.dsk
+cp orwin.dsk ~/ORIC/
+
+
+ls -l ~/ORIC/himem.tap ~/ORIC/himem.dsk ~/ORIC/himem-boot.dsk
+

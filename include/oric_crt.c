@@ -47,6 +47,7 @@
 
 // Linker-provided section boundary symbols
 void StackStart, StackEnd, BSSStart, BSSEnd, CodeStart, CodeEnd, ZeroStart, ZeroEnd;
+void HeapStart, HeapEnd;
 
 // -------------------------------------------------------------------------
 // Section and region declarations
@@ -56,10 +57,22 @@ void StackStart, StackEnd, BSSStart, BSSEnd, CodeStart, CodeEnd, ZeroStart, Zero
 #pragma section(stack,     0x0000, StackStart, StackEnd)
 #pragma section(bss,       0x0000, BSSStart,   BSSEnd)
 #pragma section(zeropage,  0x0000, ZeroStart,  ZeroEnd)
+#pragma section(heap,      0x0000, HeapStart,  HeapEnd)
+
+// Define the exact maximum size available in that block.
+// $C000 to $FC00 (leaving space before the ROM vectors at $FFFA) is roughly 15KB.
+// 15KB = 15 * 1024 = 15360 bytes = 0x3C00
+//#pragma heapsize(0x3C00)
+#pragma heapsize(0x1000)
+// Create a completely separate region dedicated strictly to the Heap at $C000!
+// This maps the 15KB chunk starting exactly at 0xC000 up to 0xFC00.
+// Doesn't work?
+//#pragma region(high_heap, 0xC000, 0xFC00, , , {heap})
 
 // Stack: 512 bytes, just below the standard/alternate character set RAM
-#pragma stacksize(0x0200)
-#pragma region(stack, 0xB200, 0xB400, , , {stack})
+//#pragma stacksize(0x0200)
+#pragma stacksize(0x0800)
+//#pragma region(stack, 0xB200, 0xB400, , , {stack})
 
 // Startup region: Oscar64 requires a region named "startup" for the #pragma startup
 // function. Without it Oscar64 auto-creates one at $0800, conflicting with main.
@@ -68,7 +81,10 @@ void StackStart, StackEnd, BSSStart, BSSEnd, CodeStart, CodeEnd, ZeroStart, Zero
 
 // Main program region: starts at $0580 (after startup region)
 // The compiler now successfully registers that 'heap' lives here!
-#pragma region(main, 0x0580, 0xB200, , , {code, data, bss, heap})
+#pragma region(main, 0x0580, 0xB200, , , {code, data, bss, heap, stack})
+
+// Main region now ONLY processes code, constants, and global BSS variables
+//#pragma region(main, 0x0580, 0xB200, , , {code, data, bss})
 
 // -------------------------------------------------------------------------
 // Runtime/Heap include MUST go after the regions are declared

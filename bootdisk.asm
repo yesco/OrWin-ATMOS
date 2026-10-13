@@ -158,12 +158,14 @@ Entry:
 	;;   Y     == sector counting down
 @next:
 	;; update screen counter at status line end
+        clc
         lda     track
-	adc     #'0'
+        adc     #'0'
         sta     SCREEN+37
 
-	tya 			; get sector count down
-	adc     #'0'
+        clc
+        txa                     ; show real sector
+        adc     #'0'
         sta     SCREEN+38
 
 	;; move to next track/sector

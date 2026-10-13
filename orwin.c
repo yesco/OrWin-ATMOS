@@ -40,10 +40,87 @@ char wputc(char c);
 
 #ifdef OSCAR64
 
+#ifdef ORIC
+
   // increase from locifilemanager default
-  #pragma stacksize(2000)
+  // #pragma stacksize(2000)
   // allocate, locifilemanager has none!
-  #pragma heapsize(0x1000) 
+
+//  #pragma region( zeropage, 0x00, 0x80, , , {zeropage} )
+
+int main(void);
+
+// oric_start.c  — compile as the primary file or -rt=
+
+/* Single place — must match #pragma region end */
+#define ORIC_MAIN_END   0xB200
+#define ORIC_SP_INIT    (ORIC_MAIN_END - 1)   /* $B1FF */
+
+#pragma section(startup, 0)
+#pragma region(startup, 0x0500, 0x0520, , , {startup})
+
+#pragma region(zeropage, 0x00, 0x80, , , {zeropage})
+#pragma region(main, 0x0520, ORIC_MAIN_END, , , {code, data, bss, heap, stack})
+#pragma heapsize(0x1000)
+#pragma stacksize(0x1000)
+
+//#pragma region(main, 0x0500, 0xB400, , , {code, data, bss, heap, stack})
+//#pragma region(main, 0x0500, 0xB200, , , {code, data, bss, heap, stack})
+//#pragma heapsize(0x1000)
+//#pragma stacksize(0x1000)
+
+#ifdef SETUPMALLOC
+// Optional: real malloc later; stub is fine until heap works
+__asm crt_malloc {
+  lda #0 
+  sta accu
+  sta accu+1
+  rts
+}
+__asm crt_free   {
+  rts
+}
+
+#pragma runtime(malloc, crt_malloc)
+#pragma runtime(free, crt_free)
+#endif // STARTUPMALLOC
+
+#ifdef STARTUP
+__asm startup {
+        ldx     #$ff
+        txs
+        sei
+
+        lda     #<ORIC_SP_INIT
+        sta     __sp
+        lda     #>ORIC_SP_INIT
+        sta     __sp+1
+
+        jsr     main
+hang:
+        jmp     hang
+}
+#pragma startup(startup)
+
+#endif // STARTUP
+
+
+//#define OVERRIDEMAIN
+
+#ifdef OVERRIDEMAIN
+int main(void)
+{
+    *(char *)0xbb80 = '!';
+    for (;;) ;
+    return 0;
+}
+#endif // OVERRIDEMAIN
+
+#endif // ORIC
+
+  void* my_malloc(unsigned int size);
+  void  my_free(void* p);
+
 
   // enable for simple see where it crashed Trace
   #if 1
@@ -228,6 +305,35 @@ char* wname(char winid) {
 #undef realloc
 #undef free
 
+#if defined(OSCAR64) && defined(ORICLOCI)
+
+void* walloc(size_t z) {
+  if (z) ++winp->nalloc;
+  return my_malloc(z);
+}
+
+void* wcalloc(size_t z, size_t n) {
+  char* r= my_malloc(z);
+  if (z && n) ++winp->nalloc;
+  memset(r, 0, z);
+  return r;
+}
+
+void* wrealloc(void* p, size_t z) {
+  char* r= my_malloc(z);
+  if (z && !p) ++winp->nalloc;
+  memcpy(r, p, z);
+  my_free(p);
+  return r;
+}
+
+void wfree(void* p) {
+  if (p) --winp->nalloc;
+  my_free(p);
+}
+
+#else
+
 void* walloc(size_t z) {
   if (z) ++winp->nalloc;
   return malloc(z);
@@ -248,6 +354,12 @@ void wfree(void* p) {
   free(p);
 }
 
+#endif // OSCAR64 && ORIC
+
+#define wmalloc
+#define wcalloc
+#define wrealloc
+#define wfree
 
 char* updatewinptr() {
   // oscar64 error ; expected
@@ -610,15 +722,9 @@ void setfocus(signed char new) {
 
 char newwin() {
   // TODO: reuse empty entries
-  T('a');
   if (nwin==WIN_MAX) return 0;
-
-  T('b');
   setwin(++nwin);
-  T('c');
-
   setfocus(nwin);
-  T('d');
   return nwin;
 }
 
@@ -677,9 +783,9 @@ T('f');
   trun= clock();
 T('g');
   wtime= HITIME;
-  // oscar64 function expeted for call
-  //                       xxxxxxxxxxxxxxxx
+  // oscar64 function expected for call
 T('h');
+  // winp->fun == winp->state ??? like in 
   winp->ret= wret= (char*)((*winp->fun)(winp->state, line));
 
 T('i');
@@ -791,7 +897,7 @@ char window(
   winp->w= w;
   winp->h= h;
 
-  if (bg == -1 | fg == -1) {
+  if (bg == -1 || fg == -1) {
     // pick colors w "good contrast"
     do {
       bg= rand() & 7;
@@ -1189,6 +1295,7 @@ void scheduler() {
 
   // TODO: error catchingg...
   //  while(setjmp(orwinjmp)!=42) {
+  T('h');
   while(1) {
     DEB('^');
 
@@ -1201,6 +1308,7 @@ void scheduler() {
     //
     // TODO: winp->ret == WAITKEY
     while(wkbhit(0) || wkey) {
+      T('i');
       // restore same window to be FAIR and NO starvation!
       wnext= wcur;
 
@@ -1212,14 +1320,18 @@ void scheduler() {
       setwin(wfocus);
 
       //cputc('!');
+      T('j');
       dorun((char*)(wkey + 0x100));
+      T('k');
       
       wkey= 0;
       setwin(wnext);
     }
+    T('l');
 
     // TODO: move out, or make it an APP!
     if (!--wcur) {
+      T('m');
       clock_t now= clock();
       latency= now-lastlatency;
       lastlatency= now;
@@ -1227,8 +1339,10 @@ void scheduler() {
       timesum+= (latency<<3) +1;
       if (now-lastupdate > 100) {
         // No display if was in menu
+        T('n');
         if (latency < 100) {
           char n;
+          T('o');
           memset(SCREENXY(34,0), ' ', 6);
           n= sprintf(SCREENXY(11,0),
             "%2u#%3u%4d/s%2u%%"
@@ -1248,19 +1362,23 @@ void scheduler() {
           // this is so superfast we hardly blink redrawing
           // the screen "millions" of times per second!
           // (on ORIC this does nothing, not even fun-call)
+          T('p');
           redrawscreen();
-    
         }
+        T('q');
         
         lastupdate= now;
         rounds= runprocs= 0;
 
         // Rolling average (?)
         if (timesum > 4096) runsum/=4,timesum/=4;
-  
+        T('r');
+
       }
+      T('s');
       wcur= nwin;
     }
+    T('t');
     setwin(wcur); // inlinee ?
 
     // TODO: if no active windows/task will LOOP
@@ -1274,11 +1392,14 @@ void scheduler() {
       //cputc('0'+wcur);
       *SCREENXY(40-wcur,0)= '0'+wcur;
 
+      T('u');
       dorun(0);
     }
+    T('v');
 
     goto next;
     
+    // TODO: ???
     DEB('0'+wcur);
     DKEY();
   }
@@ -1292,11 +1413,41 @@ extern unsigned int insertlines(char* name);
 extern void printPage();
 
 
+#ifndef OVERRIDEMAIN
+
 #define MAIN
 
 
 // TODO: shitty!
 #ifdef OSCAR64
+
+    // 1. Reference the real linker symbols calculated by Oscar64
+    extern void HeapStart;
+    extern void HeapEnd;
+
+
+void enable_overlay_ram(void) {
+    // Standard Oric VIA banking example:
+    // Writing to the VIA Port B register to disconnect BASIC ROM and connect Overlay RAM
+    volatile char* via_port_b = (char*)0x0300; 
+    
+    // Exact bits vary depending on whether you are doing a pure overlay write 
+    // or full mapping, but the hardware latch must be flipped:
+    *via_port_b &= ~0x10; // Example bit flip to swap out the BASIC ROM mapping
+}
+
+    volatile char* microdisc_cfg = (char*)0x0314;
+
+
+extern void ZeroStart;
+extern void ZeroEnd;
+
+extern struct Heap {
+    void* next;
+    void* end;
+} HeapNode;
+
+
 
 //#include "oafs.c"
 
@@ -1306,11 +1457,12 @@ extern void printPage();
 int main() {
   int argc;
   const char* argv[]= {"orwin", NULL};
+  char* p;
     
 #else 
     
 int main(int argc, char** argv) {
-
+  char* p;
 
 #endif // OSCAR64
 
@@ -1318,7 +1470,8 @@ int main(int argc, char** argv) {
   
   T('I');
   init();
-
+  T('K');
+  
 #ifdef OAFS
   T('O');
   {
@@ -1332,26 +1485,53 @@ int main(int argc, char** argv) {
   T('A');
 #endif // OAFS
   
-  {
-    char *c;
-    T('?');
-    c= malloc(100);
-    T(c? '+': '-');
-  //done:goto done;
-  }
-    
-  
+    // Writing 0xFD disables the internal Oric BASIC ROM and activates Overlay RAM
+//    *microdisc_cfg = 0xFD;
 
-  heapstart= _heapmemavail();
+    // 2. Force clear HeapNode so the assembly routine knows it MUST initialize
+//    HeapNode.next = (void*)0;
+//    HeapNode.end  = (void*)0; 
+
+// REMOVE THIS OSCAR DISK and then
+// it loops to gray screen, reboots and reloads all the code!
+#if 0    
+    {
+      char hex[]= "0123456789abcdef";
+      unsigned int s= (int)&HeapStart;
+      unsigned int e= (int)&HeapEnd;
+      
+      // 5d70-b200
+      sprintf(SCREENXY(2, 10), "Heap: %c%c%c%c-%c%c%c%c"
+        ,hex[(char)(s>>4*3)&0xf], hex[(char)(s>>4*2)&0xf], hex[(char)(s>>4*1)&0xf], hex[(char)(s>>4*0)&0xf]
+        ,hex[(char)(e>>4*3)&0xf], hex[(char)(e>>4*2)&0xf], hex[(char)(e>>4*1)&0xf], hex[(char)(e>>4*0)&0xf]
+      );
+    }
+#endif 
+
+//    T('?');
+//    p= malloc(100);
+//    p= my_malloc(100);
+//    p= my_malloc(100);
+//    p= my_malloc(100);
+//    T(p!=NULL? '+': '-');
+    
+
+//  heapstart= _heapmemavail();
   T('H');
   
   // clear background to "gray" checkerboard
-  fill(0, 0, SCREENCOLS, SCREENROWS, 126);
+T('H');
+fill(0, 0, 0, 0, 126);  // one short row only
+T('I');
 
+ //fill(0, 0, SCREENCOLS, SCREENROWS, 126);
+
+  T('I');
   // TODO: abstract it!
   
   // Print logo in Upper Status Line
   strncpy(SCREENXY(0, 0), "0rWIN/ATMOS                                     ", 40);
+  T('J');
 
   #if 0
   // Print logo in Right-Hand Corner
@@ -1396,10 +1576,12 @@ int main(int argc, char** argv) {
   T('1');
   window(-1, -1, 5, 3, blue, white);
   T('2');
+
+// TODO: maybe we get here, but then have trouble
+
   start(app_ascii);
   T('3');
   wstatus(-1, "ASCII");
-  
   T('4');
   newwin();
   T('5');
@@ -1413,6 +1595,8 @@ int main(int argc, char** argv) {
   T('8');
   window(1, -1, 20-7, 10, green, black);
   T('9');
+  foo: goto foo;
+  
   start(app_sh);
 #endif
   T('-');
@@ -1426,3 +1610,4 @@ int main(int argc, char** argv) {
   (void)argc; (void)argv;
 }
 
+#endif // OVERRIDEMAIN

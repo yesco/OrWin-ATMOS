@@ -306,12 +306,17 @@ void qsort(void *base, unsigned int num, unsigned int size, int (*compar)(const 
 
 #define FILL
 void fill(char x, char y, char w, char h, char c) {
+  T('a');
   char* p= SCREENXY(x, y);
   // strided
   while(h--) {
+    T('b');
     memset(p, c, w);
+    T('c');
     p+= SCREENCOLS;
+    T('d');
   }
+  T('e');
 }
 
 #endif // FILL

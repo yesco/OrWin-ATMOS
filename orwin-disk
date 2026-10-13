@@ -2,16 +2,38 @@
 
 rm -f orwin.bin orwin.dsk ~/ORIC/orwin.dsk
 
-./oscar -DORIC -n -tf=bin -o=orwin.bin -rt=include/oric_crt.c -i=include -Os -dNOFLOAT -dOSCAR64 orwin.c app_*.c 
+# using oric_crt.c from locofilemanagerv2 - NOT WORKING!
+# (Crashes after short time)
+#
+
+#./oscar -DORIC -n -tf=bin -o=orwin.bin -rt=include/oric_crt.c -i=include -Os -dNOFLOAT -dOSCAR64 orwin.c app_*.c 
+
+./oscar -dSTARTUP -dORIC -dOSCAR64 -dNOFLOAT -n -Os -tf=bin   -rt=include/crt_math.c -o=orwin.bin orwin.c app_*.c && ls -l orwin.bin
 
 ls -l orwin.bin
+
+
+# 1. make a .tap file
+#
+#
+
+python mktap.py orwin.bin orwin-oscar.tap ORWIN 0x0500
+
+ls -l orwin-oscar.tap
+cp orwin-oscar.tap ~/ORIC/
+
+
+# 2. make a .dsk mfm format
+#
+# TODO: currently, bootable but fails
 
 ./bootdisk orwin.bin
 
 ls -l bootdisk.dsk
 
-cp bootdisk.dsk orwin.dsk
-cp orwin.dsk ~/ORIC/
+cp bootdisk.dsk orwin-oscar.dsk
+cp orwin-oscar.dsk ~/ORIC/
 
-ls -l orwin.dsk ~/ORIC/orwin.dsk
+ls -l orwin-oscar.dsk ~/ORIC/orwin-oscar.dsk ~/ORIC/orwin-oscar.tap
+
 

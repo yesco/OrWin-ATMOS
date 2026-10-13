@@ -37,7 +37,8 @@ char isliteral(void* p) {
 
 size_t heapfreex() {
   //char* p= malloc(1);
-  return heapfree();
+  //return heapfree();
+  return 4711;
 }
   
 #define _heapmemavail heapfreex
@@ -77,5 +78,10 @@ size_t heapfreex() {
 
 // cc65 missing \e
 #define ESC "\x1b"
+
+  #define INIT
+  void init() {
+     T('J');
+  }
 
 #endif // ORIC
