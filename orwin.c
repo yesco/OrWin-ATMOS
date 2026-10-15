@@ -85,21 +85,29 @@ __asm crt_free   {
 #pragma runtime(free, crt_free)
 #endif // STARTUPMALLOC
 
+
 #ifdef STARTUP
+void StackStart, StackEnd;
+void BSSStart, BSSEnd;
+void HeapStart, HeapEnd;
+void CodeStart, CodeEnd;
+void ZeroStart, ZeroEnd;
+
 __asm startup {
-        ldx     #$ff
+ldx     #$ff
         txs
         sei
 
-        lda     #<ORIC_SP_INIT
+        lda     #<StackEnd-2
         sta     __sp
-        lda     #>ORIC_SP_INIT
+        lda     #>StackEnd-2
         sta     __sp+1
 
+        // optional BSS clear using BSSStart..BSSEnd
         jsr     main
-hang:
-        jmp     hang
+hang:   jmp     hang
 }
+
 #pragma startup(startup)
 
 #endif // STARTUP
