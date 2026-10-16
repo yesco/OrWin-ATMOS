@@ -241,7 +241,9 @@ int expression(void) {
   unsigned int return_storage_addr;
   unsigned int var_ram_addr;
   int math_tmp_addr;
+  int math_tmp2_addr;
   unsigned int math_tmp_ram;
+  unsigned int math_tmp2_ram;
 
   jit_base_addr = (unsigned int)jit_bin;
 
@@ -263,10 +265,9 @@ int expression(void) {
       if (!expression()) return 0; 
       if (!match(TOK_RPAREN)) return 0;
       
-      // FIXED: Avoid any pointer address addition, calculate using absolute array bounds indices
-      param_storage_addr = jit_base_addr + saddr + 0;
-      return_storage_addr = jit_base_addr + saddr + 2;
-      target_func_pc = jit_base_addr + saddr + 4;
+      param_storage_addr = jit_base_addr + (unsigned int)saddr + 0;
+      return_storage_addr = jit_base_addr + (unsigned int)saddr + 2;
+      target_func_pc = jit_base_addr + (unsigned int)saddr + 4;
       
       emit(0x8D); emit(param_storage_addr & 0xFF); emit((param_storage_addr >> 8) & 0xFF); 
       emit(0x8E); emit((param_storage_addr + 1) & 0xFF); emit(((param_storage_addr + 1) >> 8) & 0xFF); 
@@ -276,7 +277,7 @@ int expression(void) {
       emit(0xAD); emit(return_storage_addr & 0xFF); emit((return_storage_addr >> 8) & 0xFF); 
       emit(0xAE); emit((return_storage_addr + 1) & 0xFF); emit(((return_storage_addr + 1) >> 8) & 0xFF); 
     } else {
-      var_ram_addr = jit_base_addr + saddr;
+      var_ram_addr = jit_base_addr + (unsigned int)saddr;
       emit(0xAD); emit(var_ram_addr & 0xFF); emit((var_ram_addr >> 8) & 0xFF); 
       emit(0xAE); emit((var_ram_addr + 1) & 0xFF); emit(((var_ram_addr + 1) >> 8) & 0xFF); 
     }
@@ -286,23 +287,27 @@ int expression(void) {
     next_token();
     
     lookup_symbol("__MATH_TMP", &stype, &math_tmp_addr);
-    math_tmp_ram = jit_base_addr + math_tmp_addr;
+    math_tmp_ram = jit_base_addr + (unsigned int)math_tmp_addr;
     
     emit(0x8D); emit(math_tmp_ram & 0xFF); emit((math_tmp_ram >> 8) & 0xFF);         
     emit(0x8E); emit((math_tmp_ram + 1) & 0xFF); emit(((math_tmp_ram + 1) >> 8) & 0xFF); 
     
     if (!expression()) return 0; 
     
-    emit(0x85); emit(0x02); 
-    emit(0x86); emit(0x03); 
+    // FIXED: Save the right-hand calculation directly into __MATH_TMP2 to avoid ZeroPage overrides
+    lookup_symbol("__MATH_TMP2", &stype, &math_tmp2_addr);
+    math_tmp2_ram = jit_base_addr + (unsigned int)math_tmp2_addr;
+    
+    emit(0x8D); emit(math_tmp2_ram & 0xFF); emit((math_tmp2_ram >> 8) & 0xFF);
+    emit(0x8E); emit((math_tmp2_ram + 1) & 0xFF); emit(((math_tmp2_ram + 1) >> 8) & 0xFF);
     
     emit(0x18);             
     emit(0xAD); emit(math_tmp_ram & 0xFF); emit((math_tmp_ram >> 8) & 0xFF);         
-    emit(0x65); emit(0x02); 
+    emit(0x6D); emit(math_tmp2_ram & 0xFF); emit((math_tmp2_ram >> 8) & 0xFF); // ADC absolute (Left Low + Right Low)
     emit(0x48);             
     
     emit(0xAD); emit((math_tmp_ram + 1) & 0xFF); emit(((math_tmp_ram + 1) >> 8) & 0xFF); 
-    emit(0x65); emit(0x03); 
+    emit(0x6D); emit((math_tmp2_ram + 1) & 0xFF); emit(((math_tmp2_ram + 1) >> 8) & 0xFF); // ADC absolute (Left High + Right High + Carry)
     emit(0xAA);             
     emit(0x68);             
   }
@@ -328,8 +333,7 @@ int statement(void) {
     if (!match(TOK_ASSIGN)) return 0;
     if (!expression()) return 0;
     
-    // FIXED: Convert index to absolute address safely
-    var_ram_addr = ((unsigned int)jit_bin) + addr;
+    var_ram_addr = ((unsigned int)jit_bin) + (unsigned int)addr;
     emit(0x8D); emit(var_ram_addr & 0xFF); emit((var_ram_addr >> 8) & 0xFF);     
     emit(0x8E); emit((var_ram_addr + 1) & 0xFF); emit(((var_ram_addr + 1) >> 8) & 0xFF); 
     if (!match(TOK_SEMI)) return 0;
@@ -339,23 +343,38 @@ int statement(void) {
     if (!match(TOK_LPAREN)) return 0;
     
     if (curr_tok.type == TOK_STRING) {
-      if (string_pool_count < 8) {
-        unsigned int pool_str_addr;
-        strcpy(string_pool[string_pool_count], curr_tok.lexeme);
-        pool_str_addr = (unsigned int)string_pool[string_pool_count];
-        string_pool_count++;
-        
-        emit(0xA9); emit(pool_str_addr & 0xFF);
-        emit(0xA2); emit((pool_str_addr >> 8) & 0xFF);
-        
-        callback_addr = (unsigned int)print_str_cb;
-        emit(0x20); emit(callback_addr & 0xFF); emit((callback_addr >> 8) & 0xFF);
+      int jmp_patch_idx;
+      unsigned int str_start_ram;
+      unsigned int str_end_ram;
+      int idx = 0;
+      
+      emit(0x4C);
+      jmp_patch_idx = bin_ptr;
+      emit(0x00); emit(0x00); 
+      
+      str_start_ram = ((unsigned int)jit_bin) + (unsigned int)bin_ptr;
+      
+      while (curr_tok.lexeme[idx] != '\0') {
+        emit(curr_tok.lexeme[idx]);
+        idx++;
       }
+      emit(0x00); 
+      
+      str_end_ram = ((unsigned int)jit_bin) + (unsigned int)bin_ptr;
+      jit_bin[jmp_patch_idx] = str_end_ram & 0xFF;
+      jit_bin[jmp_patch_idx + 1] = (str_end_ram >> 8) & 0xFF;
+      
+      emit(0xA9); emit(str_start_ram & 0xFF);        
+      emit(0xA2); emit((str_start_ram >> 8) & 0xFF); 
+      
+      callback_addr = (unsigned int)print_str_cb;
+      emit(0x20); emit(callback_addr & 0xFF); emit((callback_addr >> 8) & 0xFF); 
+      
       if (!match(TOK_STRING)) return 0;
     } else {
       if (!expression()) return 0;
       callback_addr = (unsigned int)print_int_cb;
-      emit(0x20); emit(callback_addr & 0xFF); emit((callback_addr >> 8) & 0xFF);
+      emit(0x20); emit(callback_addr & 0xFF); emit((callback_addr >> 8) & 0xFF); 
     }
     
     if (!match(TOK_RPAREN)) return 0;
@@ -374,7 +393,6 @@ int compile_pipeline(void) {
   SymbolType stype;
   int final_res_addr;
   
-  // Hoisted C89-compliant variable declarations (Added main_prog_start_ram_addr)
   char func_name[MAX_SYM_LEN + 1];
   char param_name[MAX_SYM_LEN + 1];
   int func_base_offset; 
@@ -392,11 +410,14 @@ int compile_pipeline(void) {
   sym_count = 0;
   string_pool_count = 0;
   
-  // Calculate the single true base address of the execution array inside 6502 RAM space
   jit_base_addr = (unsigned int)jit_bin;
+  printf("\n[JIT Debug] jit_bin starts at RAM address: $%04X\n", jit_base_addr);
   
   // Allocate static scratch RAM indices (2 bytes each)
   add_symbol("__MATH_TMP", SYM_VAR, bin_ptr);
+  emit(0x00); emit(0x00);
+  
+  add_symbol("__MATH_TMP2", SYM_VAR, bin_ptr);
   emit(0x00); emit(0x00);
   
   add_symbol("X", SYM_VAR, bin_ptr);
@@ -458,8 +479,7 @@ int compile_pipeline(void) {
       if (!match(TOK_END)) return 0;
       if (!match(TOK_SEMI)) return 0;
       
-      // Construct the target location by doing pure mathematical offset addition
-      ret_ram = jit_base_addr + func_ret_addr;
+      ret_ram = jit_base_addr + (unsigned int)func_ret_addr;
       emit(0xAD); emit(ret_ram & 0xFF); emit((ret_ram >> 8) & 0xFF); 
       emit(0xAE); emit((ret_ram + 1) & 0xFF); emit(((ret_ram + 1) >> 8) & 0xFF); 
       emit(0x60); 
@@ -468,14 +488,16 @@ int compile_pipeline(void) {
   
   if (!match(TOK_BEGIN)) return 0;
   
-  // Back-patch JMP using pure index calculations
-  main_prog_start_ram_addr = jit_base_addr + bin_ptr;
+  // Back-patch JMP using pure integer addition to prevent pointer corruption
+  main_prog_start_ram_addr = jit_base_addr + (unsigned int)bin_ptr;
   jit_bin[main_prog_jump_patch_idx] = main_prog_start_ram_addr & 0xFF;
   jit_bin[main_prog_jump_patch_idx + 1] = (main_prog_start_ram_addr >> 8) & 0xFF;
+  
+  printf("[JIT Debug] Initial JMP patched at offset %d to jump to Main Program Address: $%04X\n", main_prog_jump_patch_idx, main_prog_start_ram_addr);
 
   final_res_addr = lookup_symbol("X", &stype, &final_res_addr) ? final_res_addr : -1;
   if (final_res_addr != -1) {
-    x_ram = jit_base_addr + final_res_addr;
+    x_ram = jit_base_addr + (unsigned int)final_res_addr;
     emit(0x8D); emit(x_ram & 0xFF); emit((x_ram >> 8) & 0xFF);                 
     emit(0x8E); emit((x_ram + 1) & 0xFF); emit(((x_ram + 1) >> 8) & 0xFF);     
   }
@@ -491,7 +513,7 @@ int compile_pipeline(void) {
 
   final_res_addr = lookup_symbol("BETA", &stype, &final_res_addr) ? final_res_addr : -1;
   if (final_res_addr != -1) {
-    beta_ram = jit_base_addr + final_res_addr;
+    beta_ram = jit_base_addr + (unsigned int)final_res_addr;
     emit(0xAD); emit(beta_ram & 0xFF); emit((beta_ram >> 8) & 0xFF);             
     emit(0xAE); emit((beta_ram + 1) & 0xFF); emit(((beta_ram + 1) >> 8) & 0xFF); 
   }
