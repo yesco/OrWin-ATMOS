@@ -294,7 +294,6 @@ int expression(void) {
     
     if (!expression()) return 0; 
     
-    // FIXED: Save the right-hand calculation directly into __MATH_TMP2 to avoid ZeroPage overrides
     lookup_symbol("__MATH_TMP2", &stype, &math_tmp2_addr);
     math_tmp2_ram = jit_base_addr + (unsigned int)math_tmp2_addr;
     
@@ -303,11 +302,11 @@ int expression(void) {
     
     emit(0x18);             
     emit(0xAD); emit(math_tmp_ram & 0xFF); emit((math_tmp_ram >> 8) & 0xFF);         
-    emit(0x6D); emit(math_tmp2_ram & 0xFF); emit((math_tmp2_ram >> 8) & 0xFF); // ADC absolute (Left Low + Right Low)
+    emit(0x6D); emit(math_tmp2_ram & 0xFF); emit((math_tmp2_ram >> 8) & 0xFF); 
     emit(0x48);             
     
     emit(0xAD); emit((math_tmp_ram + 1) & 0xFF); emit(((math_tmp_ram + 1) >> 8) & 0xFF); 
-    emit(0x6D); emit((math_tmp2_ram + 1) & 0xFF); emit(((math_tmp2_ram + 1) >> 8) & 0xFF); // ADC absolute (Left High + Right High + Carry)
+    emit(0x6D); emit((math_tmp2_ram + 1) & 0xFF); emit(((math_tmp2_ram + 1) >> 8) & 0xFF); 
     emit(0xAA);             
     emit(0x68);             
   }
@@ -413,7 +412,12 @@ int compile_pipeline(void) {
   jit_base_addr = (unsigned int)jit_bin;
   printf("\n[JIT Debug] jit_bin starts at RAM address: $%04X\n", jit_base_addr);
   
-  // Allocate static scratch RAM indices (2 bytes each)
+  // FIXED: The very first bytes at index 0 MUST be the absolute entry bypass JMP
+  emit(0x4C); // JMP absolute
+  main_prog_jump_patch_idx = bin_ptr; // Offset 1
+  emit(0x00); emit(0x00);             // Offsets 1 and 2 placeholder targets
+  
+  // Allocate static scratch RAM variables immediately AFTER the entry JMP instruction
   add_symbol("__MATH_TMP", SYM_VAR, bin_ptr);
   emit(0x00); emit(0x00);
   
@@ -428,11 +432,7 @@ int compile_pipeline(void) {
   if (!match(TOK_IDENT)) return 0;
   if (!match(TOK_SEMI)) return 0;
   
-  // Emit absolute bypass JMP
-  emit(0x4C); 
-  main_prog_jump_patch_idx = bin_ptr;
-  emit(0x00); emit(0x00); 
-  
+  // Global Variable / Function Declaration Processing Loop
   while (curr_tok.type == TOK_VAR || curr_tok.type == TOK_FUNCTION) {
     if (curr_tok.type == TOK_VAR) {
       next_token();
@@ -493,7 +493,7 @@ int compile_pipeline(void) {
   jit_bin[main_prog_jump_patch_idx] = main_prog_start_ram_addr & 0xFF;
   jit_bin[main_prog_jump_patch_idx + 1] = (main_prog_start_ram_addr >> 8) & 0xFF;
   
-  printf("[JIT Debug] Initial JMP patched at offset %d to jump to Main Program Address: $%04X\n", main_prog_jump_patch_idx, main_prog_start_ram_addr);
+  printf("[JIT Debug] Entry JMP patched at offset %d to point to Main Code: $%04X\n", main_prog_jump_patch_idx, main_prog_start_ram_addr);
 
   final_res_addr = lookup_symbol("X", &stype, &final_res_addr) ? final_res_addr : -1;
   if (final_res_addr != -1) {
