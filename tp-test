@@ -18,8 +18,8 @@ echo
 
 
 echo "=== OSCAR ==="
-./oscar -Os -e tp.c < tp-test.p
-ls -l tp.prg
+#./oscar -Os -e tp.c < tp-test.p
+#ls -l tp.prg
 
 
 
