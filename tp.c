@@ -12,7 +12,6 @@
 char src_buf[MAX_SRC_LEN];   
 int src_pos = 0;
 int line_num = 1;
-int line_start_pos = 0; /* Tracks where the current line starts in the buffer */
 
 typedef enum {
   TOK_EOF, TOK_ERROR, TOK_PROGRAM, 
@@ -25,7 +24,6 @@ typedef enum {
   TOK_DOT                          
 } TokenType;
 
-/* Helper array for debugging token names */
 const char* TOKEN_NAMES[] = {
   "EOF", "ERROR", "PROGRAM", "VAR", "BEGIN", "END",
   "INTEGER", "IDENT", "NUM", "ASSIGN", "SEMI", "COLON",
@@ -50,34 +48,36 @@ Symbol sym_table[MAX_SYMBOLS];
 int sym_count = 0;
 int next_zp_addr = 0x60; 
 
-/* --- DIAGNOSTIC ERROR REPORTING SYSTEM --- */
-void print_error_context(const char* error_msg) {
-  int i = line_start_pos;
-  
-  printf("\n[!] COMPILATION ERROR at Line %d:\n", line_num);
-  
-  /* Print the offending line text */
-  while (src_buf[i] && src_buf[i] != '\n' && src_buf[i] != '\r') {
-    putchar(src_buf[i]);
-    i++;
-  }
-  
-  /* Append the explicit visual error flag directly at the current parsing location */
-  printf(" ( <---- ERROR: %s )\n\n", error_msg);
-}
-
-/* --- LEXICAL ANALYZER WITH STREAM VERIFICATION --- */
+/* --- LEXICAL ANALYZER (WITH FIXED PASSTHROUGH COMMENT ENGINE) --- */
 void next_token() {
-  int i;
-  int len;
+  int i, len;
   char quote_char;
 
-  while (src_buf[src_pos] && isspace(src_buf[src_pos])) {
-    if (src_buf[src_pos] == '\n') {
-      line_num++;
-      line_start_pos = src_pos + 1; /* Mark the start boundary of the next line */
+  /* Continuous check loop for Whitespace and Pascal Blocks */
+  while (src_buf[src_pos] != '\0') {
+    if (isspace(src_buf[src_pos])) {
+      if (src_buf[src_pos] == '\n') line_num++;
+      src_pos++;
+      continue;
     }
-    src_pos++;
+    
+    /* Detect and flush out bracketed comment contents */
+    if (src_buf[src_pos] == '{') {
+      src_pos++; /* Advance past '{' */
+      while (src_buf[src_pos] != '\0' && src_buf[src_pos] != '}') {
+        if (src_buf[src_pos] == '\n') line_num++;
+        src_pos++;
+      }
+      if (src_buf[src_pos] == '}') {
+        src_pos++; /* Advance past closing '}' */
+        continue;
+      } else {
+        printf("} <---- ERROR: Unclosed comment block detected at end of file\n");
+        curr_tok.type = TOK_ERROR;
+        return;
+      }
+    }
+    break;
   }
 
   if (src_buf[src_pos] == '\0') {
@@ -93,12 +93,10 @@ void next_token() {
     while (src_buf[src_pos] && src_buf[src_pos] != quote_char && len < MAX_SYM_LEN) {
       curr_tok.lexeme[len++] = src_buf[src_pos++];
     }
-    if (src_buf[src_pos] == quote_char) {
-      src_pos++; 
-    }
+    if (src_buf[src_pos] == quote_char) src_pos++; 
     curr_tok.lexeme[len] = '\0';
     curr_tok.type = TOK_STRING;
-    printf("[Lex] Line %d: Found STRING -> \"%s\"\n", line_num, curr_tok.lexeme);
+    printf("%05d: STRING(\"%s\")\n", line_num, curr_tok.lexeme);
     return;
   }
 
@@ -120,7 +118,11 @@ void next_token() {
     else if (strcmp(curr_tok.lexeme, "WRITELN") == 0) curr_tok.type = TOK_WRITE;
     else curr_tok.type = TOK_IDENT;
     
-    printf("[Lex] Line %d: Found %s -> \"%s\"\n", line_num, TOKEN_NAMES[curr_tok.type], curr_tok.lexeme);
+    if (curr_tok.type == TOK_IDENT) {
+      printf("%05d: IDENT(\"%s\")\n", line_num, curr_tok.lexeme);
+    } else {
+      printf("%05d: %s\n", line_num, TOKEN_NAMES[curr_tok.type]);
+    }
     return;
   }
 
@@ -132,7 +134,7 @@ void next_token() {
       curr_tok.value = curr_tok.value * 10 + (src_buf[src_pos++] - '0');
     }
     sprintf(curr_tok.lexeme, "%d", curr_tok.value);
-    printf("[Lex] Line %d: Found NUM -> %d\n", line_num, curr_tok.value);
+    printf("%05d: NUM(%d)\n", line_num, curr_tok.value);
     return;
   }
 
@@ -141,10 +143,11 @@ void next_token() {
     src_pos += 2;
     curr_tok.type = TOK_ASSIGN;
     strcpy(curr_tok.lexeme, ":=");
-    printf("[Lex] Line %d: Found ASSIGN -> \":=\"\n", line_num);
+    printf("%05d: ASSIGN\n", line_num);
     return;
   }
 
+  /* Properly format string assignments for single character bounds */
   curr_tok.lexeme[0] = src_buf[src_pos];
   curr_tok.lexeme[1] = '\0';
 
@@ -157,19 +160,19 @@ void next_token() {
     case ')': src_pos++; curr_tok.type = TOK_RPAREN; break;
     case '.': src_pos++; curr_tok.type = TOK_DOT; break;
     default:
-      src_pos++; 
       curr_tok.type = TOK_ERROR;
-      printf("[Lex] Line %d: Unknown character syntax error '%c'\n", line_num, curr_tok.lexeme[0]);
+      printf("%c <---- ERROR: Unknown character syntax error\n", src_buf[src_pos]);
+      src_pos++;
       return;
   }
   
-  printf("[Lex] Line %d: Found Symbol -> '%s'\n", line_num, curr_tok.lexeme);
+  printf("%05d: SYM(\"%s\")\n", line_num, curr_tok.lexeme);
 }
 
 /* --- COMPILER BACKEND --- */
 void add_symbol(const char* name) {
   if (sym_count >= MAX_SYMBOLS) {
-    print_error_context("Symbol table capacity exceeded");
+    printf("Symbol table overflow error\n");
     return;
   }
   strcpy(sym_table[sym_count].name, name);
@@ -187,13 +190,11 @@ int lookup_symbol(const char* name) {
 }
 
 int match(TokenType expected) {
-  char error_msg[128];
   if (curr_tok.type == expected) {
     next_token();
     return 1;
   } else {
-    sprintf(error_msg, "Expected %s but encountered %s", TOKEN_NAMES[expected], TOKEN_NAMES[curr_tok.type]);
-    print_error_context(error_msg);
+    printf("%s <---- ERROR: Expected %s but found %s\n", curr_tok.lexeme, TOKEN_NAMES[expected], TOKEN_NAMES[curr_tok.type]);
     return 0;
   }
 }
@@ -206,9 +207,7 @@ void expression() {
   } else if (curr_tok.type == TOK_IDENT) {
     addr = lookup_symbol(curr_tok.lexeme);
     if (addr == -1) {
-      char msg[64];
-      sprintf(msg, "Undeclared identifier '%s'", curr_tok.lexeme);
-      print_error_context(msg);
+      printf("%s <---- ERROR: Undeclared identifier\n", curr_tok.lexeme);
       return;
     }
     printf("\tLDA $%02X\n\tLDX $%02X\n", addr, addr + 1);
@@ -237,9 +236,7 @@ int statement() {
     
     addr = lookup_symbol(target_var);
     if (addr == -1) {
-      char msg[64];
-      sprintf(msg, "Unknown identifier '%s'", target_var);
-      print_error_context(msg);
+      printf("%s <---- ERROR: Unknown target variable identifier\n", target_var);
       return 0;
     }
     printf("\tSTA $%02X\n\tSTX $%02X\n", addr, addr + 1);
@@ -268,11 +265,9 @@ int statement() {
 int compile() {
   src_pos = 0;
   line_num = 1;
-  line_start_pos = 0;
   sym_count = 0;
   next_zp_addr = 0x60;
   
-  printf("\n--- STARTING EMISSION PARSER LOG ---\n");
   next_token();
   
   if (!match(TOK_PROGRAM)) return 0;
@@ -301,7 +296,6 @@ int compile() {
   return 1;
 }
 
-/* --- STREAM INPUT CONSUMER (C89 Safe, clears unused compiler warnings) --- */
 void mini_editor() {
   int ch;
   int buf_idx = 0;
@@ -326,7 +320,6 @@ void mini_editor() {
   src_buf[buf_idx] = '\0';
 }
 
-/* --- DYNAMIC CONDITIONAL TEST HOOKS BLOCK --- */
 #ifdef TPTEST
 void run_file_test(const char* filepath) {
   size_t bytes_read;
@@ -341,17 +334,15 @@ void run_file_test(const char* filepath) {
   bytes_read = fread(src_buf, 1, MAX_SRC_LEN - 1, file);
   fclose(file);
   
-  printf("\n==================================================\n");
-  printf("RUNNING SHOWCASE DIAGNOSTIC SUITE VIA: %s (%d bytes)\n", filepath, (int)bytes_read);
-  printf("==================================================\n");
   success = compile();
   printf(">> DIAGNOSTIC RESULT: %s\n", success ? "[PASS]" : "[FAIL]");
 }
 #endif
+
 int main(int argc, char* argv[]) {
-  /* Mute unused warning states inside cl65 toolchain contexts cleanly */
   (void)argc;
   (void)argv;
+
 #ifdef TPTEST
   run_file_test("tp-test.p");
   return 0;
