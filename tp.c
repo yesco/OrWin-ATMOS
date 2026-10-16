@@ -41,7 +41,7 @@ unsigned char jit_bin[MAX_BIN_LEN];
 int bin_ptr = 0;
 
 // FIXED: String pool configured as a proper 2D array
-char string_pool[8][MAX_SYM_LEN + 1];
+char string_pool[8][MAX_SYM_LEN + 1]; // FIXED: Proper 2D tracking matrix
 int string_pool_count = 0;
 
 // --- SYMBOL TABLE ---
@@ -231,16 +231,25 @@ int match(TokenType expected) {
   }
 }
 
-int expression() {
+int expression(void) {
+  SymbolType stype;
+  int saddr;
+  char name[MAX_SYM_LEN + 1];
+  unsigned int jit_base_addr;
+  unsigned int target_func_pc;
+  unsigned int param_storage_addr;
+  unsigned int return_storage_addr;
+  unsigned int var_ram_addr;
+  int math_tmp_addr;
+  unsigned int math_tmp_ram;
+
+  jit_base_addr = (unsigned int)jit_bin;
+
   if (curr_tok.type == TOK_NUM) {
-    emit(0xA9); emit(curr_tok.value & 0xFF);
-    emit(0xA2); emit((curr_tok.value >> 8) & 0xFF);
+    emit(0xA9); emit(curr_tok.value & 0xFF);        
+    emit(0xA2); emit((curr_tok.value >> 8) & 0xFF); 
     next_token();
   } else if (curr_tok.type == TOK_IDENT) {
-    SymbolType stype;
-    int saddr;
-    char name[MAX_SYM_LEN + 1];
-    unsigned int target_func_pc;
     strcpy(name, curr_tok.lexeme);
     
     if (lookup_symbol(name, &stype, &saddr) == -1) {
@@ -251,47 +260,63 @@ int expression() {
     next_token();
     if (stype == SYM_FUNC) {
       if (!match(TOK_LPAREN)) return 0;
-      if (!expression()) return 0;
+      if (!expression()) return 0; 
       if (!match(TOK_RPAREN)) return 0;
       
-      target_func_pc = (unsigned int)(&jit_bin[saddr]);
-      emit(0x20); emit(target_func_pc & 0xFF); emit((target_func_pc >> 8) & 0xFF);
+      // FIXED: Avoid any pointer address addition, calculate using absolute array bounds indices
+      param_storage_addr = jit_base_addr + saddr + 0;
+      return_storage_addr = jit_base_addr + saddr + 2;
+      target_func_pc = jit_base_addr + saddr + 4;
+      
+      emit(0x8D); emit(param_storage_addr & 0xFF); emit((param_storage_addr >> 8) & 0xFF); 
+      emit(0x8E); emit((param_storage_addr + 1) & 0xFF); emit(((param_storage_addr + 1) >> 8) & 0xFF); 
+      
+      emit(0x20); emit(target_func_pc & 0xFF); emit((target_func_pc >> 8) & 0xFF); 
+      
+      emit(0xAD); emit(return_storage_addr & 0xFF); emit((return_storage_addr >> 8) & 0xFF); 
+      emit(0xAE); emit((return_storage_addr + 1) & 0xFF); emit(((return_storage_addr + 1) >> 8) & 0xFF); 
     } else {
-      emit(0xA5); emit(saddr);
-      emit(0xA6); emit(saddr + 1);
+      var_ram_addr = jit_base_addr + saddr;
+      emit(0xAD); emit(var_ram_addr & 0xFF); emit((var_ram_addr >> 8) & 0xFF); 
+      emit(0xAE); emit((var_ram_addr + 1) & 0xFF); emit(((var_ram_addr + 1) >> 8) & 0xFF); 
     }
   }
   
   if (curr_tok.type == TOK_PLUS) {
     next_token();
-    emit(0x48); // PHA
-    emit(0x8A); // TXA
-    emit(0x48); // PHA
+    
+    lookup_symbol("__MATH_TMP", &stype, &math_tmp_addr);
+    math_tmp_ram = jit_base_addr + math_tmp_addr;
+    
+    emit(0x8D); emit(math_tmp_ram & 0xFF); emit((math_tmp_ram >> 8) & 0xFF);         
+    emit(0x8E); emit((math_tmp_ram + 1) & 0xFF); emit(((math_tmp_ram + 1) >> 8) & 0xFF); 
     
     if (!expression()) return 0; 
     
-    emit(0x85); emit(TMP_ZP_LO); 
-    emit(0x86); emit(TMP_ZP_HI); 
-    emit(0x68);                  
-    emit(0xAA);                  
-    emit(0x68);                  
-    emit(0x18);                  
-    emit(0x65); emit(TMP_ZP_LO); 
-    emit(0x48);                  
-    emit(0x8A);                  
-    emit(0x65); emit(TMP_ZP_HI); 
-    emit(0xAA);                  
-    emit(0x68);                  
+    emit(0x85); emit(0x02); 
+    emit(0x86); emit(0x03); 
+    
+    emit(0x18);             
+    emit(0xAD); emit(math_tmp_ram & 0xFF); emit((math_tmp_ram >> 8) & 0xFF);         
+    emit(0x65); emit(0x02); 
+    emit(0x48);             
+    
+    emit(0xAD); emit((math_tmp_ram + 1) & 0xFF); emit(((math_tmp_ram + 1) >> 8) & 0xFF); 
+    emit(0x65); emit(0x03); 
+    emit(0xAA);             
+    emit(0x68);             
   }
   return 1;
 }
 
-int statement() {
+int statement(void) {
   unsigned int callback_addr;
   if (curr_tok.type == TOK_IDENT) {
     char target_var[MAX_SYM_LEN + 1];
     SymbolType stype;
     int addr;
+    unsigned int var_ram_addr;
+    
     strcpy(target_var, curr_tok.lexeme);
     
     if (lookup_symbol(target_var, &stype, &addr) == -1) {
@@ -303,8 +328,10 @@ int statement() {
     if (!match(TOK_ASSIGN)) return 0;
     if (!expression()) return 0;
     
-    emit(0x85); emit(addr);     
-    emit(0x86); emit(addr + 1); 
+    // FIXED: Convert index to absolute address safely
+    var_ram_addr = ((unsigned int)jit_bin) + addr;
+    emit(0x8D); emit(var_ram_addr & 0xFF); emit((var_ram_addr >> 8) & 0xFF);     
+    emit(0x8E); emit((var_ram_addr + 1) & 0xFF); emit(((var_ram_addr + 1) >> 8) & 0xFF); 
     if (!match(TOK_SEMI)) return 0;
   } 
   else if (curr_tok.type == TOK_WRITE) {
@@ -314,7 +341,6 @@ int statement() {
     if (curr_tok.type == TOK_STRING) {
       if (string_pool_count < 8) {
         unsigned int pool_str_addr;
-        // FIXED: Multi-dimensional syntax matches C89
         strcpy(string_pool[string_pool_count], curr_tok.lexeme);
         pool_str_addr = (unsigned int)string_pool[string_pool_count];
         string_pool_count++;
@@ -341,13 +367,24 @@ int statement() {
   return 1;
 }
 
-int compile_pipeline() {
+int compile_pipeline(void) {
   int next_free_zp = 0x04;
   int main_prog_jump_patch_idx;
-  unsigned int main_prog_start_ram_addr;
+  unsigned int jit_base_addr;
   SymbolType stype;
   int final_res_addr;
   
+  // Hoisted C89-compliant variable declarations (Added main_prog_start_ram_addr)
+  char func_name[MAX_SYM_LEN + 1];
+  char param_name[MAX_SYM_LEN + 1];
+  int func_base_offset; 
+  int func_ret_addr;
+  int func_param_addr;
+  unsigned int ret_ram;
+  unsigned int x_ram;
+  unsigned int beta_ram;
+  unsigned int main_prog_start_ram_addr;
+
   src_pos = 0;
   line_num = 1;
   last_logged_line = 0;
@@ -355,42 +392,55 @@ int compile_pipeline() {
   sym_count = 0;
   string_pool_count = 0;
   
-  add_symbol("X", SYM_VAR, 0x02);
-  next_token();
+  // Calculate the single true base address of the execution array inside 6502 RAM space
+  jit_base_addr = (unsigned int)jit_bin;
   
+  // Allocate static scratch RAM indices (2 bytes each)
+  add_symbol("__MATH_TMP", SYM_VAR, bin_ptr);
+  emit(0x00); emit(0x00);
+  
+  add_symbol("X", SYM_VAR, bin_ptr);
+  emit(0x00); emit(0x00);
+  
+  next_token();
   if (!match(TOK_PROGRAM)) return 0;
   if (!match(TOK_IDENT)) return 0;
   if (!match(TOK_SEMI)) return 0;
-  // Initial JIT Layout Action: Emit an absolute jump vector to bypass function blocks
-  emit(0x4C); // JMP absolute
+  
+  // Emit absolute bypass JMP
+  emit(0x4C); 
   main_prog_jump_patch_idx = bin_ptr;
-  emit(0x00); emit(0x00); // Temporary absolute address placeholders
-  // Global Variable/Function Tracking Declarations Block
+  emit(0x00); emit(0x00); 
+  
   while (curr_tok.type == TOK_VAR || curr_tok.type == TOK_FUNCTION) {
     if (curr_tok.type == TOK_VAR) {
       next_token();
       while (curr_tok.type == TOK_IDENT) {
-        add_symbol(curr_tok.lexeme, SYM_VAR, next_free_zp);
-        next_free_zp += 2;
-        if (!match(TOK_IDENT)) return 0;
-        if (!match(TOK_COLON)) return 0;
-        if (!match(TOK_INTEGER)) return 0;
+        add_symbol(curr_tok.lexeme, SYM_VAR, bin_ptr);
+        emit(0x00); emit(0x00); 
+        
+        if (!match(TOK_IDENT)) return 0; 
+        if (!match(TOK_COLON)) return 0; 
+        if (!match(TOK_INTEGER)) return 0; 
         if (!match(TOK_SEMI)) return 0;
       }
     }
     else if (curr_tok.type == TOK_FUNCTION) {
-      char func_name[MAX_SYM_LEN + 1];
-      char param_name[MAX_SYM_LEN + 1];
-      int func_start_offset = bin_ptr;
-      int lookup_idx;
-      int func_ret_zp;
+      func_base_offset = bin_ptr; 
       next_token();
       strcpy(func_name, curr_tok.lexeme);
-      add_symbol(func_name, SYM_FUNC, func_start_offset);
+      
+      add_symbol(func_name, SYM_FUNC, func_base_offset);
+      
+      func_param_addr = bin_ptr;  emit(0x00); emit(0x00);
+      func_ret_addr = bin_ptr;    emit(0x00); emit(0x00);
+      
       if (!match(TOK_IDENT)) return 0;
       if (!match(TOK_LPAREN)) return 0;
+      
       strcpy(param_name, curr_tok.lexeme);
-      add_symbol(param_name, SYM_VAR, 0x02);
+      add_symbol(param_name, SYM_VAR, func_param_addr);
+      
       if (!match(TOK_IDENT)) return 0;
       if (!match(TOK_COLON)) return 0;
       if (!match(TOK_INTEGER)) return 0;
@@ -398,41 +448,58 @@ int compile_pipeline() {
       if (!match(TOK_COLON)) return 0;
       if (!match(TOK_INTEGER)) return 0;
       if (!match(TOK_SEMI)) return 0;
-      add_symbol(func_name, SYM_VAR, next_free_zp);
+      
+      add_symbol(func_name, SYM_VAR, func_ret_addr);
+      
       if (!match(TOK_BEGIN)) return 0;
       while (curr_tok.type != TOK_END && curr_tok.type != TOK_EOF) {
         if (!statement()) return 0;
       }
       if (!match(TOK_END)) return 0;
       if (!match(TOK_SEMI)) return 0;
-      lookup_idx = lookup_symbol(func_name, &stype, &func_ret_zp);
-      emit(0xA5); emit(func_ret_zp);     // LDA func_ret_zp
-      emit(0xA6); emit(func_ret_zp + 1); // LDX func_ret_zp+1
-      emit(0x60);                        // RTS
-      next_free_zp += 2;
+      
+      // Construct the target location by doing pure mathematical offset addition
+      ret_ram = jit_base_addr + func_ret_addr;
+      emit(0xAD); emit(ret_ram & 0xFF); emit((ret_ram >> 8) & 0xFF); 
+      emit(0xAE); emit((ret_ram + 1) & 0xFF); emit(((ret_ram + 1) >> 8) & 0xFF); 
+      emit(0x60); 
     }
   }
+  
   if (!match(TOK_BEGIN)) return 0;
-  // Back-patch the initial runtime pipeline jump directly to the program entry point execution vector
-  main_prog_start_ram_addr = (unsigned int)(&jit_bin[bin_ptr]);
+  
+  // Back-patch JMP using pure index calculations
+  main_prog_start_ram_addr = jit_base_addr + bin_ptr;
   jit_bin[main_prog_jump_patch_idx] = main_prog_start_ram_addr & 0xFF;
   jit_bin[main_prog_jump_patch_idx + 1] = (main_prog_start_ram_addr >> 8) & 0xFF;
-  emit(0x85); emit(ARG_ZP_LO); // STA $02
-  emit(0x86); emit(ARG_ZP_HI); // STX $03
+
+  final_res_addr = lookup_symbol("X", &stype, &final_res_addr) ? final_res_addr : -1;
+  if (final_res_addr != -1) {
+    x_ram = jit_base_addr + final_res_addr;
+    emit(0x8D); emit(x_ram & 0xFF); emit((x_ram >> 8) & 0xFF);                 
+    emit(0x8E); emit((x_ram + 1) & 0xFF); emit(((x_ram + 1) >> 8) & 0xFF);     
+  }
+  
   while (curr_tok.type != TOK_END && curr_tok.type != TOK_EOF) {
     if (!statement()) return 0;
   }
-  if (!match(TOK_END)) return 0;
+  
+  if (!match(TOK_END)) return 0; 
   if (!match(TOK_DOT)) return 0;
-  printf("\n");
+  
+  printf("\n"); 
+
   final_res_addr = lookup_symbol("BETA", &stype, &final_res_addr) ? final_res_addr : -1;
   if (final_res_addr != -1) {
-    emit(0xA5); emit(final_res_addr);     // LDA BETA_lo
-    emit(0xA6); emit(final_res_addr + 1); // LDX BETA_hi
+    beta_ram = jit_base_addr + final_res_addr;
+    emit(0xAD); emit(beta_ram & 0xFF); emit((beta_ram >> 8) & 0xFF);             
+    emit(0xAE); emit((beta_ram + 1) & 0xFF); emit(((beta_ram + 1) >> 8) & 0xFF); 
   }
-  emit(0x60); // RTS
+  
+  emit(0x60); 
   return 1;
 }
+
 int main(void) {
   int ch;
   int buf_idx = 0;
