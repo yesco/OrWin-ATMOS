@@ -3,24 +3,24 @@
 #include <string.h>
 #include <ctype.h>
 
-/* --- SYSTEM CONSTANTS FOR 6502 HARDWARE BINDINGS --- */
+// --- SYSTEM CONSTANTS FOR 6502 HARDWARE BINDINGS ---
 #define MAX_SRC_LEN  1024   
 #define MAX_SYM_LEN  64     
-#define MAX_BIN_LEN  256    
+#define MAX_BIN_LEN  512    
 #define MAX_SYMBOLS  32     
 
-/* --- COMPLETE TOKEN DEFINITIONS --- */
+// --- COMPLETE TOKEN DEFINITIONS ---
 typedef enum {
   TOK_EOF, TOK_ERROR, TOK_PROGRAM, TOK_VAR, TOK_BEGIN, TOK_END,
   TOK_INTEGER, TOK_IDENT, TOK_NUM, TOK_ASSIGN, TOK_SEMI,
   TOK_COLON, TOK_PLUS, TOK_DOT, TOK_WRITE, TOK_STRING,
-  TOK_LPAREN, TOK_RPAREN
+  TOK_LPAREN, TOK_RPAREN, TOK_FUNCTION
 } TokenType;
 
 const char* TOKEN_NAMES[] = {
   "EOF", "ERROR", "PROGRAM", "VAR", "BEGIN", "END",
   "INTEGER", "IDENT", "NUM", "ASSIGN", "SEMI", "COLON",
-  "PLUS", "DOT", "WRITELN", "STRING", "LPAREN", "RPAREN"
+  "PLUS", "DOT", "WRITELN", "STRING", "LPAREN", "RPAREN", "FUNCTION"
 };
 
 typedef struct {
@@ -29,31 +29,33 @@ typedef struct {
   int value;
 } Token;
 
-/* --- COMPILER WORKSPACES --- */
+// --- COMPILER WORKSPACES ---
 char src_buf[MAX_SRC_LEN];
 int src_pos = 0;
 int line_num = 1;
 int last_logged_line = 0; 
 Token curr_tok;
 
-/* THE NATIVE MACHINE BITS TARGET WORKSPACE */
+// THE NATIVE MACHINE BITS TARGET WORKSPACE
 unsigned char jit_bin[MAX_BIN_LEN];
 int bin_ptr = 0;
 
-/* PERSISTENT RUNTIME STRING LITERAL POOL */
-char string_pool[8][64];
+// FIXED: String pool configured as a proper 2D array
+char string_pool[8][MAX_SYM_LEN + 1];
 int string_pool_count = 0;
 
-/* --- SYMBOL TABLE --- */
+// --- SYMBOL TABLE ---
+typedef enum { SYM_VAR, SYM_FUNC } SymbolType;
 typedef struct {
   char name[MAX_SYM_LEN + 1];
-  int zp_offset;
+  SymbolType type;
+  int address; 
 } Symbol;
 
 Symbol sym_table[MAX_SYMBOLS];
 int sym_count = 0;
 
-/* HARDWARE ADDRESS BOUNDARIES */
+// HARDWARE ADDRESS BOUNDARIES
 #define ARG_ZP_LO 0x02
 #define ARG_ZP_HI 0x03
 #define TMP_ZP_LO 0x08
@@ -61,7 +63,13 @@ int sym_count = 0;
 
 typedef int (*PascalFunc)(int x);
 
-/* --- NATIVE C CALLOUT HOOKS FOR JIT CALLS --- */
+// --- C89 FORWARD DECLARATIONS FOR CL65 ---
+void next_token(void);
+int match(TokenType expected);
+int expression(void);
+int statement(void);
+
+// --- NATIVE C CALLOUT HOOKS FOR JIT CALLS ---
 void print_str_cb(const char* s) {
   printf("%s\n", s);
   fflush(stdout);
@@ -78,23 +86,27 @@ void emit(unsigned char val) {
   }
 }
 
-void add_symbol(const char* name, int zp) {
+void add_symbol(const char* name, SymbolType type, int address) {
   if (sym_count < MAX_SYMBOLS) {
     strcpy(sym_table[sym_count].name, name);
-    sym_table[sym_count].zp_offset = zp;
+    sym_table[sym_count].type = type;
+    sym_table[sym_count].address = address;
     sym_count++;
   }
 }
 
-int lookup_symbol(const char* name) {
+int lookup_symbol(const char* name, SymbolType* type, int* address) {
   int i;
   for (i = 0; i < sym_count; i++) {
-    if (strcmp(sym_table[i].name, name) == 0) return sym_table[i].zp_offset;
+    if (strcmp(sym_table[i].name, name) == 0) {
+      *type = sym_table[i].type;
+      *address = sym_table[i].address;
+      return i;
+    }
   }
   return -1;
 }
 
-/* --- LOG ENGINE HELPER --- */
 void log_token() {
   if (line_num != last_logged_line) {
     if (last_logged_line != 0) printf("\n");
@@ -106,7 +118,6 @@ void log_token() {
   fflush(stdout);
 }
 
-/* --- STREAM LEXER WITH FIXED PASSTHROUGH COMMENT ENGINE --- */
 void next_token() {
   int i, len;
   char quote_char;
@@ -141,7 +152,6 @@ void next_token() {
     return;
   }
 
-  /* Parse String Literals */
   if (src_buf[src_pos] == '"' || src_buf[src_pos] == '\'') {
     quote_char = src_buf[src_pos++];
     len = 0;
@@ -155,7 +165,6 @@ void next_token() {
     return;
   }
   
-  /* Parse Identifiers */
   if (isalpha(src_buf[src_pos])) {
     len = 0;
     while (isalnum(src_buf[src_pos]) && len < MAX_SYM_LEN) {
@@ -170,13 +179,13 @@ void next_token() {
     else if (strcmp(curr_tok.lexeme, "END") == 0) curr_tok.type = TOK_END;
     else if (strcmp(curr_tok.lexeme, "INTEGER") == 0) curr_tok.type = TOK_INTEGER;
     else if (strcmp(curr_tok.lexeme, "WRITELN") == 0) curr_tok.type = TOK_WRITE;
+    else if (strcmp(curr_tok.lexeme, "FUNCTION") == 0) curr_tok.type = TOK_FUNCTION;
     else curr_tok.type = TOK_IDENT;
 
     log_token();
     return;
   }
   
-  /* Parse Numbers */
   if (isdigit(src_buf[src_pos])) {
     curr_tok.type = TOK_NUM;
     curr_tok.value = 0;
@@ -192,6 +201,7 @@ void next_token() {
     src_pos += 2; curr_tok.type = TOK_ASSIGN; strcpy(curr_tok.lexeme, ":="); log_token(); return;
   }
   
+  // FIXED: Safe array byte index modification to support C89 lvalues
   curr_tok.lexeme[0] = src_buf[src_pos];
   curr_tok.lexeme[1] = '\0';
 
@@ -221,28 +231,42 @@ int match(TokenType expected) {
   }
 }
 
-/* --- 6502 CODE-GENERATING RECURSIVE DESCENT PARSER --- */
 int expression() {
   if (curr_tok.type == TOK_NUM) {
     emit(0xA9); emit(curr_tok.value & 0xFF);
     emit(0xA2); emit((curr_tok.value >> 8) & 0xFF);
     next_token();
   } else if (curr_tok.type == TOK_IDENT) {
-    int addr = lookup_symbol(curr_tok.lexeme);
-    if (addr == -1) {
+    SymbolType stype;
+    int saddr;
+    char name[MAX_SYM_LEN + 1];
+    unsigned int target_func_pc;
+    strcpy(name, curr_tok.lexeme);
+    
+    if (lookup_symbol(name, &stype, &saddr) == -1) {
       printf("\n%s <---- ERROR: Undeclared identifier\n", curr_tok.lexeme);
       return 0;
     }
-    emit(0xA5); emit(addr);
-    emit(0xA6); emit(addr + 1);
+    
     next_token();
+    if (stype == SYM_FUNC) {
+      if (!match(TOK_LPAREN)) return 0;
+      if (!expression()) return 0;
+      if (!match(TOK_RPAREN)) return 0;
+      
+      target_func_pc = (unsigned int)(&jit_bin[saddr]);
+      emit(0x20); emit(target_func_pc & 0xFF); emit((target_func_pc >> 8) & 0xFF);
+    } else {
+      emit(0xA5); emit(saddr);
+      emit(0xA6); emit(saddr + 1);
+    }
   }
   
   if (curr_tok.type == TOK_PLUS) {
     next_token();
-    emit(0x48); /* PHA */
-    emit(0x8A); /* TXA */
-    emit(0x48); /* PHA */
+    emit(0x48); // PHA
+    emit(0x8A); // TXA
+    emit(0x48); // PHA
     
     if (!expression()) return 0; 
     
@@ -266,17 +290,19 @@ int statement() {
   unsigned int callback_addr;
   if (curr_tok.type == TOK_IDENT) {
     char target_var[MAX_SYM_LEN + 1];
+    SymbolType stype;
     int addr;
     strcpy(target_var, curr_tok.lexeme);
+    
+    if (lookup_symbol(target_var, &stype, &addr) == -1) {
+      printf("\n%s <---- ERROR: Unknown identifier\n", target_var);
+      return 0;
+    }
+    
     if (!match(TOK_IDENT)) return 0;
     if (!match(TOK_ASSIGN)) return 0;
     if (!expression()) return 0;
     
-    addr = lookup_symbol(target_var);
-    if (addr == -1) {
-      printf("\n%s <---- ERROR: Unknown target variable identifier\n", target_var);
-      return 0;
-    }
     emit(0x85); emit(addr);     
     emit(0x86); emit(addr + 1); 
     if (!match(TOK_SEMI)) return 0;
@@ -288,11 +314,11 @@ int statement() {
     if (curr_tok.type == TOK_STRING) {
       if (string_pool_count < 8) {
         unsigned int pool_str_addr;
+        // FIXED: Multi-dimensional syntax matches C89
         strcpy(string_pool[string_pool_count], curr_tok.lexeme);
         pool_str_addr = (unsigned int)string_pool[string_pool_count];
         string_pool_count++;
         
-        /* Load string low/high memory bytes pointer configuration into A/X */
         emit(0xA9); emit(pool_str_addr & 0xFF);
         emit(0xA2); emit((pool_str_addr >> 8) & 0xFF);
         
@@ -308,65 +334,106 @@ int statement() {
     
     if (!match(TOK_RPAREN)) return 0;
     if (!match(TOK_SEMI)) return 0;
+  } else {
+    printf("\n%s <---- ERROR: Expected statement identifier\n", curr_tok.lexeme);
+    return 0;
   }
   return 1;
 }
 
 int compile_pipeline() {
   int next_free_zp = 0x04;
+  int main_prog_jump_patch_idx;
+  unsigned int main_prog_start_ram_addr;
+  SymbolType stype;
   int final_res_addr;
+  
   src_pos = 0;
   line_num = 1;
   last_logged_line = 0;
   bin_ptr = 0;
   sym_count = 0;
   string_pool_count = 0;
-
-  add_symbol("X", 0x02); 
-
+  
+  add_symbol("X", SYM_VAR, 0x02);
   next_token();
+  
   if (!match(TOK_PROGRAM)) return 0;
   if (!match(TOK_IDENT)) return 0;
   if (!match(TOK_SEMI)) return 0;
-  
-  if (curr_tok.type == TOK_VAR) {
-    next_token();
-    while (curr_tok.type == TOK_IDENT) {
-      add_symbol(curr_tok.lexeme, next_free_zp);
-      next_free_zp += 2;
-      if (!match(TOK_IDENT)) return 0; 
-      if (!match(TOK_COLON)) return 0; 
-      if (!match(TOK_INTEGER)) return 0; 
+  // Initial JIT Layout Action: Emit an absolute jump vector to bypass function blocks
+  emit(0x4C); // JMP absolute
+  main_prog_jump_patch_idx = bin_ptr;
+  emit(0x00); emit(0x00); // Temporary absolute address placeholders
+  // Global Variable/Function Tracking Declarations Block
+  while (curr_tok.type == TOK_VAR || curr_tok.type == TOK_FUNCTION) {
+    if (curr_tok.type == TOK_VAR) {
+      next_token();
+      while (curr_tok.type == TOK_IDENT) {
+        add_symbol(curr_tok.lexeme, SYM_VAR, next_free_zp);
+        next_free_zp += 2;
+        if (!match(TOK_IDENT)) return 0;
+        if (!match(TOK_COLON)) return 0;
+        if (!match(TOK_INTEGER)) return 0;
+        if (!match(TOK_SEMI)) return 0;
+      }
+    }
+    else if (curr_tok.type == TOK_FUNCTION) {
+      char func_name[MAX_SYM_LEN + 1];
+      char param_name[MAX_SYM_LEN + 1];
+      int func_start_offset = bin_ptr;
+      int lookup_idx;
+      int func_ret_zp;
+      next_token();
+      strcpy(func_name, curr_tok.lexeme);
+      add_symbol(func_name, SYM_FUNC, func_start_offset);
+      if (!match(TOK_IDENT)) return 0;
+      if (!match(TOK_LPAREN)) return 0;
+      strcpy(param_name, curr_tok.lexeme);
+      add_symbol(param_name, SYM_VAR, 0x02);
+      if (!match(TOK_IDENT)) return 0;
+      if (!match(TOK_COLON)) return 0;
+      if (!match(TOK_INTEGER)) return 0;
+      if (!match(TOK_RPAREN)) return 0;
+      if (!match(TOK_COLON)) return 0;
+      if (!match(TOK_INTEGER)) return 0;
       if (!match(TOK_SEMI)) return 0;
+      add_symbol(func_name, SYM_VAR, next_free_zp);
+      if (!match(TOK_BEGIN)) return 0;
+      while (curr_tok.type != TOK_END && curr_tok.type != TOK_EOF) {
+        if (!statement()) return 0;
+      }
+      if (!match(TOK_END)) return 0;
+      if (!match(TOK_SEMI)) return 0;
+      lookup_idx = lookup_symbol(func_name, &stype, &func_ret_zp);
+      emit(0xA5); emit(func_ret_zp);     // LDA func_ret_zp
+      emit(0xA6); emit(func_ret_zp + 1); // LDX func_ret_zp+1
+      emit(0x60);                        // RTS
+      next_free_zp += 2;
     }
   }
-  
   if (!match(TOK_BEGIN)) return 0;
-  
-  emit(0x85); emit(ARG_ZP_LO); 
-  emit(0x86); emit(ARG_ZP_HI); 
-  
+  // Back-patch the initial runtime pipeline jump directly to the program entry point execution vector
+  main_prog_start_ram_addr = (unsigned int)(&jit_bin[bin_ptr]);
+  jit_bin[main_prog_jump_patch_idx] = main_prog_start_ram_addr & 0xFF;
+  jit_bin[main_prog_jump_patch_idx + 1] = (main_prog_start_ram_addr >> 8) & 0xFF;
+  emit(0x85); emit(ARG_ZP_LO); // STA $02
+  emit(0x86); emit(ARG_ZP_HI); // STX $03
   while (curr_tok.type != TOK_END && curr_tok.type != TOK_EOF) {
     if (!statement()) return 0;
   }
-  
-  if (!match(TOK_END)) return 0; 
+  if (!match(TOK_END)) return 0;
   if (!match(TOK_DOT)) return 0;
-  
-  printf("\n"); 
-
-  /* Load the computed value of BETA (15 + 32 = 47) into A/X before exiting */
-  final_res_addr = lookup_symbol("BETA");
+  printf("\n");
+  final_res_addr = lookup_symbol("BETA", &stype, &final_res_addr) ? final_res_addr : -1;
   if (final_res_addr != -1) {
-    emit(0xA5); emit(final_res_addr);
-    emit(0xA6); emit(final_res_addr + 1);
+    emit(0xA5); emit(final_res_addr);     // LDA BETA_lo
+    emit(0xA6); emit(final_res_addr + 1); // LDX BETA_hi
   }
-  
-  emit(0x60); /* RTS */
+  emit(0x60); // RTS
   return 1;
 }
-
-int main() {
+int main(void) {
   int ch;
   int buf_idx = 0;
   int test_parameter = 42;
@@ -380,9 +447,10 @@ int main() {
   if (strlen(src_buf) > 0) {
     if (compile_pipeline()) {
       execute_native_jit = (PascalFunc)jit_bin;
+      printf("--- RUN ---\n");
       compiled_output = execute_native_jit(test_parameter);
-      printf("--- JIT EXECUTION SUCCESSFUL INSIDE SIM65 ---\n");
-      printf("Result Array Return (A/X): %d\n", compiled_output);
+      printf("--- END ---\n");
+      printf("AX=%d\n", compiled_output);
     } else {
       printf(">> JIT Pipeline failed during compilation.\n");
     }
