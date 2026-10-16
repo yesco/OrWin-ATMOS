@@ -40,8 +40,7 @@ Token curr_tok;
 unsigned char jit_bin[MAX_BIN_LEN];
 int bin_ptr = 0;
 
-// FIXED: String pool configured as a proper 2D array
-char string_pool[8][MAX_SYM_LEN + 1]; // FIXED: Proper 2D tracking matrix
+char string_pool[MAX_SYM_LEN + 1];
 int string_pool_count = 0;
 
 // --- SYMBOL TABLE ---
@@ -201,7 +200,6 @@ void next_token() {
     src_pos += 2; curr_tok.type = TOK_ASSIGN; strcpy(curr_tok.lexeme, ":="); log_token(); return;
   }
   
-  // FIXED: Safe array byte index modification to support C89 lvalues
   curr_tok.lexeme[0] = src_buf[src_pos];
   curr_tok.lexeme[1] = '\0';
 
@@ -240,10 +238,6 @@ int expression(void) {
   unsigned int param_storage_addr;
   unsigned int return_storage_addr;
   unsigned int var_ram_addr;
-  unsigned int local_math_tmp;
-  unsigned int local_math_tmp2;
-  int jmp_patch_idx;
-  unsigned int skip_target_ram;
 
   jit_base_addr = (unsigned int)jit_bin;
 
@@ -286,42 +280,28 @@ int expression(void) {
   if (curr_tok.type == TOK_PLUS) {
     next_token();
     
-    // Fortran style: Allocate localized math storage directly inline to avoid global variable stomping
-    emit(0x4C); // JMP absolute to skip past variable byte storage allocation
-    jmp_patch_idx = bin_ptr;
-    emit(0x00); emit(0x00);
+    emit(0x48); // PHA (Push Left Low Byte)
+    emit(0x8A); // TXA 
+    emit(0x48); // PHA (Push Left High Byte)
     
-    // Reserve 4 static bytes right here in the code array stream for this node's addition layers
-    local_math_tmp = jit_base_addr + bin_ptr;  emit(0x00); emit(0x00);
-    local_math_tmp2 = jit_base_addr + bin_ptr; emit(0x00); emit(0x00);
+    if (!expression()) return 0; 
     
-    // Back-patch JMP to jump to the actual executable instructions following the variables
-    skip_target_ram = jit_base_addr + bin_ptr;
-    jit_bin[jmp_patch_idx] = skip_target_ram & 0xFF;
-    jit_bin[jmp_patch_idx + 1] = (skip_target_ram >> 8) & 0xFF;
+    emit(0x85); emit(0x02); // STA $02 (Right Low)
+    emit(0x86); emit(0x03); // STX $03 (Right High)
     
-    // Store Left-Hand Side value into the private local block
-    emit(0x8D); emit(local_math_tmp & 0xFF); emit((local_math_tmp >> 8) & 0xFF);
-    emit(0x8E); emit((local_math_tmp + 1) & 0xFF); emit(((local_math_tmp + 1) >> 8) & 0xFF);
+    emit(0x68);             // PLA (Pull Left High Byte)
+    emit(0x85); emit(0x01); // STA $01 (Store Left High Byte in ZP $01)
+    emit(0x68);             // PLA (Pull Left Low Byte)
     
-    if (!expression()) return 0; // Evaluate RIGHT-hand side into A/X
-    
-    // Store Right-Hand Side value into the private local block
-    emit(0x8D); emit(local_math_tmp2 & 0xFF); emit((local_math_tmp2 >> 8) & 0xFF);
-    emit(0x8E); emit((local_math_tmp2 + 1) & 0xFF); emit(((local_math_tmp2 + 1) >> 8) & 0xFF);
-    
-    // Perform pure absolute 16-bit Addition completely isolated from other function branches
     emit(0x18);             // CLC
-    emit(0xAD); emit(local_math_tmp & 0xFF); emit((local_math_tmp >> 8) & 0xFF);
-    emit(0x6D); emit(local_math_tmp2 & 0xFF); emit((local_math_tmp2 >> 8) & 0xFF);
-    emit(0x48);             // PHA
+    emit(0x65); emit(0x02); // ADC $02 (Left Low + Right Low)
+    emit(0x48);             // PHA (Save Low Byte sum to stack)
     
-    // FIXED: Opcode corrected from 0xA5 (LDA ZeroPage) to 0xAD (LDA Absolute) to fix desynchronization
-    emit(0x18);             // CLC
-    emit(0xAD); emit((local_math_tmp + 1) & 0xFF); emit(((local_math_tmp + 1) >> 8) & 0xFF);
-    emit(0x6D); emit((local_math_tmp2 + 1) & 0xFF); emit(((local_math_tmp2 + 1) >> 8) & 0xFF);
-    emit(0xAA);             // TAX
-    emit(0x68);             // PLA
+    emit(0xA5); emit(0x01); // LDA $01 (Load Left High)
+    emit(0x65); emit(0x03); // ADC $03 (Left High + Right High + Carry)
+    
+    emit(0xAA);             // TAX (Move final High Byte result into X)
+    emit(0x68);             // PLA (Pull final Low Byte result back into A)
   }
   return 1;
 }
@@ -344,13 +324,10 @@ int statement(void) {
     if (!match(TOK_IDENT)) return 0;
     if (!match(TOK_ASSIGN)) return 0;
     
-    // Calculate the absolute RAM coordinate of the target variable immediately
-    // before running the recursive expression pipeline so that inline allocations do not alter it.
     var_ram_addr = ((unsigned int)jit_bin) + (unsigned int)addr;
     
     if (!expression()) return 0;
     
-    // Store the terminal evaluation result dynamically into the pre-calculated memory slot
     emit(0x8D); emit(var_ram_addr & 0xFF); emit((var_ram_addr >> 8) & 0xFF);     // STA var_ram
     emit(0x8E); emit((var_ram_addr + 1) & 0xFF); emit(((var_ram_addr + 1) >> 8) & 0xFF); // STX var_ram+1
     if (!match(TOK_SEMI)) return 0;
@@ -389,7 +366,10 @@ int statement(void) {
       
       if (!match(TOK_STRING)) return 0;
     } else {
+      // Evaluate expression parameter directly into registers A/X cleanly
       if (!expression()) return 0;
+      
+      // Invoke the standard 16-bit integer display helper callback function natively
       callback_addr = (unsigned int)print_int_cb;
       emit(0x20); emit(callback_addr & 0xFF); emit((callback_addr >> 8) & 0xFF); // JSR print_int_cb
     }
@@ -404,77 +384,59 @@ int statement(void) {
 }
 
 int compile_pipeline(void) {
-  int next_free_zp = 0x04;
   int main_prog_jump_patch_idx;
   unsigned int jit_base_addr;
   SymbolType stype;
-  int symbol_lookup_address; 
-  int last_assigned_var_offset = -1; // Dynamic tracking variable added
-  
+  int symbol_lookup_address;
+  int last_assigned_var_offset = -1;
   char func_name[MAX_SYM_LEN + 1];
   char param_name[MAX_SYM_LEN + 1];
-  int func_base_offset; 
+  int func_base_offset;
   int func_ret_addr;
   int func_param_addr;
   unsigned int ret_ram;
   unsigned int x_ram;
   unsigned int last_var_ram;
   unsigned int main_prog_start_ram_addr;
-
   src_pos = 0;
   line_num = 1;
   last_logged_line = 0;
   bin_ptr = 0;
   sym_count = 0;
   string_pool_count = 0;
-  
   jit_base_addr = (unsigned int)jit_bin;
   printf("\n[JIT Debug] jit_bin starts at RAM address: $%04X\n", jit_base_addr);
-  
-  // Emit an absolute jump vector to bypass function definition blocks
   emit(0x4C); // JMP absolute
-  main_prog_jump_patch_idx = bin_ptr; 
-  emit(0x00); emit(0x00);             
-  
-  add_symbol("X", SYM_VAR, bin_ptr);
+  main_prog_jump_patch_idx = bin_ptr;
   emit(0x00); emit(0x00);
-  
   next_token();
   if (!match(TOK_PROGRAM)) return 0;
   if (!match(TOK_IDENT)) return 0;
   if (!match(TOK_SEMI)) return 0;
-  
-  // Global Variable / Function Declaration Processing Loop
   while (curr_tok.type == TOK_VAR || curr_tok.type == TOK_FUNCTION) {
     if (curr_tok.type == TOK_VAR) {
       next_token();
       while (curr_tok.type == TOK_IDENT) {
         add_symbol(curr_tok.lexeme, SYM_VAR, bin_ptr);
-        last_assigned_var_offset = bin_ptr; // Track this as a valid data storage location
-        emit(0x00); emit(0x00); 
-        
-        if (!match(TOK_IDENT)) return 0; 
-        if (!match(TOK_COLON)) return 0; 
-        if (!match(TOK_INTEGER)) return 0; 
+        last_assigned_var_offset = bin_ptr;
+        emit(0x00); emit(0x00);
+        if (!match(TOK_IDENT)) return 0;
+        if (!match(TOK_COLON)) return 0;
+        if (!match(TOK_INTEGER)) return 0;
         if (!match(TOK_SEMI)) return 0;
       }
     }
     else if (curr_tok.type == TOK_FUNCTION) {
-      func_base_offset = bin_ptr; 
+      func_base_offset = bin_ptr;
       next_token();
       strcpy(func_name, curr_tok.lexeme);
-      
       add_symbol(func_name, SYM_FUNC, func_base_offset);
-      
       func_param_addr = bin_ptr;  emit(0x00); emit(0x00);
       func_ret_addr = bin_ptr;    emit(0x00); emit(0x00);
-      
       if (!match(TOK_IDENT)) return 0;
       if (!match(TOK_LPAREN)) return 0;
-      
       strcpy(param_name, curr_tok.lexeme);
       add_symbol(param_name, SYM_VAR, func_param_addr);
-      
       if (!match(TOK_IDENT)) return 0;
       if (!match(TOK_COLON)) return 0;
       if (!match(TOK_INTEGER)) return 0;
@@ -482,58 +444,53 @@ int compile_pipeline(void) {
       if (!match(TOK_COLON)) return 0;
       if (!match(TOK_INTEGER)) return 0;
       if (!match(TOK_SEMI)) return 0;
-      
       add_symbol(func_name, SYM_VAR, func_ret_addr);
-      
       if (!match(TOK_BEGIN)) return 0;
       while (curr_tok.type != TOK_END && curr_tok.type != TOK_EOF) {
         if (!statement()) return 0;
       }
       if (!match(TOK_END)) return 0;
       if (!match(TOK_SEMI)) return 0;
-      
       ret_ram = jit_base_addr + (unsigned int)func_ret_addr;
-      emit(0xAD); emit(ret_ram & 0xFF); emit((ret_ram >> 8) & 0xFF); // LDA ret_ram
-      emit(0xAE); emit((ret_ram + 1) & 0xFF); emit(((ret_ram + 1) >> 8) & 0xFF); // LDX ret_ram+1
-      emit(0x60); // RTS
+      emit(0xAD); emit(ret_ram & 0xFF); emit((ret_ram >> 8) & 0xFF);
+      emit(0xAE); emit((ret_ram + 1) & 0xFF); emit(((ret_ram + 1) >> 8) & 0xFF);
+      emit(0x60);
     }
   }
-  
   if (!match(TOK_BEGIN)) return 0;
-  
-  // Back-patch JMP using pure integer addition to prevent pointer corruption
   main_prog_start_ram_addr = jit_base_addr + (unsigned int)bin_ptr;
   jit_bin[main_prog_jump_patch_idx] = main_prog_start_ram_addr & 0xFF;
   jit_bin[main_prog_jump_patch_idx + 1] = (main_prog_start_ram_addr >> 8) & 0xFF;
-  
   printf("[JIT Debug] Entry JMP patched at offset %d to point to Main Code: $%04X\n", main_prog_jump_patch_idx, main_prog_start_ram_addr);
-
   if (lookup_symbol("X", &stype, &symbol_lookup_address) != -1) {
     x_ram = jit_base_addr + (unsigned int)symbol_lookup_address;
-    emit(0x8D); emit(x_ram & 0xFF); emit((x_ram >> 8) & 0xFF);                 
-    emit(0x8E); emit((x_ram + 1) & 0xFF); emit(((x_ram + 1) >> 8) & 0xFF);     
+    emit(0x8D); emit(x_ram & 0xFF); emit((x_ram >> 8) & 0xFF);
+    emit(0x8E); emit((x_ram + 1) & 0xFF); emit(((x_ram + 1) >> 8) & 0xFF);
   }
-  
   while (curr_tok.type != TOK_END && curr_tok.type != TOK_EOF) {
     if (!statement()) return 0;
   }
-  
-  if (!match(TOK_END)) return 0; 
+  if (!match(TOK_END)) return 0;
   if (!match(TOK_DOT)) return 0;
-  
-  printf("\n"); 
-
-  // FIXED: No hardcoded string checks. Pull the last dynamically allocated variable space index into A/X
+  printf("\n");
   if (last_assigned_var_offset != -1) {
     last_var_ram = jit_base_addr + (unsigned int)last_assigned_var_offset;
-    emit(0xAD); emit(last_var_ram & 0xFF); emit((last_var_ram >> 8) & 0xFF);             // LDA last_var
-    emit(0xAE); emit((last_var_ram + 1) & 0xFF); emit(((last_var_ram + 1) >> 8) & 0xFF); // LDX last_var+1
+    emit(0xAD); emit(last_var_ram & 0xFF); emit((last_var_ram >> 8) & 0xFF);
+    emit(0xAE); emit((last_var_ram + 1) & 0xFF); emit(((last_var_ram + 1) >> 8) & 0xFF);
   }
-  
-  emit(0x60); // RTS
+  emit(0x60);
   return 1;
 }
-
+// --- EXPLORATORY BYTECODE PRINTER SUBSYSTEM ---
+void dump_compiled_hex(void) {
+  int i;
+  printf("\n--- EMITTED BYTECODE INSPECTOR ---\n");
+  for (i = 0; i < bin_ptr; i++) {
+    printf("%02X ", jit_bin[i]);
+    if ((i + 1) % 16 == 0) printf("\n");
+  }
+  printf("\n----------------------------------\n");
+}
 int main(void) {
   int ch;
   int buf_idx = 0;
@@ -547,6 +504,7 @@ int main(void) {
   src_buf[buf_idx] = '\0';
   if (strlen(src_buf) > 0) {
     if (compile_pipeline()) {
+      dump_compiled_hex(); // Execute live hex visualization right before jumping into simulation
       execute_native_jit = (PascalFunc)jit_bin;
       printf("--- RUN ---\n");
       compiled_output = execute_native_jit(test_parameter);
