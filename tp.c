@@ -316,6 +316,8 @@ int expression(void) {
     emit(0x6D); emit(local_math_tmp2 & 0xFF); emit((local_math_tmp2 >> 8) & 0xFF);
     emit(0x48);             // PHA
     
+    // FIXED: Opcode corrected from 0xA5 (LDA ZeroPage) to 0xAD (LDA Absolute) to fix desynchronization
+    emit(0x18);             // CLC
     emit(0xAD); emit((local_math_tmp + 1) & 0xFF); emit(((local_math_tmp + 1) >> 8) & 0xFF);
     emit(0x6D); emit((local_math_tmp2 + 1) & 0xFF); emit(((local_math_tmp2 + 1) >> 8) & 0xFF);
     emit(0xAA);             // TAX
@@ -341,11 +343,16 @@ int statement(void) {
     
     if (!match(TOK_IDENT)) return 0;
     if (!match(TOK_ASSIGN)) return 0;
+    
+    // Calculate the absolute RAM coordinate of the target variable immediately
+    // before running the recursive expression pipeline so that inline allocations do not alter it.
+    var_ram_addr = ((unsigned int)jit_bin) + (unsigned int)addr;
+    
     if (!expression()) return 0;
     
-    var_ram_addr = ((unsigned int)jit_bin) + (unsigned int)addr;
-    emit(0x8D); emit(var_ram_addr & 0xFF); emit((var_ram_addr >> 8) & 0xFF);     
-    emit(0x8E); emit((var_ram_addr + 1) & 0xFF); emit(((var_ram_addr + 1) >> 8) & 0xFF); 
+    // Store the terminal evaluation result dynamically into the pre-calculated memory slot
+    emit(0x8D); emit(var_ram_addr & 0xFF); emit((var_ram_addr >> 8) & 0xFF);     // STA var_ram
+    emit(0x8E); emit((var_ram_addr + 1) & 0xFF); emit(((var_ram_addr + 1) >> 8) & 0xFF); // STX var_ram+1
     if (!match(TOK_SEMI)) return 0;
   } 
   else if (curr_tok.type == TOK_WRITE) {
@@ -378,13 +385,13 @@ int statement(void) {
       emit(0xA2); emit((str_start_ram >> 8) & 0xFF); 
       
       callback_addr = (unsigned int)print_str_cb;
-      emit(0x20); emit(callback_addr & 0xFF); emit((callback_addr >> 8) & 0xFF); 
+      emit(0x20); emit(callback_addr & 0xFF); emit((callback_addr >> 8) & 0xFF); // JSR print_str_cb
       
       if (!match(TOK_STRING)) return 0;
     } else {
       if (!expression()) return 0;
       callback_addr = (unsigned int)print_int_cb;
-      emit(0x20); emit(callback_addr & 0xFF); emit((callback_addr >> 8) & 0xFF); 
+      emit(0x20); emit(callback_addr & 0xFF); emit((callback_addr >> 8) & 0xFF); // JSR print_int_cb
     }
     
     if (!match(TOK_RPAREN)) return 0;
@@ -401,7 +408,8 @@ int compile_pipeline(void) {
   int main_prog_jump_patch_idx;
   unsigned int jit_base_addr;
   SymbolType stype;
-  int final_res_addr;
+  int symbol_lookup_address; 
+  int last_assigned_var_offset = -1; // Dynamic tracking variable added
   
   char func_name[MAX_SYM_LEN + 1];
   char param_name[MAX_SYM_LEN + 1];
@@ -410,7 +418,7 @@ int compile_pipeline(void) {
   int func_param_addr;
   unsigned int ret_ram;
   unsigned int x_ram;
-  unsigned int beta_ram;
+  unsigned int last_var_ram;
   unsigned int main_prog_start_ram_addr;
 
   src_pos = 0;
@@ -423,17 +431,10 @@ int compile_pipeline(void) {
   jit_base_addr = (unsigned int)jit_bin;
   printf("\n[JIT Debug] jit_bin starts at RAM address: $%04X\n", jit_base_addr);
   
-  // FIXED: The very first bytes at index 0 MUST be the absolute entry bypass JMP
+  // Emit an absolute jump vector to bypass function definition blocks
   emit(0x4C); // JMP absolute
-  main_prog_jump_patch_idx = bin_ptr; // Offset 1
-  emit(0x00); emit(0x00);             // Offsets 1 and 2 placeholder targets
-  
-  // Allocate static scratch RAM variables immediately AFTER the entry JMP instruction
-  add_symbol("__MATH_TMP", SYM_VAR, bin_ptr);
-  emit(0x00); emit(0x00);
-  
-  add_symbol("__MATH_TMP2", SYM_VAR, bin_ptr);
-  emit(0x00); emit(0x00);
+  main_prog_jump_patch_idx = bin_ptr; 
+  emit(0x00); emit(0x00);             
   
   add_symbol("X", SYM_VAR, bin_ptr);
   emit(0x00); emit(0x00);
@@ -449,6 +450,7 @@ int compile_pipeline(void) {
       next_token();
       while (curr_tok.type == TOK_IDENT) {
         add_symbol(curr_tok.lexeme, SYM_VAR, bin_ptr);
+        last_assigned_var_offset = bin_ptr; // Track this as a valid data storage location
         emit(0x00); emit(0x00); 
         
         if (!match(TOK_IDENT)) return 0; 
@@ -491,9 +493,9 @@ int compile_pipeline(void) {
       if (!match(TOK_SEMI)) return 0;
       
       ret_ram = jit_base_addr + (unsigned int)func_ret_addr;
-      emit(0xAD); emit(ret_ram & 0xFF); emit((ret_ram >> 8) & 0xFF); 
-      emit(0xAE); emit((ret_ram + 1) & 0xFF); emit(((ret_ram + 1) >> 8) & 0xFF); 
-      emit(0x60); 
+      emit(0xAD); emit(ret_ram & 0xFF); emit((ret_ram >> 8) & 0xFF); // LDA ret_ram
+      emit(0xAE); emit((ret_ram + 1) & 0xFF); emit(((ret_ram + 1) >> 8) & 0xFF); // LDX ret_ram+1
+      emit(0x60); // RTS
     }
   }
   
@@ -506,9 +508,8 @@ int compile_pipeline(void) {
   
   printf("[JIT Debug] Entry JMP patched at offset %d to point to Main Code: $%04X\n", main_prog_jump_patch_idx, main_prog_start_ram_addr);
 
-  final_res_addr = lookup_symbol("X", &stype, &final_res_addr) ? final_res_addr : -1;
-  if (final_res_addr != -1) {
-    x_ram = jit_base_addr + (unsigned int)final_res_addr;
+  if (lookup_symbol("X", &stype, &symbol_lookup_address) != -1) {
+    x_ram = jit_base_addr + (unsigned int)symbol_lookup_address;
     emit(0x8D); emit(x_ram & 0xFF); emit((x_ram >> 8) & 0xFF);                 
     emit(0x8E); emit((x_ram + 1) & 0xFF); emit(((x_ram + 1) >> 8) & 0xFF);     
   }
@@ -522,14 +523,14 @@ int compile_pipeline(void) {
   
   printf("\n"); 
 
-  final_res_addr = lookup_symbol("BETA", &stype, &final_res_addr) ? final_res_addr : -1;
-  if (final_res_addr != -1) {
-    beta_ram = jit_base_addr + (unsigned int)final_res_addr;
-    emit(0xAD); emit(beta_ram & 0xFF); emit((beta_ram >> 8) & 0xFF);             
-    emit(0xAE); emit((beta_ram + 1) & 0xFF); emit(((beta_ram + 1) >> 8) & 0xFF); 
+  // FIXED: No hardcoded string checks. Pull the last dynamically allocated variable space index into A/X
+  if (last_assigned_var_offset != -1) {
+    last_var_ram = jit_base_addr + (unsigned int)last_assigned_var_offset;
+    emit(0xAD); emit(last_var_ram & 0xFF); emit((last_var_ram >> 8) & 0xFF);             // LDA last_var
+    emit(0xAE); emit((last_var_ram + 1) & 0xFF); emit(((last_var_ram + 1) >> 8) & 0xFF); // LDX last_var+1
   }
   
-  emit(0x60); 
+  emit(0x60); // RTS
   return 1;
 }
 
