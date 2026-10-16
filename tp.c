@@ -64,7 +64,7 @@ typedef int (*PascalFunc)(int x);
 
 // --- C89 FORWARD DECLARATIONS FOR CL65 ---
 void next_token(void);
-int match(TokenType expected);
+int expect(TokenType expected);
 int expression(void);
 int statement(void);
 
@@ -120,6 +120,7 @@ void next_token() {
   int i, len;
   char quote_char;
 
+// use c and NEXT macro
   while (src_buf[src_pos]) {
     if (isspace(src_buf[src_pos])) {
       if (src_buf[src_pos] == '\n') line_num++;
@@ -144,7 +145,7 @@ void next_token() {
     break;
   }
   
-  if (src_buf[src_pos] == '\0') {
+  if (!src_buf[src_pos]) {
     curr_tok.type = TOK_EOF;
     strcpy(curr_tok.lexeme, "EOF");
     return;
@@ -157,20 +158,22 @@ void next_token() {
       curr_tok.lexeme[len++] = src_buf[src_pos++];
     }
     if (src_buf[src_pos] == quote_char) src_pos++; 
-    curr_tok.lexeme[len] = '\0';
+    curr_tok.lexeme[len] = 0;
     curr_tok.type = TOK_STRING;
     log_token();
     return;
   }
   
+// TODO: a million references to src_buf[src_pos] use c and NEXT macro/fun
   if (isalpha(src_buf[src_pos])) {
     len = 0;
     while (isalnum(src_buf[src_pos]) && len < MAX_SYM_LEN) {
       curr_tok.lexeme[len++] = src_buf[src_pos++];
     }
-    curr_tok.lexeme[len] = '\0';
+    curr_tok.lexeme[len] = 0;
     for(i = 0; i < len; i++) curr_tok.lexeme[i] = toupper(curr_tok.lexeme[i]);
     
+// TODO: use TOKEN_NAMES to match...
     if (strcmp(curr_tok.lexeme, "PROGRAM") == 0) curr_tok.type = TOK_PROGRAM;
     else if (strcmp(curr_tok.lexeme, "VAR") == 0) curr_tok.type = TOK_VAR;
     else if (strcmp(curr_tok.lexeme, "BEGIN") == 0) curr_tok.type = TOK_BEGIN;
@@ -180,6 +183,8 @@ void next_token() {
     else if (strcmp(curr_tok.lexeme, "FUNCTION") == 0) curr_tok.type = TOK_FUNCTION;
     else curr_tok.type = TOK_IDENT;
 
+// TODO: almsot always log_token + return ... why duplicate, and why
+// not caller calling log_token?
     log_token();
     return;
   }
@@ -218,7 +223,7 @@ void next_token() {
   log_token();
 }
 
-int match(TokenType expected) {
+int expect(TokenType expected) {
   if (curr_tok.type == expected) {
     next_token();
     return 1;
@@ -254,9 +259,9 @@ int expression(void) {
     
     next_token();
     if (stype == SYM_FUNC) {
-      if (!match(TOK_LPAREN)) return 0;
+      if (!expect(TOK_LPAREN)) return 0;
       if (!expression()) return 0; // Evaluates incoming parameter argument into A/X
-      if (!match(TOK_RPAREN)) return 0;
+      if (!expect(TOK_RPAREN)) return 0;
       
       // Calculate function targets using the newly corrected absolute entry address offsets template
       param_storage_addr = jit_base_addr + (unsigned int)saddr - 4; // Parameter sits 4 bytes behind entry
@@ -346,8 +351,8 @@ int statement(void) {
       return 0;
     }
     
-    if (!match(TOK_IDENT)) return 0;
-    if (!match(TOK_ASSIGN)) return 0;
+    if (!expect(TOK_IDENT)) return 0;
+    if (!expect(TOK_ASSIGN)) return 0;
     
     var_ram_addr = ((unsigned int)jit_bin) + (unsigned int)addr;
     
@@ -355,11 +360,11 @@ int statement(void) {
     
     emit(0x8D); emit(var_ram_addr & 0xFF); emit((var_ram_addr >> 8) & 0xFF);     // STA var_ram
     emit(0x8E); emit((var_ram_addr + 1) & 0xFF); emit(((var_ram_addr + 1) >> 8) & 0xFF); // STX var_ram+1
-    if (!match(TOK_SEMI)) return 0;
+    if (!expect(TOK_SEMI)) return 0;
   } 
   else if (curr_tok.type == TOK_WRITE) {
-    if (!match(TOK_WRITE)) return 0;
-    if (!match(TOK_LPAREN)) return 0;
+    if (!expect(TOK_WRITE)) return 0;
+    if (!expect(TOK_LPAREN)) return 0;
     
     if (curr_tok.type == TOK_STRING) {
       int jmp_patch_idx;
@@ -389,15 +394,16 @@ int statement(void) {
       callback_addr = (unsigned int)print_str_cb;
       emit(0x20); emit(callback_addr & 0xFF); emit((callback_addr >> 8) & 0xFF); // JSR print_str_cb
       
-      if (!match(TOK_STRING)) return 0;
+      // if going to give error just longjmp(FAIL) inside
+      if (!expect(TOK_STRING)) return 0;
     } else {
       if (!expression()) return 0;
       callback_addr = (unsigned int)print_int_cb;
       emit(0x20); emit(callback_addr & 0xFF); emit((callback_addr >> 8) & 0xFF); // JSR print_int_cb
     }
     
-    if (!match(TOK_RPAREN)) return 0;
-    if (!match(TOK_SEMI)) return 0;
+    if (!expect(TOK_RPAREN)) return 0;
+    if (!expect(TOK_SEMI)) return 0;
   } else {
     printf("\n%s <---- ERROR: Expected statement identifier\n", curr_tok.lexeme);
     return 0;
@@ -442,9 +448,9 @@ int compile_pipeline(void) {
   emit(0x00); emit(0x00);
   
   next_token();
-  if (!match(TOK_PROGRAM)) return 0;
-  if (!match(TOK_IDENT)) return 0;
-  if (!match(TOK_SEMI)) return 0;
+  if (!expect(TOK_PROGRAM)) return 0;
+  if (!expect(TOK_IDENT)) return 0;
+  if (!expect(TOK_SEMI)) return 0;
   
   // Global Variable / Function Declaration Processing Loop
   while (curr_tok.type == TOK_VAR || curr_tok.type == TOK_FUNCTION) {
@@ -455,10 +461,10 @@ int compile_pipeline(void) {
         last_assigned_var_offset = bin_ptr; 
         emit(0x00); emit(0x00); 
         
-        if (!match(TOK_IDENT)) return 0; 
-        if (!match(TOK_COLON)) return 0; 
-        if (!match(TOK_INTEGER)) return 0; 
-        if (!match(TOK_SEMI)) return 0;
+        if (!expect(TOK_IDENT)) return 0; 
+        if (!expect(TOK_COLON)) return 0; 
+        if (!expect(TOK_INTEGER)) return 0; 
+        if (!expect(TOK_SEMI)) return 0;
       }
     }
     else if (curr_tok.type == TOK_FUNCTION) {
@@ -469,23 +475,23 @@ int compile_pipeline(void) {
       func_param_addr = bin_ptr;  emit(0x00); emit(0x00);
       func_ret_addr = bin_ptr;    emit(0x00); emit(0x00);
       
-      if (!match(TOK_IDENT)) return 0;
-      if (!match(TOK_LPAREN)) return 0;
+      if (!expect(TOK_IDENT)) return 0;
+      if (!expect(TOK_LPAREN)) return 0;
       
       strcpy(param_name, curr_tok.lexeme);
       add_symbol(param_name, SYM_VAR, func_param_addr);
       
-      if (!match(TOK_IDENT)) return 0;
-      if (!match(TOK_COLON)) return 0;
-      if (!match(TOK_INTEGER)) return 0;
-      if (!match(TOK_RPAREN)) return 0;
-      if (!match(TOK_COLON)) return 0;
-      if (!match(TOK_INTEGER)) return 0;
-      if (!match(TOK_SEMI)) return 0;
+      if (!expect(TOK_IDENT)) return 0;
+      if (!expect(TOK_COLON)) return 0;
+      if (!expect(TOK_INTEGER)) return 0;
+      if (!expect(TOK_RPAREN)) return 0;
+      if (!expect(TOK_COLON)) return 0;
+      if (!expect(TOK_INTEGER)) return 0;
+      if (!expect(TOK_SEMI)) return 0;
       
       add_symbol(func_name, SYM_VAR, func_ret_addr);
       
-      if (!match(TOK_BEGIN)) return 0;
+      if (!expect(TOK_BEGIN)) return 0;
       
       // Register the function symbol mapped to the actual executable instruction entry point address
       func_base_offset = bin_ptr; 
@@ -499,8 +505,8 @@ int compile_pipeline(void) {
       while (curr_tok.type != TOK_END && curr_tok.type != TOK_EOF) {
         if (!statement()) return 0;
       }
-      if (!match(TOK_END)) return 0;
-      if (!match(TOK_SEMI)) return 0;
+      if (!expect(TOK_END)) return 0;
+      if (!expect(TOK_SEMI)) return 0;
       
       // Function Return: Load calculated value from return storage slot into A/X and RTS
       ret_ram = jit_base_addr + (unsigned int)func_ret_addr;
@@ -510,7 +516,7 @@ int compile_pipeline(void) {
     }
   }
   
-  if (!match(TOK_BEGIN)) return 0;
+  if (!expect(TOK_BEGIN)) return 0;
   
   // Back-patch JMP using pure integer addition to prevent pointer corruption
   main_prog_start_ram_addr = jit_base_addr + (unsigned int)bin_ptr;
@@ -529,8 +535,8 @@ int compile_pipeline(void) {
     if (!statement()) return 0;
   }
   
-  if (!match(TOK_END)) return 0; 
-  if (!match(TOK_DOT)) return 0;
+  if (!expect(TOK_END)) return 0; 
+  if (!expect(TOK_DOT)) return 0;
   
   printf("\n"); 
 

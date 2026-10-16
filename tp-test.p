@@ -1,5 +1,6 @@
 program ShowcaseSuite;
 
+{ TODO: extend for several args }
 function AddTen(val : integer) : integer;
 begin
   AddTen := val + 10;
@@ -7,7 +8,7 @@ end;
 
 var
   alpha : integer;
-  beta  : integer;
+  beta	: integer;
 
 begin
   { Test Case 1: Direct literal string compilation }
@@ -21,4 +22,6 @@ begin
 
   { Test Case 4: Printing numeric value from memory }
   writeln(beta);
+   
+  writeln("Magitcal injected input parameter X="); writeln(X); { is 42 }
 end.
