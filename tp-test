@@ -1,0 +1,9 @@
+echo "=============== clang ==============="
+#clang -DTPTEST -o tp-test.x tp.c && (cat tp-test.p | ./tp-test.x)
+clang -o tp.x tp.c && ./tp.x < tp-test.p
+echo "=============== CL65 ==============="
+#cl65 -DTPTEST -t sim6502 -o tp-test.sim tp.c && (sim65 tp-test.sim < tp-test.p)
+cl65 -t sim6502 -o tp.sim tp.c && sim65 tp.sim < tp-test.p
+
+
+
