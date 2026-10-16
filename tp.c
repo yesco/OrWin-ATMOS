@@ -4,14 +4,15 @@
 #include <ctype.h>
 
 /* --- SYSTEM CONSTANTS FOR SMALL MEMORY (6502/cc65) --- */
-#define MAX_SRC_LEN  8192   /* Strict limit for target text buffer */
-#define MAX_SYM_LEN  64     /* Expanded to handle longer string constants safely */
-#define MAX_SYMBOLS  32     /* Tiny Symbol Table to fit ZeroPage / low RAM */
+#define MAX_SRC_LEN  8192   
+#define MAX_SYM_LEN  64     
+#define MAX_SYMBOLS  32     
 
 /* --- EDITOR & LEXER STATES --- */
-char src_buf[MAX_SRC_LEN];   /* The global source workspace */
+char src_buf[MAX_SRC_LEN];   
 int src_pos = 0;
 int line_num = 1;
+int line_start_pos = 0; /* Tracks where the current line starts in the buffer */
 
 typedef enum {
   TOK_EOF, TOK_ERROR, TOK_PROGRAM, 
@@ -24,6 +25,13 @@ typedef enum {
   TOK_DOT                          
 } TokenType;
 
+/* Helper array for debugging token names */
+const char* TOKEN_NAMES[] = {
+  "EOF", "ERROR", "PROGRAM", "VAR", "BEGIN", "END",
+  "INTEGER", "IDENT", "NUM", "ASSIGN", "SEMI", "COLON",
+  "PLUS", "MINUS", "WRITELN", "LPAREN", "RPAREN", "STRING", "DOT"
+};
+
 typedef struct {
   TokenType type;
   char lexeme[MAX_SYM_LEN + 1];
@@ -35,30 +43,50 @@ Token curr_tok;
 /* --- SYMBOL TABLE --- */
 typedef struct {
   char name[MAX_SYM_LEN + 1];
-  int zp_offset; /* Mapped to 6502 Zero Page addresses for rapid cc65 access */
+  int zp_offset; 
 } Symbol;
 
 Symbol sym_table[MAX_SYMBOLS];
 int sym_count = 0;
-int next_zp_addr = 0x60; /* Start layout safely after cc65 runtime ZP space */
+int next_zp_addr = 0x60; 
 
-/* --- LEXICAL ANALYZER (COMPILER FRONTEND) --- */
+/* --- DIAGNOSTIC ERROR REPORTING SYSTEM --- */
+void print_error_context(const char* error_msg) {
+  int i = line_start_pos;
+  
+  printf("\n[!] COMPILATION ERROR at Line %d:\n", line_num);
+  
+  /* Print the offending line text */
+  while (src_buf[i] && src_buf[i] != '\n' && src_buf[i] != '\r') {
+    putchar(src_buf[i]);
+    i++;
+  }
+  
+  /* Append the explicit visual error flag directly at the current parsing location */
+  printf(" ( <---- ERROR: %s )\n\n", error_msg);
+}
+
+/* --- LEXICAL ANALYZER WITH STREAM VERIFICATION --- */
 void next_token() {
   int i;
   int len;
   char quote_char;
 
   while (src_buf[src_pos] && isspace(src_buf[src_pos])) {
-    if (src_buf[src_pos] == '\n') line_num++;
+    if (src_buf[src_pos] == '\n') {
+      line_num++;
+      line_start_pos = src_pos + 1; /* Mark the start boundary of the next line */
+    }
     src_pos++;
   }
 
   if (src_buf[src_pos] == '\0') {
     curr_tok.type = TOK_EOF;
+    strcpy(curr_tok.lexeme, "EOF");
     return;
   }
 
-  /* Parse String Literals (Supports standard Pascal '...' and "...") */
+  /* Parse String Literals */
   if (src_buf[src_pos] == '"' || src_buf[src_pos] == '\'') {
     quote_char = src_buf[src_pos++];
     len = 0;
@@ -70,6 +98,7 @@ void next_token() {
     }
     curr_tok.lexeme[len] = '\0';
     curr_tok.type = TOK_STRING;
+    printf("[Lex] Line %d: Found STRING -> \"%s\"\n", line_num, curr_tok.lexeme);
     return;
   }
 
@@ -90,6 +119,8 @@ void next_token() {
     else if (strcmp(curr_tok.lexeme, "INTEGER") == 0) curr_tok.type = TOK_INTEGER;
     else if (strcmp(curr_tok.lexeme, "WRITELN") == 0) curr_tok.type = TOK_WRITE;
     else curr_tok.type = TOK_IDENT;
+    
+    printf("[Lex] Line %d: Found %s -> \"%s\"\n", line_num, TOKEN_NAMES[curr_tok.type], curr_tok.lexeme);
     return;
   }
 
@@ -100,6 +131,8 @@ void next_token() {
     while (isdigit(src_buf[src_pos])) {
       curr_tok.value = curr_tok.value * 10 + (src_buf[src_pos++] - '0');
     }
+    sprintf(curr_tok.lexeme, "%d", curr_tok.value);
+    printf("[Lex] Line %d: Found NUM -> %d\n", line_num, curr_tok.value);
     return;
   }
 
@@ -107,27 +140,36 @@ void next_token() {
   if (src_buf[src_pos] == ':' && src_buf[src_pos+1] == '=') {
     src_pos += 2;
     curr_tok.type = TOK_ASSIGN;
+    strcpy(curr_tok.lexeme, ":=");
+    printf("[Lex] Line %d: Found ASSIGN -> \":=\"\n", line_num);
     return;
   }
 
-  switch (src_buf[src_pos]) {
-    case ';': src_pos++; curr_tok.type = TOK_SEMI; return;
-    case ':': src_pos++; curr_tok.type = TOK_COLON; return;
-    case '+': src_pos++; curr_tok.type = TOK_PLUS; return;
-    case '-': src_pos++; curr_tok.type = TOK_MINUS; return;
-    case '(': src_pos++; curr_tok.type = TOK_LPAREN; return;
-    case ')': src_pos++; curr_tok.type = TOK_RPAREN; return;
-    case '.': src_pos++; curr_tok.type = TOK_DOT; return;
-  }
+  curr_tok.lexeme[0] = src_buf[src_pos];
+  curr_tok.lexeme[1] = '\0';
 
-  curr_tok.type = TOK_ERROR;
-  src_pos++;
+  switch (src_buf[src_pos]) {
+    case ';': src_pos++; curr_tok.type = TOK_SEMI; break;
+    case ':': src_pos++; curr_tok.type = TOK_COLON; break;
+    case '+': src_pos++; curr_tok.type = TOK_PLUS; break;
+    case '-': src_pos++; curr_tok.type = TOK_MINUS; break;
+    case '(': src_pos++; curr_tok.type = TOK_LPAREN; break;
+    case ')': src_pos++; curr_tok.type = TOK_RPAREN; break;
+    case '.': src_pos++; curr_tok.type = TOK_DOT; break;
+    default:
+      src_pos++; 
+      curr_tok.type = TOK_ERROR;
+      printf("[Lex] Line %d: Unknown character syntax error '%c'\n", line_num, curr_tok.lexeme[0]);
+      return;
+  }
+  
+  printf("[Lex] Line %d: Found Symbol -> '%s'\n", line_num, curr_tok.lexeme);
 }
 
-/* --- COMPILER BACKEND (6502 CODE GENERATION) --- */
+/* --- COMPILER BACKEND --- */
 void add_symbol(const char* name) {
   if (sym_count >= MAX_SYMBOLS) {
-    printf("Error: Symbol table full at line %d\n", line_num);
+    print_error_context("Symbol table capacity exceeded");
     return;
   }
   strcpy(sym_table[sym_count].name, name);
@@ -145,11 +187,13 @@ int lookup_symbol(const char* name) {
 }
 
 int match(TokenType expected) {
+  char error_msg[128];
   if (curr_tok.type == expected) {
     next_token();
     return 1;
   } else {
-    printf("Syntax Error: Expected token enum %d but got %d at line %d\n", expected, curr_tok.type, line_num);
+    sprintf(error_msg, "Expected %s but encountered %s", TOKEN_NAMES[expected], TOKEN_NAMES[curr_tok.type]);
+    print_error_context(error_msg);
     return 0;
   }
 }
@@ -162,7 +206,9 @@ void expression() {
   } else if (curr_tok.type == TOK_IDENT) {
     addr = lookup_symbol(curr_tok.lexeme);
     if (addr == -1) {
-      printf("Error: Undeclared identifier %s at line %d\n", curr_tok.lexeme, line_num);
+      char msg[64];
+      sprintf(msg, "Undeclared identifier '%s'", curr_tok.lexeme);
+      print_error_context(msg);
       return;
     }
     printf("\tLDA $%02X\n\tLDX $%02X\n", addr, addr + 1);
@@ -191,7 +237,9 @@ int statement() {
     
     addr = lookup_symbol(target_var);
     if (addr == -1) {
-      printf("Error: Unknown identifier %s\n", target_var);
+      char msg[64];
+      sprintf(msg, "Unknown identifier '%s'", target_var);
+      print_error_context(msg);
       return 0;
     }
     printf("\tSTA $%02X\n\tSTX $%02X\n", addr, addr + 1);
@@ -220,9 +268,11 @@ int statement() {
 int compile() {
   src_pos = 0;
   line_num = 1;
+  line_start_pos = 0;
   sym_count = 0;
   next_zp_addr = 0x60;
   
+  printf("\n--- STARTING EMISSION PARSER LOG ---\n");
   next_token();
   
   if (!match(TOK_PROGRAM)) return 0;
@@ -251,26 +301,29 @@ int compile() {
   return 1;
 }
 
-/* --- INTERACTIVE EDITOR SUBSYSTEM --- */
+/* --- STREAM INPUT CONSUMER (C89 Safe, clears unused compiler warnings) --- */
 void mini_editor() {
-  char line[128];
-  printf("\n--- TURBO PASCAL 3.0 SMALL-ED (Type 'QUIT' on a blank line to finish) ---\n");
+  int ch;
+  int buf_idx = 0;
   memset(src_buf, 0, MAX_SRC_LEN);
-  src_pos = 0;
-    
-  while (1) {
-    printf("%03d> ", line_num++);
-    if (!fgets(line, sizeof(line), stdin)) break;
-    if (strcmp(line, "QUIT\n") == 0 || strcmp(line, "quit\n") == 0) break;
-        
-    if (strlen(src_buf) + strlen(line) < MAX_SRC_LEN - 1) {
-      strcat(src_buf, line);
+
+  while ((ch = getc(stdin)) != EOF) {
+    if (buf_idx < MAX_SRC_LEN - 1) {
+      src_buf[buf_idx++] = (char)ch;
+
+      if (buf_idx >= 4 &&
+          (src_buf[buf_idx - 4] == 'Q' || src_buf[buf_idx - 4] == 'q') &&
+          (src_buf[buf_idx - 3] == 'U' || src_buf[buf_idx - 3] == 'u') &&
+          (src_buf[buf_idx - 2] == 'I' || src_buf[buf_idx - 2] == 'i') &&
+          (src_buf[buf_idx - 1] == 'T' || src_buf[buf_idx - 1] == 't')) {
+        buf_idx -= 4;
+        break;
+      }
     } else {
-      printf("[!] Buffer Overflow Warning!\n");
       break;
     }
   }
-  line_num = 1;
+  src_buf[buf_idx] = '\0';
 }
 
 /* --- DYNAMIC CONDITIONAL TEST HOOKS BLOCK --- */
@@ -291,20 +344,20 @@ void run_file_test(const char* filepath) {
   printf("\n==================================================\n");
   printf("RUNNING SHOWCASE DIAGNOSTIC SUITE VIA: %s (%d bytes)\n", filepath, (int)bytes_read);
   printf("==================================================\n");
-  
   success = compile();
   printf(">> DIAGNOSTIC RESULT: %s\n", success ? "[PASS]" : "[FAIL]");
 }
 #endif
-
 int main(int argc, char* argv[]) {
+  /* Mute unused warning states inside cl65 toolchain contexts cleanly */
+  (void)argc;
+  (void)argv;
 #ifdef TPTEST
   run_file_test("tp-test.p");
   return 0;
 #else
   mini_editor();
   if (strlen(src_buf) > 0) {
-    printf("\n--- GENERATING TARGET ASSEMBLY (cc65-compatible Native 6502) ---\n");
     compile();
   }
   return 0;

@@ -1,0 +1,2 @@
+cl65 -t sim6502 -o tp.sim tp.c && sim65 -c tp.sim
+
