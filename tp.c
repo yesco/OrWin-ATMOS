@@ -71,12 +71,10 @@ int statement(void);
 // --- NATIVE C CALLOUT HOOKS FOR JIT CALLS ---
 void print_str_cb(const char* s) {
   printf("%s\n", s);
-  fflush(stdout);
 }
 
 void print_int_cb(int val) {
   printf("%d\n", val);
-  fflush(stdout);
 }
 
 void emit(unsigned char val) {
@@ -115,14 +113,14 @@ void log_token() {
   } else {
     printf(" %s", curr_tok.lexeme);
   }
-  fflush(stdout);
+  //fflush(stdout);
 }
 
 void next_token() {
   int i, len;
   char quote_char;
 
-  while (src_buf[src_pos] != '\0') {
+  while (src_buf[src_pos]) {
     if (isspace(src_buf[src_pos])) {
       if (src_buf[src_pos] == '\n') line_num++;
       src_pos++;
@@ -213,7 +211,7 @@ void next_token() {
     case ')': src_pos++; curr_tok.type = TOK_RPAREN; break;
     default:
       curr_tok.type = TOK_ERROR;
-      printf("\n%c <---- ERROR: Unknown character syntax error\n", src_buf[src_pos]);
+      printf("\n%c <---- ERROR: Unknown character syntax error: $%02x\n", src_buf[src_pos], src_buf[src_pos]);
       src_pos++;
       return;
   }
@@ -519,7 +517,7 @@ int compile_pipeline(void) {
   jit_bin[main_prog_jump_patch_idx] = main_prog_start_ram_addr & 0xFF;
   jit_bin[main_prog_jump_patch_idx + 1] = (main_prog_start_ram_addr >> 8) & 0xFF;
   
-  printf("[JIT Debug] Entry JMP patched at offset %d to point to Main Code: $%04X\n", main_prog_jump_patch_idx, main_prog_start_ram_addr);
+  //printf("[JIT Debug] Entry JMP patched at offset %d to point to Main Code: $%04X\n", main_prog_jump_patch_idx, main_prog_start_ram_addr);
 
   if (lookup_symbol("X", &stype, &symbol_lookup_address) != -1) {
     x_ram = jit_base_addr + (unsigned int)symbol_lookup_address;
@@ -564,7 +562,8 @@ int main(void) {
   int compiled_output = 0;
   PascalFunc execute_native_jit;
   memset(src_buf, 0, MAX_SRC_LEN);
-  while ((ch = getc(stdin)) != EOF && buf_idx < MAX_SRC_LEN - 1) {
+//  while ((ch = getc(stdin)) != EOF && buf_idx < MAX_SRC_LEN - 1) {
+  while ((ch = getchar()) != EOF && ch != 0xff && buf_idx < MAX_SRC_LEN - 1) {
     src_buf[buf_idx++] = (char)ch;
   }
   src_buf[buf_idx] = '\0';

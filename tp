@@ -1,2 +1,4 @@
-cl65 -t sim6502 -o tp.sim tp.c && sim65 -c tp.sim
+cl65 -Oirs -t sim6502 -o tp.sim tp.c && sim65 -c tp.sim
+ls -l tp.sim
+
 
