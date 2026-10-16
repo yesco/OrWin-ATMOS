@@ -1,9 +1,19 @@
-echo "=============== clang ==============="
+#echo "=============== clang ==============="
 #clang -DTPTEST -o tp-test.x tp.c && (cat tp-test.p | ./tp-test.x)
-clang -o tp.x tp.c && ./tp.x < tp-test.p
-echo "=============== CL65 ==============="
-#cl65 -DTPTEST -t sim6502 -o tp-test.sim tp.c && (sim65 tp-test.sim < tp-test.p)
-./tp < tp-test.p
+#clang -o tp.x tp.c && ./tp.x < tp-test.p
 
+#echo "=============== CL65 ==============="
+#cl65 -DTPTEST -t sim6502 -o tp-test.sim tp.c && (sim65 tp-test.sim < tp-test.p)
+
+
+echo "--- Testing; tp-test.p ---"
+./tp < tp-test.p
+echo
+echo
+
+echo "--- ERROR ON PURPOSE ---"
+printf "program foo;\nvar x:integer=35;\nbegin\nx:=35;\nx=77+33;\n;writelne("fish");\nend." | ./tp
+echo
+echo
 
 
