@@ -16,7 +16,7 @@ void* app_charset(void* voidapp, char* line) {
     
     for(c= 0; c<256; ++c) {
       if ((c & 0x7f) < 32) continue;
-      // beginning of line
+      // beginning of line, put NORMAL/ALT attribute
       if ((c & 0b1111)==0) putcraw(c<=128? 8: 9);
       // ORIC only have 80 alt chars (rest overlaps w screen!)
       if (c < 128+32+80) putcraw(c & 0x7f);

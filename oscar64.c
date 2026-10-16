@@ -35,9 +35,16 @@ char isliteral(void* p) {
 // no difference
 //#pragma heapsize(0)
 
+extern void HeapEnd;
+extern char* brk;
+
 size_t heapfreex() {
   //char* p= malloc(1);
   //return heapfree();
+
+// TODO: fix...:
+  return (char*)&HeapEnd - brk;
+
   return 4711;
 }
   

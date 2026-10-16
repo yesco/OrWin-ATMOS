@@ -8,36 +8,7 @@
 // see README.md for documentation!
 
 
-#include <stdlib.h>
-#include <stdio.h>
-#include <string.h>
-#include <conio.h>
-#include <ctype.h>
-
-// HMMM, ATMOS overrides write
-#if !defined(__ATMOS__) && !defined(OSCAR64)
-#include <unistd.h> // write
-#endif
-
-#include <assert.h>
-
-char wputc(char c);
-
-#define HELPTEXT "FUNCT-3 Prev spc Next List Run Kill Shll"
-
-
-#include "orwin.h"
-
-
-
-// Each file sets FOOBAR if they provide foobar()
-// Otherwise, "fillins.c, will fill them in!
-
-
-#include "misc.c"
-
-
-
+// TODO: this should really go to an oric-oscar-crt.c file!
 #ifdef OSCAR64
 
 #ifdef ORIC
@@ -50,25 +21,26 @@ char wputc(char c);
 
 int main(void);
 
-// oric_start.c  — compile as the primary file or -rt=
+// these aren't really variables but "magical" address hoolders
+// for oscar64, can only define once, otherwise loose values.
+void StackStart, StackEnd, BSSStart, BSSEnd, CodeStart, CodeEnd, ZeroStart, ZeroEnd;
+void HeapStart, HeapEnd;
 
-/* Single place — must match #pragma region end */
-#define ORIC_MAIN_END   0xB200
-#define ORIC_SP_INIT    (ORIC_MAIN_END - 1)   /* $B1FF */
+#pragma section(code,     0x0000, CodeStart,  CodeEnd)
+#pragma section(stack,    0x0000, StackStart, StackEnd)
+#pragma section(bss,      0x0000, BSSStart,   BSSEnd)
+#pragma section(zeropage, 0x0000, ZeroStart,  ZeroEnd)
+#pragma section(heap,     0x0000, HeapStart,  HeapEnd)
 
 #pragma section(startup, 0)
 #pragma region(startup, 0x0500, 0x0520, , , {startup})
-
 #pragma region(zeropage, 0x00, 0x80, , , {zeropage})
-#pragma region(main, 0x0520, ORIC_MAIN_END, , , {code, data, bss, heap, stack})
+#pragma region(main, 0x0520, 0xB200, , , {code, data, bss, heap, stack})
 #pragma heapsize(0x1000)
 #pragma stacksize(0x1000)
 
-//#pragma region(main, 0x0500, 0xB400, , , {code, data, bss, heap, stack})
-//#pragma region(main, 0x0500, 0xB200, , , {code, data, bss, heap, stack})
-//#pragma heapsize(0x1000)
-//#pragma stacksize(0x1000)
 
+// TODO: replace w real from crt?
 #ifdef SETUPMALLOC
 // Optional: real malloc later; stub is fine until heap works
 __asm crt_malloc {
@@ -87,11 +59,6 @@ __asm crt_free   {
 
 
 #ifdef STARTUP
-void StackStart, StackEnd;
-void BSSStart, BSSEnd;
-void HeapStart, HeapEnd;
-void CodeStart, CodeEnd;
-void ZeroStart, ZeroEnd;
 
 __asm startup {
 ldx     #$ff
@@ -125,6 +92,45 @@ int main(void)
 #endif // OVERRIDEMAIN
 
 #endif // ORIC
+
+
+#endif // OSCAR64
+
+
+
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include <conio.h>
+#include <ctype.h>
+
+// HMMM, ATMOS overrides write
+#if !defined(__ATMOS__) && !defined(OSCAR64)
+#include <unistd.h> // write
+#endif
+
+#include <assert.h>
+
+char wputc(char c);
+
+#define HELPTEXT "FUNCT-3 Prev spc Next List Run Kill Shll"
+
+
+#include "orwin.h"
+
+
+
+// Each file sets FOOBAR if they provide foobar()
+// Otherwise, "fillins.c, will fill them in!
+
+
+#include "misc.c"
+
+
+
+
+
+#ifdef OSCAR64
 
   void* my_malloc(unsigned int size);
   void  my_free(void* p);
@@ -168,6 +174,9 @@ int main(void)
 
 // Any missing routines will be filled in!
 #include "fillins.c"
+
+
+
 
 
 
@@ -313,7 +322,35 @@ char* wname(char winid) {
 #undef realloc
 #undef free
 
-#if defined(OSCAR64) && defined(ORICLOCI)
+//#if defined(OSCAR64) && defined(ORICLOCI)
+#if defined(OSCAR64)
+// oscar64 - use temporary test alloc
+
+//extern char HeapStart, HeapEnd;
+
+static char *brk = 0;
+
+// Simple bump-allocator to get started
+void* my_malloc(unsigned size) {
+  if (!brk) brk= &HeapStart;
+  // align to even addresses (actually 6502 no care)
+  size = (size + 1) & ~1u;
+  if (brk + size > &HeapEnd)
+{
+  // Indicate memory error
+  T('E');
+  done: goto done;
+    return 0;
+}
+
+  char *p = brk;
+  brk+= size;
+  return p;
+}
+
+void my_free(void* p) {
+  (void)p;
+}
 
 void* walloc(size_t z) {
   if (z) ++winp->nalloc;
@@ -321,9 +358,10 @@ void* walloc(size_t z) {
 }
 
 void* wcalloc(size_t z, size_t n) {
-  char* r= my_malloc(z);
-  if (z && n) ++winp->nalloc;
-  memset(r, 0, z);
+  size_t bytes= z*n;
+  char* r= my_malloc(bytes);
+  if (bytes) ++winp->nalloc;
+  memset(r, 0, bytes);
   return r;
 }
 
@@ -341,6 +379,7 @@ void wfree(void* p) {
 }
 
 #else
+// CC65 use the normal malloc
 
 void* walloc(size_t z) {
   if (z) ++winp->nalloc;
@@ -795,7 +834,6 @@ T('g');
 T('h');
   // winp->fun == winp->state ??? like in 
   winp->ret= wret= (char*)((*winp->fun)(winp->state, line));
-
 T('i');
   winp->ticks+= trun= clock()-trun;
 T('k');
@@ -1068,6 +1106,8 @@ void apprun() {
     clnl();
     if (spc) *spc= ' ';
 
+    // TODO: make and use common funtion for "shell.c:editline"
+    
     // -- get user input
     putcraw(8);
     putchar('>');
@@ -1315,6 +1355,9 @@ void scheduler() {
     // and this is prioritized as highly interactive app!
     //
     // TODO: winp->ret == WAITKEY
+
+    
+    // TODO: wbkbhit() only true if win=focus? || wkey, hmmm?
     while(wkbhit(0) || wkey) {
       T('i');
       // restore same window to be FAIR and NO starvation!
@@ -1629,13 +1672,23 @@ T('I');
   T('1');
   window(-1, -1, 5, 3, blue, white);
   T('2');
-
-// TODO: maybe we get here, but then have trouble
-
   start(app_ascii);
   T('3');
   wstatus(-1, "ASCII");
   T('4');
+
+#define DOUBLE
+#ifdef DOUBLE
+  newwin();
+  window(3, 10, 5, 3, green, black);
+  start(app_ascii);
+  wstatus(-1, "ascii");
+
+setwin(2); setfocus(2);
+dorun(0);dorun(0);dorun(0);dorun(0);
+
+#endif // DOUBLE
+
   newwin();
   T('5');
   start(app_charset);
@@ -1648,13 +1701,20 @@ T('I');
   T('8');
   window(1, -1, 20-7, 10, green, black);
   T('9');
-  foo: goto foo;
-  
   start(app_sh);
 #endif
   T('-');
   
 #endif // DEMO
+
+
+// TODO: oscar64 mixes up windows, ascii runs in charset...
+#if 0
+loop:
+  setwin(1);
+  dorun(0);
+goto loop;
+#endif
   
   T('S');
   scheduler();
