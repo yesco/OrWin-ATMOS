@@ -240,16 +240,16 @@ int expression(void) {
   unsigned int param_storage_addr;
   unsigned int return_storage_addr;
   unsigned int var_ram_addr;
-  int math_tmp_addr;
-  int math_tmp2_addr;
-  unsigned int math_tmp_ram;
-  unsigned int math_tmp2_ram;
+  unsigned int local_math_tmp;
+  unsigned int local_math_tmp2;
+  int jmp_patch_idx;
+  unsigned int skip_target_ram;
 
   jit_base_addr = (unsigned int)jit_bin;
 
   if (curr_tok.type == TOK_NUM) {
-    emit(0xA9); emit(curr_tok.value & 0xFF);        
-    emit(0xA2); emit((curr_tok.value >> 8) & 0xFF); 
+    emit(0xA9); emit(curr_tok.value & 0xFF);        // LDA #immediate_lo
+    emit(0xA2); emit((curr_tok.value >> 8) & 0xFF); // LDX #immediate_hi
     next_token();
   } else if (curr_tok.type == TOK_IDENT) {
     strcpy(name, curr_tok.lexeme);
@@ -262,53 +262,64 @@ int expression(void) {
     next_token();
     if (stype == SYM_FUNC) {
       if (!match(TOK_LPAREN)) return 0;
-      if (!expression()) return 0; 
+      if (!expression()) return 0; // Evaluates incoming parameter argument into A/X
       if (!match(TOK_RPAREN)) return 0;
       
       param_storage_addr = jit_base_addr + (unsigned int)saddr + 0;
       return_storage_addr = jit_base_addr + (unsigned int)saddr + 2;
       target_func_pc = jit_base_addr + (unsigned int)saddr + 4;
       
-      emit(0x8D); emit(param_storage_addr & 0xFF); emit((param_storage_addr >> 8) & 0xFF); 
-      emit(0x8E); emit((param_storage_addr + 1) & 0xFF); emit(((param_storage_addr + 1) >> 8) & 0xFF); 
+      emit(0x8D); emit(param_storage_addr & 0xFF); emit((param_storage_addr >> 8) & 0xFF); // STA param
+      emit(0x8E); emit((param_storage_addr + 1) & 0xFF); emit(((param_storage_addr + 1) >> 8) & 0xFF); // STX param+1
       
-      emit(0x20); emit(target_func_pc & 0xFF); emit((target_func_pc >> 8) & 0xFF); 
+      emit(0x20); emit(target_func_pc & 0xFF); emit((target_func_pc >> 8) & 0xFF); // JSR func
       
-      emit(0xAD); emit(return_storage_addr & 0xFF); emit((return_storage_addr >> 8) & 0xFF); 
-      emit(0xAE); emit((return_storage_addr + 1) & 0xFF); emit(((return_storage_addr + 1) >> 8) & 0xFF); 
+      emit(0xAD); emit(return_storage_addr & 0xFF); emit((return_storage_addr >> 8) & 0xFF); // LDA return
+      emit(0xAE); emit((return_storage_addr + 1) & 0xFF); emit(((return_storage_addr + 1) >> 8) & 0xFF); // LDX return+1
     } else {
       var_ram_addr = jit_base_addr + (unsigned int)saddr;
-      emit(0xAD); emit(var_ram_addr & 0xFF); emit((var_ram_addr >> 8) & 0xFF); 
-      emit(0xAE); emit((var_ram_addr + 1) & 0xFF); emit(((var_ram_addr + 1) >> 8) & 0xFF); 
+      emit(0xAD); emit(var_ram_addr & 0xFF); emit((var_ram_addr >> 8) & 0xFF); // LDA var
+      emit(0xAE); emit((var_ram_addr + 1) & 0xFF); emit(((var_ram_addr + 1) >> 8) & 0xFF); // LDX var+1
     }
   }
   
   if (curr_tok.type == TOK_PLUS) {
     next_token();
     
-    lookup_symbol("__MATH_TMP", &stype, &math_tmp_addr);
-    math_tmp_ram = jit_base_addr + (unsigned int)math_tmp_addr;
+    // Fortran style: Allocate localized math storage directly inline to avoid global variable stomping
+    emit(0x4C); // JMP absolute to skip past variable byte storage allocation
+    jmp_patch_idx = bin_ptr;
+    emit(0x00); emit(0x00);
     
-    emit(0x8D); emit(math_tmp_ram & 0xFF); emit((math_tmp_ram >> 8) & 0xFF);         
-    emit(0x8E); emit((math_tmp_ram + 1) & 0xFF); emit(((math_tmp_ram + 1) >> 8) & 0xFF); 
+    // Reserve 4 static bytes right here in the code array stream for this node's addition layers
+    local_math_tmp = jit_base_addr + bin_ptr;  emit(0x00); emit(0x00);
+    local_math_tmp2 = jit_base_addr + bin_ptr; emit(0x00); emit(0x00);
     
-    if (!expression()) return 0; 
+    // Back-patch JMP to jump to the actual executable instructions following the variables
+    skip_target_ram = jit_base_addr + bin_ptr;
+    jit_bin[jmp_patch_idx] = skip_target_ram & 0xFF;
+    jit_bin[jmp_patch_idx + 1] = (skip_target_ram >> 8) & 0xFF;
     
-    lookup_symbol("__MATH_TMP2", &stype, &math_tmp2_addr);
-    math_tmp2_ram = jit_base_addr + (unsigned int)math_tmp2_addr;
+    // Store Left-Hand Side value into the private local block
+    emit(0x8D); emit(local_math_tmp & 0xFF); emit((local_math_tmp >> 8) & 0xFF);
+    emit(0x8E); emit((local_math_tmp + 1) & 0xFF); emit(((local_math_tmp + 1) >> 8) & 0xFF);
     
-    emit(0x8D); emit(math_tmp2_ram & 0xFF); emit((math_tmp2_ram >> 8) & 0xFF);
-    emit(0x8E); emit((math_tmp2_ram + 1) & 0xFF); emit(((math_tmp2_ram + 1) >> 8) & 0xFF);
+    if (!expression()) return 0; // Evaluate RIGHT-hand side into A/X
     
-    emit(0x18);             
-    emit(0xAD); emit(math_tmp_ram & 0xFF); emit((math_tmp_ram >> 8) & 0xFF);         
-    emit(0x6D); emit(math_tmp2_ram & 0xFF); emit((math_tmp2_ram >> 8) & 0xFF); 
-    emit(0x48);             
+    // Store Right-Hand Side value into the private local block
+    emit(0x8D); emit(local_math_tmp2 & 0xFF); emit((local_math_tmp2 >> 8) & 0xFF);
+    emit(0x8E); emit((local_math_tmp2 + 1) & 0xFF); emit(((local_math_tmp2 + 1) >> 8) & 0xFF);
     
-    emit(0xAD); emit((math_tmp_ram + 1) & 0xFF); emit(((math_tmp_ram + 1) >> 8) & 0xFF); 
-    emit(0x6D); emit((math_tmp2_ram + 1) & 0xFF); emit(((math_tmp2_ram + 1) >> 8) & 0xFF); 
-    emit(0xAA);             
-    emit(0x68);             
+    // Perform pure absolute 16-bit Addition completely isolated from other function branches
+    emit(0x18);             // CLC
+    emit(0xAD); emit(local_math_tmp & 0xFF); emit((local_math_tmp >> 8) & 0xFF);
+    emit(0x6D); emit(local_math_tmp2 & 0xFF); emit((local_math_tmp2 >> 8) & 0xFF);
+    emit(0x48);             // PHA
+    
+    emit(0xAD); emit((local_math_tmp + 1) & 0xFF); emit(((local_math_tmp + 1) >> 8) & 0xFF);
+    emit(0x6D); emit((local_math_tmp2 + 1) & 0xFF); emit(((local_math_tmp2 + 1) >> 8) & 0xFF);
+    emit(0xAA);             // TAX
+    emit(0x68);             // PLA
   }
   return 1;
 }
