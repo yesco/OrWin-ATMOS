@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <setjmp.h>
 
 // Dumps hex etc...
 #define TPDEBUG
@@ -37,6 +38,8 @@ typedef struct {
   int value;
 } Token;
 
+jmp_buf fail_jmp;
+
 // --- COMPILER WORKSPACES ---
 // TODO: seems stupid, do we really need backtracking? Hmmm
 //   or maybe it's good for a tp w editor integrated, lol
@@ -69,11 +72,12 @@ int nsym = 0;
 
 typedef int (*PascalFunc)(int x);
 
-// --- C89 FORWARD DECLARATIONS FOR CL65 ---
 void next_token(void);
-int expect(TokenType expected);
+void expect(TokenType expected);
 int expression(void);
 int statement(void);
+
+#define EXPECT(expected) expect(expected)
 
 // --- NATIVE C CALLOUT HOOKS FOR CALLS ---
 void print_str_cb(const char* s) {
@@ -280,14 +284,11 @@ void next_token() {
 }
 
 // TODO: change to EXPECT and longjmp FAIL
-int expect(TokenType expected) {
-  if (curr_tok.type == expected) {
-    next_token();
-    return 1;
-  } else {
-    printf("\n%s <---- ERROR: Expected %s but found %s\n", curr_tok.lexeme, TOKEN_NAMES[expected], TOKEN_NAMES[curr_tok.type]);
-    return 0;
-  }
+void expect(TokenType expected) {
+  if (curr_tok.type == expected) { next_token(); return; }
+  // ERROR
+  printf("\n%s <---- ERROR: Expected %s but found %s\n", curr_tok.lexeme, TOKEN_NAMES[expected], TOKEN_NAMES[curr_tok.type]);
+  longjmp(fail_jmp, 1);
 }
 
 int expression(void) {
@@ -322,9 +323,9 @@ int expression(void) {
     if (stype == SYM_FUNC) {
 
       // FUNCTION: ( expr )
-      if (!expect(TOK_LPAREN)) return 0;
+      EXPECT(TOK_LPAREN);
       if (!expression()) return 0; // Evaluates incoming parameter argument into AX
-      if (!expect(TOK_RPAREN)) return 0;
+      EXPECT(TOK_RPAREN);
       
       // Calculate function targets using the newly corrected absolute entry address offsets template
       // - Parameter sits 4 bytes behind entry
@@ -433,20 +434,20 @@ int statement(void) {
       return 0;
     }
     
-    if (!expect(TOK_IDENT)) return 0;
-    if (!expect(TOK_ASSIGN)) return 0;
+    EXPECT(TOK_IDENT);
+    EXPECT(TOK_ASSIGN);
     
     if (!expression()) return 0;
     
     STAX(((unsigned int)bin) + (unsigned int)addr);
 
-    if (!expect(TOK_SEMI)) return 0;
+    EXPECT(TOK_SEMI);
   } 
 
   // WRITELN ( expr )
   else if (curr_tok.type == TOK_WRITE) {
-    if (!expect(TOK_WRITE)) return 0;
-    if (!expect(TOK_LPAREN)) return 0;
+    EXPECT(TOK_WRITE);
+    EXPECT(TOK_LPAREN);
     
     if (curr_tok.type == TOK_STRING) {
       int jmp_patch_idx;
@@ -481,7 +482,7 @@ int statement(void) {
       
       // TODO: if going to give error just longjmp(FAIL) inside
       // TODO: why test a second time???
-      if (!expect(TOK_STRING)) return 0; // FAIL
+      EXPECT(TOK_STRING);
 
     } else {
 
@@ -492,8 +493,8 @@ int statement(void) {
     }
     
     // ) ;
-    if (!expect(TOK_RPAREN)) return 0;
-    if (!expect(TOK_SEMI)) return 0;
+    EXPECT(TOK_RPAREN);
+    EXPECT(TOK_SEMI);
 
   } else {
     printf("\n%s <---- ERROR: Expected statement identifier\n", curr_tok.lexeme);
@@ -540,9 +541,9 @@ int compile_pipeline(void) {
   
   // PROGRAM foo;
   next_token();
-  if (!expect(TOK_PROGRAM)) return 0;
-  if (!expect(TOK_IDENT)) return 0;
-  if (!expect(TOK_SEMI)) return 0;
+  EXPECT(TOK_PROGRAM);
+  EXPECT(TOK_IDENT);
+  EXPECT(TOK_SEMI);
   
   // VAR x: integer;
   while (curr_tok.type == TOK_VAR || curr_tok.type == TOK_FUNCTION) {
@@ -553,12 +554,12 @@ int compile_pipeline(void) {
         last_assigned_var_offset = bin_ptr; 
         WZERO();
         
-        if (!expect(TOK_IDENT)) return 0; 
-        if (!expect(TOK_COLON)) return 0; 
+        EXPECT(TOK_IDENT);
+        EXPECT(TOK_COLON);
         // TODO: string
-        if (!expect(TOK_INTEGER)) return 0; 
+        EXPECT(TOK_INTEGER);
         // TODO: it's not comma?
-        if (!expect(TOK_SEMI)) return 0;
+        EXPECT(TOK_SEMI);
       }
     }
 
@@ -574,26 +575,26 @@ int compile_pipeline(void) {
       func_param_addr = bin_ptr; WZERO();
       func_ret_addr   = bin_ptr; WZERO();
       
-      if (!expect(TOK_IDENT)) return 0;
-      if (!expect(TOK_LPAREN)) return 0;
+      EXPECT(TOK_IDENT);
+      EXPECT(TOK_LPAREN);
       
       // param : INTEGER
       strcpy(param_name, curr_tok.lexeme);
       add_symbol(param_name, SYM_VAR, func_param_addr);
-      if (!expect(TOK_IDENT)) return 0;
-      if (!expect(TOK_COLON)) return 0;
-      if (!expect(TOK_INTEGER)) return 0;
+      EXPECT(TOK_IDENT);
+      EXPECT(TOK_COLON);
+      EXPECT(TOK_INTEGER);
 
       // ) : INTEGER ;
-      if (!expect(TOK_RPAREN)) return 0;
-      if (!expect(TOK_COLON)) return 0;
-      if (!expect(TOK_INTEGER)) return 0;
-      if (!expect(TOK_SEMI)) return 0;
+      EXPECT(TOK_RPAREN);
+      EXPECT(TOK_COLON);
+      EXPECT(TOK_INTEGER);
+      EXPECT(TOK_SEMI);
       
       add_symbol(func_name, SYM_VAR, func_ret_addr);
       
       // BEGIN
-      if (!expect(TOK_BEGIN)) return 0;
+      EXPECT(TOK_BEGIN);
       
       // Register the function symbol mapped to the actual executable instruction entry point address
       func_base_offset = bin_ptr; 
@@ -606,8 +607,8 @@ int compile_pipeline(void) {
       while (curr_tok.type != TOK_END && curr_tok.type != TOK_EOF) {
         if (!statement()) return 0;
       }
-      if (!expect(TOK_END)) return 0;
-      if (!expect(TOK_SEMI)) return 0;
+      EXPECT(TOK_END);
+      EXPECT(TOK_SEMI);
       
       // Return: load AX with stored return value
       LDAX(base + (unsigned int)func_ret_addr);
@@ -616,7 +617,7 @@ int compile_pipeline(void) {
   }
   
   // (MAIN) BEGIN ... 
-  if (!expect(TOK_BEGIN)) return 0;
+  EXPECT(TOK_BEGIN);
   
   // Back-patch JMP using pure integer addition to prevent pointer corruption
   main_addr = base + (unsigned int)bin_ptr;
@@ -633,9 +634,9 @@ int compile_pipeline(void) {
   }
   
   // END .
-  if (!expect(TOK_END)) return 0; 
-  if (!expect(TOK_DOT)) return 0;
-  
+  EXPECT(TOK_END);
+  EXPECT(TOK_DOT);
+
   printf("\n"); 
 
   // implicit return of "last_var" TODO: ???
@@ -682,10 +683,10 @@ int main(void) {
   }
   src_buf[buf_idx] = 0;
 
-  // COMPILE
   if (!buf_idx) return 0;
   
-  if (!compile_pipeline()) {
+  // COMPILE
+  if (setjmp(fail_jmp) || !compile_pipeline()) {
     printf(">> FAIL!\n");
     return 0;
   }
