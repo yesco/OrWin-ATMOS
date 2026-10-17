@@ -8,9 +8,9 @@
 #define TPDEBUG
 
 // --- SYSTEM CONSTANTS FOR 6502 HARDWARE BINDINGS ---
-#define MAX_SRC_LEN  1024   
+#define MAX_SRC_LEN  2048
 #define MAX_SYM_LEN  64     
-#define MAX_BIN_LEN  512    
+#define MAX_BIN_LEN  1024
 #define MAX_SYMBOLS  32     
 
 // --- COMPLETE TOKEN DEFINITIONS ---
