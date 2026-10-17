@@ -5,7 +5,8 @@
 #include <setjmp.h>
 
 // Dumps hex etc...
-#define TPDEBUG
+//#define TPDEBUG
+//#define TPPRINT
 
 // --- SYSTEM CONSTANTS FOR 6502 HARDWARE BINDINGS ---
 #define MAX_SRC_LEN  2048
@@ -139,6 +140,7 @@ int lookup_symbol(const char* name, SymbolType* type, int* address) {
   return -1;
 }
 
+#ifdef TPPRINT
 void log_token() {
   if (lnum != last_lnum) {
     if (last_lnum != 0) printf("\n");
@@ -149,6 +151,11 @@ void log_token() {
   }
   //fflush(stdout); // no have on OSCAR
 }
+#else
+void log_token() {
+  last_lnum= lnum;
+}
+#endif
 
 
 char cur_c;
@@ -277,7 +284,7 @@ void next_token() {
     default:
       curr_tok.type = TOK_ERROR;
       printf("\n%c <---- ERROR: Unknown character syntax error: $%02x\n", C, C);
-      return;
+      longjmp(fail_jmp, 1);
   }
   NEXT;
   log_token();
@@ -315,7 +322,7 @@ int expression(void) {
     
     if (lookup_symbol(name, &stype, &saddr) == -1) {
       printf("\n%s <---- ERROR: Undeclared identifier\n", curr_tok.lexeme);
-      return 0;
+      longjmp(fail_jmp, 1);
     }
     
     // FUNC / VAR?
@@ -431,7 +438,7 @@ int statement(void) {
     }
     if (addr == -1) {
       printf("\n%s <---- ERROR: Unknown variable identifier\n", target_var);
-      return 0;
+      longjmp(fail_jmp, 1);
     }
     
     EXPECT(TOK_IDENT);
@@ -498,8 +505,9 @@ int statement(void) {
 
   } else {
     printf("\n%s <---- ERROR: Expected statement identifier\n", curr_tok.lexeme);
-    return 0;
+    longjmp(fail_jmp, 1);
   }
+
   return 1;
 }
 
@@ -527,8 +535,7 @@ int compile_pipeline(void) {
   string_pool_count = 0;
   
   base = (unsigned int)bin;
-  printf("\n[Debug] bin starts at RAM address: $%04X\n", base);
-  
+
   // Emit an absolute jump vector to bypass function definition blocks
   B(0x4C); // JMP absolute
   main_patch_idx = bin_ptr; 
@@ -653,7 +660,7 @@ int compile_pipeline(void) {
 void dumphex(void) {
   int i;
 
-  printf("\n--- EMITTED BYTECODE INSPECTOR ---\n");
+  printf("\n--- EMITTED BYTECODE INSPECTOR: $04x ---\n", bin);
   for (i = 0; i < bin_ptr; i++) {
     printf("%02X ", bin[i]);
     if ((i + 1) % 16 == 0) printf("\n");
@@ -687,8 +694,16 @@ int main(void) {
   
   // COMPILE
   if (setjmp(fail_jmp) || !compile_pipeline()) {
-    printf(">> FAIL!\n");
-    return 0;
+    unsigned int err_pos= src_pos;
+    printf(">> FAIL on line:\n\n%d: ", lnum);
+    // go back to beginning of line
+    while(C && C!='\n' && src_pos) C= src_buf[--src_pos];
+    // print line
+    do {
+      if (src_pos==err_pos) printf(" <<<---ERROR--- ");
+      putchar(NEXT);
+    } while(C && C!='\n');
+    return 1;
   }
     
   // SUCESSS
