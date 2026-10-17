@@ -146,25 +146,37 @@ void log_token() {
   //fflush(stdout); // no have on OSCAR
 }
 
+
+char cur_c;
+
+// saved 661 bytes code, slightly faster!
+#define C cur_c
+#define NEXT next()
+char next() { return (cur_c= src_buf[++src_pos]); }
+
+
 void next_token() {
   int i, len;
   char quote_char;
 
-// use c and NEXT macro
-  while (src_buf[src_pos]) {
-    if (isspace(src_buf[src_pos])) {
-      if (src_buf[src_pos] == '\n') lnum++;
-      src_pos++;
+  while (C) {
+
+    // SKIP SPACE
+    if (isspace(C)) {
+      if (C == '\n') lnum++;
+      NEXT;
       continue;
     }
-    if (src_buf[src_pos] == '{') {
-      src_pos++; 
-      while (src_buf[src_pos] != '\0' && src_buf[src_pos] != '}') {
-        if (src_buf[src_pos] == '\n') lnum++;
-        src_pos++;
+
+    // { COMMENT }
+    if (C == '{') {
+      NEXT; 
+      while (C && C != '}') {
+        if (C == '\n') lnum++;
+        NEXT;
       }
-      if (src_buf[src_pos] == '}') {
-        src_pos++; 
+      if (C == '}') {
+        NEXT; 
         continue;
       } else {
         printf("\n} <---- ERROR: Unclosed comment block\n");
@@ -176,32 +188,36 @@ void next_token() {
   }
   
   // EOF = DONE
-  if (!src_buf[src_pos]) {
+  if (!C) {
     curr_tok.type = TOK_EOF;
     strcpy(curr_tok.lexeme, "EOF"); // TODO: needed?
     return;
   }
 
   // STRING
-  if (src_buf[src_pos] == '"' || src_buf[src_pos] == '\'') {
-    quote_char = src_buf[src_pos++];
+  if (C == '"' || C == '\'') {
+    quote_char = C;
+    NEXT;
     len = 0;
-    while (src_buf[src_pos] && src_buf[src_pos] != quote_char && len < MAX_SYM_LEN) {
-      curr_tok.lexeme[len++] = src_buf[src_pos++];
+    while (C && C != quote_char && len < MAX_SYM_LEN) {
+      curr_tok.lexeme[len++] = C;
+      NEXT;
     }
-    if (src_buf[src_pos] == quote_char) src_pos++; 
+    if (C == quote_char) NEXT; 
     curr_tok.lexeme[len] = 0;
     curr_tok.type = TOK_STRING;
+    
+    // compiler makes tail-call!
     log_token();
     return;
   }
   
-  // TOKEN/SYMBOL
-  if (isalpha(src_buf[src_pos])) {
+  // IDENT: token/symbol
+  if (isalpha(C)) {
     len = 0;
-// TODO: a million references to src_buf[src_pos] use c and NEXT macro/fun
-    while (isalnum(src_buf[src_pos]) && len < MAX_SYM_LEN) {
-      curr_tok.lexeme[len++] = src_buf[src_pos++];
+    while (isalnum(C) && len < MAX_SYM_LEN) {
+      curr_tok.lexeme[len++] = C;
+      NEXT;
     }
     curr_tok.lexeme[len] = 0;
     for(i = 0; i < len; i++) curr_tok.lexeme[i] = toupper(curr_tok.lexeme[i]);
@@ -216,50 +232,54 @@ void next_token() {
     else if (strcmp(curr_tok.lexeme, "FUNCTION") == 0) curr_tok.type = TOK_FUNCTION;
     else curr_tok.type = TOK_IDENT;
 
-// TODO: almsot always log_token + return ... why duplicate, and why
-// not caller calling log_token?
     log_token();
     return;
   }
   
   // NUMBER
-  if (isdigit(src_buf[src_pos])) {
+  if (isdigit(C)) {
     curr_tok.type = TOK_NUM;
     curr_tok.value = 0;
-    while (isdigit(src_buf[src_pos])) {
-      curr_tok.value = curr_tok.value * 10 + (src_buf[src_pos++] - '0');
+    while (isdigit(C)) {
+      curr_tok.value = curr_tok.value * 10 + (C - '0');
+      NEXT;
     }
     sprintf(curr_tok.lexeme, "%d", curr_tok.value);
+
     log_token();
     return;
   }
   
   // ASSIGN
-  if (src_buf[src_pos] == ':' && src_buf[src_pos+1] == '=') {
-    src_pos += 2; curr_tok.type = TOK_ASSIGN; strcpy(curr_tok.lexeme, ":="); log_token(); return;
+  if (C == ':' && src_buf[src_pos+1] == '=') { // PEEK
+    NEXT; NEXT; curr_tok.type = TOK_ASSIGN;
+    strcpy(curr_tok.lexeme, ":=");
+    log_token();
+    return;
   }
   
-  // delimit one char "tokens"
-  curr_tok.lexeme[0] = src_buf[src_pos];
+  // OPERATORS - single char "tokens"
+  curr_tok.lexeme[0] = C;
   curr_tok.lexeme[1] = 0;
 
   // TODO: strchr and order string according to enum?
-  switch (src_buf[src_pos]) {
-    case ';': src_pos++; curr_tok.type = TOK_SEMI; break;
-    case ':': src_pos++; curr_tok.type = TOK_COLON; break;
-    case '+': src_pos++; curr_tok.type = TOK_PLUS; break;
-    case '.': src_pos++; curr_tok.type = TOK_DOT; break;
-    case '(': src_pos++; curr_tok.type = TOK_LPAREN; break;
-    case ')': src_pos++; curr_tok.type = TOK_RPAREN; break;
+  switch (C) {
+    case ';': curr_tok.type = TOK_SEMI; break;
+    case ':': curr_tok.type = TOK_COLON; break;
+    case '+': curr_tok.type = TOK_PLUS; break;
+    case '.': curr_tok.type = TOK_DOT; break;
+    case '(': curr_tok.type = TOK_LPAREN; break;
+    case ')': curr_tok.type = TOK_RPAREN; break;
     default:
       curr_tok.type = TOK_ERROR;
-      printf("\n%c <---- ERROR: Unknown character syntax error: $%02x\n", src_buf[src_pos], src_buf[src_pos]);
-      src_pos++;
+      printf("\n%c <---- ERROR: Unknown character syntax error: $%02x\n", C, C);
       return;
   }
+  NEXT;
   log_token();
 }
 
+// TODO: change to EXPECT and longjmp FAIL
 int expect(TokenType expected) {
   if (curr_tok.type == expected) {
     next_token();
@@ -497,7 +517,8 @@ int compile_pipeline(void) {
 
   unsigned int main_addr;
 
-  src_pos = 0;
+  src_pos= -1;
+  NEXT;
   lnum = 1;
   last_lnum = 0;
   bin_ptr = 0;
@@ -556,7 +577,7 @@ int compile_pipeline(void) {
       if (!expect(TOK_IDENT)) return 0;
       if (!expect(TOK_LPAREN)) return 0;
       
-      // name : INTEGER
+      // param : INTEGER
       strcpy(param_name, curr_tok.lexeme);
       add_symbol(param_name, SYM_VAR, func_param_addr);
       if (!expect(TOK_IDENT)) return 0;
