@@ -75,7 +75,7 @@ int expect(TokenType expected);
 int expression(void);
 int statement(void);
 
-// --- NATIVE C CALLOUT HOOKS FOR JIT CALLS ---
+// --- NATIVE C CALLOUT HOOKS FOR CALLS ---
 void print_str_cb(const char* s) {
   printf("%s\n", s);
 }
@@ -253,19 +253,23 @@ int expression(void) {
   SymbolType stype;
   int saddr;
   char name[MAX_SYM_LEN + 1];
-  unsigned int jit_base_addr;
+  unsigned int base;
+  // TODO: too long names..
   unsigned int target_func_pc;
   unsigned int param_storage_addr;
   unsigned int return_storage_addr;
   unsigned int var_ram_addr;
 
-  jit_base_addr = (unsigned int)bin;
+  base = (unsigned int)bin;
 
   if (curr_tok.type == TOK_NUM) {
+    // NUMBER
     emit(0xA9); emit(curr_tok.value & 0xFF);        // LDA #immediate_lo
     emit(0xA2); emit((curr_tok.value >> 8) & 0xFF); // LDX #immediate_hi
     next_token();
+
   } else if (curr_tok.type == TOK_IDENT) {
+    // VARIBLE || FUN(...
     strcpy(name, curr_tok.lexeme);
     
     if (lookup_symbol(name, &stype, &saddr) == -1) {
@@ -273,31 +277,51 @@ int expression(void) {
       return 0;
     }
     
+    // FUNC / VAR?
     next_token();
     if (stype == SYM_FUNC) {
+
+      // FUNCTION: ( expr )
       if (!expect(TOK_LPAREN)) return 0;
-      if (!expression()) return 0; // Evaluates incoming parameter argument into A/X
+      if (!expression()) return 0; // Evaluates incoming parameter argument into AX
       if (!expect(TOK_RPAREN)) return 0;
       
       // Calculate function targets using the newly corrected absolute entry address offsets template
-      param_storage_addr = jit_base_addr + (unsigned int)saddr - 4; // Parameter sits 4 bytes behind entry
-      return_storage_addr = jit_base_addr + (unsigned int)saddr - 2; // Return sits 2 bytes behind entry
-      target_func_pc = jit_base_addr + (unsigned int)saddr;          // Target points directly to saddr
+      // - Parameter sits 4 bytes behind entry
+      param_storage_addr = base + (unsigned int)saddr - 4; 
+      // - Return sits 2 bytes behind entry
+      return_storage_addr = base + (unsigned int)saddr - 2;
+      // - Target points directly to saddr
+      target_func_pc = base + (unsigned int)saddr;         
       
-      emit(0x8D); emit(param_storage_addr & 0xFF); emit((param_storage_addr >> 8) & 0xFF); // STA param
-      emit(0x8E); emit((param_storage_addr + 1) & 0xFF); emit(((param_storage_addr + 1) >> 8) & 0xFF); // STX param+1
+      // STA param ; STX param+1
+      // TODO: common pattern make a STAX(addr)
+      emit(0x8D); emit(param_storage_addr & 0xFF); emit((param_storage_addr >> 8) & 0xFF);
+      emit(0x8E); emit((param_storage_addr + 1) & 0xFF); emit(((param_storage_addr + 1) >> 8) & 0xFF);
       
-      emit(0x20); emit(target_func_pc & 0xFF); emit((target_func_pc >> 8) & 0xFF); // JSR func
+      // JSR
+      // TOD:O make a JSR(addr)
+      emit(0x20); emit(target_func_pc & 0xFF); emit((target_func_pc >> 8) & 0xFF);
       
+      // LDAX(return)
       emit(0xAD); emit(return_storage_addr & 0xFF); emit((return_storage_addr >> 8) & 0xFF); // LDA return
       emit(0xAE); emit((return_storage_addr + 1) & 0xFF); emit(((return_storage_addr + 1) >> 8) & 0xFF); // LDX return+1
+
     } else {
-      var_ram_addr = jit_base_addr + (unsigned int)saddr;
+
+      // VARIABLE
+      // TODO: unsigned BS ???
+      var_ram_addr = base + (unsigned int)saddr;
+      // LDAX(addr)
       emit(0xAD); emit(var_ram_addr & 0xFF); emit((var_ram_addr >> 8) & 0xFF); // LDA var
       emit(0xAE); emit((var_ram_addr + 1) & 0xFF); emit(((var_ram_addr + 1) >> 8) & 0xFF); // LDX var+1
     }
   }
   
+  // OPERATOR: A + B
+  //
+  //   TODO: can it be generlized for all operators?
+  //   TODO: this is massive...
   if (curr_tok.type == TOK_PLUS) {
     int jmp_patch_idx;
     unsigned int skip_target_ram;
@@ -307,45 +331,64 @@ int expression(void) {
     next_token();
     
     // Fortran style inline storage allocation: completely bypass ZeroPage
+    // TODO: Cannot do recursion, unless added as local var... lol
     emit(0x4C); // JMP absolute to skip past variable byte storage allocation
     jmp_patch_idx = bin_ptr;
     emit(0x00); emit(0x00);
     
+    // HAHA! TODO: shouldn't 2 be enough, at least if COMMUNINATIVE OP
     // Reserve 4 static bytes right here in the code array stream for this node's addition layers
-    local_math_tmp = jit_base_addr + bin_ptr;  emit(0x00); emit(0x00);
-    local_math_tmp2 = jit_base_addr + bin_ptr; emit(0x00); emit(0x00);
+    local_math_tmp = base + bin_ptr;  emit(0x00); emit(0x00);
+    local_math_tmp2 = base + bin_ptr; emit(0x00); emit(0x00);
     
     // Back-patch JMP to jump to the actual executable instructions following the variables
-    skip_target_ram = jit_base_addr + bin_ptr;
+    skip_target_ram = base + bin_ptr;
     bin[jmp_patch_idx] = skip_target_ram & 0xFF;
     bin[jmp_patch_idx + 1] = (skip_target_ram >> 8) & 0xFF;
     
     // Store Left-Hand Side value into the private local block
+    // STAX(local_math_tmp)
     emit(0x8D); emit(local_math_tmp & 0xFF); emit((local_math_tmp >> 8) & 0xFF); // STA local_math_tmp
     emit(0x8E); emit((local_math_tmp + 1) & 0xFF); emit(((local_math_tmp + 1) >> 8) & 0xFF); // STX local_math_tmp+1
     
-    if (!expression()) return 0; // Evaluate RIGHT-hand side into A/X
+    // Evaluate RIGHT-hand side into AX
+    if (!expression()) return 0; // FAIL
     
     // Store Right-Hand Side value into the private local block
+    // STAX(local_math_tmp2)
     emit(0x8D); emit(local_math_tmp2 & 0xFF); emit((local_math_tmp2 >> 8) & 0xFF); // STA local_math_tmp2
     emit(0x8E); emit((local_math_tmp2 + 1) & 0xFF); emit(((local_math_tmp2 + 1) >> 8) & 0xFF); // STX local_math_tmp2+1
     
     // Perform pure absolute 16-bit Addition completely isolated from other function branches
-    emit(0x18);             // CLC
-    emit(0xAD); emit(local_math_tmp & 0xFF); emit((local_math_tmp >> 8) & 0xFF); // LDA local_math_tmp
-    emit(0x6D); emit(local_math_tmp2 & 0xFF); emit((local_math_tmp2 >> 8) & 0xFF); // ADC local_math_tmp2
-    emit(0x48);             // PHA (Save Low Byte sum to hardware stack)
+    // CLC
+    // lobyte: ADC local_math_tmp2
+    //         LDA local_math_tmp
+    emit(0x18);
+    emit(0xAD); emit(local_math_tmp & 0xFF); emit((local_math_tmp >> 8) & 0xFF); 
+    emit(0x6D); emit(local_math_tmp2 & 0xFF); emit((local_math_tmp2 >> 8) & 0xFF);
+
+    // TODO: use Y?
+    // PHA (Save Low Byte sum to hardware stack)
+    emit(0x48);             
     
-    emit(0xAD); emit((local_math_tmp + 1) & 0xFF); emit(((local_math_tmp + 1) >> 8) & 0xFF); // LDA local_math_tmp+1
-    emit(0x6D); emit((local_math_tmp2 + 1) & 0xFF); emit(((local_math_tmp2 + 1) >> 8) & 0xFF); // ADC local_math_tmp2+1
-    emit(0xAA);             // TAX (Final High Byte result into X)
-    emit(0x68);             // PLA (Pull final Low Byte result back into A)
+    // hibyte: LDA local_math_tmp+1
+    //         ADC local_math_tmp2+1
+    emit(0xAD); emit((local_math_tmp + 1) & 0xFF); emit(((local_math_tmp + 1) >> 8) & 0xFF); 
+    emit(0x6D); emit((local_math_tmp2 + 1) & 0xFF); emit(((local_math_tmp2 + 1) >> 8) & 0xFF);
+
+    // TAX (Final High Byte result into X)
+    emit(0xAA);
+
+    // PLA (lobyte) TODO: use Y
+    emit(0x68);
   }
   return 1;
 }
 
 int statement(void) {
   unsigned int callback_addr;
+
+  // VAR :=  or FUN()
   if (curr_tok.type == TOK_IDENT) {
     char target_var[MAX_SYM_LEN + 1];
     int addr = -1;
@@ -354,14 +397,16 @@ int statement(void) {
     
     strcpy(target_var, curr_tok.lexeme);
     
-    // FIXED: Explicit variable lookup loop to prevent function name shadowing on assignments
+    // Explicit variable lookup loop to prevent function name shadowing on assignments
+
+    //   TODO: why only here? only on assignemnt?
+    //   TODO: generalize
     for (i = nsym - 1; i >= 0; i--) {
       if (strcmp(syms[i].name, target_var) == 0 && syms[i].type == SYM_VAR) {
         addr = syms[i].address;
         break;
       }
     }
-    
     if (addr == -1) {
       printf("\n%s <---- ERROR: Unknown variable identifier\n", target_var);
       return 0;
@@ -378,6 +423,8 @@ int statement(void) {
     emit(0x8E); emit((var_ram_addr + 1) & 0xFF); emit(((var_ram_addr + 1) >> 8) & 0xFF); // STX var_ram+1
     if (!expect(TOK_SEMI)) return 0;
   } 
+
+  // WRITELN ( expr )
   else if (curr_tok.type == TOK_WRITE) {
     if (!expect(TOK_WRITE)) return 0;
     if (!expect(TOK_LPAREN)) return 0;
@@ -388,6 +435,7 @@ int statement(void) {
       unsigned int str_end_ram;
       int idx = 0;
       
+      // JMP: Skip over inline string!
       emit(0x4C);
       jmp_patch_idx = bin_ptr;
       emit(0x00); emit(0x00); 
@@ -398,28 +446,38 @@ int statement(void) {
         emit(curr_tok.lexeme[idx]);
         idx++;
       }
-      emit(0x00); 
+      emit(0x00);
       
       str_end_ram = ((unsigned int)bin) + (unsigned int)bin_ptr;
+      // PATCH(loc, addr)
       bin[jmp_patch_idx] = str_end_ram & 0xFF;
       bin[jmp_patch_idx + 1] = (str_end_ram >> 8) & 0xFF;
       
+      // LDAX(str_start_ram)
       emit(0xA9); emit(str_start_ram & 0xFF);        
       emit(0xA2); emit((str_start_ram >> 8) & 0xFF); 
       
+      // JSR print_str_ch
       callback_addr = (unsigned int)print_str_cb;
-      emit(0x20); emit(callback_addr & 0xFF); emit((callback_addr >> 8) & 0xFF); // JSR print_str_cb
+      emit(0x20); emit(callback_addr & 0xFF); emit((callback_addr >> 8) & 0xFF);
       
-      // if going to give error just longjmp(FAIL) inside
-      if (!expect(TOK_STRING)) return 0;
+      // TODO: if going to give error just longjmp(FAIL) inside
+      // TODO: why test a second time???
+      if (!expect(TOK_STRING)) return 0; // FAIL
+
     } else {
+
+      // JSR print_int_cb
       if (!expression()) return 0;
       callback_addr = (unsigned int)print_int_cb;
-      emit(0x20); emit(callback_addr & 0xFF); emit((callback_addr >> 8) & 0xFF); // JSR print_int_cb
+      emit(0x20); emit(callback_addr & 0xFF); emit((callback_addr >> 8) & 0xFF);
+
     }
     
+    // ) ;
     if (!expect(TOK_RPAREN)) return 0;
     if (!expect(TOK_SEMI)) return 0;
+
   } else {
     printf("\n%s <---- ERROR: Expected statement identifier\n", curr_tok.lexeme);
     return 0;
@@ -428,18 +486,18 @@ int statement(void) {
 }
 
 int compile_pipeline(void) {
-  int next_free_zp = 0x04;
   int main_prog_jump_patch_idx;
-  unsigned int jit_base_addr;
+  unsigned int base;
   SymbolType stype;
   int symbol_lookup_address; 
   int last_assigned_var_offset = -1; 
   
   char func_name[MAX_SYM_LEN + 1];
   char param_name[MAX_SYM_LEN + 1];
-  int func_base_offset; 
+  int func_base_offset;
   int func_ret_addr;
   int func_param_addr;
+
   unsigned int ret_ram;
   unsigned int x_ram;
   unsigned int last_var_ram;
@@ -452,13 +510,13 @@ int compile_pipeline(void) {
   nsym = 0;
   string_pool_count = 0;
   
-  jit_base_addr = (unsigned int)bin;
-  printf("\n[JIT Debug] bin starts at RAM address: $%04X\n", jit_base_addr);
+  base = (unsigned int)bin;
+  printf("\n[Debug] bin starts at RAM address: $%04X\n", base);
   
   // Emit an absolute jump vector to bypass function definition blocks
   emit(0x4C); // JMP absolute
   main_prog_jump_patch_idx = bin_ptr; 
-// TODO: common!
+  // TODO: common!
   emit(0x00); emit(0x00);             
   
   // Magical "X" implicit injected variable!
@@ -528,7 +586,7 @@ int compile_pipeline(void) {
       add_symbol(func_name, SYM_FUNC, func_base_offset);
       
       // Store AX in fixed parameter location
-      ret_ram = jit_base_addr + (unsigned int)func_param_addr;
+      ret_ram = base + (unsigned int)func_param_addr;
       emit(0x8D); emit(ret_ram & 0xFF); emit((ret_ram >> 8) & 0xFF); // STA func_param_addr
       emit(0x8E); emit((ret_ram + 1) & 0xFF); emit(((ret_ram + 1) >> 8) & 0xFF); // STX func_param_addr+1
 
@@ -540,7 +598,7 @@ int compile_pipeline(void) {
       if (!expect(TOK_SEMI)) return 0;
       
       // Return: load AX with stored return value
-      ret_ram = jit_base_addr + (unsigned int)func_ret_addr;
+      ret_ram = base + (unsigned int)func_ret_addr;
       emit(0xAD); emit(ret_ram & 0xFF); emit((ret_ram >> 8) & 0xFF); // LDA ret_ram
       emit(0xAE); emit((ret_ram + 1) & 0xFF); emit(((ret_ram + 1) >> 8) & 0xFF); // LDX ret_ram+1
       emit(0x60); // RTS
@@ -551,14 +609,14 @@ int compile_pipeline(void) {
   if (!expect(TOK_BEGIN)) return 0;
   
   // Back-patch JMP using pure integer addition to prevent pointer corruption
-  main_prog_start_ram_addr = jit_base_addr + (unsigned int)bin_ptr;
+  main_prog_start_ram_addr = base + (unsigned int)bin_ptr;
   bin[main_prog_jump_patch_idx] = main_prog_start_ram_addr & 0xFF;
   bin[main_prog_jump_patch_idx + 1] = (main_prog_start_ram_addr >> 8) & 0xFF;
   
-  //printf("[JIT Debug] Entry JMP patched at offset %d to point to Main Code: $%04X\n", main_prog_jump_patch_idx, main_prog_start_ram_addr);
+  //printf("[Debug] Entry JMP patched at offset %d to point to Main Code: $%04X\n", main_prog_jump_patch_idx, main_prog_start_ram_addr);
 
   if (lookup_symbol("X", &stype, &symbol_lookup_address) != -1) {
-    x_ram = jit_base_addr + (unsigned int)symbol_lookup_address;
+    x_ram = base + (unsigned int)symbol_lookup_address;
     emit(0x8D); emit(x_ram & 0xFF); emit((x_ram >> 8) & 0xFF);                 
     emit(0x8E); emit((x_ram + 1) & 0xFF); emit(((x_ram + 1) >> 8) & 0xFF);     
   }
@@ -575,7 +633,7 @@ int compile_pipeline(void) {
 
   // implicit return of "last_var" TODO: ???
   if (last_assigned_var_offset != -1) {
-    last_var_ram = jit_base_addr + (unsigned int)last_assigned_var_offset;
+    last_var_ram = base + (unsigned int)last_assigned_var_offset;
     emit(0xAD); emit(last_var_ram & 0xFF); emit((last_var_ram >> 8) & 0xFF);             // LDA last_var
     emit(0xAE); emit((last_var_ram + 1) & 0xFF); emit(((last_var_ram + 1) >> 8) & 0xFF); // LDX last_var+1
   }

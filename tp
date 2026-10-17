@@ -1,6 +1,9 @@
 cl65 -Oirs -t sim6502 -o tp.sim tp.c && sim65 -c tp.sim
+echo
 ls -l tp.sim
 wc tp.c
+echo
+echo "=== tp.c: `./wcode tp.c` LOC ===" 
 
 
 

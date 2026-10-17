@@ -1,5 +1,7 @@
 program ShowcaseSuite;
 
+{ TODO: do function var names hide/obstruct lgobals? }
+
 function Mul2(val : integer) : integer;
 begin
    Mul2 := val+val;
