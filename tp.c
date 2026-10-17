@@ -1,5 +1,3 @@
-// (- 10094 9596) = 498 bytes saved w W WZERO LDAX STAX
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -86,8 +84,11 @@ void print_int_cb(int val) {
   printf("%d\n", val);
 }
 
-// TOOD: 122 emit() calls = (* 5 122) = 610 bytes
-// TODO: emit(0x00)x2 == 9 times = 90 bytes, could be 9*3=27
+// DONE: 122 emit() calls = (* 5 122) = 610 bytes
+// DONE: emit(0x00)x2 == 9 times = 90 bytes, could be 9*3=27
+// (- 10094 9596) = 498 bytes saved w W WZERO LDAX STAX
+// (- 5174870 5164021) 10,849= 11 ms slower... still 5.2s...
+
 void B(unsigned char val) {
   if (bin_ptr < MAX_BIN_LEN) {
     bin[bin_ptr++] = val;
