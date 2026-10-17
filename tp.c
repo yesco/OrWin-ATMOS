@@ -3,6 +3,9 @@
 #include <string.h>
 #include <ctype.h>
 
+// Dumps hex etc...
+#define TPDEBUG
+
 // --- SYSTEM CONSTANTS FOR 6502 HARDWARE BINDINGS ---
 #define MAX_SRC_LEN  1024   
 #define MAX_SYM_LEN  64     
@@ -17,6 +20,11 @@ typedef enum {
   TOK_LPAREN, TOK_RPAREN, TOK_FUNCTION
 } TokenType;
 
+// TODO: WRITE()
+// TODO: IF
+// TODO: FOR
+// TODO: WHILE
+// TODO: REPEAT
 const char* TOKEN_NAMES[] = {
   "EOF", "ERROR", "PROGRAM", "VAR", "BEGIN", "END",
   "INTEGER", "IDENT", "NUM", "ASSIGN", "SEMI", "COLON",
@@ -30,14 +38,19 @@ typedef struct {
 } Token;
 
 // --- COMPILER WORKSPACES ---
+// TODO: seems stupid, do we really need backtracking? Hmmm
+//   or maybe it's good for a tp w editor integrated, lol
+
+// TODO: double indirection... use p++ instead?
 char src_buf[MAX_SRC_LEN];
-int src_pos = 0;
-int line_num = 1;
-int last_logged_line = 0; 
+int src_pos = 0; 
+
+int lnum = 1;
+int last_lnum = 0; 
 Token curr_tok;
 
 // THE NATIVE MACHINE BITS TARGET WORKSPACE
-unsigned char jit_bin[MAX_BIN_LEN];
+unsigned char bin[MAX_BIN_LEN];
 int bin_ptr = 0;
 
 char string_pool[MAX_SYM_LEN + 1];
@@ -51,14 +64,8 @@ typedef struct {
   int address; 
 } Symbol;
 
-Symbol sym_table[MAX_SYMBOLS];
-int sym_count = 0;
-
-// HARDWARE ADDRESS BOUNDARIES
-#define ARG_ZP_LO 0x02
-#define ARG_ZP_HI 0x03
-#define TMP_ZP_LO 0x08
-#define TMP_ZP_HI 0x09
+Symbol syms[MAX_SYMBOLS];
+int nsym = 0;
 
 typedef int (*PascalFunc)(int x);
 
@@ -77,28 +84,30 @@ void print_int_cb(int val) {
   printf("%d\n", val);
 }
 
+// TOOD: 122 emit() calls = (* 5 122) = 610 bytes
+// TODO: emit(0x00)x2 == 9 times = 90 bytes, could be 9*3=27
 void emit(unsigned char val) {
   if (bin_ptr < MAX_BIN_LEN) {
-    jit_bin[bin_ptr++] = val;
+    bin[bin_ptr++] = val;
   }
 }
 
 void add_symbol(const char* name, SymbolType type, int address) {
-  if (sym_count < MAX_SYMBOLS) {
-    strcpy(sym_table[sym_count].name, name);
-    sym_table[sym_count].type = type;
-    sym_table[sym_count].address = address;
-    sym_count++;
+  if (nsym < MAX_SYMBOLS) {
+    strcpy(syms[nsym].name, name);
+    syms[nsym].type = type;
+    syms[nsym].address = address;
+    nsym++;
   }
 }
 
 int lookup_symbol(const char* name, SymbolType* type, int* address) {
   int i;
-  // FIXED: Loop walks backwards from the top to prioritize function entry points over variable slots
-  for (i = sym_count - 1; i >= 0; i--) {
-    if (strcmp(sym_table[i].name, name) == 0) {
-      *type = sym_table[i].type;
-      *address = sym_table[i].address;
+  // Loop walks backwards from the top to prioritize function entry points over variable slots
+  for (i = nsym - 1; i >= 0; i--) {
+    if (strcmp(syms[i].name, name) == 0) {
+      *type = syms[i].type;
+      *address = syms[i].address;
       return i;
     }
   }
@@ -106,14 +115,14 @@ int lookup_symbol(const char* name, SymbolType* type, int* address) {
 }
 
 void log_token() {
-  if (line_num != last_logged_line) {
-    if (last_logged_line != 0) printf("\n");
-    printf("%05d: %s", line_num, curr_tok.lexeme);
-    last_logged_line = line_num;
+  if (lnum != last_lnum) {
+    if (last_lnum != 0) printf("\n");
+    printf("%05d: %s", lnum, curr_tok.lexeme);
+    last_lnum = lnum;
   } else {
     printf(" %s", curr_tok.lexeme);
   }
-  //fflush(stdout);
+  //fflush(stdout); // no have on OSCAR
 }
 
 void next_token() {
@@ -123,14 +132,14 @@ void next_token() {
 // use c and NEXT macro
   while (src_buf[src_pos]) {
     if (isspace(src_buf[src_pos])) {
-      if (src_buf[src_pos] == '\n') line_num++;
+      if (src_buf[src_pos] == '\n') lnum++;
       src_pos++;
       continue;
     }
     if (src_buf[src_pos] == '{') {
       src_pos++; 
       while (src_buf[src_pos] != '\0' && src_buf[src_pos] != '}') {
-        if (src_buf[src_pos] == '\n') line_num++;
+        if (src_buf[src_pos] == '\n') lnum++;
         src_pos++;
       }
       if (src_buf[src_pos] == '}') {
@@ -145,12 +154,14 @@ void next_token() {
     break;
   }
   
+  // EOF = DONE
   if (!src_buf[src_pos]) {
     curr_tok.type = TOK_EOF;
-    strcpy(curr_tok.lexeme, "EOF");
+    strcpy(curr_tok.lexeme, "EOF"); // TODO: needed?
     return;
   }
 
+  // STRING
   if (src_buf[src_pos] == '"' || src_buf[src_pos] == '\'') {
     quote_char = src_buf[src_pos++];
     len = 0;
@@ -164,9 +175,10 @@ void next_token() {
     return;
   }
   
-// TODO: a million references to src_buf[src_pos] use c and NEXT macro/fun
+  // TOKEN/SYMBOL
   if (isalpha(src_buf[src_pos])) {
     len = 0;
+// TODO: a million references to src_buf[src_pos] use c and NEXT macro/fun
     while (isalnum(src_buf[src_pos]) && len < MAX_SYM_LEN) {
       curr_tok.lexeme[len++] = src_buf[src_pos++];
     }
@@ -189,6 +201,7 @@ void next_token() {
     return;
   }
   
+  // NUMBER
   if (isdigit(src_buf[src_pos])) {
     curr_tok.type = TOK_NUM;
     curr_tok.value = 0;
@@ -200,13 +213,16 @@ void next_token() {
     return;
   }
   
+  // ASSIGN
   if (src_buf[src_pos] == ':' && src_buf[src_pos+1] == '=') {
     src_pos += 2; curr_tok.type = TOK_ASSIGN; strcpy(curr_tok.lexeme, ":="); log_token(); return;
   }
   
+  // delimit one char "tokens"
   curr_tok.lexeme[0] = src_buf[src_pos];
-  curr_tok.lexeme[1] = '\0';
+  curr_tok.lexeme[1] = 0;
 
+  // TODO: strchr and order string according to enum?
   switch (src_buf[src_pos]) {
     case ';': src_pos++; curr_tok.type = TOK_SEMI; break;
     case ':': src_pos++; curr_tok.type = TOK_COLON; break;
@@ -243,7 +259,7 @@ int expression(void) {
   unsigned int return_storage_addr;
   unsigned int var_ram_addr;
 
-  jit_base_addr = (unsigned int)jit_bin;
+  jit_base_addr = (unsigned int)bin;
 
   if (curr_tok.type == TOK_NUM) {
     emit(0xA9); emit(curr_tok.value & 0xFF);        // LDA #immediate_lo
@@ -301,8 +317,8 @@ int expression(void) {
     
     // Back-patch JMP to jump to the actual executable instructions following the variables
     skip_target_ram = jit_base_addr + bin_ptr;
-    jit_bin[jmp_patch_idx] = skip_target_ram & 0xFF;
-    jit_bin[jmp_patch_idx + 1] = (skip_target_ram >> 8) & 0xFF;
+    bin[jmp_patch_idx] = skip_target_ram & 0xFF;
+    bin[jmp_patch_idx + 1] = (skip_target_ram >> 8) & 0xFF;
     
     // Store Left-Hand Side value into the private local block
     emit(0x8D); emit(local_math_tmp & 0xFF); emit((local_math_tmp >> 8) & 0xFF); // STA local_math_tmp
@@ -339,9 +355,9 @@ int statement(void) {
     strcpy(target_var, curr_tok.lexeme);
     
     // FIXED: Explicit variable lookup loop to prevent function name shadowing on assignments
-    for (i = sym_count - 1; i >= 0; i--) {
-      if (strcmp(sym_table[i].name, target_var) == 0 && sym_table[i].type == SYM_VAR) {
-        addr = sym_table[i].address;
+    for (i = nsym - 1; i >= 0; i--) {
+      if (strcmp(syms[i].name, target_var) == 0 && syms[i].type == SYM_VAR) {
+        addr = syms[i].address;
         break;
       }
     }
@@ -354,7 +370,7 @@ int statement(void) {
     if (!expect(TOK_IDENT)) return 0;
     if (!expect(TOK_ASSIGN)) return 0;
     
-    var_ram_addr = ((unsigned int)jit_bin) + (unsigned int)addr;
+    var_ram_addr = ((unsigned int)bin) + (unsigned int)addr;
     
     if (!expression()) return 0;
     
@@ -376,7 +392,7 @@ int statement(void) {
       jmp_patch_idx = bin_ptr;
       emit(0x00); emit(0x00); 
       
-      str_start_ram = ((unsigned int)jit_bin) + (unsigned int)bin_ptr;
+      str_start_ram = ((unsigned int)bin) + (unsigned int)bin_ptr;
       
       while (curr_tok.lexeme[idx] != '\0') {
         emit(curr_tok.lexeme[idx]);
@@ -384,9 +400,9 @@ int statement(void) {
       }
       emit(0x00); 
       
-      str_end_ram = ((unsigned int)jit_bin) + (unsigned int)bin_ptr;
-      jit_bin[jmp_patch_idx] = str_end_ram & 0xFF;
-      jit_bin[jmp_patch_idx + 1] = (str_end_ram >> 8) & 0xFF;
+      str_end_ram = ((unsigned int)bin) + (unsigned int)bin_ptr;
+      bin[jmp_patch_idx] = str_end_ram & 0xFF;
+      bin[jmp_patch_idx + 1] = (str_end_ram >> 8) & 0xFF;
       
       emit(0xA9); emit(str_start_ram & 0xFF);        
       emit(0xA2); emit((str_start_ram >> 8) & 0xFF); 
@@ -430,29 +446,33 @@ int compile_pipeline(void) {
   unsigned int main_prog_start_ram_addr;
 
   src_pos = 0;
-  line_num = 1;
-  last_logged_line = 0;
+  lnum = 1;
+  last_lnum = 0;
   bin_ptr = 0;
-  sym_count = 0;
+  nsym = 0;
   string_pool_count = 0;
   
-  jit_base_addr = (unsigned int)jit_bin;
-  printf("\n[JIT Debug] jit_bin starts at RAM address: $%04X\n", jit_base_addr);
+  jit_base_addr = (unsigned int)bin;
+  printf("\n[JIT Debug] bin starts at RAM address: $%04X\n", jit_base_addr);
   
   // Emit an absolute jump vector to bypass function definition blocks
   emit(0x4C); // JMP absolute
   main_prog_jump_patch_idx = bin_ptr; 
+// TODO: common!
   emit(0x00); emit(0x00);             
   
+  // Magical "X" implicit injected variable!
+  // TODO: remove? ARGV? pascal standard?
   add_symbol("X", SYM_VAR, bin_ptr);
   emit(0x00); emit(0x00);
   
+  // PROGRAM foo;
   next_token();
   if (!expect(TOK_PROGRAM)) return 0;
   if (!expect(TOK_IDENT)) return 0;
   if (!expect(TOK_SEMI)) return 0;
   
-  // Global Variable / Function Declaration Processing Loop
+  // VAR x: integer;
   while (curr_tok.type == TOK_VAR || curr_tok.type == TOK_FUNCTION) {
     if (curr_tok.type == TOK_VAR) {
       next_token();
@@ -463,10 +483,17 @@ int compile_pipeline(void) {
         
         if (!expect(TOK_IDENT)) return 0; 
         if (!expect(TOK_COLON)) return 0; 
+        // TODO: string
         if (!expect(TOK_INTEGER)) return 0; 
+        // TODO: it's not comma?
         if (!expect(TOK_SEMI)) return 0;
       }
     }
+
+    // FUNCTION name(name : integer): integer
+    //   TODO: 0 arg
+    //   TODO: many arg; must have next:
+    //   > TODO: recursive/overlap - at least detect
     else if (curr_tok.type == TOK_FUNCTION) {
       next_token();
       strcpy(func_name, curr_tok.lexeme);
@@ -478,12 +505,14 @@ int compile_pipeline(void) {
       if (!expect(TOK_IDENT)) return 0;
       if (!expect(TOK_LPAREN)) return 0;
       
+      // name : INTEGER
       strcpy(param_name, curr_tok.lexeme);
       add_symbol(param_name, SYM_VAR, func_param_addr);
-      
       if (!expect(TOK_IDENT)) return 0;
       if (!expect(TOK_COLON)) return 0;
       if (!expect(TOK_INTEGER)) return 0;
+
+      // ) : INTEGER ;
       if (!expect(TOK_RPAREN)) return 0;
       if (!expect(TOK_COLON)) return 0;
       if (!expect(TOK_INTEGER)) return 0;
@@ -491,24 +520,26 @@ int compile_pipeline(void) {
       
       add_symbol(func_name, SYM_VAR, func_ret_addr);
       
+      // BEGIN
       if (!expect(TOK_BEGIN)) return 0;
       
       // Register the function symbol mapped to the actual executable instruction entry point address
       func_base_offset = bin_ptr; 
       add_symbol(func_name, SYM_FUNC, func_base_offset);
       
-      // FIXED: Change from LDA/LDX to STA/STX (0x8D/0x8E) to store incoming parameter out of fastcall registers
+      // Store AX in fixed parameter location
       ret_ram = jit_base_addr + (unsigned int)func_param_addr;
       emit(0x8D); emit(ret_ram & 0xFF); emit((ret_ram >> 8) & 0xFF); // STA func_param_addr
       emit(0x8E); emit((ret_ram + 1) & 0xFF); emit(((ret_ram + 1) >> 8) & 0xFF); // STX func_param_addr+1
 
+      // (BEGIN) ... END;
       while (curr_tok.type != TOK_END && curr_tok.type != TOK_EOF) {
         if (!statement()) return 0;
       }
       if (!expect(TOK_END)) return 0;
       if (!expect(TOK_SEMI)) return 0;
       
-      // Function Return: Load calculated value from return storage slot into A/X and RTS
+      // Return: load AX with stored return value
       ret_ram = jit_base_addr + (unsigned int)func_ret_addr;
       emit(0xAD); emit(ret_ram & 0xFF); emit((ret_ram >> 8) & 0xFF); // LDA ret_ram
       emit(0xAE); emit((ret_ram + 1) & 0xFF); emit(((ret_ram + 1) >> 8) & 0xFF); // LDX ret_ram+1
@@ -516,12 +547,13 @@ int compile_pipeline(void) {
     }
   }
   
+  // (MAIN) BEGIN ... 
   if (!expect(TOK_BEGIN)) return 0;
   
   // Back-patch JMP using pure integer addition to prevent pointer corruption
   main_prog_start_ram_addr = jit_base_addr + (unsigned int)bin_ptr;
-  jit_bin[main_prog_jump_patch_idx] = main_prog_start_ram_addr & 0xFF;
-  jit_bin[main_prog_jump_patch_idx + 1] = (main_prog_start_ram_addr >> 8) & 0xFF;
+  bin[main_prog_jump_patch_idx] = main_prog_start_ram_addr & 0xFF;
+  bin[main_prog_jump_patch_idx + 1] = (main_prog_start_ram_addr >> 8) & 0xFF;
   
   //printf("[JIT Debug] Entry JMP patched at offset %d to point to Main Code: $%04X\n", main_prog_jump_patch_idx, main_prog_start_ram_addr);
 
@@ -535,11 +567,13 @@ int compile_pipeline(void) {
     if (!statement()) return 0;
   }
   
+  // END .
   if (!expect(TOK_END)) return 0; 
   if (!expect(TOK_DOT)) return 0;
   
   printf("\n"); 
 
+  // implicit return of "last_var" TODO: ???
   if (last_assigned_var_offset != -1) {
     last_var_ram = jit_base_addr + (unsigned int)last_assigned_var_offset;
     emit(0xAD); emit(last_var_ram & 0xFF); emit((last_var_ram >> 8) & 0xFF);             // LDA last_var
@@ -551,39 +585,59 @@ int compile_pipeline(void) {
 }
 
 // --- EXPLORATORY BYTECODE PRINTER SUBSYSTEM ---
-void dump_compiled_hex(void) {
+#ifdef TPDEBUG
+
+void dumphex(void) {
   int i;
+
   printf("\n--- EMITTED BYTECODE INSPECTOR ---\n");
   for (i = 0; i < bin_ptr; i++) {
-    printf("%02X ", jit_bin[i]);
+    printf("%02X ", bin[i]);
     if ((i + 1) % 16 == 0) printf("\n");
   }
-  printf("\n----------------------------------\n");
+  printf("\n----------------------------------\n\n");
 }
+
+#else
+
+#define dumphex() (void)0
+
+#endif // TPDEBUG
 
 int main(void) {
   int ch;
   int buf_idx = 0;
-  int test_parameter = 42;
-  int compiled_output = 0;
-  PascalFunc execute_native_jit;
+  int X_parameter = 42;
+  int res = 0;
+  PascalFunc program;
+
+  // Read program into buffer (Why)
   memset(src_buf, 0, MAX_SRC_LEN);
-//  while ((ch = getc(stdin)) != EOF && buf_idx < MAX_SRC_LEN - 1) {
+  // TODO: OSCAR64 getc give char so EOF ... ?
+  //  while ((ch = getc(stdin)) != EOF && buf_idx < MAX_SRC_LEN - 1) {
   while ((ch = getchar()) != EOF && ch != 0xff && buf_idx < MAX_SRC_LEN - 1) {
     src_buf[buf_idx++] = (char)ch;
   }
-  src_buf[buf_idx] = '\0';
-  if (strlen(src_buf) > 0) {
-    if (compile_pipeline()) {
-      dump_compiled_hex(); // Execute live hex visualization right before jumping into simulation
-      execute_native_jit = (PascalFunc)jit_bin;
-      printf("--- RUN ---\n");
-      compiled_output = execute_native_jit(test_parameter);
-      printf("--- END ---\n");
-      printf("AX=%d\n", compiled_output);
-    } else {
-      printf(">> JIT Pipeline failed during compilation.\n");
-    }
+  src_buf[buf_idx] = 0;
+
+  // COMPILE
+  if (!buf_idx) return 0;
+  
+  if (!compile_pipeline()) {
+    printf(">> FAIL!\n");
+    return 0;
   }
+    
+  // SUCESSS
+
+  dumphex();
+
+  // RUN
+  printf("--- RUN %d bytes---\n", bin_ptr);
+  program= (PascalFunc)bin;
+  res = program(X_parameter);
+  printf("--- END ---\n");
+  printf("Last var/val: AX=%d\n\n", res);
+  
   return 0;
 }
