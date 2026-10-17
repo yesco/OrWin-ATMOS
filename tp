@@ -1,4 +1,4 @@
-cl65 -Oirs -t sim6502 -o tp.sim tp.c && sim65 -c tp.sim
+cl65 -Oirs -t sim6502 -m tp.map -o tp.sim tp.c && sim65 -c tp.sim
 echo
 ls -l tp.sim
 wc tp.c
