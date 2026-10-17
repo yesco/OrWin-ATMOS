@@ -152,18 +152,21 @@ void log_token() {
   //fflush(stdout); // no have on OSCAR
 }
 #else
-void log_token() {
-  last_lnum= lnum;
-}
+#define log_token() (void)0
 #endif
 
 
+char cur_line= 0;
 char cur_c;
 
 // saved 661 bytes code, slightly faster!
 #define C cur_c
 #define NEXT next()
-char next() { return (cur_c= src_buf[++src_pos]); }
+char next() {
+  if ((cur_c= src_buf[++src_pos])=='\n')
+    cur_line= src_pos;
+  return cur_c;
+}
 
 
 void next_token() {
@@ -696,9 +699,8 @@ int main(void) {
   if (setjmp(fail_jmp) || !compile_pipeline()) {
     unsigned int err_pos= src_pos;
     printf(">> FAIL on line:\n\n%d: ", lnum);
-    // go back to beginning of line
-    while(C && C!='\n' && src_pos) C= src_buf[--src_pos];
     // print line
+    src_pos= cur_line;
     do {
       if (src_pos==err_pos) printf(" <<<---ERROR--- ");
       putchar(NEXT);
