@@ -5,8 +5,8 @@
 { ivm: 1000: (/ (- 6678940 2332536) 1000) = 4346c/loop }
 { ivm/asm = (/ 4346 127) = 34x slower, lol             }
 
-{ ivm: 1000: (/ (- 7371646 1597825) 1000) = 5773c/loop }
-{ ivm/asm = (/ 5773 127) = 43x slower, lol             }
+{ ivm: 1000: (/ (- 9057252 3313270) 1000) = 5743c/loop }
+{ ivm/asm = (/ 5743 127) = 45x slower, lol             }
 
 
 Program ShowcaseSuite;
@@ -45,7 +45,7 @@ begin
    
   { Test Case 5: looping sum - 130c / loop}
   sum:= 0;
-  for i:=1 to 0 do sum:= sum + i;
+  for i:=1 to 1000 do sum:= sum + i;
   writeln("Sum:"); writeln(sum);
 
   writeln("Magical injected input parameter X="); writeln(X); { is 42 }

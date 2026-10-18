@@ -426,19 +426,39 @@ int expression(void) {
     }
 
     if (sym->type == SYM_FUNC) {
-      // call: evaluate argument, store into param slot, issue vector call
+      // Stackless call:
+      //   1. eval arg → acc
+      //   2. S param_slot
+      //   3. store return-IP into callee ret_addr_slot (const patched below)
+      //   4. vector call 0xC0|V
+      //   5. L ret_slot
+      int ret_ip_const;
       EXPECT(TOK_LPAREN);
       if (!expression()) return 0;               // arg → acc
       emit2('S', sym->param_slot);
 
-      // vectorised call  0xC0 + vector_index
+      // fresh constant for the return IP (no dedup – each call site unique)
+      if (nconst >= MAX_CONSTS) {
+        printf("\nERROR: constant pool full\n");
+        longjmp(fail_jmp, 1);
+      }
+      ret_ip_const = nconst;
+      const_pool[nconst++] = 0;                  // placeholder, patched below
+      emit('L');
+      emit((char)(0x80 | (ret_ip_const & 0x7F)));
+      emit2('S', sym->ret_addr_slot);
+
+      // vectorised call
       if (sym->address < 0 || sym->address >= nvector) {
         printf("\nERROR: bad vector index for %s\n", name);
         longjmp(fail_jmp, 1);
       }
       emit((char)(0xC0 | (sym->address & 0x3F)));
 
-      // after return the result is in the return-value slot
+      // patch the return IP = offset of the next instruction
+      const_pool[ret_ip_const] = (unsigned int)bin_ptr;
+
+      // result lives in the return-value slot
       emit2('L', sym->ret_slot);
       EXPECT(TOK_RPAREN);
     }
@@ -616,6 +636,9 @@ void compile_function(void) {
   // (classic Pascal:  FuncName := expression;  )
   add_symbol(func_name, SYM_VAR, ret_val_slot);
 
+  // Expose RETURN as a local name for the return-address slot
+  add_symbol("RETURN", SYM_VAR, ret_addr_slot);
+
   // BEGIN
   EXPECT(TOK_BEGIN);
 
@@ -631,18 +654,15 @@ void compile_function(void) {
   EXPECT(TOK_END);
   EXPECT(TOK_SEMI);
 
-  // return sequence:
-
-  //   (the last assignment to the function name already stored the
-  //    result into ret_val_slot because we also registered the
-  //    function name as a variable pointing at that slot – see below)
-  //    For the alpha version we simply emit a special return opcode
-  //    'r' that the interpreter understands as “pop return address
-  //    and jump”.  Before that we make sure the return value is in
-  //    the ret_val slot.  (If the programmer wrote name := expr it
-  //    already did the store.)
-  emit('r');                            // return
+  // return sequence (stackless):
+  //   The return address was stored by the caller into ret_addr_slot.
+  //   Opcode ';' takes that slot and jumps to the address held there.
+  //   (Pascal-style  FuncName := expr;  already wrote the result into
+  //    ret_val_slot.)
+  emit(';');
+  emit((char)ret_addr_slot);
 }
+
 
 // ---------------------------------------------------------------------------
 // Top-level compilation
@@ -745,27 +765,22 @@ void finalise(void) {
 void run_ivm(void) {
   char *ipc = bin;
   unsigned int acc = 0;
-  char *return_stack[32];
-  int rsp = 0;
 
   printf("--- RUN IVM (%d bytes, %d vectors, %d consts) ---\n",
     bin_ptr, nvector, nconst);
 
   while (1) {
-    char op = *ipc++;
+    unsigned char op = (unsigned char)*ipc++;
     if (op == 0) break;
 
     // parameter-taking ordinary ops
     if (op == '+' || op == '-' || op == '*' || op == '/' ||
         op == '&' || op == '|' || op == '^' ||
         op == 'L' || op == 'S') {
-      char arg = *ipc++;
+      unsigned char arg = (unsigned char)*ipc++;
       unsigned int *cell;
-      // WHY???
-      if (arg & 0x80)                     // constant pool
-        cell = &mem[arg];                 // already placed at 0x80+idx
-      else
-        cell = &mem[arg];
+      // high bit set => constant pool index (0x80+n)
+      cell = &mem[arg];
 
       switch (op) {
         case '+': acc += *cell; break;
@@ -782,17 +797,14 @@ void run_ivm(void) {
     }
 
     // vectorised call  0xC0 .. 0xFF
-    if (op >= 0xC0) {
-      int vec = op - 0xC0;
+    // (return address was already stored into the callee's ret_addr_slot
+    //  by the caller before this opcode)
+    if ((unsigned char)op >= 0xC0) {
+      int vec = (unsigned char)op - 0xC0;
       if (vec >= nvector) {
         printf("\n[IVM] bad vector %d\n", vec);
         return;
       }
-      if (rsp >= 31) {
-        printf("\n[IVM] return stack overflow\n");
-        return;
-      }
-      return_stack[rsp++] = ipc;          // save return address
       ipc = bin + vectors[vec];           // jump to function entry
       continue;
     }
@@ -812,13 +824,11 @@ void run_ivm(void) {
         while (*ipc) putchar(*ipc++);
         ipc++;
         break;
-      case 'r':                           // return from function
-        if (rsp <= 0) {
-          printf("\n[IVM] return stack underflow\n");
-          return;
-        }
-        ipc = return_stack[--rsp];
+      case ';': {                         // return: jump to address in slot
+        unsigned char slot = (unsigned char)*ipc++;
+        ipc = bin + mem[slot];
         break;
+      }
       case 'G': {                         // absolute goto  <lo> <hi>
         char lo = *ipc++;
         char hi = *ipc++;
