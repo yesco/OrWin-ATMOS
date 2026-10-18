@@ -5,7 +5,7 @@
 #include <setjmp.h>
 
 // Dumps hex etc...
-//#define TPDEBUG
+#define TPDEBUG
 //#define TPPRINT
 
 // --- SYSTEM CONSTANTS FOR 6502 HARDWARE BINDINGS ---
@@ -19,18 +19,19 @@ typedef enum {
   TOK_EOF, TOK_ERROR, TOK_PROGRAM, TOK_VAR, TOK_BEGIN, TOK_END,
   TOK_INTEGER, TOK_IDENT, TOK_NUM, TOK_ASSIGN, TOK_SEMI,
   TOK_COLON, TOK_PLUS, TOK_DOT, TOK_WRITE, TOK_STRING,
-  TOK_LPAREN, TOK_RPAREN, TOK_FUNCTION
+  TOK_LPAREN, TOK_RPAREN, TOK_FUNCTION,
+  TOK_FOR, TOK_TO, TOK_DO
 } TokenType;
 
 // TODO: WRITE()
 // TODO: IF
-// TODO: FOR
 // TODO: WHILE
 // TODO: REPEAT
 const char* TOKEN_NAMES[] = {
   "EOF", "ERROR", "PROGRAM", "VAR", "BEGIN", "END",
   "INTEGER", "IDENT", "NUM", "ASSIGN", "SEMI", "COLON",
-  "PLUS", "DOT", "WRITELN", "STRING", "LPAREN", "RPAREN", "FUNCTION"
+  "PLUS", "DOT", "WRITELN", "STRING", "LPAREN", "RPAREN", "FUNCTION",
+  "FOR", "TO", "DO"
 };
 
 typedef struct {
@@ -244,6 +245,9 @@ void next_token() {
     else if (strcmp(curr_tok.lexeme, "INTEGER") == 0) curr_tok.type = TOK_INTEGER;
     else if (strcmp(curr_tok.lexeme, "WRITELN") == 0) curr_tok.type = TOK_WRITE;
     else if (strcmp(curr_tok.lexeme, "FUNCTION") == 0) curr_tok.type = TOK_FUNCTION;
+    else if (strcmp(curr_tok.lexeme, "FOR") == 0) curr_tok.type = TOK_FOR;
+    else if (strcmp(curr_tok.lexeme, "TO") == 0) curr_tok.type = TOK_TO;
+    else if (strcmp(curr_tok.lexeme, "DO") == 0) curr_tok.type = TOK_DO;
     else curr_tok.type = TOK_IDENT;
 
     log_token();
@@ -421,7 +425,9 @@ int expression(void) {
 }
 
 int statement(void) {
-  // VAR :=  or FUN()
+  unsigned int base = (unsigned int)bin;
+
+  // VAR := expr ;
   if (curr_tok.type == TOK_IDENT) {
     char target_var[MAX_SYM_LEN + 1];
     int addr = -1;
@@ -430,9 +436,6 @@ int statement(void) {
     strcpy(target_var, curr_tok.lexeme);
     
     // Explicit variable lookup loop to prevent function name shadowing on assignments
-
-    //   TODO: why only here? only on assignemnt?
-    //   TODO: generalize
     for (i = nsym - 1; i >= 0; i--) {
       if (strcmp(syms[i].name, target_var) == 0 && syms[i].type == SYM_VAR) {
         addr = syms[i].address;
@@ -449,12 +452,12 @@ int statement(void) {
     
     if (!expression()) return 0;
     
-    STAX(((unsigned int)bin) + (unsigned int)addr);
+    STAX(base + (unsigned int)addr);
 
     EXPECT(TOK_SEMI);
   } 
 
-  // WRITELN ( expr )
+  // WRITELN ( expr | string )
   else if (curr_tok.type == TOK_WRITE) {
     EXPECT(TOK_WRITE);
     EXPECT(TOK_LPAREN);
@@ -470,7 +473,7 @@ int statement(void) {
       jmp_patch_idx = bin_ptr;
       WZERO();
       
-      str_start_ram = ((unsigned int)bin) + (unsigned int)bin_ptr;
+      str_start_ram = base + (unsigned int)bin_ptr;
       
       while (curr_tok.lexeme[idx] != '\0') {
         B(curr_tok.lexeme[idx]);
@@ -478,20 +481,18 @@ int statement(void) {
       }
       B(0x00);
       
-      str_end_ram = ((unsigned int)bin) + (unsigned int)bin_ptr;
+      str_end_ram = base + (unsigned int)bin_ptr;
       // PATCH(loc, addr)
       bin[jmp_patch_idx]     = str_end_ram & 0xFF;
       bin[jmp_patch_idx + 1] = (str_end_ram >> 8) & 0xFF;
       
-      // LDAX(str_start_ram)
+      // LDA #lo / LDX #hi  of string address
       B(0xA9); B(str_start_ram & 0xFF);        
       B(0xA2); B((str_start_ram >> 8) & 0xFF); 
       
-      // JSR print_str_ch
+      // JSR print_str_cb
       B(0x20); W((unsigned int)print_str_cb);
       
-      // TODO: if going to give error just longjmp(FAIL) inside
-      // TODO: why test a second time???
       EXPECT(TOK_STRING);
 
     } else {
@@ -505,9 +506,109 @@ int statement(void) {
     // ) ;
     EXPECT(TOK_RPAREN);
     EXPECT(TOK_SEMI);
+  }
 
-  } else {
-    printf("\n%s <---- ERROR: Expected statement identifier\n", curr_tok.lexeme);
+  // FOR var := low TO high DO statement
+  else if (curr_tok.type == TOK_FOR) {
+    char ctrl_name[MAX_SYM_LEN + 1];
+    int ctrl_addr = -1;
+    int i;
+    int jmp_over_temp;
+    int loop_start;
+    int exit_patch;
+    unsigned int high_temp;
+    unsigned int skip_addr;
+
+    EXPECT(TOK_FOR);
+
+    // control variable
+    if (curr_tok.type != TOK_IDENT) {
+      printf("\n%s <---- ERROR: Expected control variable after FOR\n", curr_tok.lexeme);
+      longjmp(fail_jmp, 1);
+    }
+    strcpy(ctrl_name, curr_tok.lexeme);
+
+    for (i = nsym - 1; i >= 0; i--) {
+      if (strcmp(syms[i].name, ctrl_name) == 0 && syms[i].type == SYM_VAR) {
+        ctrl_addr = syms[i].address;
+        break;
+      }
+    }
+    if (ctrl_addr == -1) {
+      printf("\n%s <---- ERROR: Undeclared FOR control variable\n", ctrl_name);
+      longjmp(fail_jmp, 1);
+    }
+    EXPECT(TOK_IDENT);
+    EXPECT(TOK_ASSIGN);
+
+    // lower bound → control var
+    if (!expression()) return 0;
+    STAX(base + (unsigned int)ctrl_addr);
+
+    EXPECT(TOK_TO);
+
+    // upper bound → private inline temp (same style as +)
+    if (!expression()) return 0;
+
+    B(0x4C);                    // JMP over the temp storage
+    jmp_over_temp = bin_ptr;
+    WZERO();
+
+    high_temp = base + (unsigned int)bin_ptr;
+    WZERO();                    // 2 bytes for the high value
+
+    skip_addr = base + (unsigned int)bin_ptr;
+    bin[jmp_over_temp]     = skip_addr & 0xFF;
+    bin[jmp_over_temp + 1] = (skip_addr >> 8) & 0xFF;
+
+    STAX(high_temp);            // store the already-evaluated high value
+
+    EXPECT(TOK_DO);
+
+    // ---- loop header (test at top) ----
+    loop_start = bin_ptr;
+
+    // 16-bit compare: if (ctrl > high) goto exit
+    // SEC ; LDA ctrl ; SBC high ; LDA ctrl+1 ; SBC high+1 ; BCS exit
+    B(0x38);                    // SEC
+    B(0xAD); W(base + (unsigned int)ctrl_addr);     // LDA ctrl
+    B(0xED); W(high_temp);                          // SBC high
+    B(0xAD); W(base + (unsigned int)ctrl_addr + 1); // LDA ctrl+1
+    B(0xED); W(high_temp + 1);                      // SBC high+1
+    B(0xB0);                    // BCS exit (unsigned > )
+    exit_patch = bin_ptr;
+    B(0x00);                    // relative offset, patched later
+
+    // body
+    if (!statement()) return 0;
+
+    // 16-bit increment of control variable
+    // LDA ctrl ; CLC ; ADC #1 ; STA ctrl
+    // LDA ctrl+1 ; ADC #0 ; STA ctrl+1
+    B(0xAD); W(base + (unsigned int)ctrl_addr);
+    B(0x18);                    // CLC
+    B(0x69); B(0x01);           // ADC #1
+    B(0x8D); W(base + (unsigned int)ctrl_addr);
+    B(0xAD); W(base + (unsigned int)ctrl_addr + 1);
+    B(0x69); B(0x00);           // ADC #0
+    B(0x8D); W(base + (unsigned int)ctrl_addr + 1);
+
+    // JMP loop_start
+    B(0x4C); W(base + (unsigned int)loop_start);
+
+    // patch the BCS relative offset
+    {
+      int delta = bin_ptr - (exit_patch + 1);
+      if (delta < -128 || delta > 127) {
+        printf("\nFOR loop body too large for relative branch\n");
+        longjmp(fail_jmp, 1);
+      }
+      bin[exit_patch] = (unsigned char)delta;
+    }
+  }
+
+  else {
+    printf("\n%s <---- ERROR: Expected statement (ident, WRITELN or FOR)\n", curr_tok.lexeme);
     longjmp(fail_jmp, 1);
   }
 
@@ -663,7 +764,7 @@ int compile_pipeline(void) {
 void dumphex(void) {
   int i;
 
-  printf("\n--- EMITTED BYTECODE INSPECTOR: $04x ---\n", bin);
+  printf("\n--- EMITTED BYTECODE INSPECTOR: %p (%d bytes) ---\n", (void*)bin, bin_ptr);
   for (i = 0; i < bin_ptr; i++) {
     printf("%02X ", bin[i]);
     if ((i + 1) % 16 == 0) printf("\n");
@@ -708,13 +809,13 @@ int main(void) {
     return 1;
   }
     
-  // SUCESSS
-
+  // SUCCESS
+  printf("--- COMPILED %d bytes ---\n", bin_ptr);
   dumphex();
 
-  // RUN
+  // RUN (native 6502 code – intended for cc65 / OSCAR64)
   printf("--- RUN %d bytes---\n", bin_ptr);
-  program= (PascalFunc)bin;
+  program = (PascalFunc)bin;
   res = program(X_parameter);
   printf("--- END ---\n");
   printf("Last var/val: AX=%d\n\n", res);

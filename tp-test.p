@@ -14,21 +14,28 @@ begin
 end;
 
 var
-  alpha : integer;
+  alpha	: integer;
   beta	: integer;
+  i	: integer;
+  sum	: integer;
 
 begin
   { Test Case 1: Direct literal string compilation }
   writeln("Hello World from CP/M 6502!");
 
   { Test Case 2: 16-Bit variable immediate assignment }
-  alpha := 7;
+  alpha:= 7;
 
   { Test Case 3: Complex math addition using our functional JSR routine }
-  beta := AddTen(Mul2(alpha)+1) + Mul2(11);
+  beta:= AddTen(Mul2(alpha)+1) + Mul2(11);
 
   { Test Case 4: Printing numeric value from memory }
   writeln(beta);
    
+  { Test Case 5: looping sum - 130c / loop}
+  sum:= 0;
+  for i:=1 to 1000 do sum:= sum + i;
+  writeln("Sum:"); writeln(sum);
+
   writeln("Magitcal injected input parameter X="); writeln(X); { is 42 }
 end.

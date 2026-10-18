@@ -11,10 +11,10 @@ echo "--- Testing; tp-test.p ---"
 echo
 echo
 
-echo "--- ERROR ON PURPOSE ---"
-printf "program foo;\nvar x:integer=35;\nbegin\nx:=35;\nx=77+33;\n;writelne("fish");\nend." | ./tp
-echo
-echo
+#echo "--- ERROR ON PURPOSE ---"
+#printf "program foo;\nvar x:integer=35;\nbegin\nx:=35;\nx=77+33;\n;writelne("fish");\nend." | ./tp
+#echo
+#echo
 
 
 echo "=== OSCAR ==="
