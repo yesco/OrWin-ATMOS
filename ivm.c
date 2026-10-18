@@ -74,7 +74,7 @@ unsigned int acc= 0;
 //=  = indicates "implemented"
 //
 // 0-31: global memory read value
-//= ' ' - nop
+//=' ' - nop
 //  !
 //= " - inline print string end with " or 0
 //  # - number?
@@ -95,7 +95,7 @@ unsigned int acc= 0;
 //  : - define?
 //  ; - return /enddef
 //  <=> - cmp - do we need all?
-//  ? - zeroskip
+//  ? - have value == C ! 0=>-1 any=>0
 //  @ - read *$ - Load
 //= A - car acc= acc[0] == @
 //  B
@@ -113,30 +113,29 @@ unsigned int acc= 0;
 //= O - output (emit #)
 //= P - print acc as string
 //  Q
-
-// R - recurse (save current frame, malloc?)
-//=S - store $
-// T - type acc chars from $ (?)
-// U - null?
-// V
-//(W - write var string $)
-// XY
-// Z - zero # (fill)
+//  R - recurse (save current frame, malloc?)
+//= S - store $
+//  T - type acc chars from $ (?)
+//  U - null?
+//  V
+//( W - write var string $)
+//  XY
+//  Z - zero # (fill)
 //
-// [ - shift left $
-// '\'
-// ] - shift rigth $
-//=^ - xor $
-// _ - dynamic lookup(acc) => addr
-// `
-// { - shift left #
-//=| - or $
-// } - shift right #
-//=~ - inverse (oric: gray)
-//  - DEL not visible (oric: full block)
+//  [ - shift left $
+//  '\'
+//  ] - shift rigth $
+//= ^ - xor $
+//  _ - dynamic lookup(acc) => addr
+//  ` - conditional non-zero loop jump backwards (0-255)
+//  { - shift left #
+//= | - or $
+//  } - shift right #
+//= ~ - inverse (oric: gray)
+//  - DEL not visible (oric: full block)
 //
-// $80-$bf (64) relative jump (forward only?)
-// $bf-$ff (64) 
+// $80-$bf (64) conditional relative jump (forward)
+// $bf-$ff (64) subroutine calls (vectorized)
 
 // GLOBAL "OS" API
 // ===============
