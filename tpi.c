@@ -236,7 +236,31 @@ int alloc_temp(void) {
 // ---------------------------------------------------------------------------
 // Constants (separate array, referenced as 0x80+n)
 // ---------------------------------------------------------------------------
+
 unsigned int const_pool[MAX_CONSTS];
+
+// NO NO NO NO NO ! ! !
+
+// TODO: the const pool separate array is just temporary during
+//   compilation, the finlize() should add it at the end of the
+//   runtime vars block!
+//
+//   The whole point was to store constants in memory so 
+//   that we wouldn't have a separate code path for it,
+//   now everything is duplicated! LOL
+//
+//   I guess this makes another one of those to "relocate", lol
+//   
+//   finalising(): before executing, we relocate all references
+//   to constants in the code, by moving them to a base at end
+//   of final, that is, if we're copying the constants...
+// 
+//   Then during execution there would be one code path.
+//
+//   ALT: hi-bit set (== too limited), or idx >= startconstidx:
+//     load using different base pointer. (complicated)
+
+
 int nconst = 0;
 
 int add_const(unsigned int v) {
