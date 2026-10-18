@@ -116,7 +116,7 @@ unsigned int acc= 0;
 //  R - recurse (save current frame, malloc?)
 //= S - store $
 //  T - type acc chars from $ (?)
-//  U - null?
+//  U - null? === ?
 //  V
 //( W - write var string $)
 //  XY

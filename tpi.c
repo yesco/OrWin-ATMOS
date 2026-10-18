@@ -1,18 +1,21 @@
-// tpi.c - Tiny Pascal → IVM (Indirect / Accumulator Alphabetical Virtual Machine)
-// Based on tp.c (6502 native) but retargeted to the alpha bytecode VM in ivm.c
+// tpi.c - Tiny Pascal → IVM bytecode
 //
-// Design goals for this first version:
-//   - Keep the same Pascal subset (PROGRAM, VAR, FUNCTION, BEGIN/END,
-//     assignment, +, WRITELN, FOR)
-//   - Emit readable ASCII bytecode using the opcodes defined in ivm.c
-//   - Provide a minimal host-side interpreter so programs can run today
-//   - Variables and temporaries live in a 256-slot memory array (the PAR space)
-//   - Result of every expression is left in the accumulator (acc)
+// Notice:
+//  1) needs to follow c89 so can compie on cc65
+//  2) only define varaibles at start of { scope
+//  3) don't use /* comment */
+//  4) don't change any lines if not needed
+//  5) char is unsigned on cc65 & oscar64 & clang
+
+// Target model (as specified):
 //
-// Missing / incomplete in upstream ivm.c (we add minimal support here):
-//   - Real memory array (MEM / PAR)
-//   - Conditional relative jumps (needed for FOR)
-//   - Comparison that sets acc to 0 / non-zero
+// a) Globals allocated preferentially in slots 0-31
+// b) Function frames (ret-addr, ret-val, params, locals) from 32 upward
+// c) When 0-31 are full, globals may continue into the frame area (skip used)
+// d) Vectors kept in a separate array during compilation
+// e) Constants in their own array; referenced as 0x80+n in the code stream
+// f) Patch list of program offsets that need final fix-ups
+// g) Vectorised calls use opcodes 192-255 (0xC0-0xFF)
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,16 +23,22 @@
 #include <ctype.h>
 #include <setjmp.h>
 
-//#define TPPRINT
+// --- options
+#define TPDUMP
 
-#define MAX_SRC_LEN  2048
-#define MAX_SYM_LEN  64
-#define MAX_BIN_LEN  2048          // bytecode can be larger than 6502 binary
-#define MAX_SYMBOLS  64
-#define MAX_SLOTS    256           // IVM memory / PAR space
+#define MAX_SRC_LEN   2048
+#define MAX_SYM_LEN   64
+#define MAX_BIN_LEN   4096
+#define MAX_SYMBOLS   64
+#define MAX_SLOTS     256
+#define MAX_CONSTS    64
+#define MAX_VECTORS   64          // opcodes 0xC0 .. 0xFF
+#define MAX_PATCHES   128
+#define GLOBAL_LIMIT  32          // preferred global area 0-31
+#define FRAME_BASE    32          // frames start here
 
 // ---------------------------------------------------------------------------
-// Tokens (same as tp.c + FOR)
+// Tokens
 // ---------------------------------------------------------------------------
 typedef enum {
   TOK_EOF, TOK_ERROR, TOK_PROGRAM, TOK_VAR, TOK_BEGIN, TOK_END,
@@ -55,7 +64,7 @@ typedef struct {
 jmp_buf fail_jmp;
 
 // ---------------------------------------------------------------------------
-// Compiler workspaces
+// Source / token state
 // ---------------------------------------------------------------------------
 char src_buf[MAX_SRC_LEN];
 int src_pos = 0;
@@ -63,60 +72,175 @@ int lnum = 1;
 int last_lnum = 0;
 Token curr_tok;
 
-char bin[MAX_BIN_LEN];             // emitted bytecode (ASCII opcodes + args)
+char cur_line = 0;
+char cur_c;
+#define C cur_c
+#define NEXT next()
+char next(void) {
+  if ((cur_c = src_buf[++src_pos]) == '\n')
+    cur_line = src_pos;
+  return cur_c;
+}
+
+// ---------------------------------------------------------------------------
+// Bytecode buffer + patch list
+// ---------------------------------------------------------------------------
+char bin[MAX_BIN_LEN];
 int bin_ptr = 0;
 
-// IVM memory model (the $ / PAR space)
-unsigned int mem[MAX_SLOTS];
-int next_slot = 16;                // leave 0..15 free for future OS / globals
+typedef struct {
+  int offset;          // location inside bin[] that needs a value
+  int kind;            // 0 = const index, 1 = vector index, …
+  int value;           // the value to write (or index)
+} Patch;
 
-// Symbol table – address is now a slot index (0-255)
+Patch patches[MAX_PATCHES];
+int npatch = 0;
+
+void emit(char c) {
+  if (bin_ptr >= MAX_BIN_LEN - 1) {
+    printf("\nERROR: bytecode buffer overflow\n");
+    longjmp(fail_jmp, 1);
+  }
+  bin[bin_ptr++] = c;
+}
+
+void emit2(char op, char arg) {
+  emit(op);
+  emit((char)arg);
+}
+
+void add_patch(int offset, int kind, int value) {
+  if (npatch >= MAX_PATCHES) {
+    printf("\nERROR: too many patches\n");
+    longjmp(fail_jmp, 1);
+  }
+  patches[npatch].offset = offset;
+  patches[npatch].kind   = kind;
+  patches[npatch].value  = value;
+  npatch++;
+}
+
+// ---------------------------------------------------------------------------
+// Slot allocation (globals 0-31, frames from 32)
+// ---------------------------------------------------------------------------
+unsigned int mem[MAX_SLOTS];          // runtime memory
+char slot_used[MAX_SLOTS];            // allocation map
+int next_global = 0;                  // next candidate in 0-31
+int next_frame  = FRAME_BASE;         // next candidate from 32
+
+int alloc_global(void) {
+  // Prefer 0-31; if exhausted continue from next_frame, skipping used slots
+  while (next_global < GLOBAL_LIMIT) {
+    if (!slot_used[next_global]) {
+      slot_used[next_global] = 1;
+      return next_global++;
+    }
+    next_global++;
+  }
+  // fall into frame area
+  while (next_frame < MAX_SLOTS) {
+    if (!slot_used[next_frame]) {
+      slot_used[next_frame] = 1;
+      return next_frame++;
+    }
+    next_frame++;
+  }
+  printf("\nERROR: out of slots\n");
+  longjmp(fail_jmp, 1);
+  return -1;
+}
+
+int alloc_frame_slot(void) {
+  while (next_frame < MAX_SLOTS) {
+    if (!slot_used[next_frame]) {
+      slot_used[next_frame] = 1;
+      return next_frame++;
+    }
+    next_frame++;
+  }
+  printf("\nERROR: out of frame slots\n");
+  longjmp(fail_jmp, 1);
+  return -1;
+}
+
+// Temporaries for expression evaluation also come from the frame area
+int alloc_temp(void) {
+  return alloc_frame_slot();
+}
+
+// ---------------------------------------------------------------------------
+// Constants (separate array, referenced as 0x80+n)
+// ---------------------------------------------------------------------------
+unsigned int const_pool[MAX_CONSTS];
+int nconst = 0;
+
+int add_const(unsigned int v) {
+  int i;
+  for (i = 0; i < nconst; i++)
+    if (const_pool[i] == v) return i;
+  if (nconst >= MAX_CONSTS) {
+    printf("\nERROR: constant pool full\n");
+    longjmp(fail_jmp, 1);
+  }
+  const_pool[nconst] = v;
+  return nconst++;
+}
+
+// Emit a load of a constant: L (0x80+idx)
+void emit_load_const(unsigned int v) {
+  int idx;
+  if (v == 0) { emit('0'); return; }
+  if (v == (unsigned int)-1) { emit('9'); return; }
+  idx = add_const(v);
+  emit('L');
+  emit((char)(0x80 | (idx & 0x7F)));
+}
+
+// ---------------------------------------------------------------------------
+// Vectors (function entry points)
+// ---------------------------------------------------------------------------
+int vectors[MAX_VECTORS];             // bytecode offset of each function
+int nvector = 0;
+
+int add_vector(int entry_offset) {
+  if (nvector >= MAX_VECTORS) {
+    printf("\nERROR: too many functions (max %d)\n", MAX_VECTORS);
+    longjmp(fail_jmp, 1);
+  }
+  vectors[nvector] = entry_offset;
+  return nvector++;
+}
+
+// ---------------------------------------------------------------------------
+// Symbol table
+// ---------------------------------------------------------------------------
 typedef enum { SYM_VAR, SYM_FUNC } SymbolType;
+
 typedef struct {
   char name[MAX_SYM_LEN + 1];
   SymbolType type;
-  int address;                     // slot number
+  char address;          // slot number (var) or vector index (func)
+  char param_slot;       // for functions: slot of the single parameter
+  char ret_slot;         // for functions: slot of the return value
+  char ret_addr_slot;    // for functions: slot that holds return ipc
 } Symbol;
 
 Symbol syms[MAX_SYMBOLS];
 int nsym = 0;
 
-void next_token(void);
-void expect(TokenType expected);
-int expression(void);
-int statement(void);
-
-#define EXPECT(expected) expect(expected)
-
-// ---------------------------------------------------------------------------
-// Bytecode emission
-// ---------------------------------------------------------------------------
-void emit(char c) {
-  if (bin_ptr < MAX_BIN_LEN - 1)
-    bin[bin_ptr++] = c;
-}
-
-void emit_op_par(char op, unsigned char slot) {
-  emit(op);
-  emit((char)slot);
-}
-
-// Allocate a fresh slot (for vars or temporaries / constants)
-int alloc_slot(void) {
-  if (next_slot >= MAX_SLOTS) {
-    printf("\nERROR: out of IVM memory slots\n");
+void add_symbol(const char* name, SymbolType type, int address) {
+  if (nsym >= MAX_SYMBOLS) {
+    printf("\nERROR: symbol table full\n");
     longjmp(fail_jmp, 1);
   }
-  return next_slot++;
-}
-
-void add_symbol(const char* name, SymbolType type, int address) {
-  if (nsym < MAX_SYMBOLS) {
-    strcpy(syms[nsym].name, name);
-    syms[nsym].type = type;
-    syms[nsym].address = address;
-    nsym++;
-  }
+  strcpy(syms[nsym].name, name);
+  syms[nsym].type = type;
+  syms[nsym].address = address;
+  syms[nsym].param_slot = -1;
+  syms[nsym].ret_slot = -1;
+  syms[nsym].ret_addr_slot = -1;
+  nsym++;
 }
 
 int lookup_symbol(const char* name, SymbolType* type, int* address) {
@@ -131,33 +255,22 @@ int lookup_symbol(const char* name, SymbolType* type, int* address) {
   return -1;
 }
 
-#ifdef TPPRINT
-void log_token() {
-  if (lnum != last_lnum) {
-    if (last_lnum != 0) printf("\n");
-    printf("%05d: %s", lnum, curr_tok.lexeme);
-    last_lnum = lnum;
-  } else {
-    printf(" %s", curr_tok.lexeme);
-  }
-}
-#else
-#define log_token() (void)0
-#endif
-
-char cur_line = 0;
-char cur_c;
-#define C cur_c
-#define NEXT next()
-char next(void) {
-  if ((cur_c = src_buf[++src_pos]) == '\n')
-    cur_line = src_pos;
-  return cur_c;
+Symbol* lookup_sym(const char* name) {
+  int i;
+  for (i = nsym - 1; i >= 0; i--)
+    if (strcmp(syms[i].name, name) == 0) return &syms[i];
+  return NULL;
 }
 
 // ---------------------------------------------------------------------------
-// Lexer (identical to tp.c)
+// Lexer
 // ---------------------------------------------------------------------------
+void next_token(void);
+void expect(TokenType expected);
+int expression(void);
+int statement(void);
+#define EXPECT(expected) expect(expected)
+
 void next_token(void) {
   int i, len;
   char quote_char;
@@ -174,14 +287,10 @@ void next_token(void) {
         if (C == '\n') lnum++;
         NEXT;
       }
-      if (C == '}') {
-        NEXT;
-        continue;
-      } else {
-        printf("\n} <---- ERROR: Unclosed comment block\n");
-        curr_tok.type = TOK_ERROR;
-        return;
-      }
+      if (C == '}') { NEXT; continue; }
+      printf("\n} <---- ERROR: Unclosed comment\n");
+      curr_tok.type = TOK_ERROR;
+      return;
     }
     break;
   }
@@ -203,7 +312,6 @@ void next_token(void) {
     if (C == quote_char) NEXT;
     curr_tok.lexeme[len] = 0;
     curr_tok.type = TOK_STRING;
-    log_token();
     return;
   }
 
@@ -214,21 +322,20 @@ void next_token(void) {
       NEXT;
     }
     curr_tok.lexeme[len] = 0;
-    for (i = 0; i < len; i++) curr_tok.lexeme[i] = toupper(curr_tok.lexeme[i]);
+    for (i = 0; i < len; i++)
+      curr_tok.lexeme[i] = toupper(curr_tok.lexeme[i]);
 
-    if (strcmp(curr_tok.lexeme, "PROGRAM") == 0) curr_tok.type = TOK_PROGRAM;
-    else if (strcmp(curr_tok.lexeme, "VAR") == 0) curr_tok.type = TOK_VAR;
-    else if (strcmp(curr_tok.lexeme, "BEGIN") == 0) curr_tok.type = TOK_BEGIN;
-    else if (strcmp(curr_tok.lexeme, "END") == 0) curr_tok.type = TOK_END;
-    else if (strcmp(curr_tok.lexeme, "INTEGER") == 0) curr_tok.type = TOK_INTEGER;
-    else if (strcmp(curr_tok.lexeme, "WRITELN") == 0) curr_tok.type = TOK_WRITE;
+    if      (strcmp(curr_tok.lexeme, "PROGRAM")  == 0) curr_tok.type = TOK_PROGRAM;
+    else if (strcmp(curr_tok.lexeme, "VAR")      == 0) curr_tok.type = TOK_VAR;
+    else if (strcmp(curr_tok.lexeme, "BEGIN")    == 0) curr_tok.type = TOK_BEGIN;
+    else if (strcmp(curr_tok.lexeme, "END")      == 0) curr_tok.type = TOK_END;
+    else if (strcmp(curr_tok.lexeme, "INTEGER")  == 0) curr_tok.type = TOK_INTEGER;
+    else if (strcmp(curr_tok.lexeme, "WRITELN")  == 0) curr_tok.type = TOK_WRITE;
     else if (strcmp(curr_tok.lexeme, "FUNCTION") == 0) curr_tok.type = TOK_FUNCTION;
-    else if (strcmp(curr_tok.lexeme, "FOR") == 0) curr_tok.type = TOK_FOR;
-    else if (strcmp(curr_tok.lexeme, "TO") == 0) curr_tok.type = TOK_TO;
-    else if (strcmp(curr_tok.lexeme, "DO") == 0) curr_tok.type = TOK_DO;
+    else if (strcmp(curr_tok.lexeme, "FOR")      == 0) curr_tok.type = TOK_FOR;
+    else if (strcmp(curr_tok.lexeme, "TO")       == 0) curr_tok.type = TOK_TO;
+    else if (strcmp(curr_tok.lexeme, "DO")       == 0) curr_tok.type = TOK_DO;
     else curr_tok.type = TOK_IDENT;
-
-    log_token();
     return;
   }
 
@@ -240,7 +347,6 @@ void next_token(void) {
       NEXT;
     }
     sprintf(curr_tok.lexeme, "%d", curr_tok.value);
-    log_token();
     return;
   }
 
@@ -248,7 +354,6 @@ void next_token(void) {
     NEXT; NEXT;
     curr_tok.type = TOK_ASSIGN;
     strcpy(curr_tok.lexeme, ":=");
-    log_token();
     return;
   }
 
@@ -263,11 +368,10 @@ void next_token(void) {
     case ')': curr_tok.type = TOK_RPAREN; break;
     default:
       curr_tok.type = TOK_ERROR;
-      printf("\n%c <---- ERROR: Unknown character syntax error: $%02x\n", C, C);
+      printf("\n%c <---- ERROR: unknown character\n", C);
       longjmp(fail_jmp, 1);
   }
   NEXT;
-  log_token();
 }
 
 void expect(TokenType expected) {
@@ -278,74 +382,84 @@ void expect(TokenType expected) {
 }
 
 // ---------------------------------------------------------------------------
-// Expression → leaves result in acc
+// Expression → result in acc
 // ---------------------------------------------------------------------------
 int expression(void) {
-  SymbolType stype;
-  int saddr;
   char name[MAX_SYM_LEN + 1];
 
   if (curr_tok.type == TOK_NUM) {
-    // Special-case the two constants the VM has direct opcodes for
-    if (curr_tok.value == 0) {
-      emit('0');
-    } else if (curr_tok.value == -1 || curr_tok.value == 65535) {
-      emit('9');
-    } else {
-      // Allocate a constant slot and load it
-      int slot = alloc_slot();
-      mem[slot] = (unsigned int)curr_tok.value;   // initialise at compile time
-      emit_op_par('L', (unsigned char)slot);
-    }
+    emit_load_const((unsigned int)curr_tok.value);
     next_token();
-
-  } else if (curr_tok.type == TOK_IDENT) {
+  }
+  else if (curr_tok.type == TOK_IDENT) {
+    Symbol* sym = NULL;
     strcpy(name, curr_tok.lexeme);
-    if (lookup_symbol(name, &stype, &saddr) == -1) {
-      printf("\n%s <---- ERROR: Undeclared identifier\n", curr_tok.lexeme);
+    // Peek: if next token will be '(', prefer the function symbol
+    {
+      int i;
+      int want_func = 0;
+      // crude peek at source for '(' after the identifier
+      // (the real next_token has not been called yet)
+      // Better: look up both and decide after seeing the next token.
+      for (i = nsym - 1; i >= 0; i--) {
+        if (strcmp(syms[i].name, name) == 0) {
+          if (syms[i].type == SYM_FUNC) { sym = &syms[i]; break; }
+          if (!sym) sym = &syms[i];   // keep first (most recent) var
+        }
+      }
+    }
+    if (!sym) {
+      printf("\n%s <---- ERROR: Undeclared identifier\n", name);
       longjmp(fail_jmp, 1);
     }
     next_token();
 
-    if (stype == SYM_FUNC) {
-      // Very simple function call support (static param block style)
-      // For now we only support the call pattern that stores the argument
-      // into the function's parameter slot and then jumps to the body.
-      // Full call/return is still incomplete in the alpha VM.
-      EXPECT(TOK_LPAREN);
-      if (!expression()) return 0;          // arg → acc
-      // Store into the parameter slot that was allocated for the function
-      // (we stored it as address-2 relative to the function entry in tp.c;
-      //  here we simply use the address that was registered for the param)
-      // For the first version we just evaluate the argument and leave it
-      // in acc; a real call would need the vectorised call mechanism.
-      EXPECT(TOK_RPAREN);
-      // TODO: real call once IVM subroutine vectors are finished
-      printf("\nWARNING: FUNCTION calls are not yet fully supported in IVM backend\n");
-    } else {
-      // Variable load
-      emit_op_par('L', (unsigned char)saddr);
+    // If we found a var but the next token is '(', look again for a function
+    if (sym->type == SYM_VAR && curr_tok.type == TOK_LPAREN) {
+      int i;
+      for (i = nsym - 1; i >= 0; i--) {
+        if (strcmp(syms[i].name, name) == 0 && syms[i].type == SYM_FUNC) {
+          sym = &syms[i];
+          break;
+        }
+      }
     }
-  } else {
+
+    if (sym->type == SYM_FUNC) {
+      // call: evaluate argument, store into param slot, issue vector call
+      EXPECT(TOK_LPAREN);
+      if (!expression()) return 0;               // arg → acc
+      emit2('S', sym->param_slot);
+
+      // vectorised call  0xC0 + vector_index
+      if (sym->address < 0 || sym->address >= nvector) {
+        printf("\nERROR: bad vector index for %s\n", name);
+        longjmp(fail_jmp, 1);
+      }
+      emit((char)(0xC0 | (sym->address & 0x3F)));
+
+      // after return the result is in the return-value slot
+      emit2('L', sym->ret_slot);
+      EXPECT(TOK_RPAREN);
+    }
+    else {
+      // ordinary variable
+      emit2('L', sym->address);
+    }
+  }
+  else {
     printf("\n%s <---- ERROR: Expected expression\n", curr_tok.lexeme);
     longjmp(fail_jmp, 1);
   }
 
-  // Binary +
+  // binary +
   if (curr_tok.type == TOK_PLUS) {
-    int tmp = alloc_slot();
+    int tmp = alloc_temp();
     next_token();
-
-    // acc currently holds left-hand side → store it
-    emit_op_par('S', (unsigned char)tmp);
-
-    // evaluate right-hand side → acc
-    if (!expression()) return 0;
-
-    // acc = acc + mem[tmp]
-    emit_op_par('+', (unsigned char)tmp);
+    emit2('S', tmp);   // save LHS
+    if (!expression()) return 0;            // RHS → acc
+    emit2('+', tmp);   // acc += mem[tmp]
   }
-
   return 1;
 }
 
@@ -353,319 +467,379 @@ int expression(void) {
 // Statement
 // ---------------------------------------------------------------------------
 int statement(void) {
-
-  // assignment: ident := expr ;
+  // assignment
   if (curr_tok.type == TOK_IDENT) {
-    char target_var[MAX_SYM_LEN + 1];
-    int addr = -1;
-    int i;
-
-    strcpy(target_var, curr_tok.lexeme);
-    for (i = nsym - 1; i >= 0; i--) {
-      if (strcmp(syms[i].name, target_var) == 0 && syms[i].type == SYM_VAR) {
-        addr = syms[i].address;
-        break;
-      }
-    }
-    if (addr == -1) {
-      printf("\n%s <---- ERROR: Unknown variable identifier\n", target_var);
+    char target[MAX_SYM_LEN + 1];
+    Symbol* sym = lookup_sym(curr_tok.lexeme); // ?? safe
+    strcpy(target, curr_tok.lexeme);
+    if (!sym || sym->type != SYM_VAR) {
+      printf("\n%s <---- ERROR: Unknown variable\n", target);
       longjmp(fail_jmp, 1);
     }
-
     EXPECT(TOK_IDENT);
     EXPECT(TOK_ASSIGN);
     if (!expression()) return 0;
-    emit_op_par('S', (unsigned char)addr);
+    emit2('S', sym->address);
     EXPECT(TOK_SEMI);
   }
-
-  // WRITELN ( string | expr )
+  // WRITELN
   else if (curr_tok.type == TOK_WRITE) {
+    int i;
     EXPECT(TOK_WRITE);
     EXPECT(TOK_LPAREN);
-
     if (curr_tok.type == TOK_STRING) {
-      // Inline string print: " .... \0
       emit('"');
-      {
-        int idx = 0;
-        while (curr_tok.lexeme[idx]) {
-          emit(curr_tok.lexeme[idx]);
-          idx++;
-        }
-      }
-      emit(0);                     // terminator
+      for (i = 0; curr_tok.lexeme[i]; i++)
+        emit(curr_tok.lexeme[i]);
+      emit(0);
       EXPECT(TOK_STRING);
     } else {
       if (!expression()) return 0;
-      emit('.');                   // print number
+      emit('.');
     }
-    emit('N');                     // newline
+    emit('N');
     EXPECT(TOK_RPAREN);
     EXPECT(TOK_SEMI);
   }
-
-  // FOR var := low TO high DO statement
-  // Jump encoding used by the embedded interpreter:
-  //   Jf <delta>   – conditional forward jump (taken when acc > 0)
-  //   Jb <delta>   – unconditional backward jump
-  // These are two-byte opcodes so the relative distance is easy to compute.
+  // FOR
   else if (curr_tok.type == TOK_FOR) {
     char ctrl_name[MAX_SYM_LEN + 1];
-    int ctrl_addr = -1;
-    int high_slot;
-    int loop_start;
-    int exit_patch;
-    int i;
+    int high_slot, loop_start, exit_patch;
+    Symbol* ctrl;
 
     EXPECT(TOK_FOR);
-
     if (curr_tok.type != TOK_IDENT) {
-      printf("\n%s <---- ERROR: Expected control variable after FOR\n", curr_tok.lexeme);
+      printf("\nERROR: expected control variable\n");
       longjmp(fail_jmp, 1);
     }
     strcpy(ctrl_name, curr_tok.lexeme);
-    for (i = nsym - 1; i >= 0; i--) {
-      if (strcmp(syms[i].name, ctrl_name) == 0 && syms[i].type == SYM_VAR) {
-        ctrl_addr = syms[i].address;
-        break;
-      }
-    }
-    if (ctrl_addr == -1) {
-      printf("\n%s <---- ERROR: Undeclared FOR control variable\n", ctrl_name);
+    ctrl = lookup_sym(ctrl_name);
+    if (!ctrl || ctrl->type != SYM_VAR) {
+      printf("\n%s <---- ERROR: undeclared control variable\n", ctrl_name);
       longjmp(fail_jmp, 1);
     }
     EXPECT(TOK_IDENT);
     EXPECT(TOK_ASSIGN);
 
-    // low → control var
     if (!expression()) return 0;
-    emit_op_par('S', (unsigned char)ctrl_addr);
+    emit2('S', ctrl->address);
 
     EXPECT(TOK_TO);
-
-    // high → private temp slot
-    high_slot = alloc_slot();
+    high_slot = alloc_temp();
     if (!expression()) return 0;
-    emit_op_par('S', (unsigned char)high_slot);
+    emit2('S', high_slot);
 
     EXPECT(TOK_DO);
-
     loop_start = bin_ptr;
 
-    // test: acc = ctrl - high ;  if (acc > 0) goto exit
-    emit_op_par('L', (unsigned char)ctrl_addr);
-    emit_op_par('-', (unsigned char)high_slot);
-
-    // Jf <delta>  (patched after body)
+    // test: acc = ctrl - high;  if (acc > 0) exit
+    emit2('L', ctrl->address);
+    emit2('-', high_slot);
     exit_patch = bin_ptr;
-    emit('g'); emit('f'); emit(0);          // placeholder delta
+    emit('g'); emit('f'); emit(0);          // placeholder
 
-    // body
     if (!statement()) return 0;
 
-    // increment control variable
-    emit_op_par('L', (unsigned char)ctrl_addr);
+    // increment
+    emit2('L', ctrl->address);
     emit('I');
-    emit_op_par('S', (unsigned char)ctrl_addr);
+    emit2('S', ctrl->address);
 
-    // Jb <delta>  back to loop_start
+    // backward jump
     {
-      int delta = bin_ptr + 3 - loop_start;   // distance from after this instr
+      int delta = (bin_ptr + 3) - loop_start;
       if (delta > 255) {
-        printf("\nFOR loop body too large for relative jump\n");
+        printf("\nFOR body too large\n");
         longjmp(fail_jmp, 1);
       }
       emit('g'); emit('b'); emit((char)delta);
     }
-
-    // patch the forward exit jump
+    // patch forward exit
     {
       int delta = bin_ptr - (exit_patch + 3);
-      if (delta > 255) {
-        printf("\nFOR exit jump too far\n");
-        longjmp(fail_jmp, 1);
-      }
       bin[exit_patch + 2] = (char)delta;
     }
   }
-
   else {
-    printf("\n%s <---- ERROR: Expected statement (ident, WRITELN or FOR)\n",
-           curr_tok.lexeme);
+    printf("\n%s <---- ERROR: expected statement\n", curr_tok.lexeme);
     longjmp(fail_jmp, 1);
   }
-
   return 1;
 }
 
 // ---------------------------------------------------------------------------
-// Top-level compile
+// Compile a whole function (called from the declaration loop)
+// Layout of a function frame (allocated from FRAME_BASE upward):
+//   ret_addr_slot
+//   ret_val_slot
+//   param_slot          (single argument for now)
+//   … possible locals later
+// The vector entry points at the first instruction of the body.
 // ---------------------------------------------------------------------------
-int compile_pipeline(void) {
-  SymbolType stype;
-  int symbol_lookup_address;
-  int last_assigned_var_offset = -1;
-
+void compile_function(void) {
   char func_name[MAX_SYM_LEN + 1];
   char param_name[MAX_SYM_LEN + 1];
-  int func_param_slot;
-  int func_ret_slot;
+  int ret_addr_slot, ret_val_slot, param_slot;
+  int entry_offset, vec_idx;
+  Symbol* fsym;
+
+  // FUNCTION name (
+  next_token();                       // consume FUNCTION
+  strcpy(func_name, curr_tok.lexeme);
+  EXPECT(TOK_IDENT);
+  EXPECT(TOK_LPAREN);
+
+  // allocate the three fixed frame slots
+  ret_addr_slot = alloc_frame_slot();
+  ret_val_slot  = alloc_frame_slot();
+  param_slot    = alloc_frame_slot();
+
+  // param : INTEGER
+  strcpy(param_name, curr_tok.lexeme);
+  add_symbol(param_name, SYM_VAR, param_slot);
+  EXPECT(TOK_IDENT);
+  EXPECT(TOK_COLON);
+  EXPECT(TOK_INTEGER);
+  EXPECT(TOK_RPAREN);
+  EXPECT(TOK_COLON);
+  EXPECT(TOK_INTEGER);
+  EXPECT(TOK_SEMI);
+
+  // register the function symbol (vector index filled in a moment)
+  add_symbol(func_name, SYM_FUNC, 0);   // temporary
+  fsym = lookup_sym(func_name);
+  fsym->param_slot    = param_slot;
+  fsym->ret_slot      = ret_val_slot;
+  fsym->ret_addr_slot = ret_addr_slot;
+
+  // Also expose the function name as a variable that writes the return slot
+  // (classic Pascal:  FuncName := expression;  )
+  add_symbol(func_name, SYM_VAR, ret_val_slot);
+
+  // BEGIN
+  EXPECT(TOK_BEGIN);
+
+  // the entry point is right here
+  entry_offset = bin_ptr;
+  vec_idx = add_vector(entry_offset);
+  fsym->address = vec_idx;              // now the symbol holds the vector index
+
+  // body
+  while (curr_tok.type != TOK_END && curr_tok.type != TOK_EOF) {
+    if (!statement()) longjmp(fail_jmp, 1);
+  }
+  EXPECT(TOK_END);
+  EXPECT(TOK_SEMI);
+
+  // return sequence:
+
+  //   (the last assignment to the function name already stored the
+  //    result into ret_val_slot because we also registered the
+  //    function name as a variable pointing at that slot – see below)
+  //    For the alpha version we simply emit a special return opcode
+  //    'r' that the interpreter understands as “pop return address
+  //    and jump”.  Before that we make sure the return value is in
+  //    the ret_val slot.  (If the programmer wrote name := expr it
+  //    already did the store.)
+  emit('r');                            // return
+}
+
+// ---------------------------------------------------------------------------
+// Top-level compilation
+// ---------------------------------------------------------------------------
+int compile_pipeline(void) {
+  int last_var_slot = -1;
+  int main_entry_patch;
 
   src_pos = -1;
   NEXT;
   lnum = 1;
-  last_lnum = 0;
   bin_ptr = 0;
   nsym = 0;
-  next_slot = 16;
+  nconst = 0;
+  nvector = 0;
+  npatch = 0;
+  next_global = 0;
+  next_frame  = FRAME_BASE;
+  memset(slot_used, 0, sizeof(slot_used));
   memset(mem, 0, sizeof(mem));
 
-  // Implicit "X" variable (kept for compatibility with tp.c)
-  add_symbol("X", SYM_VAR, alloc_slot());
+  // Absolute jump to main (patched once we know the offset)
+  // Encoding:  'G'  <lo> <hi>
+  emit('G');
+  main_entry_patch = bin_ptr;
+  emit(0); emit(0);
 
-  // PROGRAM name ;
+  // implicit X (global)
+  {
+    int xslot = alloc_global();
+    add_symbol("X", SYM_VAR, xslot);
+  }
+
   next_token();
   EXPECT(TOK_PROGRAM);
   EXPECT(TOK_IDENT);
   EXPECT(TOK_SEMI);
 
-  // VAR / FUNCTION declarations
+  // declarations
   while (curr_tok.type == TOK_VAR || curr_tok.type == TOK_FUNCTION) {
     if (curr_tok.type == TOK_VAR) {
       next_token();
       while (curr_tok.type == TOK_IDENT) {
-        int slot = alloc_slot();
+        int slot = alloc_global();
         add_symbol(curr_tok.lexeme, SYM_VAR, slot);
-        last_assigned_var_offset = slot;
+        last_var_slot = slot;
         EXPECT(TOK_IDENT);
         EXPECT(TOK_COLON);
         EXPECT(TOK_INTEGER);
         EXPECT(TOK_SEMI);
       }
     }
-    else if (curr_tok.type == TOK_FUNCTION) {
-      // Minimal support – allocate slots, but call/return still TODO
-      next_token();
-      strcpy(func_name, curr_tok.lexeme);
-      func_param_slot = alloc_slot();
-      func_ret_slot   = alloc_slot();
-
-      EXPECT(TOK_IDENT);
-      EXPECT(TOK_LPAREN);
-      strcpy(param_name, curr_tok.lexeme);
-      add_symbol(param_name, SYM_VAR, func_param_slot);
-      EXPECT(TOK_IDENT);
-      EXPECT(TOK_COLON);
-      EXPECT(TOK_INTEGER);
-      EXPECT(TOK_RPAREN);
-      EXPECT(TOK_COLON);
-      EXPECT(TOK_INTEGER);
-      EXPECT(TOK_SEMI);
-
-      add_symbol(func_name, SYM_VAR, func_ret_slot); // return value slot
-      // Real function body would be emitted here and registered as a vector.
-      // For the alpha version we just parse the body and ignore it for now.
-      EXPECT(TOK_BEGIN);
-      while (curr_tok.type != TOK_END && curr_tok.type != TOK_EOF) {
-        if (!statement()) return 0;
-      }
-      EXPECT(TOK_END);
-      EXPECT(TOK_SEMI);
-      add_symbol(func_name, SYM_FUNC, 0); // placeholder
+    else { // FUNCTION
+      compile_function();
     }
   }
 
-  // MAIN BEGIN ... END .
+  // main program
   EXPECT(TOK_BEGIN);
 
-  // Optional: store the incoming X parameter (slot already allocated)
-  if (lookup_symbol("X", &stype, &symbol_lookup_address) != -1) {
-    // On a real IVM we would receive the parameter in acc.
-    // For the host runner we initialise it ourselves.
+  // patch the initial jump so it lands here
+  {
+    int main_off = bin_ptr;
+    bin[main_entry_patch]     = main_off & 0xFF;
+    bin[main_entry_patch + 1] = (main_off >> 8) & 0xFF;
   }
 
   while (curr_tok.type != TOK_END && curr_tok.type != TOK_EOF) {
     if (!statement()) return 0;
   }
-
   EXPECT(TOK_END);
   EXPECT(TOK_DOT);
 
-  // Leave last assigned variable in acc (mirrors tp.c behaviour)
-  if (last_assigned_var_offset != -1)
-    emit_op_par('L', (unsigned char)last_assigned_var_offset);
+  // leave last global in acc (compatibility)
+  if (last_var_slot >= 0)
+    emit2('L', last_var_slot);
 
-  emit(0);                         // stop
+  emit(0);                              // halt
   return 1;
 }
 
 // ---------------------------------------------------------------------------
-// Minimal IVM interpreter (host side) – enough to run the generated code
+// Final layout: copy constants into mem[0x80..] and apply any patches
+// ---------------------------------------------------------------------------
+void finalise(void) {
+  int i;
+  // Constants live at logical addresses 0x80 + idx.
+  // At runtime the interpreter treats an argument byte with the high bit set
+  // as a constant-pool index.
+  for (i = 0; i < nconst; i++)
+    mem[0x80 + i] = const_pool[i];
+
+  // (Future: write the vector table into the program image, relocate, etc.)
+  // For the host runner the vectors[] array is already sufficient.
+}
+
+// ---------------------------------------------------------------------------
+// Host-side IVM interpreter
 // ---------------------------------------------------------------------------
 void run_ivm(void) {
   char *ipc = bin;
   unsigned int acc = 0;
-  char op;
+  char *return_stack[32];
+  int rsp = 0;
 
-  printf("--- RUN IVM (%d bytes) ---\n", bin_ptr);
+  printf("--- RUN IVM (%d bytes, %d vectors, %d consts) ---\n",
+    bin_ptr, nvector, nconst);
 
   while (1) {
-    op = *ipc++;
-    if (op == 0) break;            // end of program
+    char op = *ipc++;
+    if (op == 0) break;
 
-    // Parameter-taking ops
+    // parameter-taking ordinary ops
     if (op == '+' || op == '-' || op == '*' || op == '/' ||
         op == '&' || op == '|' || op == '^' ||
         op == 'L' || op == 'S') {
-      unsigned char slot = (unsigned char)*ipc++;
+      char arg = *ipc++;
+      unsigned int *cell;
+      // WHY???
+      if (arg & 0x80)                     // constant pool
+        cell = &mem[arg];                 // already placed at 0x80+idx
+      else
+        cell = &mem[arg];
+
       switch (op) {
-        case '+': acc += mem[slot]; break;
-        case '-': acc -= mem[slot]; break;
-        case '*': acc *= mem[slot]; break;
-        case '/': if (mem[slot]) acc /= mem[slot]; break;
-        case '&': acc &= mem[slot]; break;
-        case '|': acc |= mem[slot]; break;
-        case '^': acc ^= mem[slot]; break;
-        case 'L': acc  = mem[slot]; break;
-        case 'S': mem[slot] = acc;  break;
+        case '+': acc += *cell; break;
+        case '-': acc -= *cell; break;
+        case '*': acc *= *cell; break;
+        case '/': if (*cell) acc /= *cell; break;
+        case '&': acc &= *cell; break;
+        case '|': acc |= *cell; break;
+        case '^': acc ^= *cell; break;
+        case 'L': acc  = *cell; break;
+        case 'S': *cell = acc;  break;
       }
       continue;
     }
 
-    // No-parameter ops
+    // vectorised call  0xC0 .. 0xFF
+    if (op >= 0xC0) {
+      int vec = op - 0xC0;
+      if (vec >= nvector) {
+        printf("\n[IVM] bad vector %d\n", vec);
+        return;
+      }
+      if (rsp >= 31) {
+        printf("\n[IVM] return stack overflow\n");
+        return;
+      }
+      return_stack[rsp++] = ipc;          // save return address
+      ipc = bin + vectors[vec];           // jump to function entry
+      continue;
+    }
+
+    // ordinary no-arg ops + our extensions
     switch (op) {
-      case ' ': break;             // nop
+      case ' ': break;
       case '0': acc = 0; break;
-      case '9': acc = (unsigned int)-1; break;
+      case '9': acc = 0xffff; break;
       case 'I': ++acc; break;
       case 'J': --acc; break;
       case '~': acc = ~acc; break;
       case '.': printf("%u", acc); break;
       case 'N': putchar('\n'); break;
       case 'E': putchar((char)acc); break;
-      case '"':                    // inline string
+      case '"':
         while (*ipc) putchar(*ipc++);
-        ipc++;                     // skip the terminating 0
+        ipc++;
         break;
-
-      case 'g': {                  // two-byte relative jumps  gf / gb
+      case 'r':                           // return from function
+        if (rsp <= 0) {
+          printf("\n[IVM] return stack underflow\n");
+          return;
+        }
+        ipc = return_stack[--rsp];
+        break;
+      case 'G': {                         // absolute goto  <lo> <hi>
+        char lo = *ipc++;
+        char hi = *ipc++;
+        ipc = bin + (lo | (hi << 8));
+        break;
+      }
+      case 'g': {                         // relative jumps gf / gb
         char kind = *ipc++;
-        unsigned char delta = (unsigned char)*ipc++;
-        if (kind == 'f') {         // conditional forward (taken if acc > 0)
-          if ((int)acc > 0)
-            ipc += delta;
-        } else if (kind == 'b') {  // unconditional backward
+        char delta = *ipc++;
+        if (kind == 'f') {
+          if ((int)acc > 0) ipc += delta;
+        } else if (kind == 'b') {
           ipc -= delta;
         } else {
-          printf("\n[IVM] unknown jump kind '%c'\n", kind);
+          printf("\n[IVM] bad jump kind '%c'\n", kind);
           return;
         }
         break;
       }
       default:
-        printf("\n[IVM] unknown opcode 0x%02X ('%c')\n",
-               (unsigned char)op, isprint(op) ? op : '?');
+        printf("\n[IVM] unknown opcode 0x%02X\n", op);
         return;
     }
   }
@@ -675,45 +849,88 @@ void run_ivm(void) {
 }
 
 // ---------------------------------------------------------------------------
-// Debug dump of generated bytecode
-// ---------------------------------------------------------------------------
+#ifdef TPDUMP
 void dump_bytecode(void) {
-  int i;
-  printf("\n--- GENERATED BYTECODE (%d bytes) ---\n", bin_ptr);
-  for (i = 0; i < bin_ptr; i++) {
+  int i= 0, n= 0, wrap= 10;
+  printf("\n--- BYTECODE (%d bytes) ---\n", bin_ptr);
+  for (; i < bin_ptr; i++) {
     char c = bin[i];
-    if (c == 0) printf("\\0 ");
-    else if (isprint(c) && c != ' ') printf("%c ", c);
-    else printf("%02X ", (unsigned char)c);
-    if ((i + 1) % 32 == 0) printf("\n");
+    if      (c == 0)    printf("\\0  ");
+    else if (c >= 0xC0) printf("V%02x ", c - 0xC0);
+    else if (c >= 0x80) printf("J%02x ", c - 0x80);
+    else if (c == ' ')  printf("_   ", c);
+    else if (c == '"') {
+      putchar('\n'); do putchar(c); while((c=bin[++i]));
+      printf("\\0\n"); n= 0; }
+    else if (isprint(c) && c > ' ') {
+      // single byte ops
+      if (strchr("#$(),.0123456789;<=>?ADEKNPRU~", c)
+        || islower(c))
+        printf("%c   ", c);
+      else // takes at least one arg
+        printf("%c%02x ", c, bin[++i]);
+    }
+    else printf("$%02x ", c);
+    if (++n == wrap) { printf("\n"); n= 0; }
   }
-  printf("\n------------------------------------\n\n");
+
+  if (nvector) {
+    printf("\n\n--- Vectors:\n");
+    for (i = 0; i < nvector; i++)
+      printf("  V%02x → offset %d\n", i, vectors[i]);
+  }
+
+  if (nvector) {
+    printf("\n--- Symbols:\n");
+    for (i = 0; i < nsym; i++) {
+      Symbol *s = syms + i;
+      printf("   %2d @ %02x (%02x) =>%02x Ret:%02x :: %s\n", i, s->address,
+        s->param_slot, s->ret_slot, s->ret_addr_slot,
+        s->name);
+    }
+  }
+
+  if (nconst) {
+    printf("--- Constants:\n");
+    for (i = 0; i < nconst; i++)
+      printf("  C%02x =%5d ($%04x)\n", 0x80 + i, const_pool[i], const_pool[i]);
+  }
+
+  printf("---------------------------\n\n");
 }
+#else
+#define dump_bytecode() (void)0
+#endif // TPDUMP
 
 // ---------------------------------------------------------------------------
 int main(void) {
-  int ch;
-  int buf_idx = 0;
+  int ch, buf_idx = 0;
 
+  // READ whole "file"
   memset(src_buf, 0, MAX_SRC_LEN);
   while ((ch = getchar()) != EOF && ch != 0xff && buf_idx < MAX_SRC_LEN - 1)
     src_buf[buf_idx++] = (char)ch;
   src_buf[buf_idx] = 0;
-
   if (!buf_idx) return 0;
 
+  // COMPILE
   if (setjmp(fail_jmp) || !compile_pipeline()) {
+    // ERROR: show line
     unsigned int err_pos = src_pos;
-    printf(">> FAIL on line:\n\n%d: ", lnum);
+    printf(">> FAIL on line %d:\n", lnum);
     src_pos = cur_line;
     do {
-      if (src_pos == err_pos) printf(" <<<---ERROR--- ");
+      if (src_pos == err_pos) printf(" <<<ERROR<<< ");
       putchar(NEXT);
     } while (C && C != '\n');
+    putchar('\n');
     return 1;
   }
 
+  finalise();
   dump_bytecode();
+
   run_ivm();
+
   return 0;
 }
