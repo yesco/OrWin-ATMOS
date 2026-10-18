@@ -1,4 +1,5 @@
-{ Test program generates 574 bytes }
+{ asm: Test program generates 574 bytes }
+{ ivm: Test program generates 167 bytes }
 { asm: 1000: (/ (- 1418227 1290832) 1000) =  127c/loop }
 { ivm: 1000: (/ (- 6678940 2332536) 1000) = 4346c/loop }
 { ivm/asm = (/ 4346 127) = 34x slower, lol             }
