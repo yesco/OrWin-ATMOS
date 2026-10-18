@@ -1,0 +1,9 @@
+cl65 -Oirs -t sim6502 -m tpi.map -o tpi.sim tpi.c && sim65 -c tpi.sim
+echo
+ls -l tpi.sim
+wc tpi.c
+echo
+echo "=== tpi.c: `./wcode tpi.c` LOC ===" 
+
+
+

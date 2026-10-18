@@ -1,5 +1,7 @@
 { Test program generates 574 bytes }
-{ 1000: (/ (- 1418227 1290832) 1000) = 127c/loop }
+{ asm: 1000: (/ (- 1418227 1290832) 1000) =  127c/loop }
+{ ivm: 1000: (/ (- 6678940 2332536) 1000) = 4346c/loop }
+{ ivm/asm = (/ 4346 127) = 34x slower, lol             }
 
 program ShowcaseSuite;
 
@@ -37,7 +39,7 @@ begin
    
   { Test Case 5: looping sum - 130c / loop}
   sum:= 0;
-  for i:=1 to 1 do sum:= sum + i;
+  for i:=1 to 1000 do sum:= sum + i;
   writeln("Sum:"); writeln(sum);
 
   writeln("Magitcal injected input parameter X="); writeln(X); { is 42 }
