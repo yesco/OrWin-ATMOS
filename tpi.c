@@ -17,6 +17,22 @@
 // f) Patch list of program offsets that need final fix-ups
 // g) Vectorised calls use opcodes 192-255 (0xC0-0xFF)
 
+
+// asm: Test program generates 574 bytes
+// ivm: Test program generates 167 bytes
+// asm: 1000: (/ (- 1418227 1290832) 1000) =  127c/loop
+
+// ivm: 1000: (/ (- 9734015 3970047) 1000) = 5763c/loop
+// ivm/asm = (/ 5763 127) = 45x slower, lol            
+
+// ivm: 1000: (/ (- 6142119 3989127) 1000) = 2152 start
+// ivm/asm = (/ 2152 127) = 16x slower, but improved 3x!
+
+// - moving a print out... lolshoulnd' ffect any 
+// ivm: 1000: (/ (- 6150038 3985079) 1000) = 2164 start
+//                  
+
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -793,21 +809,21 @@ void finalise(void) {
 // ---------------------------------------------------------------------------
 // Host-side IVM interpreter
 // ---------------------------------------------------------------------------
-void run_ivm(void) {
+
+unsigned int run_ivm(void) {
   // Classic single-switch + goto dispatch (ivm.c style).
   // - opcode 0   = halt (program end) — no explicit pre-test in the loop
   // - opcode ';' = return from function (following byte = slot with return IP)
   // - parameter ops use PAR then goto pnext (pnext skips the arg byte)
   // - zero-arg ops goto next
+
+  // faster than ZP?
   register char *ipc;
   register unsigned int acc;
   register unsigned char op;
 
   ipc = bin;
   acc = 0;
-
-  printf("--- RUN IVM (%d bytes, %d vectors, %d consts) ---\n",
-    bin_ptr, nvector, nconst);
 
   // PAR = memory cell addressed by the byte currently at ipc (not consumed yet)
 #define PAR mem[(unsigned char)(*ipc)]
@@ -884,18 +900,16 @@ void run_ivm(void) {
       int vec = op - 0xC0;
       if (vec >= nvector) {
         printf("\n[IVM] bad vector %d\n", vec);
-        return;
+        longjmp(fail_jmp, 1);
       }
       ipc = bin + vectors[vec];
       goto next;
     }
     printf("\n[IVM] unknown opcode 0x%02X\n", op);
-    return;
   }
 
  done:
-  printf("--- END ---\n");
-  printf("acc = %u\n", acc);
+  return acc;
 #undef PAR
 }
 
@@ -954,7 +968,7 @@ void dump_bytecode(void) {
 
 // ---------------------------------------------------------------------------
 int main(void) {
-  int ch, buf_idx = 0;
+  int ch, ret, buf_idx = 0;
 
   // READ whole "file"
   memset(src_buf, 0, MAX_SRC_LEN);
@@ -977,10 +991,18 @@ int main(void) {
     return 1;
   }
 
+  // "LOAD"
   finalise();
   dump_bytecode();
 
-  run_ivm();
+  // RUN
+  printf("--- RUN IVM (%d bytes, %d vectors, %d consts) ---\n",
+    bin_ptr, nvector, nconst);
+
+  ret= run_ivm();
+
+  printf("--- END ---\n");
+  printf("acc = %u\n", ret);
 
   return 0;
 }

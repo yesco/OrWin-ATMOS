@@ -8,6 +8,8 @@
 { ivm: 1000: (/ (- 6069944 3947071) 1000) = 2122c/loop  }
 { ivm/asm = (/ 2122 127) = 16x slower, but improved 3x! }
 
+{ ivm: 1000: (/ (- 6613215 3947071) 1000) = 2666c/loop  }
+
 Program ShowcaseSuite;
 
 { TODO: do function var names hide/obstruct lgobals? }
