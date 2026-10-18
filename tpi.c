@@ -86,7 +86,7 @@
 typedef enum {
   TOK_EOF, TOK_ERROR, TOK_PROGRAM, TOK_VAR, TOK_BEGIN, TOK_END,
   TOK_INTEGER, TOK_IDENT, TOK_NUM, TOK_ASSIGN, TOK_SEMI,
-  TOK_COLON, TOK_PLUS, TOK_DOT, TOK_WRITE, TOK_STRING,
+  TOK_COLON, TOK_PLUS, TOK_MINUS, TOK_DOT, TOK_WRITE, TOK_STRING,
   TOK_LPAREN, TOK_RPAREN, TOK_FUNCTION,
   TOK_FOR, TOK_TO, TOK_DO, TOK_COMMA
 } TokenType;
@@ -94,7 +94,7 @@ typedef enum {
 const char* TOKEN_NAMES[] = {
   "EOF", "ERROR", "PROGRAM", "VAR", "BEGIN", "END",
   "INTEGER", "IDENT", "NUM", "ASSIGN", "SEMI", "COLON",
-  "PLUS", "DOT", "WRITELN", "STRING", "LPAREN", "RPAREN", "FUNCTION",
+  "PLUS", "MINUS", "DOT", "WRITELN", "STRING", "LPAREN", "RPAREN", "FUNCTION",
   "FOR", "TO", "DO", "COMMA"
 };
 
@@ -193,6 +193,7 @@ char slot_used[MAX_SLOTS]; // allocation map
 int next_global = 0; // next candidate in 0-31
 int next_frame  = FRAME_BASE; // next candidate from 32
 
+// TODO: char
 int alloc_global(void) {
   // Prefer 0-31; if exhausted continue from next_frame, skipping used slots
   while (next_global < GLOBAL_LIMIT) {
@@ -215,6 +216,7 @@ int alloc_global(void) {
   return -1;
 }
 
+// TODO: char
 int alloc_frame_slot(void) {
   while (next_frame < MAX_SLOTS) {
     if (!slot_used[next_frame]) {
@@ -229,6 +231,8 @@ int alloc_frame_slot(void) {
 }
 
 // Temporaries for expression evaluation also come from the frame area
+
+// TODO: char
 int alloc_temp(void) {
   return alloc_frame_slot();
 }
@@ -465,6 +469,7 @@ void next_token(void) {
     case ';': curr_tok.type = TOK_SEMI; break;
     case ':': curr_tok.type = TOK_COLON; break;
     case '+': curr_tok.type = TOK_PLUS; break;
+    case '-': curr_tok.type = TOK_MINUS; break;
     case '.': curr_tok.type = TOK_DOT; break;
     case '(': curr_tok.type = TOK_LPAREN; break;
     case ')': curr_tok.type = TOK_RPAREN; break;
@@ -603,42 +608,54 @@ int primary(char *out_kind, unsigned int *out_val) {
 int expression(void) {
   char left_kind, right_kind;
   unsigned int left_val, right_val;
+  char op;
 
   if (!primary(&left_kind, &left_val)) return 0;
 
-  while (curr_tok.type == TOK_PLUS) {
+  while (curr_tok.type == TOK_PLUS || curr_tok.type == TOK_MINUS) {
+    op = (curr_tok.type == TOK_MINUS) ? '-' : '+';
     next_token();
 
-    // Left in ACC would be killed by RHS (calls etc.) — spill first
+    // Spill a left-hand function result before evaluating the RHS.
     if (left_kind == OP_ACC) {
       int tmp = alloc_temp();
-      emit2('S', tmp);
+      emit2('S', (char)tmp);
       left_kind = OP_MEM;
       left_val = (unsigned int)(unsigned char)tmp;
     }
 
     if (!primary(&right_kind, &right_val)) return 0;
 
-    // IMM+IMM fold
+    // Constant folding.
     if (left_kind == OP_IMM && right_kind == OP_IMM) {
-      left_val = left_val + right_val;
+      if (op == '-')
+        left_val -= right_val;
+      else
+        left_val += right_val;
       continue;
     }
 
-    // right in ACC (call as RHS): ACC += left → spill right, load left, +spill
+    // A function call on the right returns its value in ACC.
+    // Spill it, restore the left operand, then apply the operator.
     if (right_kind == OP_ACC) {
       int tmp = alloc_temp();
-      emit2('S', tmp);
+      emit2('S', (char)tmp);
       force_acc(left_kind, left_val);
-      emit2('+', tmp);
+      emit2(op, (char)tmp);
       left_kind = OP_ACC;
       left_val = 0;
       continue;
     }
 
-    // left MEM/IMM, right MEM/IMM (or left was spilled to MEM)
     force_acc(left_kind, left_val);
-    emit_add_to_acc(right_kind, right_val);
+
+    if (op == '-')
+      emit2('-', (char)(right_kind == OP_MEM
+        ? right_val
+        : (0x80 | (add_const(right_val) & 0x7F))));
+    else
+      emit_add_to_acc(right_kind, right_val);
+
     left_kind = OP_ACC;
     left_val = 0;
   }
