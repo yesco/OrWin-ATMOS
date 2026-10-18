@@ -3,7 +3,7 @@
 // Notice:
 //  1) needs to follow c89 so can compie on cc65
 //  2) only define varaibles at start of { scope
-//  3) use // comment - do NOT: /* no no no */
+//  3) use // comment - do NOT: // no no no
 //  4) don't change any lines if not needed
 //  5) char is unsigned on cc65 & oscar64 & clang
 
@@ -48,6 +48,11 @@
 // ivm: 1000: (/ (- 5201162 3311988) 1000) = 1889 start
 //  => same speed
 
+// - optimize operator apply
+// ivm: 1000: (/ (- 4791507 3247259) 1000) = 1544 start
+// ivm/asm = (/ 1544 127.0) = 12.16x ... 18% faster!
+//  => same speed => 225 => 211 bytesp (/ 211 239.0) ... 12% smaller
+
 #include <stdio.h>
 #include <stddef.h>
 #include <stdlib.h>
@@ -64,11 +69,11 @@
 #define MAX_SYMBOLS   64
 #define MAX_SLOTS     256
 #define MAX_CONSTS    64
-#define MAX_VECTORS   64          // opcodes 0xC0 .. 0xFF
+#define MAX_VECTORS   64 // opcodes 0xC0 .. 0xFF
 #define MAX_PATCHES   128
-#define MAX_PARAMS    4           // max arguments per function
-#define GLOBAL_LIMIT  32          // preferred global area 0-31
-#define FRAME_BASE    32          // frames start here
+#define MAX_PARAMS    4 // max arguments per function
+#define GLOBAL_LIMIT  32 // preferred global area 0-31
+#define FRAME_BASE    32 // frames start here
 
 // ---------------------------------------------------------------------------
 // Tokens
@@ -122,13 +127,27 @@ char bin[MAX_BIN_LEN];
 int bin_ptr = 0;
 
 typedef struct {
-  int offset;          // location inside bin[] that needs a value
-  int kind;            // 0 = const index, 1 = vector index, …
-  int value;           // the value to write (or index)
+  int offset; // location inside bin[] that needs a value
+  int kind; // 0 = const index, 1 = vector index, …
+  int value; // the value to write (or index)
 } Patch;
 
 Patch patches[MAX_PATCHES];
 int npatch = 0;
+
+// ACC mirror: which mem slot ACC currently holds (-1 = none/unknown)
+char acc_slot;
+char acc_valid;
+
+void acc_invalidate(void) {
+  acc_valid = 0;
+  acc_slot = (char)-1;
+}
+
+void acc_set_slot(char slot) {
+  acc_slot = slot;
+  acc_valid = 1;
+}
 
 void emit(char c) {
   if (bin_ptr >= MAX_BIN_LEN - 1) {
@@ -136,11 +155,18 @@ void emit(char c) {
     longjmp(fail_jmp, 1);
   }
   bin[bin_ptr++] = c;
+  if (c == 'I' || c == 'J' || c == '0' || c == '9' || c == '~')
+    acc_invalidate();
 }
 
 void emit2(char op, char arg) {
   emit(op);
   emit((char)arg);
+  if (op == 'S' || op == 'L')
+    acc_set_slot((char)arg);
+  else if (op == '+' || op == '-' || op == '*' || op == '/' ||
+           op == '&' || op == '|' || op == '^')
+    acc_invalidate();
 }
 
 void add_patch(int offset, int kind, int value) {
@@ -157,10 +183,10 @@ void add_patch(int offset, int kind, int value) {
 // ---------------------------------------------------------------------------
 // Slot allocation (globals 0-31, frames from 32)
 // ---------------------------------------------------------------------------
-unsigned int mem[MAX_SLOTS];          // runtime memory
-char slot_used[MAX_SLOTS];            // allocation map
-int next_global = 0;                  // next candidate in 0-31
-int next_frame  = FRAME_BASE;         // next candidate from 32
+unsigned int mem[MAX_SLOTS]; // runtime memory
+char slot_used[MAX_SLOTS]; // allocation map
+int next_global = 0; // next candidate in 0-31
+int next_frame  = FRAME_BASE; // next candidate from 32
 
 int alloc_global(void) {
   // Prefer 0-31; if exhausted continue from next_frame, skipping used slots
@@ -233,16 +259,16 @@ void emit_load_const(unsigned int v) {
 // ---------------------------------------------------------------------------
 // Vectors (function entry points)
 // ---------------------------------------------------------------------------
-int vectors[MAX_VECTORS];             // bytecode offset during compile
-char *vptr[MAX_VECTORS];              // resolved absolute pointers (finalise)
-char vec_link[MAX_VECTORS];           // mem slot: return NEXT (ipc) per function
-char vec_val[MAX_VECTORS];            // mem slot: return VALUE per function
+int vectors[MAX_VECTORS]; // bytecode offset during compile
+char *vptr[MAX_VECTORS]; // resolved absolute pointers (finalise)
+char vec_link[MAX_VECTORS]; // mem slot: return NEXT (ipc) per function
+char vec_val[MAX_VECTORS]; // mem slot: return VALUE per function
 int nvector = 0;
 int main_offset = 0;
 char *main_entry = 0;
 char is_code_addr[MAX_CONSTS];
 
-/* threaded call chain: which function is active (0xFF = main) */
+// threaded call chain: which function is active (0xFF = main)
 #define MAX_CALL_DEPTH 8
 #define FUNC_MAIN      ((char)0xFF)
 char cur_func; // TODO: maybe register
@@ -266,11 +292,11 @@ typedef enum { SYM_VAR, SYM_FUNC } SymbolType;
 typedef struct {
   char name[MAX_SYM_LEN + 1];
   SymbolType type;
-  char address;          // slot number (var) or vector index (func)
-  char nparams;          // number of parameters
+  char address; // slot number (var) or vector index (func)
+  char nparams; // number of parameters
   char param_slot[MAX_PARAMS]; // slots for each parameter
-  char ret_slot;         // for functions: slot of the return value
-  char ret_addr_slot;    // for functions: slot that holds return ipc
+  char ret_slot; // for functions: slot of the return value
+  char ret_addr_slot; // for functions: slot that holds return ipc
 } Symbol;
 
 Symbol syms[MAX_SYMBOLS];
@@ -430,30 +456,78 @@ void expect(TokenType expected) {
 }
 
 // ---------------------------------------------------------------------------
-// Expression → result in acc
+// Operand descriptors (in-situ codegen, no peephole pass)
+// kind: 0=ACC 1=MEM 2=IMM
+// Passed as pointers — cc65 cannot pass struct by value reliably
 // ---------------------------------------------------------------------------
-int expression(void) {
+#define OP_ACC 0
+#define OP_MEM 1
+#define OP_IMM 2
+
+typedef struct {
+  char kind;
+  unsigned int val; // slot if MEM, constant if IMM
+} Operand;
+
+void force_acc(Operand *o) {
+  int idx;
+  if (o->kind == OP_ACC)
+    return;
+  if (o->kind == OP_MEM) {
+    if (acc_valid && acc_slot == (char)o->val)
+      return;
+    emit2('L', (char)o->val);
+    return;
+  }
+  // OP_IMM
+  if (o->val == 0) { emit('0'); return; }
+  if (o->val == (unsigned int)-1) { emit('9'); return; }
+  idx = add_const(o->val);
+  emit('L');
+  emit((char)(0x80 | (idx & 0x7F)));
+  acc_invalidate();
+}
+
+void emit_add_to_acc(Operand *r) {
+  int idx;
+  char slot;
+  if (r->kind == OP_MEM) {
+    slot = (char)r->val;
+    // ACC already holds this slot's value (e.g. last param on entry, or
+    // val+val). +slot reads MEMORY; if we never spilled, mem can be stale
+    // or we still need a second copy — S first so +slot doubles correctly.
+    if (acc_valid && acc_slot == slot)
+      emit2('S', slot);
+    emit2('+', slot);
+    return;
+  }
+  if (r->kind == OP_IMM) {
+    if (r->val == 0) return;
+    idx = add_const(r->val);
+    emit2('+', (char)(0x80 | (idx & 0x7F)));
+    return;
+  }
+}
+
+int primary(Operand *out) {
   char name[MAX_SYM_LEN + 1];
+  Symbol *sym;
+  int i, pi;
 
   if (curr_tok.type == TOK_NUM) {
-    emit_load_const((unsigned int)curr_tok.value);
+    out->kind = OP_IMM;
+    out->val = (unsigned int)curr_tok.value;
     next_token();
+    return 1;
   }
-  else if (curr_tok.type == TOK_IDENT) {
-    Symbol* sym = NULL;
+
+  if (curr_tok.type == TOK_IDENT) {
+    sym = NULL;
     strcpy(name, curr_tok.lexeme);
-    // Peek: if next token will be '(', prefer the function symbol
-    {
-      int i;
-      int want_func = 0;
-      // crude peek at source for '(' after the identifier
-      // (the real next_token has not been called yet)
-      // Better: look up both and decide after seeing the next token.
-      for (i = nsym - 1; i >= 0; i--) {
-        if (strcmp(syms[i].name, name) == 0) {
-          if (syms[i].type == SYM_FUNC) { sym = &syms[i]; break; }
-          if (!sym) sym = &syms[i];   // keep first (most recent) var
-        }
+    for (i = nsym - 1; i >= 0; i--) {
+      if (strcmp(syms[i].name, name) == 0) {
+        if (syms[i].type == SYM_FUNC) { sym = &syms[i]; break; }
+        if (!sym) sym = &syms[i];
       }
     }
     if (!sym) {
@@ -462,9 +536,7 @@ int expression(void) {
     }
     next_token();
 
-    // If we found a var but the next token is '(', look again for a function
     if (sym->type == SYM_VAR && curr_tok.type == TOK_LPAREN) {
-      int i;
       for (i = nsym - 1; i >= 0; i--) {
         if (strcmp(syms[i].name, name) == 0 && syms[i].type == SYM_FUNC) {
           sym = &syms[i];
@@ -474,44 +546,80 @@ int expression(void) {
     }
 
     if (sym->type == SYM_FUNC) {
-      // 1. args → param slots  2. one-byte CALL
-      // ';' leaves return value in ACC — no L after call
-      int pi;
       EXPECT(TOK_LPAREN);
-
       for (pi = 0; pi < sym->nparams; pi++) {
         if (pi > 0) EXPECT(TOK_COMMA);
         if (!expression()) return 0;
         emit2('S', sym->param_slot[pi]);
+        // S leaves ACC holding last arg for callee
       }
       EXPECT(TOK_RPAREN);
-
       if (sym->address >= nvector) {
         printf("\nERROR: bad vector index for %s\n", name);
         longjmp(fail_jmp, 1);
       }
       emit((char)(0xC0 | (sym->address & 0x3F)));
+      acc_invalidate(); // return value in ACC, not a known slot
+      out->kind = OP_ACC;
+      out->val = 0;
+      return 1;
     }
-    else {
-      // ordinary variable
-      emit2('L', sym->address);
-    }
-  }
-  else {
-    printf("\n%s <---- ERROR: Expected expression\n", curr_tok.lexeme);
-    longjmp(fail_jmp, 1);
+
+    out->kind = OP_MEM;
+    out->val = (unsigned int)sym->address;
+    return 1;
   }
 
-  // binary +
-  if (curr_tok.type == TOK_PLUS) {
-    int tmp = alloc_temp();
+  printf("\n%s <---- ERROR: Expected expression\n", curr_tok.lexeme);
+  longjmp(fail_jmp, 1);
+  return 0;
+}
+
+// Expression → result in ACC
+int expression(void) {
+  Operand left, right;
+
+  if (!primary(&left)) return 0;
+
+  while (curr_tok.type == TOK_PLUS) {
     next_token();
-    emit2('S', tmp);   // save LHS
-    if (!expression()) return 0;            // RHS → acc
-    emit2('+', tmp);   // acc += mem[tmp]
+
+    // Left in ACC would be killed by RHS (calls etc.) — spill first
+    if (left.kind == OP_ACC) {
+      int tmp = alloc_temp();
+      emit2('S', tmp);
+      left.kind = OP_MEM;
+      left.val = (unsigned int)(unsigned char)tmp;
+    }
+
+    if (!primary(&right)) return 0;
+
+    // IMM+IMM fold
+    if (left.kind == OP_IMM && right.kind == OP_IMM) {
+      left.val = left.val + right.val;
+      continue;
+    }
+
+    // right in ACC (call as RHS): ACC += left → spill right, load left, +spill
+    if (right.kind == OP_ACC) {
+      int tmp = alloc_temp();
+      emit2('S', tmp);
+      force_acc(&left);
+      emit2('+', tmp);
+      left.kind = OP_ACC;
+      continue;
+    }
+
+    // left MEM/IMM, right MEM/IMM (or left was spilled to MEM)
+    force_acc(&left);
+    emit_add_to_acc(&right);
+    left.kind = OP_ACC;
   }
+
+  force_acc(&left);
   return 1;
 }
+
 
 // ---------------------------------------------------------------------------
 // Statement
@@ -636,7 +744,7 @@ void compile_function(void) {
   Symbol* fsym;
 
   // FUNCTION name (
-  next_token();                       // consume FUNCTION
+  next_token(); // consume FUNCTION
   strcpy(func_name, curr_tok.lexeme);
   EXPECT(TOK_IDENT);
   EXPECT(TOK_LPAREN);
@@ -679,7 +787,7 @@ void compile_function(void) {
   EXPECT(TOK_SEMI);
 
   // register the function symbol (vector index filled in a moment)
-  add_symbol(func_name, SYM_FUNC, 0);   // temporary
+  add_symbol(func_name, SYM_FUNC, 0); // temporary
   fsym = lookup_sym(func_name);
   fsym->nparams = nparams;
   for (i = 0; i < nparams; i++)
@@ -700,9 +808,15 @@ void compile_function(void) {
   // the entry point is right here
   entry_offset = bin_ptr;
   vec_idx = add_vector(entry_offset);
-  vec_link[vec_idx] = ret_addr_slot;    // NEXT pointer slot (compact, one per fn)
-  vec_val[vec_idx]  = ret_val_slot;     // return VALUE slot
+  vec_link[vec_idx] = ret_addr_slot; // NEXT pointer slot (compact, one per fn)
+  vec_val[vec_idx]  = ret_val_slot; // return VALUE slot
   fsym->address = vec_idx;
+
+  // last parameter remains in ACC on entry (caller S does not clobber ACC)
+  if (nparams > 0)
+    acc_set_slot(param_slots[nparams - 1]);
+  else
+    acc_invalidate();
 
   // body
   while (curr_tok.type != TOK_END && curr_tok.type != TOK_EOF) {
@@ -786,7 +900,7 @@ int compile_pipeline(void) {
   if (last_var_slot >= 0)
     emit2('L', last_var_slot);
 
-  emit(0);                              // halt
+  emit(0); // halt
   return 1;
 }
 
@@ -848,7 +962,7 @@ unsigned int run_ivm(void) {
 
   case 0: goto done;
 
-    /* single-byte return: value in ACC, restore NEXT, pop function chain */
+    // single-byte return: value in ACC, restore NEXT, pop function chain
   case ';': {
     char link, val;
     if (cur_func == FUNC_MAIN) {
