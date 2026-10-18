@@ -5,7 +5,7 @@
 #include <setjmp.h>
 
 // Dumps hex etc...
-#define TPDEBUG
+//#define TPDEBUG
 //#define TPPRINT
 
 // --- SYSTEM CONSTANTS FOR 6502 HARDWARE BINDINGS ---

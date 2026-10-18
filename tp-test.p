@@ -1,3 +1,6 @@
+{ Test program generates 574 bytes }
+{ 1000: (/ (- 1418227 1290832) 1000) = 127c/loop }
+
 program ShowcaseSuite;
 
 { TODO: do function var names hide/obstruct lgobals? }
@@ -34,7 +37,7 @@ begin
    
   { Test Case 5: looping sum - 130c / loop}
   sum:= 0;
-  for i:=1 to 1000 do sum:= sum + i;
+  for i:=1 to 1 do sum:= sum + i;
   writeln("Sum:"); writeln(sum);
 
   writeln("Magitcal injected input parameter X="); writeln(X); { is 42 }
