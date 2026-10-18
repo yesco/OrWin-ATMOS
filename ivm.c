@@ -172,19 +172,24 @@ unsigned int acc= 0;
 // There may be several programs at any time and any
 // program could have several instances. So, each
 // execution of a process will depend on a few zero
-// page globals:
+// page globals. The interpretive loop runs for at most
+// 4 ms. These are restored/saved by the multi-tasker.
 //  
-//   // pure byte addressing program
+//   // - pure byte addressing program
 //   char      *program;
-//   // address as vectors
-//   uint16_t  *vprogram= program;
+//   // - program as vectors (this 
+//   #define   VPROGRAM ((uint16_t*)program)
 //
-//   // slots of vars/constants indexed by 0-255 max
+//   // - slots of vars/constants indexed by 0-255 max
 //   uint16_t  *vars; 
 //   
+//   // - program running info
+//   char      *ipc;
+
+
 // PROGRAM VECTORS
 // ---------------
-// This is a vector interpreation of program bytes.
+// This is a vector interpretation of program bytes.
 // Each is 2 bytes uint16_t relative to 0==program
 // Patch at load time to actual addresses, until
 // a final $0000 subroutine vector.
