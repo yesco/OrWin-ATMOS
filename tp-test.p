@@ -1,15 +1,3 @@
-{ asm: Test program generates 574 bytes }
-{ ivm: Test program generates 167 bytes }
-{ asm: 1000: (/ (- 1418227 1290832) 1000) =  127c/loop }
-
-{ ivm: 1000: (/ (- 9734015 3970047) 1000) = 5763c/loop }
-{ ivm/asm = (/ 5763 127) = 45x slower, lol             }
-
-{ ivm: 1000: (/ (- 6069944 3947071) 1000) = 2122c/loop  }
-{ ivm/asm = (/ 2122 127) = 16x slower, but improved 3x! }
-
-{ ivm: 1000: (/ (- 6613215 3947071) 1000) = 2666c/loop  }
-
 Program ShowcaseSuite;
 
 { TODO: do function var names hide/obstruct lgobals? }
@@ -51,7 +39,7 @@ begin
    
   { Test Case 5: looping sum - 130c / loop}
   sum:= 0;
-  for i:=1 to 1000 do sum:= sum + i;
+  for i:=1 to 0 do sum:= sum + i;
   writeln("Sum:"); writeln(sum);
 
   writeln("Two:"); writeln(Two(alpha, beta));

@@ -33,10 +33,16 @@
 
 // 'g' 'b' no sublevel
 // ivm: 1000: (/ (- 5899169 3976177) 1000) = 1922 start
-// ivm/asm = (/ 1922 127.0) = 15.13x slower, but improved 3x!
+// ivm/asm = (/ 1922 127.0) = 15.13x slower, but improved 1%
 
+// ivm: 1000: (/ (- 5593710 3707529) 1000) = 1886 start
+// ivm/asm = (/ 1886 127.0) = 14.85x slower, but improved 0.5%
+
+// ivm: 1000: (/ (- 5289946 3403768) 1000) = 1886 start
+// ivm/asm = (/ 1886 127.0) = 14.85x slower, but improved 0.5%
 
 #include <stdio.h>
+#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
@@ -220,8 +226,12 @@ void emit_load_const(unsigned int v) {
 // ---------------------------------------------------------------------------
 // Vectors (function entry points)
 // ---------------------------------------------------------------------------
-int vectors[MAX_VECTORS];             // bytecode offset of each function
+int vectors[MAX_VECTORS];             // bytecode offset during compile
+char *vptr[MAX_VECTORS];              // resolved absolute pointers (finalise)
 int nvector = 0;
+int main_offset = 0;                  // offset of main body
+char *main_entry = 0;                 // resolved pointer to main (finalise)
+char is_code_addr[MAX_CONSTS];        // const_pool[i] is a code offset to relocate
 
 int add_vector(int entry_offset) {
   if (nvector >= MAX_VECTORS) {
@@ -450,10 +460,10 @@ int expression(void) {
     if (sym->type == SYM_FUNC) {
       // Stackless multi-arg call:
       //   1. eval each arg → S param_slot[i]
-      //   2. store return-IP into callee ret_addr_slot
-      //   3. vector call 0xC0|V
-      //   4. L ret_slot
-      int ret_ip_const, pi;
+      //   2. vector call 0xC0|V, followed by ret_addr_slot
+      //      runtime stores the live ipc (absolute) into that slot
+      //   3. L ret_slot
+      int pi;
       EXPECT(TOK_LPAREN);
 
       for (pi = 0; pi < sym->nparams; pi++) {
@@ -463,26 +473,13 @@ int expression(void) {
       }
       EXPECT(TOK_RPAREN);
 
-      // fresh constant for the return IP (no dedup)
-      if (nconst >= MAX_CONSTS) {
-        printf("\nERROR: constant pool full\n");
-        longjmp(fail_jmp, 1);
-      }
-      ret_ip_const = nconst;
-      const_pool[nconst++] = 0;
-      emit('L');
-      emit((char)(0x80 | (ret_ip_const & 0x7F)));
-      emit2('S', sym->ret_addr_slot);
-
-      // vectorised call
       if ((unsigned char)sym->address >= (unsigned char)nvector) {
         printf("\nERROR: bad vector index for %s\n", name);
         longjmp(fail_jmp, 1);
       }
+      // CALL: opcode encodes vector; next byte is ret_addr_slot
       emit((char)(0xC0 | (sym->address & 0x3F)));
-
-      // patch return IP
-      const_pool[ret_ip_const] = (unsigned int)bin_ptr;
+      emit((char)sym->ret_addr_slot);
 
       // result
       emit2('L', sym->ret_slot);
@@ -581,7 +578,7 @@ int statement(void) {
     emit2('L', ctrl->address);
     emit2('-', high_slot);
     exit_patch = bin_ptr;
-    emit('g'); emit(0); // placeholder
+    emit('G'); emit(0); // G <delta> conditional forward (acc > 0)
 
     if (!statement()) return 0;
 
@@ -590,14 +587,14 @@ int statement(void) {
     emit('I');
     emit2('S', ctrl->address);
 
-    // backward jump
+    // backward jump B <delta>
     {
       int delta = (bin_ptr + 2) - loop_start;
       if (delta > 255) {
         printf("\nFOR body too large\n");
         longjmp(fail_jmp, 1);
       }
-      emit('b'); emit((char)delta);
+      emit('B'); emit((char)delta);
     }
     // patch forward exit
     {
@@ -719,7 +716,6 @@ void compile_function(void) {
 // ---------------------------------------------------------------------------
 int compile_pipeline(void) {
   int last_var_slot = -1;
-  int main_entry_patch;
 
   src_pos = -1;
   NEXT;
@@ -729,16 +725,15 @@ int compile_pipeline(void) {
   nconst = 0;
   nvector = 0;
   npatch = 0;
+  main_offset = 0;
   next_global = 0;
   next_frame  = FRAME_BASE;
   memset(slot_used, 0, sizeof(slot_used));
   memset(mem, 0, sizeof(mem));
+  memset(is_code_addr, 0, sizeof(is_code_addr));
 
-  // Absolute jump to main (patched once we know the offset)
-  // Encoding:  'G'  <lo> <hi>
-  emit('G');
-  main_entry_patch = bin_ptr;
-  emit(0); emit(0);
+  // Functions are emitted first; main_entry is set when we reach BEGIN.
+  // finalise() resolves main_entry to a direct pointer — no absolute G opcode.
 
   // implicit X (global)
   {
@@ -773,12 +768,8 @@ int compile_pipeline(void) {
   // main program
   EXPECT(TOK_BEGIN);
 
-  // patch the initial jump so it lands here
-  {
-    int main_off = bin_ptr;
-    bin[main_entry_patch]     = main_off & 0xFF;
-    bin[main_entry_patch + 1] = (main_off >> 8) & 0xFF;
-  }
+  // record main entry offset (resolved to a pointer in finalise)
+  main_offset = bin_ptr;
 
   while (curr_tok.type != TOK_END && curr_tok.type != TOK_EOF) {
     if (!statement()) return 0;
@@ -799,14 +790,19 @@ int compile_pipeline(void) {
 // ---------------------------------------------------------------------------
 void finalise(void) {
   int i;
-  // Constants live at logical addresses 0x80 + idx.
-  // At runtime the interpreter treats an argument byte with the high bit set
-  // as a constant-pool index.
+
+  // Constants at 0x80+idx (plain values and code offsets for return IPs).
+  // Code offsets stay relative to bin[]; only vectors/main become direct
+  // pointers — the code image does not move after this.
   for (i = 0; i < nconst; i++)
     mem[0x80 + i] = const_pool[i];
 
-  // (Future: write the vector table into the program image, relocate, etc.)
-  // For the host runner the vectors[] array is already sufficient.
+  // Function vectors → direct pointers (no bin+ at each CALL)
+  for (i = 0; i < nvector; i++)
+    vptr[i] = bin + vectors[i];
+
+  // Main entry → direct pointer (replaces absolute G jump at program start)
+  main_entry = bin + main_offset;
 }
 
 // ---------------------------------------------------------------------------
@@ -825,7 +821,8 @@ unsigned int run_ivm(void) {
   register unsigned int acc;
   register unsigned char op;
 
-  ipc = bin;
+  // Start at resolved main entry (direct pointer, set in finalise)
+  ipc = main_entry;
   acc = 0;
 
   // PAR = memory cell addressed by the byte currently at ipc (not consumed yet)
@@ -839,16 +836,19 @@ unsigned int run_ivm(void) {
   op = (unsigned char)*ipc++;
   switch (op) {
 
-    // ---- return from function: next byte is slot holding return IP ----
   case 0: goto done;
 
+    // return: slot holds ipc saved by CALL (absolute on 16-bit targets)
   case ';': {
     unsigned char slot = (unsigned char)*ipc++;
-    ipc = bin + mem[slot];
+    if (sizeof(char *) <= sizeof(unsigned int))
+      ipc = (char *)(size_t)mem[slot];
+    else
+      ipc = bin + mem[slot];              /* host: stored as offset */
     goto next;
   }
 
-    // ---- parameter ops ---- 
+    // ---- parameter ops ----
   case '+': acc += PAR; goto pnext;
   case '-': acc -= PAR; goto pnext;
   case '*': acc *= PAR; goto pnext;
@@ -870,33 +870,39 @@ unsigned int run_ivm(void) {
   case 'N': putchar('\n');      goto next;
   case 'E': putchar((char)acc); goto next;
 
-  case '"': // inline string ends at 0 
+  case '"': // inline string ends at 0
     while (*ipc) putchar(*ipc++);
     goto pnext; // skip the terminating 0
 
-    // ---- absolute goto  G <lo> <hi> ----
-  case 'G': {
-    unsigned int addr;
-    addr  = (unsigned char)*ipc++; // lo
-    addr |= ((unsigned int)(unsigned char)*ipc++) << 8; // hi
-    ipc = bin + addr;
-    goto next; // already skipped both bytes 
-  }
-
-    // ---- relative jumps  g f|b <delta> ---- 
-    // TODO: bad use the 0x80-0x8f
-  case 'g': if ((int)acc > 0) ipc += *ipc; goto pnext;
-  case 'b': ipc -= *ipc; goto pnext;
+    // ---- relative jumps (uppercase, single opcode each) ----
+    // G <delta>  conditional forward if acc > 0
+  case 'G':
+    if ((int)acc > 0) ipc += (unsigned char)*ipc;
+    goto pnext;
+    // B <delta>  unconditional backward
+  case 'B':
+    ipc -= (unsigned char)*ipc;
+    goto pnext;
 
     // ---- vectorised call 0xC0..0xFF ----
+    // encoding:  (0xC0|vec)  <ret_addr_slot>
+    // saves the live ipc (address of the following opcode) into the slot,
+    // then jumps via resolved vector pointer
   default:
     if (op >= 0xC0) {
       int vec = op - 0xC0;
+      unsigned char rslot;
       if (vec >= nvector) {
         printf("\n[IVM] bad vector %d\n", vec);
         longjmp(fail_jmp, 1);
       }
-      ipc = bin + vectors[vec];
+      rslot = (unsigned char)*ipc++;
+      /* ipc now points at the instruction after CALL — that is the return address */
+      if (sizeof(char *) <= sizeof(unsigned int))
+        mem[rslot] = (unsigned int)(size_t)ipc;   /* 6502: true absolute */
+      else
+        mem[rslot] = (unsigned int)(ipc - bin);   /* host runner only */
+      ipc = vptr[vec];
       goto next;
     }
     printf("\n[IVM] unknown opcode 0x%02X\n", op);
