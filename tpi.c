@@ -44,6 +44,9 @@
 // ivm: 1000: (/ (- 5273425 3384263) 1000) = 1889 start
 // ivm/asm = (/ 1889 127.0) = 14.87x slower, slightly slower
 
+// - better single byte return, and mini stack, lol  => 239 => 225
+// ivm: 1000: (/ (- 5201162 3311988) 1000) = 1889 start
+//  => same speed
 
 #include <stdio.h>
 #include <stddef.h>

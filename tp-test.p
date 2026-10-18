@@ -39,7 +39,7 @@ begin
    
   { Test Case 5: looping sum - 130c / loop}
   sum:= 0;
-  for i:=1 to 1000 do sum:= sum + i;
+  for i:=1 to 0 do sum:= sum + i;
   writeln("Sum:"); writeln(sum);
 
   writeln("Two:"); writeln(Two(alpha, beta));
