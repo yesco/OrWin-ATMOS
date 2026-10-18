@@ -167,6 +167,45 @@ unsigned int acc= 0;
 //(xy- cursor, see j)
 // z - fill A over X Y
    
+// PROGRAM MEMORY LAYOUT
+// ---------------------
+// There may be several programs at any time and any
+// program could have several instances. So, each
+// execution of a process will depend on a few zero
+// page globals:
+//  
+//   // pure byte addressing program
+//   char      *program;
+//   // address as vectors
+//   uint16_t  *vprogram= program;
+//
+//   // slots of vars/constants indexed by 0-255 max
+//   uint16_t  *vars; 
+//   
+// PROGRAM VECTORS
+// ---------------
+// This is a vector interpreation of program bytes.
+// Each is 2 bytes uint16_t relative to 0==program
+// Patch at load time to actual addresses, until
+// a final $0000 subroutine vector.
+
+// 0: 1 byte index C=start of constants, N=number
+// 1: P=start of actual program
+// 2: subroutine code vectors... (max 64)
+//    ..... relocated subs
+// C: constant to copy start
+//    ..... relocated constants! (like str ptr)
+//    $0000 = end marker, relocate till here
+//    .....
+// P: program start
+//    ...init...
+//    jmp main (M)
+//    ...subs...
+// M: main program
+//    rts
+// S: strings/data referre to by relocated constants
+//    ....
+
 void ivm() {
   // return here if ate one parameter byte
  pnext:
