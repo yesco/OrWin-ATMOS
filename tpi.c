@@ -3,7 +3,7 @@
 // Notice:
 //  1) needs to follow c89 so can compie on cc65
 //  2) only define varaibles at start of { scope
-//  3) don't use /* comment */
+//  3) use // comment - do NOT: /* no no no */
 //  4) don't change any lines if not needed
 //  5) char is unsigned on cc65 & oscar64 & clang
 
@@ -794,102 +794,111 @@ void finalise(void) {
 // Host-side IVM interpreter
 // ---------------------------------------------------------------------------
 void run_ivm(void) {
-  char *ipc = bin;
-  unsigned int acc = 0;
+  // Classic single-switch + goto dispatch (ivm.c style).
+  // - opcode 0   = halt (program end) — no explicit pre-test in the loop
+  // - opcode ';' = return from function (following byte = slot with return IP)
+  // - parameter ops use PAR then goto pnext (pnext skips the arg byte)
+  // - zero-arg ops goto next
+  register char *ipc;
+  register unsigned int acc;
+  register unsigned char op;
+
+  ipc = bin;
+  acc = 0;
 
   printf("--- RUN IVM (%d bytes, %d vectors, %d consts) ---\n",
     bin_ptr, nvector, nconst);
 
-  while (1) {
-    unsigned char op = (unsigned char)*ipc++;
-    if (op == 0) break;
+  // PAR = memory cell addressed by the byte currently at ipc (not consumed yet)
+#define PAR mem[(unsigned char)(*ipc)]
 
-    // parameter-taking ordinary ops
-    if (op == '+' || op == '-' || op == '*' || op == '/' ||
-        op == '&' || op == '|' || op == '^' ||
-        op == 'L' || op == 'S') {
-      unsigned char arg = (unsigned char)*ipc++;
-      unsigned int *cell;
-      // high bit set => constant pool index (0x80+n)
-      cell = &mem[arg];
+  goto next; // enter at next, not pnext
 
-      switch (op) {
-        case '+': acc += *cell; break;
-        case '-': acc -= *cell; break;
-        case '*': acc *= *cell; break;
-        case '/': if (*cell) acc /= *cell; break;
-        case '&': acc &= *cell; break;
-        case '|': acc |= *cell; break;
-        case '^': acc ^= *cell; break;
-        case 'L': acc  = *cell; break;
-        case 'S': *cell = acc;  break;
-      }
-      continue;
+ pnext:
+  ++ipc; // skip the parameter byte
+ next:
+  op = (unsigned char)*ipc++;
+  switch (op) {
+
+    // ---- return from function: next byte is slot holding return IP ----
+  case 0: goto done;
+
+  case ';': {
+    unsigned char slot = (unsigned char)*ipc++;
+    ipc = bin + mem[slot];
+    goto next;
+  }
+
+    // ---- parameter ops ---- 
+  case '+': acc += PAR; goto pnext;
+  case '-': acc -= PAR; goto pnext;
+  case '*': acc *= PAR; goto pnext;
+  case '/': if (PAR) acc /= PAR; goto pnext;
+  case '&': acc &= PAR; goto pnext;
+  case '|': acc |= PAR; goto pnext;
+  case '^': acc ^= PAR; goto pnext;
+  case 'L': acc  = PAR; goto pnext;
+  case 'S': PAR = acc;  goto pnext;
+
+    // ---- no-arg ops ----
+  case ' ': goto next;
+  case '0': acc = 0;      goto next;
+  case '9': acc = 0xffff; goto next;
+  case 'I': ++acc;        goto next;
+  case 'J': --acc;        goto next;
+  case '~': acc = ~acc;   goto next;
+  case '.': printf("%u", acc);  goto next;
+  case 'N': putchar('\n');      goto next;
+  case 'E': putchar((char)acc); goto next;
+
+  case '"': // inline string ends at 0 
+    while (*ipc) putchar(*ipc++);
+    goto pnext; // skip the terminating 0
+
+    // ---- absolute goto  G <lo> <hi> ----
+  case 'G': {
+    unsigned int addr;
+    addr  = (unsigned char)*ipc++; // lo
+    addr |= ((unsigned int)(unsigned char)*ipc++) << 8; // hi
+    ipc = bin + addr;
+    goto next; // already skipped both bytes 
+  }
+
+    // ---- relative jumps  g f|b <delta> ---- 
+    // TODO: bad use the 0x80-0x8f
+  case 'g': {
+    char kind = *ipc++; // f or b
+    // peek, pnext will skip
+    unsigned char delta = (unsigned char)*ipc;
+    if (kind == 'f') {
+      if ((int)acc > 0) ipc += delta;
+    } else {
+      ipc -= delta;
     }
+    goto pnext;
+  }
 
-    // vectorised call  0xC0 .. 0xFF
-    // (return address was already stored into the callee's ret_addr_slot
-    //  by the caller before this opcode)
-    if ((unsigned char)op >= 0xC0) {
-      int vec = (unsigned char)op - 0xC0;
+    // ---- vectorised call 0xC0..0xFF ----
+  default:
+    if (op >= 0xC0) {
+      int vec = op - 0xC0;
       if (vec >= nvector) {
         printf("\n[IVM] bad vector %d\n", vec);
         return;
       }
-      ipc = bin + vectors[vec];           // jump to function entry
-      continue;
+      ipc = bin + vectors[vec];
+      goto next;
     }
-
-    // ordinary no-arg ops + our extensions
-    switch (op) {
-      case ' ': break;
-      case '0': acc = 0; break;
-      case '9': acc = 0xffff; break;
-      case 'I': ++acc; break;
-      case 'J': --acc; break;
-      case '~': acc = ~acc; break;
-      case '.': printf("%u", acc); break;
-      case 'N': putchar('\n'); break;
-      case 'E': putchar((char)acc); break;
-      case '"':
-        while (*ipc) putchar(*ipc++);
-        ipc++;
-        break;
-      case ';': {                         // return: jump to address in slot
-        unsigned char slot = (unsigned char)*ipc++;
-        ipc = bin + mem[slot];
-        break;
-      }
-      case 'G': {                         // absolute goto  <lo> <hi>
-        char lo = *ipc++;
-        char hi = *ipc++;
-        ipc = bin + (lo | (hi << 8));
-        break;
-      }
-      case 'g': {                         // relative jumps gf / gb
-        char kind = *ipc++;
-        char delta = *ipc++;
-        if (kind == 'f') {
-          if ((int)acc > 0) ipc += delta;
-        } else if (kind == 'b') {
-          ipc -= delta;
-        } else {
-          printf("\n[IVM] bad jump kind '%c'\n", kind);
-          return;
-        }
-        break;
-      }
-      default:
-        printf("\n[IVM] unknown opcode 0x%02X\n", op);
-        return;
-    }
+    printf("\n[IVM] unknown opcode 0x%02X\n", op);
+    return;
   }
 
+ done:
   printf("--- END ---\n");
   printf("acc = %u\n", acc);
+#undef PAR
 }
 
-// ---------------------------------------------------------------------------
 #ifdef TPDUMP
 void dump_bytecode(void) {
   int i= 0, n= 0, wrap= 10;

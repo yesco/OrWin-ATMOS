@@ -2,12 +2,11 @@
 { ivm: Test program generates 167 bytes }
 { asm: 1000: (/ (- 1418227 1290832) 1000) =  127c/loop }
 
-{ ivm: 1000: (/ (- 6678940 2332536) 1000) = 4346c/loop }
-{ ivm/asm = (/ 4346 127) = 34x slower, lol             }
+{ ivm: 1000: (/ (- 9734015 3970047) 1000) = 5763c/loop }
+{ ivm/asm = (/ 5763 127) = 45x slower, lol             }
 
-{ ivm: 1000: (/ (- 9057252 3313270) 1000) = 5743c/loop }
-{ ivm/asm = (/ 5743 127) = 45x slower, lol             }
-
+{ ivm: 1000: (/ (- 6069944 3947071) 1000) = 2122c/loop  }
+{ ivm/asm = (/ 2122 127) = 16x slower, but improved 3x! }
 
 Program ShowcaseSuite;
 
