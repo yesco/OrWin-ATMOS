@@ -50,66 +50,123 @@ unsigned int acc= 0;
 
 #define PAR (MEM(*ipc))
 
-// perl -e 'foreach $c (32..128) { printf("%c", $c); }'
-
 // Accummulator Alphabetical Virtual Machine
 // =========================================
-//=' ' - nop
-// !
-//=" - inline print string end with " or 0
-// # - number?
-// $ - string?
-//=%& - mod and
-// '
-// ( - push acc == dup
-// ) - drop
-//=*+ - mul/add $
-// ,
-//=- - sub $
-//=. - print number
-//='/' - div $
-//=0 - acc = 0 nul/nil
-// 12345678 - local var read ?
-//=9 - -1
-// :
-// ; - return /enddef
-// <=> - cmp ???
-// ? - conditional jump?
-// @ - read *$ - Load
-//=A - car acc= acc[0] == @
-// B
-// C - cons(acc, $) - a variant of alloc cell and , ???
-//=D - cdr acc= acc[1] == 2 + @, lol
-//=E - emit char (acc)
-//=F - free *$
-// GHIJ
-//=K - key
-//=L - load $
-//=M - $= malloc #
-//=N - newline 
-//=O - output (emit #)
-//=P - print acc as string
-// Q
+// A simple "register" virtual machine run by
+// ascii encoded op-codes.
+//
+// Programs are "fortran" compiled assuming no
+// stack, static allocation of parameters.
+//
+// Each function has a parameter block:
+//   0: return address
+//   1: return value
+//   2: parameter 1...
+// 1+n: parameter n
+// 2+n: local var/temp...
+//   m: last local
+//
+// $ = most ops address value in memory (0-255)
+// # = inline numeric argument count (unusual as fixed)
+// 0 = only constant setter!
+// 9 = only second (LOL) constant setter (-1/$ffff/true)
+// all other constants need to be put in the $ memory
+//=  = indicates "implemented"
+//
+// 0-31: global memory read value
+//= ' ' - nop
+//  !
+//= " - inline print string end with " or 0
+//  # - number?
+//  $ - string?
+//= %& - mod and
+//  '
+//  ( - ??? no stack: push acc == dup 
+//  ) - ??? no stack: drop
+//= *+ - mul/add $
+//  , - half a cons?
+//= - - sub $
+//= . - print number
+//= '/' - div $
+//= 0 - acc = 0 nul/nil
+//  1234 - local var read  | single byte read/write "frame"
+//  5678 - local var write | can use 2 byte L/S $ instead
+//= 9 - acc= -1 
+//  : - define?
+//  ; - return /enddef
+//  <=> - cmp - do we need all?
+//  ? - zeroskip
+//  @ - read *$ - Load
+//= A - car acc= acc[0] == @
+//  B
+//  C - cons(acc, $) - a variant of alloc cell and , ???
+//= D - cdr acc= acc[1] == 2 + @, lol
+//= E - emit char = putchar(acc)
+//= F - free *$
+//  G - geap ?
+//  H - heap ?
+//= IJ - inc/dec acc TODO: or $ (and load it in acc)
+//= K - key (waits?)
+//= L - load $
+//= M - $= malloc #
+//= N - newline 
+//= O - output (emit #)
+//= P - print acc as string
+//  Q
+
 // R - recurse (save current frame, malloc?)
 //=S - store $
-// T - type n chars from $ (?)
+// T - type acc chars from $ (?)
 // U - null?
 // V
 //(W - write var string $)
 // XY
 // Z - zero # (fill)
+//
 // [ - shift left $
 // '\'
 // ] - shift rigth $
 //=^ - xor $
 // _ - dynamic lookup(acc) => addr
 // `
-// abcdefghijklmnopqrstuvwxyz - global API
 // { - shift left #
 //=| - or $
 // } - shift right #
-//=~ - inverse
-// 
+//=~ - inverse (oric: gray)
+//  - DEL not visible (oric: full block)
+//
+// $80-$bf (64) relative jump (forward only?)
+// $bf-$ff (64) 
+
+// GLOBAL "OS" API
+// ===============
+// TODO: cd ls (first/next) R/O user lock truncate
+//
+// a - block in
+// b - block out
+// c - create window
+// d - file descriptor open (can kill it!)
+// e - execute/system - external programs hexdump
+// f - file open/close
+// g - gotoxy
+//(h - height)
+// i - input from file (#0 => freadline)
+// j - jinfo (version, stats, file size, disk free, xywh v)
+// k - kill window/file/free memory?/flush buffers/exit if 0
+// l - line input (message/event read)
+// m - message/event to $ or #
+// n - nreceive
+// o - output to file (#0 => 0 terminated, otherwise count)
+// p - printf or generic small formatting printers
+//(q - quit (exit(#) program) see "k")
+// r - restore window
+// s - save window
+//(t - time, see j)
+//(u - status, see j)
+//(v - vvindow pointer, see j)
+//(w - width, see j)
+//(xy- cursor, see j)
+// z - fill A over X Y
    
 void ivm() {
   // return here if ate one parameter byte
