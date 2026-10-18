@@ -26,11 +26,14 @@
 // ivm/asm = (/ 5763 127) = 45x slower, lol            
 
 // ivm: 1000: (/ (- 6142119 3989127) 1000) = 2152 start
-// ivm/asm = (/ 2152 127) = 16x slower, but improved 3x!
+// ivm/asm = (/ 2152 127.0) = 16.95x slower, but improved 3x!
 
 // - moving a print out... lolshoulnd' ffect any 
 // ivm: 1000: (/ (- 6150038 3985079) 1000) = 2164 start
-//                  
+
+// 'g' 'b' no sublevel
+// ivm: 1000: (/ (- 5899169 3976177) 1000) = 1922 start
+// ivm/asm = (/ 1922 127.0) = 15.13x slower, but improved 3x!
 
 
 #include <stdio.h>
@@ -578,7 +581,7 @@ int statement(void) {
     emit2('L', ctrl->address);
     emit2('-', high_slot);
     exit_patch = bin_ptr;
-    emit('g'); emit('f'); emit(0);          // placeholder
+    emit('g'); emit(0); // placeholder
 
     if (!statement()) return 0;
 
@@ -589,17 +592,17 @@ int statement(void) {
 
     // backward jump
     {
-      int delta = (bin_ptr + 3) - loop_start;
+      int delta = (bin_ptr + 2) - loop_start;
       if (delta > 255) {
         printf("\nFOR body too large\n");
         longjmp(fail_jmp, 1);
       }
-      emit('g'); emit('b'); emit((char)delta);
+      emit('b'); emit((char)delta);
     }
     // patch forward exit
     {
-      int delta = bin_ptr - (exit_patch + 3);
-      bin[exit_patch + 2] = (char)delta;
+      int delta = bin_ptr - (exit_patch + 2);
+      bin[exit_patch + 1] = (char)delta;
     }
   }
   else {
@@ -882,17 +885,8 @@ unsigned int run_ivm(void) {
 
     // ---- relative jumps  g f|b <delta> ---- 
     // TODO: bad use the 0x80-0x8f
-  case 'g': {
-    char kind = *ipc++; // f or b
-    // peek, pnext will skip
-    unsigned char delta = (unsigned char)*ipc;
-    if (kind == 'f') {
-      if ((int)acc > 0) ipc += delta;
-    } else {
-      ipc -= delta;
-    }
-    goto pnext;
-  }
+  case 'g': if ((int)acc > 0) ipc += *ipc; goto pnext;
+  case 'b': ipc -= *ipc; goto pnext;
 
     // ---- vectorised call 0xC0..0xFF ----
   default:
