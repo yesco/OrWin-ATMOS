@@ -34,6 +34,7 @@
 #define MAX_CONSTS    64
 #define MAX_VECTORS   64          // opcodes 0xC0 .. 0xFF
 #define MAX_PATCHES   128
+#define MAX_PARAMS    4           // max arguments per function
 #define GLOBAL_LIMIT  32          // preferred global area 0-31
 #define FRAME_BASE    32          // frames start here
 
@@ -45,14 +46,14 @@ typedef enum {
   TOK_INTEGER, TOK_IDENT, TOK_NUM, TOK_ASSIGN, TOK_SEMI,
   TOK_COLON, TOK_PLUS, TOK_DOT, TOK_WRITE, TOK_STRING,
   TOK_LPAREN, TOK_RPAREN, TOK_FUNCTION,
-  TOK_FOR, TOK_TO, TOK_DO
+  TOK_FOR, TOK_TO, TOK_DO, TOK_COMMA
 } TokenType;
 
 const char* TOKEN_NAMES[] = {
   "EOF", "ERROR", "PROGRAM", "VAR", "BEGIN", "END",
   "INTEGER", "IDENT", "NUM", "ASSIGN", "SEMI", "COLON",
   "PLUS", "DOT", "WRITELN", "STRING", "LPAREN", "RPAREN", "FUNCTION",
-  "FOR", "TO", "DO"
+  "FOR", "TO", "DO", "COMMA"
 };
 
 typedef struct {
@@ -72,7 +73,7 @@ int lnum = 1;
 int last_lnum = 0;
 Token curr_tok;
 
-char cur_line = 0;
+int cur_line = 0;
 char cur_c;
 #define C cur_c
 #define NEXT next()
@@ -221,7 +222,8 @@ typedef struct {
   char name[MAX_SYM_LEN + 1];
   SymbolType type;
   char address;          // slot number (var) or vector index (func)
-  char param_slot;       // for functions: slot of the single parameter
+  char nparams;          // number of parameters
+  char param_slot[MAX_PARAMS]; // slots for each parameter
   char ret_slot;         // for functions: slot of the return value
   char ret_addr_slot;    // for functions: slot that holds return ipc
 } Symbol;
@@ -237,7 +239,7 @@ void add_symbol(const char* name, SymbolType type, int address) {
   strcpy(syms[nsym].name, name);
   syms[nsym].type = type;
   syms[nsym].address = address;
-  syms[nsym].param_slot = -1;
+  syms[nsym].nparams = 0;
   syms[nsym].ret_slot = -1;
   syms[nsym].ret_addr_slot = -1;
   nsym++;
@@ -366,6 +368,7 @@ void next_token(void) {
     case '.': curr_tok.type = TOK_DOT; break;
     case '(': curr_tok.type = TOK_LPAREN; break;
     case ')': curr_tok.type = TOK_RPAREN; break;
+    case ',': curr_tok.type = TOK_COMMA; break;
     default:
       curr_tok.type = TOK_ERROR;
       printf("\n%c <---- ERROR: unknown character\n", C);
@@ -426,41 +429,44 @@ int expression(void) {
     }
 
     if (sym->type == SYM_FUNC) {
-      // Stackless call:
-      //   1. eval arg → acc
-      //   2. S param_slot
-      //   3. store return-IP into callee ret_addr_slot (const patched below)
-      //   4. vector call 0xC0|V
-      //   5. L ret_slot
-      int ret_ip_const;
+      // Stackless multi-arg call:
+      //   1. eval each arg → S param_slot[i]
+      //   2. store return-IP into callee ret_addr_slot
+      //   3. vector call 0xC0|V
+      //   4. L ret_slot
+      int ret_ip_const, pi;
       EXPECT(TOK_LPAREN);
-      if (!expression()) return 0;               // arg → acc
-      emit2('S', sym->param_slot);
 
-      // fresh constant for the return IP (no dedup – each call site unique)
+      for (pi = 0; pi < sym->nparams; pi++) {
+        if (pi > 0) EXPECT(TOK_COMMA);
+        if (!expression()) return 0;             // arg → acc
+        emit2('S', sym->param_slot[pi]);
+      }
+      EXPECT(TOK_RPAREN);
+
+      // fresh constant for the return IP (no dedup)
       if (nconst >= MAX_CONSTS) {
         printf("\nERROR: constant pool full\n");
         longjmp(fail_jmp, 1);
       }
       ret_ip_const = nconst;
-      const_pool[nconst++] = 0;                  // placeholder, patched below
+      const_pool[nconst++] = 0;
       emit('L');
       emit((char)(0x80 | (ret_ip_const & 0x7F)));
       emit2('S', sym->ret_addr_slot);
 
       // vectorised call
-      if (sym->address < 0 || sym->address >= nvector) {
+      if ((unsigned char)sym->address >= (unsigned char)nvector) {
         printf("\nERROR: bad vector index for %s\n", name);
         longjmp(fail_jmp, 1);
       }
       emit((char)(0xC0 | (sym->address & 0x3F)));
 
-      // patch the return IP = offset of the next instruction
+      // patch return IP
       const_pool[ret_ip_const] = (unsigned int)bin_ptr;
 
-      // result lives in the return-value slot
+      // result
       emit2('L', sym->ret_slot);
-      EXPECT(TOK_RPAREN);
     }
     else {
       // ordinary variable
@@ -599,8 +605,10 @@ int statement(void) {
 void compile_function(void) {
   char func_name[MAX_SYM_LEN + 1];
   char param_name[MAX_SYM_LEN + 1];
-  int ret_addr_slot, ret_val_slot, param_slot;
+  int ret_addr_slot, ret_val_slot;
   int entry_offset, vec_idx;
+  int nparams, i;
+  char param_slots[MAX_PARAMS];
   Symbol* fsym;
 
   // FUNCTION name (
@@ -609,17 +617,38 @@ void compile_function(void) {
   EXPECT(TOK_IDENT);
   EXPECT(TOK_LPAREN);
 
-  // allocate the three fixed frame slots
+  // frame: ret_addr, ret_val, then params
   ret_addr_slot = alloc_frame_slot();
   ret_val_slot  = alloc_frame_slot();
-  param_slot    = alloc_frame_slot();
 
-  // param : INTEGER
-  strcpy(param_name, curr_tok.lexeme);
-  add_symbol(param_name, SYM_VAR, param_slot);
-  EXPECT(TOK_IDENT);
-  EXPECT(TOK_COLON);
-  EXPECT(TOK_INTEGER);
+  // parse parameter list: name : INTEGER [, name : INTEGER]*
+  nparams = 0;
+  if (curr_tok.type == TOK_IDENT) {
+    while (1) {
+      if (nparams >= MAX_PARAMS) {
+        printf("\nERROR: too many parameters (max %d)\n", MAX_PARAMS);
+        longjmp(fail_jmp, 1);
+      }
+      strcpy(param_name, curr_tok.lexeme);
+      param_slots[nparams] = alloc_frame_slot();
+      add_symbol(param_name, SYM_VAR, param_slots[nparams]);
+      nparams++;
+      EXPECT(TOK_IDENT);
+      EXPECT(TOK_COLON);
+      EXPECT(TOK_INTEGER);
+      // accept both "," and ";" as parameter separators
+      // (comma is convenient; semicolon is classic Pascal)
+      if (curr_tok.type == TOK_COMMA || curr_tok.type == TOK_SEMI) {
+        next_token();
+        // trailing separator before ')' is not allowed – loop continues
+        // only if another IDENT follows; otherwise fall through to RPAREN
+        if (curr_tok.type != TOK_IDENT)
+          break;
+        continue;
+      }
+      break;
+    }
+  }
   EXPECT(TOK_RPAREN);
   EXPECT(TOK_COLON);
   EXPECT(TOK_INTEGER);
@@ -628,7 +657,9 @@ void compile_function(void) {
   // register the function symbol (vector index filled in a moment)
   add_symbol(func_name, SYM_FUNC, 0);   // temporary
   fsym = lookup_sym(func_name);
-  fsym->param_slot    = param_slot;
+  fsym->nparams = nparams;
+  for (i = 0; i < nparams; i++)
+    fsym->param_slot[i] = param_slots[i];
   fsym->ret_slot      = ret_val_slot;
   fsym->ret_addr_slot = ret_addr_slot;
 
@@ -894,8 +925,8 @@ void dump_bytecode(void) {
     printf("\n--- Symbols:\n");
     for (i = 0; i < nsym; i++) {
       Symbol *s = syms + i;
-      printf("   %2d @ %02x (%02x) =>%02x Ret:%02x :: %s\n", i, s->address,
-        s->param_slot, s->ret_slot, s->ret_addr_slot,
+      printf("   %2d @ %02x nparams=%d =>%02x Ret:%02x :: %s\n", i, s->address,
+        s->nparams, s->ret_slot, s->ret_addr_slot,
         s->name);
     }
   }

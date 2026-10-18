@@ -24,6 +24,11 @@ begin
   AddTen := val + Mul2(5);
 end;
 
+function Two(a : integer; b: integer) : integer;
+begin
+   Two := a + b;
+end;
+
 var
   alpha	: integer;
   beta	: integer;
@@ -48,5 +53,7 @@ begin
   for i:=1 to 1000 do sum:= sum + i;
   writeln("Sum:"); writeln(sum);
 
+  writeln("Two:"); writeln(Two(alpha, beta));
+   
   writeln("Magical injected input parameter X="); writeln(X); { is 42 }
 end.
