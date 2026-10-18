@@ -53,6 +53,11 @@
 // ivm/asm = (/ 1544 127.0) = 12.16x ... 18% faster!
 //  => same speed => 225 => 211 bytesp (/ 211 239.0) ... 12% smaller
 
+// - optimize operator apply
+// ivm: 1000: (/ (- 4782032 3245844) 1000) = 1536 start
+// ivm/asm = (/ 1535 127.0) = 12.09x ... (/ 12.09 12.16) 0.5 faster
+// code (- 14800 14705) = 95 bytes saved
+
 #include <stdio.h>
 #include <stddef.h>
 #include <stdlib.h>
@@ -458,41 +463,36 @@ void expect(TokenType expected) {
 // ---------------------------------------------------------------------------
 // Operand descriptors (in-situ codegen, no peephole pass)
 // kind: 0=ACC 1=MEM 2=IMM
-// Passed as pointers — cc65 cannot pass struct by value reliably
+// Passed as separate scalar parameters to eliminate struct/pointer overhead on cc65.
 // ---------------------------------------------------------------------------
 #define OP_ACC 0
 #define OP_MEM 1
 #define OP_IMM 2
 
-typedef struct {
-  char kind;
-  unsigned int val; // slot if MEM, constant if IMM
-} Operand;
-
-void force_acc(Operand *o) {
+void force_acc(char kind, unsigned int val) {
   int idx;
-  if (o->kind == OP_ACC)
+  if (kind == OP_ACC)
     return;
-  if (o->kind == OP_MEM) {
-    if (acc_valid && acc_slot == (char)o->val)
+  if (kind == OP_MEM) {
+    if (acc_valid && acc_slot == (char)val)
       return;
-    emit2('L', (char)o->val);
+    emit2('L', (char)val);
     return;
   }
   // OP_IMM
-  if (o->val == 0) { emit('0'); return; }
-  if (o->val == (unsigned int)-1) { emit('9'); return; }
-  idx = add_const(o->val);
+  if (val == 0) { emit('0'); return; }
+  if (val == (unsigned int)-1) { emit('9'); return; }
+  idx = add_const(val);
   emit('L');
   emit((char)(0x80 | (idx & 0x7F)));
   acc_invalidate();
 }
 
-void emit_add_to_acc(Operand *r) {
+void emit_add_to_acc(char kind, unsigned int val) {
   int idx;
   char slot;
-  if (r->kind == OP_MEM) {
-    slot = (char)r->val;
+  if (kind == OP_MEM) {
+    slot = (char)val;
     // ACC already holds this slot's value (e.g. last param on entry, or
     // val+val). +slot reads MEMORY; if we never spilled, mem can be stale
     // or we still need a second copy — S first so +slot doubles correctly.
@@ -501,22 +501,22 @@ void emit_add_to_acc(Operand *r) {
     emit2('+', slot);
     return;
   }
-  if (r->kind == OP_IMM) {
-    if (r->val == 0) return;
-    idx = add_const(r->val);
+  if (kind == OP_IMM) {
+    if (val == 0) return;
+    idx = add_const(val);
     emit2('+', (char)(0x80 | (idx & 0x7F)));
     return;
   }
 }
 
-int primary(Operand *out) {
+int primary(char *out_kind, unsigned int *out_val) {
   char name[MAX_SYM_LEN + 1];
   Symbol *sym;
   int i, pi;
 
   if (curr_tok.type == TOK_NUM) {
-    out->kind = OP_IMM;
-    out->val = (unsigned int)curr_tok.value;
+    *out_kind = OP_IMM;
+    *out_val = (unsigned int)curr_tok.value;
     next_token();
     return 1;
   }
@@ -560,13 +560,13 @@ int primary(Operand *out) {
       }
       emit((char)(0xC0 | (sym->address & 0x3F)));
       acc_invalidate(); // return value in ACC, not a known slot
-      out->kind = OP_ACC;
-      out->val = 0;
+      *out_kind = OP_ACC;
+      *out_val = 0;
       return 1;
     }
 
-    out->kind = OP_MEM;
-    out->val = (unsigned int)sym->address;
+    *out_kind = OP_MEM;
+    *out_val = (unsigned int)sym->address;
     return 1;
   }
 
@@ -577,48 +577,52 @@ int primary(Operand *out) {
 
 // Expression → result in ACC
 int expression(void) {
-  Operand left, right;
+  char left_kind, right_kind;
+  unsigned int left_val, right_val;
 
-  if (!primary(&left)) return 0;
+  if (!primary(&left_kind, &left_val)) return 0;
 
   while (curr_tok.type == TOK_PLUS) {
     next_token();
 
     // Left in ACC would be killed by RHS (calls etc.) — spill first
-    if (left.kind == OP_ACC) {
+    if (left_kind == OP_ACC) {
       int tmp = alloc_temp();
       emit2('S', tmp);
-      left.kind = OP_MEM;
-      left.val = (unsigned int)(unsigned char)tmp;
+      left_kind = OP_MEM;
+      left_val = (unsigned int)(unsigned char)tmp;
     }
 
-    if (!primary(&right)) return 0;
+    if (!primary(&right_kind, &right_val)) return 0;
 
     // IMM+IMM fold
-    if (left.kind == OP_IMM && right.kind == OP_IMM) {
-      left.val = left.val + right.val;
+    if (left_kind == OP_IMM && right_kind == OP_IMM) {
+      left_val = left_val + right_val;
       continue;
     }
 
     // right in ACC (call as RHS): ACC += left → spill right, load left, +spill
-    if (right.kind == OP_ACC) {
+    if (right_kind == OP_ACC) {
       int tmp = alloc_temp();
       emit2('S', tmp);
-      force_acc(&left);
+      force_acc(left_kind, left_val);
       emit2('+', tmp);
-      left.kind = OP_ACC;
+      left_kind = OP_ACC;
+      left_val = 0;
       continue;
     }
 
     // left MEM/IMM, right MEM/IMM (or left was spilled to MEM)
-    force_acc(&left);
-    emit_add_to_acc(&right);
-    left.kind = OP_ACC;
+    force_acc(left_kind, left_val);
+    emit_add_to_acc(right_kind, right_val);
+    left_kind = OP_ACC;
+    left_val = 0;
   }
 
-  force_acc(&left);
+  force_acc(left_kind, left_val);
   return 1;
 }
+
 
 
 // ---------------------------------------------------------------------------
