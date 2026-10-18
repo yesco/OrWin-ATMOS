@@ -944,6 +944,58 @@ void finalise(void) {
   for (i = 0; i < nconst; i++)
     mem[0x80 + i] = const_pool[i];
 
+  // TODO: seems to have forgotten my memory layout design:
+  // 
+  // - all code "loaded from disk" should be a blob
+  // - during loaded all vectors up to $0000 are relocated
+  //   by adding actual start address. $0000 is left intact
+
+
+// PROGRAM MEMORY LAYOUT
+// ---------------------
+// There may be several programs at any time and any
+// program could have several instances. So, each
+// execution of a process will depend on a few zero
+// page globals. The interpretive loop runs for at most
+// 4 ms. These are restored/saved by the multi-tasker.
+//  
+//   // - pure byte addressing program
+//   char      *program;
+//   // - program as vectors (this 
+//   #define   VPROGRAM ((uint16_t*)program)
+//
+//   // - slots of vars/constants indexed by 0-255 max
+//   uint16_t  *vars; 
+//   
+//   // - program running info
+//   char      *ipc;
+
+
+// PROGRAM VECTORS
+// ---------------
+// This is a vector interpretation of program bytes.
+// Each is 2 bytes uint16_t relative to 0==program
+// Patch at load time to actual addresses, until
+// a final $0000 subroutine vector.
+
+// 0: 1 byte index C=start of constants, N=number
+// 1: P=start of actual program
+// 2: subroutine code vectors... (max 64)
+//    ..... relocated subs
+// C: constant to copy start
+//    ..... relocated constants! (like str ptr)
+//    $0000 = end marker, relocate till here
+//    .....
+// P: program start
+//    ...init...
+//    jmp main (M)
+//    ...subs...
+// M: main program
+//    rts
+// S: strings/data referre to by relocated constants
+//    ....
+
+
   // Function vectors → direct pointers (no bin+ at each CALL)
   for (i = 0; i < nvector; i++)
     vptr[i] = bin + vectors[i];
