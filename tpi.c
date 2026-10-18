@@ -33,13 +33,17 @@
 
 // 'g' 'b' no sublevel
 // ivm: 1000: (/ (- 5899169 3976177) 1000) = 1922 start
-// ivm/asm = (/ 1922 127.0) = 15.13x slower, but improved 1%
+// ivm/asm = (/ 1922 127.0) = 15.13x slower, but improved 3x!
 
+// ivm/asm = (/ 1922 127.0) = 15.13x slower, but improved 1%
+ 
 // ivm: 1000: (/ (- 5593710 3707529) 1000) = 1886 start
 // ivm/asm = (/ 1886 127.0) = 14.85x slower, but improved 0.5%
 
-// ivm: 1000: (/ (- 5289946 3403768) 1000) = 1886 start
-// ivm/asm = (/ 1886 127.0) = 14.85x slower, but improved 0.5%
+// - fixing return byte wasted (save one byte per function call)
+// ivm: 1000: (/ (- 5273425 3384263) 1000) = 1889 start
+// ivm/asm = (/ 1889 127.0) = 14.87x slower, slightly slower
+
 
 #include <stdio.h>
 #include <stddef.h>
@@ -228,6 +232,7 @@ void emit_load_const(unsigned int v) {
 // ---------------------------------------------------------------------------
 int vectors[MAX_VECTORS];             // bytecode offset during compile
 char *vptr[MAX_VECTORS];              // resolved absolute pointers (finalise)
+unsigned char vec_ret_slot[MAX_VECTORS]; // RETURN slot for each vector (function frame)
 int nvector = 0;
 int main_offset = 0;                  // offset of main body
 char *main_entry = 0;                 // resolved pointer to main (finalise)
@@ -460,15 +465,16 @@ int expression(void) {
     if (sym->type == SYM_FUNC) {
       // Stackless multi-arg call:
       //   1. eval each arg → S param_slot[i]
-      //   2. vector call 0xC0|V, followed by ret_addr_slot
-      //      runtime stores the live ipc (absolute) into that slot
+      //   2. one-byte vector CALL 0xC0|V
+      //      runtime: mem[vec_ret_slot[V]] = ipc; ipc = vptr[V]
+      //      (return slot is per-function, not duplicated at each call site)
       //   3. L ret_slot
       int pi;
       EXPECT(TOK_LPAREN);
 
       for (pi = 0; pi < sym->nparams; pi++) {
         if (pi > 0) EXPECT(TOK_COMMA);
-        if (!expression()) return 0;             // arg → acc
+        if (!expression()) return 0;
         emit2('S', sym->param_slot[pi]);
       }
       EXPECT(TOK_RPAREN);
@@ -477,11 +483,8 @@ int expression(void) {
         printf("\nERROR: bad vector index for %s\n", name);
         longjmp(fail_jmp, 1);
       }
-      // CALL: opcode encodes vector; next byte is ret_addr_slot
       emit((char)(0xC0 | (sym->address & 0x3F)));
-      emit((char)sym->ret_addr_slot);
 
-      // result
       emit2('L', sym->ret_slot);
     }
     else {
@@ -692,6 +695,7 @@ void compile_function(void) {
   // the entry point is right here
   entry_offset = bin_ptr;
   vec_idx = add_vector(entry_offset);
+  vec_ret_slot[vec_idx] = (unsigned char)ret_addr_slot;
   fsym->address = vec_idx;              // now the symbol holds the vector index
 
   // body
@@ -838,13 +842,14 @@ unsigned int run_ivm(void) {
 
   case 0: goto done;
 
-    // return: slot holds ipc saved by CALL (absolute on 16-bit targets)
+    // return: slot holds ipc saved by CALL
   case ';': {
     unsigned char slot = (unsigned char)*ipc++;
-    if (sizeof(char *) <= sizeof(unsigned int))
-      ipc = (char *)(size_t)mem[slot];
-    else
-      ipc = bin + mem[slot];              /* host: stored as offset */
+#ifdef __CC65__
+    ipc = (char *)mem[slot];
+#else
+    ipc = bin + mem[slot]; //host runner: offset form
+#endif
     goto next;
   }
 
@@ -884,24 +889,21 @@ unsigned int run_ivm(void) {
     ipc -= (unsigned char)*ipc;
     goto pnext;
 
-    // ---- vectorised call 0xC0..0xFF ----
-    // encoding:  (0xC0|vec)  <ret_addr_slot>
-    // saves the live ipc (address of the following opcode) into the slot,
-    // then jumps via resolved vector pointer
+    // ---- vectorised call 0xC0..0xFF (one byte) ----
+    // mem[vec_ret_slot[vec]] = live ipc;  ipc = vptr[vec]
   default:
     if (op >= 0xC0) {
       int vec = op - 0xC0;
-      unsigned char rslot;
       if (vec >= nvector) {
         printf("\n[IVM] bad vector %d\n", vec);
         longjmp(fail_jmp, 1);
       }
-      rslot = (unsigned char)*ipc++;
-      /* ipc now points at the instruction after CALL — that is the return address */
-      if (sizeof(char *) <= sizeof(unsigned int))
-        mem[rslot] = (unsigned int)(size_t)ipc;   /* 6502: true absolute */
-      else
-        mem[rslot] = (unsigned int)(ipc - bin);   /* host runner only */
+      // ipc points at the next opcode — that is the return address
+#ifdef __CC65__
+      mem[vec_ret_slot[vec]] = (unsigned int)ipc;
+#else
+      mem[vec_ret_slot[vec]] = (unsigned int)(ipc - bin);
+#endif
       ipc = vptr[vec];
       goto next;
     }
