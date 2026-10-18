@@ -232,11 +232,19 @@ void emit_load_const(unsigned int v) {
 // ---------------------------------------------------------------------------
 int vectors[MAX_VECTORS];             // bytecode offset during compile
 char *vptr[MAX_VECTORS];              // resolved absolute pointers (finalise)
-unsigned char vec_ret_slot[MAX_VECTORS]; // RETURN slot for each vector (function frame)
+char vec_link[MAX_VECTORS];           // mem slot: return NEXT (ipc) per function
+char vec_val[MAX_VECTORS];            // mem slot: return VALUE per function
 int nvector = 0;
-int main_offset = 0;                  // offset of main body
-char *main_entry = 0;                 // resolved pointer to main (finalise)
-char is_code_addr[MAX_CONSTS];        // const_pool[i] is a code offset to relocate
+int main_offset = 0;
+char *main_entry = 0;
+char is_code_addr[MAX_CONSTS];
+
+/* threaded call chain: which function is active (0xFF = main) */
+#define MAX_CALL_DEPTH 8
+#define FUNC_MAIN      ((char)0xFF)
+char cur_func; // TODO: maybe register
+char fstack[MAX_CALL_DEPTH];
+char fsp;
 
 int add_vector(int entry_offset) {
   if (nvector >= MAX_VECTORS) {
@@ -463,12 +471,8 @@ int expression(void) {
     }
 
     if (sym->type == SYM_FUNC) {
-      // Stackless multi-arg call:
-      //   1. eval each arg → S param_slot[i]
-      //   2. one-byte vector CALL 0xC0|V
-      //      runtime: mem[vec_ret_slot[V]] = ipc; ipc = vptr[V]
-      //      (return slot is per-function, not duplicated at each call site)
-      //   3. L ret_slot
+      // 1. args → param slots  2. one-byte CALL
+      // ';' leaves return value in ACC — no L after call
       int pi;
       EXPECT(TOK_LPAREN);
 
@@ -479,13 +483,11 @@ int expression(void) {
       }
       EXPECT(TOK_RPAREN);
 
-      if ((unsigned char)sym->address >= (unsigned char)nvector) {
+      if (sym->address >= nvector) {
         printf("\nERROR: bad vector index for %s\n", name);
         longjmp(fail_jmp, 1);
       }
       emit((char)(0xC0 | (sym->address & 0x3F)));
-
-      emit2('L', sym->ret_slot);
     }
     else {
       // ordinary variable
@@ -695,8 +697,9 @@ void compile_function(void) {
   // the entry point is right here
   entry_offset = bin_ptr;
   vec_idx = add_vector(entry_offset);
-  vec_ret_slot[vec_idx] = (unsigned char)ret_addr_slot;
-  fsym->address = vec_idx;              // now the symbol holds the vector index
+  vec_link[vec_idx] = ret_addr_slot;    // NEXT pointer slot (compact, one per fn)
+  vec_val[vec_idx]  = ret_val_slot;     // return VALUE slot
+  fsym->address = vec_idx;
 
   // body
   while (curr_tok.type != TOK_END && curr_tok.type != TOK_EOF) {
@@ -705,13 +708,8 @@ void compile_function(void) {
   EXPECT(TOK_END);
   EXPECT(TOK_SEMI);
 
-  // return sequence (stackless):
-  //   The return address was stored by the caller into ret_addr_slot.
-  //   Opcode ';' takes that slot and jumps to the address held there.
-  //   (Pascal-style  FuncName := expr;  already wrote the result into
-  //    ret_val_slot.)
+  // single-byte return: ACC ← return value, ipc ← link, pop cur_func
   emit(';');
-  emit((char)ret_addr_slot);
 }
 
 
@@ -823,33 +821,50 @@ unsigned int run_ivm(void) {
   // faster than ZP?
   register char *ipc;
   register unsigned int acc;
-  register unsigned char op;
+  register char op;
 
-  // Start at resolved main entry (direct pointer, set in finalise)
+  // Start at resolved main entry
   ipc = main_entry;
   acc = 0;
+  cur_func = FUNC_MAIN;
+  fsp = 0;
 
-  // PAR = memory cell addressed by the byte currently at ipc (not consumed yet)
+#ifdef __CC65__
+#define PAR mem[*ipc]
+#else
 #define PAR mem[(unsigned char)(*ipc)]
+#endif
 
-  goto next; // enter at next, not pnext
+  goto next;
 
  pnext:
-  ++ipc; // skip the parameter byte
+  ++ipc;
  next:
-  op = (unsigned char)*ipc++;
+  op = *ipc++;
   switch (op) {
 
   case 0: goto done;
 
-    // return: slot holds ipc saved by CALL
+    /* single-byte return: value in ACC, restore NEXT, pop function chain */
   case ';': {
-    unsigned char slot = (unsigned char)*ipc++;
+    char link, val;
+    if (cur_func == FUNC_MAIN) {
+      printf("\n[IVM] return from main\n");
+      goto done;
+    }
+    link = vec_link[cur_func];
+    val  = vec_val[cur_func];
+    acc  = mem[val];
 #ifdef __CC65__
-    ipc = (char *)mem[slot];
+    ipc = (char *)mem[link];
 #else
-    ipc = bin + mem[slot]; //host runner: offset form
+    ipc = bin + mem[link];
 #endif
+    if (fsp <= 0) {
+      printf("\n[IVM] call chain underflow\n");
+      goto done;
+    }
+    cur_func = fstack[--fsp];
     goto next;
   }
 
@@ -889,20 +904,25 @@ unsigned int run_ivm(void) {
     ipc -= (unsigned char)*ipc;
     goto pnext;
 
-    // ---- vectorised call 0xC0..0xFF (one byte) ----
-    // mem[vec_ret_slot[vec]] = live ipc;  ipc = vptr[vec]
+    // ---- vectorised call (one byte) ----
+    // push cur_func; cur_func=vec; mem[vec_link[vec]]=ipc; ipc=vptr[vec]
   default:
-    if (op >= 0xC0) {
-      int vec = op - 0xC0;
+    if ((op & 0xc0) == 0xc0) {
+      int vec = op & 0x3f;
       if (vec >= nvector) {
         printf("\n[IVM] bad vector %d\n", vec);
         longjmp(fail_jmp, 1);
       }
-      // ipc points at the next opcode — that is the return address
+      if (fsp >= MAX_CALL_DEPTH) {
+        printf("\n[IVM] call chain overflow\n");
+        longjmp(fail_jmp, 1);
+      }
+      fstack[fsp++] = cur_func;
+      cur_func = (char)vec;
 #ifdef __CC65__
-      mem[vec_ret_slot[vec]] = (unsigned int)ipc;
+      mem[vec_link[vec]] = (unsigned int)ipc;
 #else
-      mem[vec_ret_slot[vec]] = (unsigned int)(ipc - bin);
+      mem[vec_link[vec]] = (unsigned int)(ipc - bin);
 #endif
       ipc = vptr[vec];
       goto next;
@@ -931,9 +951,10 @@ void dump_bytecode(void) {
     else if (isprint(c) && c > ' ') {
       // single byte ops
       if (strchr("#$(),.0123456789;<=>?ADEKNPRU~", c)
-        || islower(c))
+        || islower(c)) {
         printf("%c   ", c);
-      else // takes at least one arg
+        if (c == ';') { n= 0; putchar('\n'); }
+      } else // takes at least one arg
         printf("%c%02x ", c, bin[++i]);
     }
     else printf("$%02x ", c);
