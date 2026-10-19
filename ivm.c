@@ -143,8 +143,8 @@ unsigned int acc= 0;
 //
 // a - block in
 // b - block out
-// c - create window
-// d - file descriptor open (can kill it!)
+// c - create window TODO: move to w)indow?
+// d
 // e - execute/system - external programs hexdump
 // f - file open/close
 // g - gotoxy
@@ -158,15 +158,19 @@ unsigned int acc= 0;
 // o - output to file (#0 => 0 terminated, otherwise count)
 // p - printf or generic small formatting printers
 //(q - quit (exit(#) program) see "k")
-// r - restore window
+// r - restore window // TODO: receive... lol
 // s - save window
 //(t - time, see j)
 //(u - status, see j)
 //(v - vvindow pointer, see j)
-//(w - width, see j)
+//(w - width, see j) -- instead of c)reate just w)indow
 //(xy- cursor, see j)
 // z - fill A over X Y
    
+// TODO: SOUND PLAY MUSIC - oric, others" MIDI?
+//   - maybe implement by sending message to "sequenser"? w timing
+//   - a beep/sound process!
+
 // PROGRAM MEMORY LAYOUT
 // ---------------------
 // There may be several programs at any time and any
