@@ -76,6 +76,15 @@
 // savee: (- 317 309) = 8 bytes 
 // (/ (- 8156974 8086719) 1000) saves 70c / Two-par-function call
 
+// - "Poophole" optimization: sum:= sum+i; sum:= i+sum;
+// "Iss Jss Ussdd": ops modified, 9 bytes saved
+// (/ (- 6590838 5178079) 1000) = 1412 with 'U'
+// (/ (- 6561061 5138975) 1000) = 1422 no 'U' opt!!! ?????
+// (/ (- 6568864 5194953) 1000) = 1373 'Ussdd' 300 bytes!
+// (/ 1373 127.0)  = 10.81x 300 bytes from 303.
+// (/ 10.81 12.09) = 11% faster sum- loop
+// 6 ops / loop with new Iss and Ussdd
+// (/ 1373 6) = 228c / op
 
 #include <stdio.h>
 #include <stddef.h>
@@ -236,18 +245,19 @@ void emit(char c) {
 void emitop(char op) {
   emit(op);
   // TODO: make bitmask for detection
-  if (op == 'I' || op == 'J' || op == '0' || op == '9' || op == '~')
+  if (op == '0' || op == '9' || op == '~')
     acc_invalidate();
 }
 
 void emitop2(char op, char arg) {
   emitop(op);
   emit(arg);
-  if (op == 'S' || op == 'L')
+  if (op == 'S' || op == 'L' || op == 'U')
     acc_set_slot(arg);
   // TODO: make bitmask for detection
-  else if (op == '+' || op == '-' || op == '*' || op == '/' ||
-           op == '&' || op == '|' || op == '^')
+  else if (
+    op == '+' || op == '-' || op == '*' || op == '/' ||
+    op == '&' || op == '|' || op == '^' || op == 'I' || op == 'J')
     acc_invalidate();
 }
 
@@ -258,7 +268,7 @@ void emitop2(char op, char arg) {
 //
 // Opcode \0  = return, keep ACC.
 // Opcode ';' = ACC <- ret_val, then return
-// Opcode 'Q' = quit program (C: exit).
+// Opcode 'q' = quit program (C: exit).
 void emitreturn(char ret_slot) {
   if (acc_valid && acc_slot == ret_slot) {
     // "poophole": drop END "S ret_slot" — ACC is == value already
@@ -778,6 +788,7 @@ int expression(void) {
 int statement(void) {
   // assignment
   if (curr_tok.type == TOK_IDENT) {
+    int jj= src_pos - 5;
     char target[MAX_SYM_LEN + 1];
     Symbol* sym = lookup_sym(curr_tok.lexeme); // ?? safe
     strcpy(target, curr_tok.lexeme);
@@ -785,11 +796,46 @@ int statement(void) {
       printf("\n%s <---- ERROR: Unknown variable\n", target);
       longjmp(fail_jmp, 1);
     }
+
+#if 0
     EXPECT(TOK_IDENT);
     EXPECT(TOK_ASSIGN);
     if (!expression()) return 0;
     emitop2('S', sym->address);
     EXPECT(';');
+#else
+    // "Poophole" optimization: sum:= sum+i; sum:= i+sum;
+    { int i= bin_ptr;
+
+      EXPECT(TOK_IDENT);
+      EXPECT(TOK_ASSIGN);
+      if (!expression()) return 0;
+      emitop2('S', sym->address);
+      EXPECT(';');
+
+      if (bin_ptr-i==6
+        && bin[i]=='L' && bin[i+2]=='+' && bin[i+4]=='S'
+        && bin[i+1]==bin[i+5]
+      ) {
+        printf("====> poophole 'U' %d: %c%02x %c%02x %c%02x   >> %.30s\n"
+          , bin_ptr - i
+          , bin[i + 0]
+          , bin[i + 1]
+          , bin[i + 2]
+          , bin[i + 3]
+          , bin[i + 4]
+          , bin[i + 5]
+          , src_buf + jj
+        );
+        
+        {
+          char d= bin[i+3], s= bin[i+1];
+          bin_ptr-= 6; // rewind
+          emitop2('U', s); emit(d);
+        }
+      }
+    }
+#endif // POOP
   }
   // WRITELN
   else if (curr_tok.type == TOK_WRITE) {
@@ -850,10 +896,7 @@ int statement(void) {
     if (!statement()) return 0;
 
     // increment
-    // TODO: make one op 'I'
-    emitop2('L', ctrl->address);
-    emitop('I');
-    emitop2('S', ctrl->address);
+    emitop2('I', ctrl->address);
 
     // backward jump B <delta>
     {
@@ -1053,7 +1096,7 @@ int compile_pipeline(void) {
   if (last_var_slot >= 0)
     emitop2('L', last_var_slot);
 
-  emitop('Q'); // quit program
+  emitop('q'); // quit program
   return 1;
 }
 
@@ -1159,56 +1202,80 @@ unsigned int run_ivm(void) {
 
   goto next;
 
+  // Eat up one byte parameter from last op
  pnext:
   ++ipc;
- next:
-  op = *ipc++;
-  switch (op) {
 
-  case 'Q': // quit program (C exit)
+  // Next when no parameters
+  // TODO: 26 x cmp beq ...
+  //         net ++pc lda  jmp cmp/beq
+  //   avg (+ 3  8    5    1   (* 13 4)) = 69c
+  //   69c dispatch-overhead AT LEAST!
+
+ next:
+  switch ((op= *ipc++)) {
+
+    // OS: quit program (C: exit)
+  case 'q': 
     goto done;
 
-    // 0 = return, keep ACC;  ';' = ACC <- ret_val, then return
-  case 0:
-  case ';': {
-    char link;
+    // ';' = ACC <- ret_val, then return
+  case ';':
+    // TODO: remove this once we call by subroutine call!
     if (cur_func == FUNC_MAIN) {
       printf("\n[IVM] return from main\n");
       goto done;
     }
-    if (op == ';')
-      acc = mem[vec_val[cur_func]];
-    link = vec_link[cur_func];
+    acc = mem[vec_val[cur_func]];
+    // fall-through
+
+    // \0: return
+  case 0:
+    op = vec_link[cur_func];
+    // restore program counter
+
 #ifdef __CC65__
-    ipc = (char *)mem[link];
+    ipc = (char *)mem[op];
 #else
-    ipc = bin + mem[link];
+    ipc = bin + mem[op];
 #endif
+
+    // TODO: let's remove this fake limited stack
     if (fsp <= 0) {
       printf("\n[IVM] call chain underflow\n");
       goto done;
     }
     cur_func = fstack[--fsp];
-    goto next;
-  }
 
+    goto next;
+    
     // ---- parameter ops ----
+
+    // TODO: cc65 '+' becomes 72 c include goto pnext
+    // ~150++ cycles per instruction 
+    // (/ 1000000 150) = 6666 ops/s (18K ok for asm 50c)
   case '+': acc += PAR; goto pnext;
   case '-': acc -= PAR; goto pnext;
   case '*': acc *= PAR; goto pnext;
   case '/': if (PAR) acc /= PAR; goto pnext;
+
   case '&': acc &= PAR; goto pnext;
   case '|': acc |= PAR; goto pnext;
   case '^': acc ^= PAR; goto pnext;
+
   case 'L': acc  = PAR; goto pnext;
   case 'S': PAR = acc;  goto pnext;
+
+  case 'I': acc= (PAR++); goto pnext;
+  case 'J': acc= (PAR--); goto pnext;
+
+  case 'U': acc= (mem[ipc[0]]+= mem[ipc[1]]); ipc+=2; goto next;
 
     // ---- no-arg ops ----
   case ' ': goto next;
   case '0': acc = 0;      goto next;
   case '9': acc = 0xffff; goto next;
-  case 'I': ++acc;        goto next;
-  case 'J': --acc;        goto next;
+
   case '~': acc = ~acc;   goto next;
   case '.': printf("%u", acc);  goto next;
   case 'N': putchar('\n');      goto next;
@@ -1223,6 +1290,7 @@ unsigned int run_ivm(void) {
   case 'G':
     if ((int)acc > 0) ipc += (unsigned char)*ipc;
     goto pnext;
+
     // B <delta>  unconditional backward
   case 'B':
     ipc -= (unsigned char)*ipc;
@@ -1232,30 +1300,40 @@ unsigned int run_ivm(void) {
     // push cur_func; cur_func=vec; mem[vec_link[vec]]=ipc; ipc=vptr[vec]
   default:
     if ((op & 0xc0) == 0xc0) {
-      int vec = op & 0x3f;
-      if (vec >= nvector) {
-        printf("\n[IVM] bad vector %d\n", vec);
-        longjmp(fail_jmp, 1);
-      }
+
+      // JSR [op]
+
+      // TODO: we don't want stack and tests at runtime!
       if (fsp >= MAX_CALL_DEPTH) {
         printf("\n[IVM] call chain overflow\n");
         longjmp(fail_jmp, 1);
       }
       fstack[fsp++] = cur_func;
-      cur_func = (char)vec;
+
+      cur_func = op & 0x3f;
+
+
+      // save IPC and set new one from vector
 #ifdef __CC65__
-      mem[vec_link[vec]] = (unsigned int)ipc;
+      mem[vec_link[cur_func]] = (unsigned int)ipc;
 #else
-      mem[vec_link[vec]] = (unsigned int)(ipc - bin);
+      mem[vec_link[cur_func]] = (unsigned int)(ipc - bin);
 #endif
-      ipc = vptr[vec];
+
+      // set new
+      ipc = vptr[cur_func];
+      
       goto next;
     }
+
+    // ZJMP [op] (forward)
+    // TODO: (op & 0xc0) == 0x80 for 0x80..0xbf
     printf("\n[IVM] unknown opcode 0x%02X\n", op);
   }
 
  done:
   return acc;
+
 #undef PAR
 }
 
@@ -1274,12 +1352,16 @@ void dump_bytecode(void) {
       printf("\\0\n"); n= 0; }
     else if (isprint(c) && c > ' ') {
       // single byte ops
-      if (strchr("#$(),.0123456789;<=>?ADEIJKNPRU~", c)
+      if (strchr("#$(),.0123456789;<=>?ADEKNPR~", c)
         || islower(c)) {
         printf("%c   ", c);
         if (c == ';') { n= 0; putchar('\n'); }
-      } else // takes at least one arg
-        printf("%c%02x ", c, bin[++i]);
+      }
+      else // takes at least one arg
+        if (c == 'U') {
+          printf("U%02x%02x   ", bin[i+1], bin[i+2]); i+= 2;
+        } else
+          printf("%c%02x ", c, bin[++i]);
     }
     else printf("$%02x ", c);
     if (++n == wrap) { printf("\n"); n= 0; }

@@ -91,21 +91,21 @@ unsigned int acc= 0;
 //= 0 - acc = 0 nul/nil
 //  1234 - local var read  | single byte read/write "frame"
 //  5678 - local var write | can use 2 byte L/S $ instead
-//= 9 - acc= -1 
+//= 9 - acc= -1
 //  : - define?
 //  ; - return /enddef
 //  <=> - cmp - do we need all?
 //  ? - have value == C ! 0=>-1 any=>0
 //  @ - read *$ - Load
 //= A - car acc= acc[0] == @
-//  B
+//  B - back jump #
 //  C - cons(acc, $) - a variant of alloc cell and , ???
-//= D - cdr acc= acc[1] == 2 + @, lol
+//= D - cdr acc= acc[1] == 2 + @, LOL
 //= E - emit char = putchar(acc)
 //= F - free *$
 //  G - geap ?
 //  H - heap ?
-//= IJ - inc/dec acc TODO: or $ (and load it in acc)
+//= IJ - inc/dec $ leave val in acc
 //= K - key (waits?)
 //= L - load $
 //= M - $= malloc #
@@ -116,8 +116,8 @@ unsigned int acc= 0;
 //  R - recurse (save current frame, malloc?)
 //= S - store $
 //  T - type acc chars from $ (?)
-//  U - null? === ?
-//  V
+//  U - variable $ += acc
+//( V - variable $ -= acc - TODO: more uncommon, not needed?)
 //( W - write var string $)
 //  XY
 //  Z - zero # (fill)
@@ -244,8 +244,8 @@ void ivm() {
   case 'A': acc= MEM(acc);   goto next;
   case 'D': acc= MEM(acc+2); goto next;
 
-  case 'I': ++acc; goto next;
-  case 'J': --acc; goto next;
+  case 'I': acc= MEM(PAR)= MEM(PAR)+1; goto pnext;
+  case 'J': acc= MEM(PAR)= MEM(PAR)+1; goto pnext;
   case '~': acc= ~acc; goto next;
   // case '!': acc= !acc; goto next;
       

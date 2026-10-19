@@ -1,3 +1,6 @@
+cc65 -Oirs -T tpi.c -t sim6502
+ca65 -l tpi.asm tpi.s
+
 cl65 -Oirs -t sim6502 -m tpi.map -o tpi.sim tpi.c && sim65 -c tpi.sim
 echo
 ls -l tpi.sim
