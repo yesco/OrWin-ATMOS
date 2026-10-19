@@ -67,6 +67,10 @@
 // ivm: 1000: (/ (- 8140443 6778897) 1000) = 1361 cycles/call
 // 9 ops instead of 3, so 6 => (/ 1361 6) = 226 cycle/op
 
+// - last parameter in ACC when call function
+// ivm: 1000: (/ (- 6789427 5236649) 1000) = 1552 cycles / loop
+// savee: (- 333 317) = 16 bytes! (2 bytes per >=2 calls same fun!)
+
 
 #include <stdio.h>
 #include <stddef.h>
@@ -127,12 +131,6 @@ typedef struct {
 // Real keywords + "combi" names for specials (printer only).
 // Names starting with * never match lexer (non-alpha won't enter IDENT).
 Keyword keywords[] = {
-  {"*EOF*",    TOK_EOF},
-  {"*ERROR*",  TOK_ERROR},
-  {"*IDENT*",  TOK_IDENT},
-  {"*NUM*",    TOK_NUM},
-  {"*STRING*", TOK_STRING},
-  {":=",       TOK_ASSIGN},
   {"PROGRAM",  TOK_PROGRAM},
   {"VAR",      TOK_VAR},
   {"BEGIN",    TOK_BEGIN},
@@ -143,6 +141,13 @@ Keyword keywords[] = {
   {"FOR",      TOK_FOR},
   {"TO",       TOK_TO},
   {"DO",       TOK_DO},
+  // TODO: insert a 0 entry to end matching during tokenization
+  {"*EOF*",    TOK_EOF},
+  {"*ERROR*",  TOK_ERROR},
+  {"*IDENT*",  TOK_IDENT},
+  {"*NUM*",    TOK_NUM},
+  {"*STRING*", TOK_STRING},
+  {":=",       TOK_ASSIGN},
 };
 #define NKEYWORDS ((int)(sizeof keywords / sizeof keywords[0]))
 
@@ -605,11 +610,11 @@ void emit_add_to_acc(char kind, unsigned int val) {
   char slot;
   if (kind == OP_MEM) {
     slot = (char)val;
-    // ACC already holds this slot's value (e.g. last param on entry, or
-    // val+val). +slot reads MEMORY; if we never spilled, mem can be stale
-    // or we still need a second copy — S first so +slot doubles correctly.
-    if (acc_valid && acc_slot == slot)
-      emitop2('S', slot);
+    // ACC holds this slot: need mem copy for +slot. S unless just stored.
+    if (acc_valid && acc_slot == slot) {
+      if (!(bin_ptr >= 2 && bin[bin_ptr-2] == 'S' && bin[bin_ptr-1] == slot))
+        emitop2('S', slot);
+    }
     emitop2('+', slot);
     return;
   }
@@ -659,11 +664,12 @@ int primary(char *out_kind, unsigned int *out_val) {
 
     if (sym->type == SYM_FUNC) {
       EXPECT('(');
+      // store all but last param; last stays in ACC for callee to S at entry
       for (pi = 0; pi < sym->nparams; pi++) {
         if (pi > 0) EXPECT(',');
         if (!expression()) return 0;
-        emitop2('S', sym->param_slot[pi]);
-        // S leaves ACC holding last arg for callee
+        if (pi < sym->nparams - 1)
+          emitop2('S', sym->param_slot[pi]);
       }
       EXPECT(')');
       if (sym->address >= nvector) {
@@ -941,10 +947,11 @@ void compile_function(void) {
   vec_val[vec_idx]  = ret_val_slot; // return VALUE slot
   fsym->address = vec_idx;
 
-  // last parameter remains in ACC on entry (caller S does not clobber ACC)
-  if (nparams > 0)
+  // last param arrives in ACC; store into its slot (call sites omit that S)
+  if (nparams > 0) {
+    emitop2('S', param_slots[nparams - 1]);
     acc_set_slot(param_slots[nparams - 1]);
-  else
+  } else
     acc_invalidate();
 
   // body
