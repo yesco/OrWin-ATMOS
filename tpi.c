@@ -55,8 +55,18 @@
 
 // - optimize operator apply
 // ivm: 1000: (/ (- 4782032 3245844) 1000) = 1536 start
-// ivm/asm = (/ 1535 127.0) = 12.09x ... (/ 12.09 12.16) 0.5 faster
+// ivm/asm = (/ 1536 127.0) = 12.09x ... (/ 12.09 12.16) 0.5 faster
 // code (- 14800 14705) = 95 bytes saved
+
+// - "poophole" (not peep as this is at the "end") return optimization
+// ivm: 1000: (/ (- 8418438 8140443) 1000) = 277 c less
+// (/ 8418438 8140443.0) => 3.4 % faster function return
+// 339 bytes => 333 bytes, saved 6 bytes! 
+
+// - function 2 parameter overhead:
+// ivm: 1000: (/ (- 8140443 6778897) 1000) = 1361 cycles/call
+// 9 ops instead of 3, so 6 => (/ 1361 6) = 226 cycle/op
+
 
 #include <stdio.h>
 #include <stddef.h>
@@ -128,9 +138,6 @@ Keyword keywords[] = {
 };
 #define NKEYWORDS ((int)(sizeof keywords / sizeof keywords[0]))
 
-// accepted single-char tokens (the char is the type)
-char *single_chars = ";:+-.,()*/";
-
 typedef struct {
   TokenType type;
   char lexeme[MAX_SYM_LEN + 1];
@@ -138,7 +145,7 @@ typedef struct {
 } Token;
 
 char tok_name_buf[4];
-char *tok_name(TokenType t) {
+char* tok_name(TokenType t) {
   int i;
   if (t == TOK_EOF) return "EOF";
   if (t == TOK_ERROR) return "ERROR";
@@ -230,6 +237,24 @@ void emitop2(char op, char arg) {
   else if (op == '+' || op == '-' || op == '*' || op == '/' ||
            op == '&' || op == '|' || op == '^')
     acc_invalidate();
+}
+
+// Generate function return (pascal: exit)
+//
+// - If ACC already holds the return-value slot, emit 0 (return without reload).
+// - Otherwise emit ';' (load ret slot, then return).
+//
+// Opcode \0  = return, keep ACC.
+// Opcode ';' = ACC <- ret_val, then return
+// Opcode 'Q' = quit program (C: exit).
+void emitreturn(char ret_slot) {
+  if (acc_valid && acc_slot == ret_slot) {
+    // "poophole": drop END "S ret_slot" — ACC is == value already
+    if (bin_ptr >= 2 && bin[bin_ptr - 2] == 'S' && bin[bin_ptr - 1] == ret_slot)
+      bin_ptr -= 2;
+    emit(0); // return, keep ACC
+  } else
+    emitop(';'); // ACC <- ret_val, then return
 }
 
 void add_patch(int offset, int kind, int value) {
@@ -528,7 +553,7 @@ void next_token(void) {
   // single-char: token type is the character itself
   curr_tok.lexeme[0] = C;
   curr_tok.lexeme[1] = 0;
-  if (strchr(single_chars, C)) {
+  if (strchr(";:+-.,()*/", C)) {
     curr_tok.type = C;
     NEXT;
     return;
@@ -927,8 +952,8 @@ void compile_function(void) {
   EXPECT(TOK_END);
   EXPECT(';');
 
-  // single-byte return: ACC ← return value, ipc ← link, pop cur_func
-  emitop(';');
+  // return: 0 if ACC already is return value, else ';' (reload then return)
+  emitreturn(ret_val_slot);
 }
 
 
@@ -1002,7 +1027,7 @@ int compile_pipeline(void) {
   if (last_var_slot >= 0)
     emitop2('L', last_var_slot);
 
-  emitop(0); // halt
+  emitop('Q'); // quit program
   return 1;
 }
 
@@ -1114,18 +1139,20 @@ unsigned int run_ivm(void) {
   op = *ipc++;
   switch (op) {
 
-  case 0: goto done;
+  case 'Q': // quit program (C exit)
+    goto done;
 
-    // single-byte return: value in ACC, restore NEXT, pop function chain
+    // 0 = return, keep ACC;  ';' = ACC <- ret_val, then return
+  case 0:
   case ';': {
-    char link, val;
+    char link;
     if (cur_func == FUNC_MAIN) {
       printf("\n[IVM] return from main\n");
       goto done;
     }
+    if (op == ';')
+      acc = mem[vec_val[cur_func]];
     link = vec_link[cur_func];
-    val  = vec_val[cur_func];
-    acc  = mem[val];
 #ifdef __CC65__
     ipc = (char *)mem[link];
 #else
@@ -1212,7 +1239,7 @@ void dump_bytecode(void) {
   printf("\n--- BYTECODE (%d bytes) ---\n", bin_ptr);
   for (; i < bin_ptr; i++) {
     char c = bin[i];
-    if      (c == 0)    printf("\\0  ");
+    if (!c) { n= 0; printf("\\0  \n"); }
     else if (c >= 0xC0) printf("V%02x ", c - 0xC0);
     else if (c >= 0x80) printf("J%02x ", c - 0x80);
     else if (c == ' ')  printf("_   ", c);

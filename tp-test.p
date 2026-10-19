@@ -34,11 +34,10 @@ begin
 
    { Test: Complex math addition using our functional JSR routine }
    beta := AddTen(Mul2(alpha)+1) + Mul2(11);
-
-   { Test: Printing numeric value from memory }
+   { Test: Printing numeric 47 value from memory }
    writeln(beta);
 
-   { Test: Two parameter function calling }
+   { Test: 54 = Two parameter function calling }
    writeln("Two:");
    writeln(Two(alpha, beta));
 
@@ -47,13 +46,13 @@ begin
 
    { Test: looping sum }
    sum := 0;
-   for i := 1 to 0 do sum := sum + i;
+   for i := 1 to 1000 do sum := sum + i;
    writeln("Sum:");
    writeln(sum);
 
    { Test: looping funsum }
    fsum := 0;
-   for i := 1 to 1000 do fsum := Two(fsum, i);
+   for i := 1 to 0 do fsum := Two(fsum, i);
    writeln("FumSum:");
    writeln(fsum);
 
