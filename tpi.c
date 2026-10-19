@@ -388,11 +388,15 @@ void next_token(void) {
   char quote_char;
 
   while (C) {
+
+    // SPACE
     if (isspace(C)) {
       if (C == '\n') lnum++;
       NEXT;
       continue;
     }
+
+    // COMMENT
     if (C == '{') {
       NEXT;
       while (C && C != '}') {
@@ -413,6 +417,7 @@ void next_token(void) {
     return;
   }
 
+  // STRING
   if (C == '"' || C == '\'') {
     quote_char = C;
     NEXT;
@@ -427,6 +432,7 @@ void next_token(void) {
     return;
   }
 
+  // IDENT
   if (isalpha(C)) {
     len = 0;
     while (isalnum(C) && len < MAX_SYM_LEN) {
@@ -451,6 +457,7 @@ void next_token(void) {
     return;
   }
 
+  // NUMBER
   if (isdigit(C)) {
     curr_tok.type = TOK_NUM;
     curr_tok.value = 0;
@@ -462,6 +469,7 @@ void next_token(void) {
     return;
   }
 
+  // ASSIGN :=
   if (C == ':' && src_buf[src_pos + 1] == '=') {
     NEXT; NEXT;
     curr_tok.type = TOK_ASSIGN;
@@ -469,6 +477,7 @@ void next_token(void) {
     return;
   }
 
+  // OPS single char
   curr_tok.lexeme[0] = C;
   curr_tok.lexeme[1] = 0;
   switch (C) {
