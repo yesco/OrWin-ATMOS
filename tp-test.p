@@ -36,6 +36,35 @@ BEGIN
   TestMath := (a * b) + (a & b);
 END;
 
+function TestIf(x : integer) : integer;
+begin
+   { TODO: this is not correct, I think it runs both then else! }
+
+   writeln("--IF THEN ELSE checks:");
+   writeln(x);
+   
+   if x then writeln("1:TRUE"); writeln("1: optional");
+   if x then writeln("2:TRUE"); else writeln("2:FALSE"); writeln("2: both");
+
+   if x then begin writeln("3:TRUE"); end; writeln("3: optional");
+   if x then begin writeln("4:TRUE"); end
+   else begin writeln("4:FALSE"); end; writeln("4: both");
+   
+   if x then
+      if x then writeln("5:TRUE");
+      else writeln("5:FALSE"); writeln("5: both");
+
+   if x then
+      if x then writeln("7:TRUE");
+      else writeln("7:FALSE");
+   else writeln("6: FALSE");
+
+   writeln("7:NOT:");
+
+   if x then TestIf := 1; else TestIf := 0;
+   
+end;
+
 var
    alpha : integer;
    beta	 : integer;
@@ -93,4 +122,8 @@ begin
 
    writeln(TestMath(42,  33));
    writeln(TestMath(17, 255));
+
+   writeln(TestIf(0));
+   writeln(TestIf(1));
 end.
+

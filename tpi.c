@@ -140,15 +140,21 @@ typedef char TokenType;
 #define TOK_ASSIGN   ((TokenType)5) // :=
 
 // keywords — letters, unique
+// free: A C H J M O QRS U XYZ
 #define TOK_PROGRAM  'P'
 #define TOK_VAR      'V'
 #define TOK_BEGIN    'B'
 #define TOK_END      'E'
-#define TOK_INTEGER  'I'
+#define TOK_INTEGER  'N'
 #define TOK_WRITE    'W' // WRITELN
 #define TOK_FUNCTION 'F'
+
+#define TOK_IF       'I'
+#define TOK_THEN     'T'
+#define TOK_ELSE     'L'
+
 #define TOK_FOR      'O' // F taken by FUNCTION
-#define TOK_TO       'T'
+#define TOK_TO       'G'
 #define TOK_DO       'D'
 
 typedef struct {
@@ -166,9 +172,15 @@ Keyword keywords[] = {
   {"INTEGER",  TOK_INTEGER},
   {"WRITELN",  TOK_WRITE},
   {"FUNCTION", TOK_FUNCTION},
+
+  {"IF",       TOK_IF},
+  {"THEN",     TOK_THEN},
+  {"ELSE",     TOK_ELSE},
+  
   {"FOR",      TOK_FOR},
   {"TO",       TOK_TO},
   {"DO",       TOK_DO},
+
   // TODO: insert a 0 entry to end matching during tokenization
   {"*EOF*",    TOK_EOF},
   {"*ERROR*",  TOK_ERROR},
@@ -795,13 +807,23 @@ int expression() {
   return 1;
 }
 
-
-
 // ---------------------------------------------------------------------------
 // Statement
 // ---------------------------------------------------------------------------
+void beginend() {
+  EXPECT(TOK_BEGIN);
+
+  while (curr_tok.type != TOK_END && curr_tok.type != TOK_EOF) {
+    // TODO: doesn't statement do this already
+    if (!statement()) longjmp(fail_jmp, 1);
+  }
+
+  EXPECT(TOK_END);
+}
+
 int statement(void) {
-  // assignment
+
+  // ASSIGNMENT
   if (curr_tok.type == TOK_IDENT) {
     int jj= src_pos - 5;
     char target[MAX_SYM_LEN + 1];
@@ -854,6 +876,7 @@ int statement(void) {
     }
 #endif // POOP
   }
+
   // WRITELN
   else if (curr_tok.type == TOK_WRITE) {
     int i;
@@ -873,6 +896,7 @@ int statement(void) {
     EXPECT(')');
     EXPECT(';');
   }
+
   // FOR
   else if (curr_tok.type == TOK_FOR) {
     char ctrl_name[MAX_SYM_LEN + 1];
@@ -930,10 +954,67 @@ int statement(void) {
       bin[exit_patch + 1] = (char)delta;
     }
   }
+
+  // IF expr THEN stmt [ELSE stmt]
+  else if (curr_tok.type == TOK_IF) {
+    int patch_then;
+    int patch_else;
+
+    EXPECT(TOK_IF);
+
+    if (!expression()) return 0;
+
+    // Condition value is now in ACC.
+    // If ACC is 0 (false), jump past the THEN body.
+    // We emit a conditional forward jump.
+    emitop('G');
+    patch_then = bin_ptr;
+    emit(0); // Placeholder for forward jump delta
+
+    EXPECT(TOK_THEN);
+
+    if (!statement()) return 0;
+
+    // Check for optional ELSE branch
+    if (curr_tok.type == TOK_ELSE) {
+      EXPECT(TOK_ELSE);
+
+      // If the THEN body executed, we must unconditionally jump past the ELSE body.
+      /// emitop('1'); // TODO: ???
+
+      emitop('9'); // TRUE (but its neg!) lol
+//      emitop('?'); // ???
+      emitop('?'); // ???
+
+      emitop('G'); // Forward unconditional jump
+      patch_else = bin_ptr;
+      emit(0); // Placeholder for forward jump delta
+
+      // Patch the initial false jump to target this ELSE entry point
+      bin[patch_then] = bin_ptr - (patch_then + 1);
+
+      if (!statement()) return 0;
+
+      // Patch the ELSE exit jump to target right after the ELSE body
+      bin[patch_else] = bin_ptr - (patch_else + 1);
+    } else {
+      // No ELSE branch: patch the false jump to land right here
+      bin[patch_then] = bin_ptr - (patch_then + 1);
+    }
+  }
+
+  // BEGIN ... END
+  else if (curr_tok.type == TOK_BEGIN) beginend();
+
+  // ; (empty statement)
+  else if (curr_tok.type == ';') EXPECT(';');
+  
+  // --- ERROR
   else {
     printf("\n%s <---- ERROR: expected statement\n", curr_tok.lexeme);
     longjmp(fail_jmp, 1);
   }
+
   return 1;
 }
 
@@ -1014,9 +1095,6 @@ void compile_function(void) {
   // Expose RETURN as a local name for the return-address slot
   add_symbol("RETURN", SYM_VAR, ret_addr_slot);
 
-  // BEGIN
-  EXPECT(TOK_BEGIN);
-
   // the entry point is right here
   entry_offset = bin_ptr;
   vec_idx = add_vector(entry_offset);
@@ -1024,6 +1102,8 @@ void compile_function(void) {
   vec_val[vec_idx]  = ret_val_slot; // return VALUE slot
   fsym->address = vec_idx;
 
+  // TODO: mustbe after previous section. WHY?
+  
   // last param arrives in ACC; store into its slot (call sites omit that S)
   if (nparams > 0) {
     emitop2('S', param_slots[nparams - 1]);
@@ -1031,11 +1111,7 @@ void compile_function(void) {
   } else
     acc_invalidate();
 
-  // body
-  while (curr_tok.type != TOK_END && curr_tok.type != TOK_EOF) {
-    if (!statement()) longjmp(fail_jmp, 1);
-  }
-  EXPECT(TOK_END);
+  beginend();
   EXPECT(';');
 
   // return: 0 if ACC already is return value, else ';' (reload then return)
@@ -1289,11 +1365,12 @@ unsigned int run_ivm(void) {
   case 'U': acc= (mem[ipc[0]]+= mem[ipc[1]]); ipc+=2; goto next;
 
     // ---- no-arg ops ----
-  case ' ': goto next;
+  case ' ':               goto next;
   case '0': acc = 0;      goto next;
   case '9': acc = 0xffff; goto next;
 
-  case '~': acc = ~acc;   goto next;
+  case '?': acc = !acc;         goto next;
+  case '~': acc = ~acc;         goto next;
   case '.': printf("%u", acc);  goto next;
   case 'N': putchar('\n');      goto next;
   case 'E': putchar((char)acc); goto next;
@@ -1302,6 +1379,8 @@ unsigned int run_ivm(void) {
     while (*ipc) putchar(*ipc++);
     goto pnext; // skip the terminating 0
 
+// TODO: reconsider: We need Zjump lol
+    
     // ---- relative jumps (uppercase, single opcode each) ----
     // G <delta>  conditional forward if acc > 0
   case 'G':
@@ -1345,7 +1424,7 @@ unsigned int run_ivm(void) {
 
     // ZJMP [op] (forward)
     // TODO: (op & 0xc0) == 0x80 for 0x80..0xbf
-    printf("\n[IVM] unknown opcode 0x%02X\n", op);
+    printf("\n[IVM] unknown opcode 0x%02X '%c'\n", op, isprint(op)?op:0);
   }
 
  done:
@@ -1368,14 +1447,17 @@ void dump_bytecode(void) {
       putchar('\n'); do putchar(c); while((c=bin[++i]));
       printf("\\0\n"); n= 0; }
     else if (isprint(c) && c > ' ') {
+
       // single byte ops
       if (strchr("#$(),.0123456789;<=>?ADEKNPR~", c)
         || islower(c)) {
         printf("%c   ", c);
         if (c == ';') { n= 0; putchar('\n'); }
       }
-      else // takes at least one arg
-        if (c == 'U') {
+
+      // takes at least one arg
+      else 
+        if (c == 'U') { // two args
           printf("U%02x%02x   ", bin[i+1], bin[i+2]); i+= 2;
         } else
           printf("%c%02x ", c, bin[++i]);
