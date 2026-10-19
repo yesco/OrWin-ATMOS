@@ -160,15 +160,21 @@ void emit(char c) {
     longjmp(fail_jmp, 1);
   }
   bin[bin_ptr++] = c;
-  if (c == 'I' || c == 'J' || c == '0' || c == '9' || c == '~')
+}
+
+void emitop(char op) {
+  emit(op);
+  // TODO: make bitmask for detection
+  if (op == 'I' || op == 'J' || op == '0' || op == '9' || op == '~')
     acc_invalidate();
 }
 
-void emit2(char op, char arg) {
-  emit(op);
-  emit((char)arg);
+void emitop2(char op, char arg) {
+  emitop(op);
+  emit(arg);
   if (op == 'S' || op == 'L')
-    acc_set_slot((char)arg);
+    acc_set_slot(arg);
+  // TODO: make bitmask for detection
   else if (op == '+' || op == '-' || op == '*' || op == '/' ||
            op == '&' || op == '|' || op == '^')
     acc_invalidate();
@@ -282,10 +288,10 @@ int add_const(unsigned int v) {
 // Emit a load of a constant: L (0x80+idx)
 void emit_load_const(unsigned int v) {
   int idx;
-  if (v == 0) { emit('0'); return; }
-  if (v == (unsigned int)-1) { emit('9'); return; }
+  if (v == 0) { emitop('0'); return; }
+  if (v == (unsigned int)-1) { emitop('9'); return; }
   idx = add_const(v);
-  emit('L');
+  emitop('L');
   emit((char)(0x80 | (idx & 0x7F)));
 }
 
@@ -505,14 +511,14 @@ void force_acc(char kind, unsigned int val) {
   if (kind == OP_MEM) {
     if (acc_valid && acc_slot == (char)val)
       return;
-    emit2('L', (char)val);
+    emitop2('L', (char)val);
     return;
   }
   // OP_IMM
-  if (val == 0) { emit('0'); return; }
-  if (val == (unsigned int)-1) { emit('9'); return; }
+  if (val == 0) { emitop('0'); return; }
+  if (val == (unsigned int)-1) { emitop('9'); return; }
   idx = add_const(val);
-  emit('L');
+  emitop('L');
   emit((char)(0x80 | (idx & 0x7F)));
   acc_invalidate();
 }
@@ -526,14 +532,14 @@ void emit_add_to_acc(char kind, unsigned int val) {
     // val+val). +slot reads MEMORY; if we never spilled, mem can be stale
     // or we still need a second copy — S first so +slot doubles correctly.
     if (acc_valid && acc_slot == slot)
-      emit2('S', slot);
-    emit2('+', slot);
+      emitop2('S', slot);
+    emitop2('+', slot);
     return;
   }
   if (kind == OP_IMM) {
     if (val == 0) return;
     idx = add_const(val);
-    emit2('+', (char)(0x80 | (idx & 0x7F)));
+    emitop2('+', (char)(0x80 | (idx & 0x7F)));
     return;
   }
 }
@@ -579,7 +585,7 @@ int primary(char *out_kind, unsigned int *out_val) {
       for (pi = 0; pi < sym->nparams; pi++) {
         if (pi > 0) EXPECT(TOK_COMMA);
         if (!expression()) return 0;
-        emit2('S', sym->param_slot[pi]);
+        emitop2('S', sym->param_slot[pi]);
         // S leaves ACC holding last arg for callee
       }
       EXPECT(TOK_RPAREN);
@@ -619,7 +625,7 @@ int expression(void) {
     // Spill a left-hand function result before evaluating the RHS.
     if (left_kind == OP_ACC) {
       int tmp = alloc_temp();
-      emit2('S', (char)tmp);
+      emitop2('S', (char)tmp);
       left_kind = OP_MEM;
       left_val = (unsigned int)(unsigned char)tmp;
     }
@@ -639,9 +645,9 @@ int expression(void) {
     // Spill it, restore the left operand, then apply the operator.
     if (right_kind == OP_ACC) {
       int tmp = alloc_temp();
-      emit2('S', (char)tmp);
+      emitop2('S', (char)tmp);
       force_acc(left_kind, left_val);
-      emit2(op, (char)tmp);
+      emitop2(op, (char)tmp);
       left_kind = OP_ACC;
       left_val = 0;
       continue;
@@ -650,7 +656,7 @@ int expression(void) {
     force_acc(left_kind, left_val);
 
     if (op == '-')
-      emit2('-', (char)(right_kind == OP_MEM
+      emitop2('-', (char)(right_kind == OP_MEM
         ? right_val
         : (0x80 | (add_const(right_val) & 0x7F))));
     else
@@ -682,7 +688,7 @@ int statement(void) {
     EXPECT(TOK_IDENT);
     EXPECT(TOK_ASSIGN);
     if (!expression()) return 0;
-    emit2('S', sym->address);
+    emitop2('S', sym->address);
     EXPECT(TOK_SEMI);
   }
   // WRITELN
@@ -691,16 +697,16 @@ int statement(void) {
     EXPECT(TOK_WRITE);
     EXPECT(TOK_LPAREN);
     if (curr_tok.type == TOK_STRING) {
-      emit('"');
+      emitop('"');
       for (i = 0; curr_tok.lexeme[i]; i++)
         emit(curr_tok.lexeme[i]);
       emit(0);
       EXPECT(TOK_STRING);
     } else {
       if (!expression()) return 0;
-      emit('.');
+      emitop('.');
     }
-    emit('N');
+    emitop('N');
     EXPECT(TOK_RPAREN);
     EXPECT(TOK_SEMI);
   }
@@ -725,28 +731,29 @@ int statement(void) {
     EXPECT(TOK_ASSIGN);
 
     if (!expression()) return 0;
-    emit2('S', ctrl->address);
+    emitop2('S', ctrl->address);
 
     EXPECT(TOK_TO);
     high_slot = alloc_temp();
     if (!expression()) return 0;
-    emit2('S', high_slot);
+    emitop2('S', high_slot);
 
     EXPECT(TOK_DO);
     loop_start = bin_ptr;
 
     // test: acc = ctrl - high;  if (acc > 0) exit
-    emit2('L', ctrl->address);
-    emit2('-', high_slot);
+    emitop2('L', ctrl->address);
+    emitop2('-', high_slot);
     exit_patch = bin_ptr;
-    emit('G'); emit(0); // G <delta> conditional forward (acc > 0)
+    emitop('G'); emit(0); // G <delta> conditional forward (acc > 0)
 
     if (!statement()) return 0;
 
     // increment
-    emit2('L', ctrl->address);
-    emit('I');
-    emit2('S', ctrl->address);
+    // TODO: make one op 'I'
+    emitop2('L', ctrl->address);
+    emitop('I');
+    emitop2('S', ctrl->address);
 
     // backward jump B <delta>
     {
@@ -755,7 +762,7 @@ int statement(void) {
         printf("\nFOR body too large\n");
         longjmp(fail_jmp, 1);
       }
-      emit('B'); emit((char)delta);
+      emitop('B'); emit((char)delta);
     }
     // patch forward exit
     {
@@ -871,7 +878,7 @@ void compile_function(void) {
   EXPECT(TOK_SEMI);
 
   // single-byte return: ACC ← return value, ipc ← link, pop cur_func
-  emit(';');
+  emitop(';');
 }
 
 
@@ -943,9 +950,9 @@ int compile_pipeline(void) {
 
   // leave last global in acc (compatibility)
   if (last_var_slot >= 0)
-    emit2('L', last_var_slot);
+    emitop2('L', last_var_slot);
 
-  emit(0); // halt
+  emitop(0); // halt
   return 1;
 }
 
