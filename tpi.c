@@ -124,7 +124,15 @@ typedef struct {
   TokenType type;
 } Keyword;
 
+// Real keywords + "combi" names for specials (printer only).
+// Names starting with * never match lexer (non-alpha won't enter IDENT).
 Keyword keywords[] = {
+  {"*EOF*",    TOK_EOF},
+  {"*ERROR*",  TOK_ERROR},
+  {"*IDENT*",  TOK_IDENT},
+  {"*NUM*",    TOK_NUM},
+  {"*STRING*", TOK_STRING},
+  {":=",       TOK_ASSIGN},
   {"PROGRAM",  TOK_PROGRAM},
   {"VAR",      TOK_VAR},
   {"BEGIN",    TOK_BEGIN},
@@ -147,12 +155,6 @@ typedef struct {
 char tok_name_buf[4];
 char* tok_name(TokenType t) {
   int i;
-  if (t == TOK_EOF) return "EOF";
-  if (t == TOK_ERROR) return "ERROR";
-  if (t == TOK_IDENT) return "IDENT";
-  if (t == TOK_NUM) return "NUM";
-  if (t == TOK_STRING) return "STRING";
-  if (t == TOK_ASSIGN) return ":=";
   for (i = 0; i < NKEYWORDS; i++)
     if (keywords[i].type == t) return keywords[i].name;
   if (t > 32 && t < 127) {
