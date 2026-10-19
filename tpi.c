@@ -86,6 +86,9 @@
 // 6 ops / loop with new Iss and Ussdd
 // (/ 1373 6) = 228c / op
 
+// 7688330
+// (/ (- 7720424 5213578) 1000) = 2506 c / loop ?
+
 #include <stdio.h>
 #include <stddef.h>
 #include <stdlib.h>
@@ -575,7 +578,7 @@ void next_token(void) {
   // single-char: token type is the character itself
   curr_tok.lexeme[0] = C;
   curr_tok.lexeme[1] = 0;
-  if (strchr(";:+-.,()*/", C)) {
+  if (strchr(";:.,()+-*'*/&|^", C)) {
     curr_tok.type = C;
     NEXT;
     return;
@@ -708,17 +711,16 @@ int primary(char *out_kind, unsigned int *out_val) {
   return 0;
 }
 
-// Expression → result in ACC
-// Expression → result in ACC with commutative poop-hole checks
-int expression(void) {
+// Expression → result in ACC using commutative optimization
+int expression() {
   char left_kind, right_kind;
   unsigned int left_val, right_val;
   char op;
 
   if (!primary(&left_kind, &left_val)) return 0;
 
-  while (curr_tok.type == '+' || curr_tok.type == '-') {
-    op = (curr_tok.type == '-') ? '-' : '+';
+  while (strchr("+-*/&|^", curr_tok.type)) {
+    op = curr_tok.type;
     next_token();
 
     // Spill a left-hand function result before evaluating the RHS.
@@ -731,46 +733,38 @@ int expression(void) {
 
     if (!primary(&right_kind, &right_val)) return 0;
 
-    // 1) Constant folding.
+    // Constant folding
     if (left_kind == OP_IMM && right_kind == OP_IMM) {
-      if (op == '-')
-        left_val -= right_val;
-      else
-        left_val += right_val;
+      if (op == '+') left_val += right_val;
+      else if (op == '-') left_val -= right_val;
+      else if (op == '*') left_val *= right_val;
+      else if (op == '/') { if (right_val) left_val /= right_val; }
+      else if (op == '&') left_val &= right_val;
+      else if (op == '|') left_val |= right_val;
+      else if (op == '^') left_val ^= right_val;
       continue;
     }
 
-    // 2) Commutative "Poop-hole" Optimization:
-    // If the right side is a function/expression output already sitting in ACC,
-    // and the operator is commutative (+), we flip them to save a spill cycle!
-    if (right_kind == OP_ACC && op == '+') {
-      // Reversing the args: right_val (which is ACC) + left_val (MEM or IMM)
-      emit_add_to_acc(left_kind, left_val);
-      left_kind = OP_ACC;
-      left_val = 0;
-      continue;
-    }
-
-    // 3) Non-commutative fallback when RHS returns in ACC (e.g., A - Func())
+    // Right operand is a function call returning its value in ACC
     if (right_kind == OP_ACC) {
-      int tmp = alloc_temp();
-      emitop2('S', (char)tmp);
-      force_acc(left_kind, left_val);
-      emitop2(op, (char)tmp);
-      left_kind = OP_ACC;
-      left_val = 0;
-      continue;
+      // Commutative optimization: if not - or /, swap processing order directly
+      if (op != '-' && op != '/') {
+        emitop2(op, (char)(left_kind == OP_MEM ? left_val : (0x80 | (add_const(left_val) & 0x7F))));
+        left_kind = OP_ACC; left_val = 0; continue;
+      }
+      // Non-commutative fallback (spill RHS, restore LHS, apply op)
+      {
+        int tmp = alloc_temp();
+        emitop2('S', (char)tmp);
+        force_acc(left_kind, left_val);
+        emitop2(op, (char)tmp);
+        left_kind = OP_ACC; left_val = 0; continue;
+      }
     }
 
-    // 4) Baseline evaluation: Left side forced to ACC, then apply right side
+    // Standard evaluation path: force LHS to ACC, apply RHS operation directly via table
     force_acc(left_kind, left_val);
-
-    if (op == '-')
-      emitop2('-', (char)(right_kind == OP_MEM
-        ? right_val
-        : (0x80 | (add_const(right_val) & 0x7F))));
-    else
-      emit_add_to_acc(right_kind, right_val);
+    emitop2(op, (char)(right_kind == OP_MEM ? right_val : (0x80 | (add_const(right_val) & 0x7F))));
 
     left_kind = OP_ACC;
     left_val = 0;

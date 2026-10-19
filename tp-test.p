@@ -18,6 +18,24 @@ begin
    Two := a + b;
 end;
 
+FUNCTION TestMath(a: INTEGER; b: INTEGER): INTEGER;
+BEGIN
+  { Standard baseline tests }
+  WRITELN("Math checks:");
+  WRITELN(a + b);
+  WRITELN(a - b);
+  WRITELN(a * b);
+  WRITELN(a / b);
+  
+  { Bitwise operators via table lookup }
+  WRITELN(a & 15);
+  WRITELN(a | 1);
+  WRITELN(a ^ b);
+
+  { Commutative poop-hole trigger: complex right side inside addition/bitwise operations }
+  TestMath := (a * b) + (a & b);
+END;
+
 var
    alpha : integer;
    beta	 : integer;
@@ -52,7 +70,7 @@ begin
 
    { Test: looping funsum }
    fsum := 0;
-   for i := 1 to 0 do fsum := Two(fsum, i);
+   for i := 1 to 1000 do fsum := Two(fsum, i);
    writeln("FumSum:");
    writeln(fsum);
 
