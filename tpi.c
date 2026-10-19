@@ -83,26 +83,78 @@
 // ---------------------------------------------------------------------------
 // Tokens
 // ---------------------------------------------------------------------------
-typedef enum {
-  TOK_EOF, TOK_ERROR, TOK_PROGRAM, TOK_VAR, TOK_BEGIN, TOK_END,
-  TOK_INTEGER, TOK_IDENT, TOK_NUM, TOK_ASSIGN, TOK_SEMI,
-  TOK_COLON, TOK_PLUS, TOK_MINUS, TOK_DOT, TOK_WRITE, TOK_STRING,
-  TOK_LPAREN, TOK_RPAREN, TOK_FUNCTION,
-  TOK_FOR, TOK_TO, TOK_DO, TOK_COMMA
-} TokenType;
+// Token type is char:
+//   single-char tokens are that char (';', '+', '('…) — compare with ';')
+//   keywords use 'A'..'Z' codes
+//   specials 0..5 for EOF/IDENT/NUM/…
+// ---------------------------------------------------------------------------
+typedef char TokenType;
 
-const char* TOKEN_NAMES[] = {
-  "EOF", "ERROR", "PROGRAM", "VAR", "BEGIN", "END",
-  "INTEGER", "IDENT", "NUM", "ASSIGN", "SEMI", "COLON",
-  "PLUS", "MINUS", "DOT", "WRITELN", "STRING", "LPAREN", "RPAREN", "FUNCTION",
-  "FOR", "TO", "DO", "COMMA"
+#define TOK_EOF      ((TokenType)0)
+#define TOK_ERROR    ((TokenType)1)
+#define TOK_IDENT    ((TokenType)2)
+#define TOK_NUM      ((TokenType)3)
+#define TOK_STRING   ((TokenType)4)
+#define TOK_ASSIGN   ((TokenType)5) // :=
+
+// keywords — letters, unique
+#define TOK_PROGRAM  'P'
+#define TOK_VAR      'V'
+#define TOK_BEGIN    'B'
+#define TOK_END      'E'
+#define TOK_INTEGER  'I'
+#define TOK_WRITE    'W' // WRITELN
+#define TOK_FUNCTION 'F'
+#define TOK_FOR      'O' // F taken by FUNCTION
+#define TOK_TO       'T'
+#define TOK_DO       'D'
+
+typedef struct {
+  char *name;
+  TokenType type;
+} Keyword;
+
+Keyword keywords[] = {
+  {"PROGRAM",  TOK_PROGRAM},
+  {"VAR",      TOK_VAR},
+  {"BEGIN",    TOK_BEGIN},
+  {"END",      TOK_END},
+  {"INTEGER",  TOK_INTEGER},
+  {"WRITELN",  TOK_WRITE},
+  {"FUNCTION", TOK_FUNCTION},
+  {"FOR",      TOK_FOR},
+  {"TO",       TOK_TO},
+  {"DO",       TOK_DO},
 };
+#define NKEYWORDS ((int)(sizeof keywords / sizeof keywords[0]))
+
+// accepted single-char tokens (the char is the type)
+char *single_chars = ";:+-.,()*/";
 
 typedef struct {
   TokenType type;
   char lexeme[MAX_SYM_LEN + 1];
   int value;
 } Token;
+
+char tok_name_buf[4];
+char *tok_name(TokenType t) {
+  int i;
+  if (t == TOK_EOF) return "EOF";
+  if (t == TOK_ERROR) return "ERROR";
+  if (t == TOK_IDENT) return "IDENT";
+  if (t == TOK_NUM) return "NUM";
+  if (t == TOK_STRING) return "STRING";
+  if (t == TOK_ASSIGN) return ":=";
+  for (i = 0; i < NKEYWORDS; i++)
+    if (keywords[i].type == t) return keywords[i].name;
+  if (t > 32 && t < 127) {
+    tok_name_buf[0] = t;
+    tok_name_buf[1] = 0;
+    return tok_name_buf;
+  }
+  return "?";
+}
 
 jmp_buf fail_jmp;
 
@@ -443,17 +495,13 @@ void next_token(void) {
     for (i = 0; i < len; i++)
       curr_tok.lexeme[i] = toupper(curr_tok.lexeme[i]);
 
-    if      (strcmp(curr_tok.lexeme, "PROGRAM")  == 0) curr_tok.type = TOK_PROGRAM;
-    else if (strcmp(curr_tok.lexeme, "VAR")      == 0) curr_tok.type = TOK_VAR;
-    else if (strcmp(curr_tok.lexeme, "BEGIN")    == 0) curr_tok.type = TOK_BEGIN;
-    else if (strcmp(curr_tok.lexeme, "END")      == 0) curr_tok.type = TOK_END;
-    else if (strcmp(curr_tok.lexeme, "INTEGER")  == 0) curr_tok.type = TOK_INTEGER;
-    else if (strcmp(curr_tok.lexeme, "WRITELN")  == 0) curr_tok.type = TOK_WRITE;
-    else if (strcmp(curr_tok.lexeme, "FUNCTION") == 0) curr_tok.type = TOK_FUNCTION;
-    else if (strcmp(curr_tok.lexeme, "FOR")      == 0) curr_tok.type = TOK_FOR;
-    else if (strcmp(curr_tok.lexeme, "TO")       == 0) curr_tok.type = TOK_TO;
-    else if (strcmp(curr_tok.lexeme, "DO")       == 0) curr_tok.type = TOK_DO;
-    else curr_tok.type = TOK_IDENT;
+    curr_tok.type = TOK_IDENT;
+    for (i = 0; i < NKEYWORDS; i++) {
+      if (strcmp(curr_tok.lexeme, keywords[i].name) == 0) {
+        curr_tok.type = keywords[i].type;
+        break;
+      }
+    }
     return;
   }
 
@@ -477,30 +525,23 @@ void next_token(void) {
     return;
   }
 
-  // OPS single char
+  // single-char: token type is the character itself
   curr_tok.lexeme[0] = C;
   curr_tok.lexeme[1] = 0;
-  switch (C) {
-    case ';': curr_tok.type = TOK_SEMI; break;
-    case ':': curr_tok.type = TOK_COLON; break;
-    case '+': curr_tok.type = TOK_PLUS; break;
-    case '-': curr_tok.type = TOK_MINUS; break;
-    case '.': curr_tok.type = TOK_DOT; break;
-    case '(': curr_tok.type = TOK_LPAREN; break;
-    case ')': curr_tok.type = TOK_RPAREN; break;
-    case ',': curr_tok.type = TOK_COMMA; break;
-    default:
-      curr_tok.type = TOK_ERROR;
-      printf("\n%c <---- ERROR: unknown character\n", C);
-      longjmp(fail_jmp, 1);
+  if (strchr(single_chars, C)) {
+    curr_tok.type = C;
+    NEXT;
+    return;
   }
-  NEXT;
+  printf("\n%c <---- ERROR: unknown character\n", C);
+  curr_tok.type = TOK_ERROR;
+  longjmp(fail_jmp, 1);
 }
 
 void expect(TokenType expected) {
   if (curr_tok.type == expected) { next_token(); return; }
   printf("\n%s <---- ERROR: Expected %s but found %s\n",
-         curr_tok.lexeme, TOKEN_NAMES[expected], TOKEN_NAMES[curr_tok.type]);
+         curr_tok.lexeme, tok_name(expected), tok_name(curr_tok.type));
   longjmp(fail_jmp, 1);
 }
 
@@ -580,7 +621,7 @@ int primary(char *out_kind, unsigned int *out_val) {
     }
     next_token();
 
-    if (sym->type == SYM_VAR && curr_tok.type == TOK_LPAREN) {
+    if (sym->type == SYM_VAR && curr_tok.type == '(') {
       for (i = nsym - 1; i >= 0; i--) {
         if (strcmp(syms[i].name, name) == 0 && syms[i].type == SYM_FUNC) {
           sym = &syms[i];
@@ -590,14 +631,14 @@ int primary(char *out_kind, unsigned int *out_val) {
     }
 
     if (sym->type == SYM_FUNC) {
-      EXPECT(TOK_LPAREN);
+      EXPECT('(');
       for (pi = 0; pi < sym->nparams; pi++) {
-        if (pi > 0) EXPECT(TOK_COMMA);
+        if (pi > 0) EXPECT(',');
         if (!expression()) return 0;
         emitop2('S', sym->param_slot[pi]);
         // S leaves ACC holding last arg for callee
       }
-      EXPECT(TOK_RPAREN);
+      EXPECT(')');
       if (sym->address >= nvector) {
         printf("\nERROR: bad vector index for %s\n", name);
         longjmp(fail_jmp, 1);
@@ -627,8 +668,8 @@ int expression(void) {
 
   if (!primary(&left_kind, &left_val)) return 0;
 
-  while (curr_tok.type == TOK_PLUS || curr_tok.type == TOK_MINUS) {
-    op = (curr_tok.type == TOK_MINUS) ? '-' : '+';
+  while (curr_tok.type == '+' || curr_tok.type == '-') {
+    op = (curr_tok.type == '-') ? '-' : '+';
     next_token();
 
     // Spill a left-hand function result before evaluating the RHS.
@@ -698,13 +739,13 @@ int statement(void) {
     EXPECT(TOK_ASSIGN);
     if (!expression()) return 0;
     emitop2('S', sym->address);
-    EXPECT(TOK_SEMI);
+    EXPECT(';');
   }
   // WRITELN
   else if (curr_tok.type == TOK_WRITE) {
     int i;
     EXPECT(TOK_WRITE);
-    EXPECT(TOK_LPAREN);
+    EXPECT('(');
     if (curr_tok.type == TOK_STRING) {
       emitop('"');
       for (i = 0; curr_tok.lexeme[i]; i++)
@@ -716,8 +757,8 @@ int statement(void) {
       emitop('.');
     }
     emitop('N');
-    EXPECT(TOK_RPAREN);
-    EXPECT(TOK_SEMI);
+    EXPECT(')');
+    EXPECT(';');
   }
   // FOR
   else if (curr_tok.type == TOK_FOR) {
@@ -808,7 +849,7 @@ void compile_function(void) {
   next_token(); // consume FUNCTION
   strcpy(func_name, curr_tok.lexeme);
   EXPECT(TOK_IDENT);
-  EXPECT(TOK_LPAREN);
+  EXPECT('(');
 
   // frame: ret_addr, ret_val, then params
   ret_addr_slot = alloc_frame_slot();
@@ -827,11 +868,11 @@ void compile_function(void) {
       add_symbol(param_name, SYM_VAR, param_slots[nparams]);
       nparams++;
       EXPECT(TOK_IDENT);
-      EXPECT(TOK_COLON);
+      EXPECT(':');
       EXPECT(TOK_INTEGER);
       // accept both "," and ";" as parameter separators
       // (comma is convenient; semicolon is classic Pascal)
-      if (curr_tok.type == TOK_COMMA || curr_tok.type == TOK_SEMI) {
+      if (curr_tok.type == ',' || curr_tok.type == ';') {
         next_token();
         // trailing separator before ')' is not allowed – loop continues
         // only if another IDENT follows; otherwise fall through to RPAREN
@@ -842,10 +883,10 @@ void compile_function(void) {
       break;
     }
   }
-  EXPECT(TOK_RPAREN);
-  EXPECT(TOK_COLON);
+  EXPECT(')');
+  EXPECT(':');
   EXPECT(TOK_INTEGER);
-  EXPECT(TOK_SEMI);
+  EXPECT(';');
 
   // register the function symbol (vector index filled in a moment)
   add_symbol(func_name, SYM_FUNC, 0); // temporary
@@ -884,7 +925,7 @@ void compile_function(void) {
     if (!statement()) longjmp(fail_jmp, 1);
   }
   EXPECT(TOK_END);
-  EXPECT(TOK_SEMI);
+  EXPECT(';');
 
   // single-byte return: ACC ← return value, ipc ← link, pop cur_func
   emitop(';');
@@ -924,7 +965,7 @@ int compile_pipeline(void) {
   next_token();
   EXPECT(TOK_PROGRAM);
   EXPECT(TOK_IDENT);
-  EXPECT(TOK_SEMI);
+  EXPECT(';');
 
   // declarations
   while (curr_tok.type == TOK_VAR || curr_tok.type == TOK_FUNCTION) {
@@ -935,9 +976,9 @@ int compile_pipeline(void) {
         add_symbol(curr_tok.lexeme, SYM_VAR, slot);
         last_var_slot = slot;
         EXPECT(TOK_IDENT);
-        EXPECT(TOK_COLON);
+        EXPECT(':');
         EXPECT(TOK_INTEGER);
-        EXPECT(TOK_SEMI);
+        EXPECT(';');
       }
     }
     else { // FUNCTION
@@ -955,7 +996,7 @@ int compile_pipeline(void) {
     if (!statement()) return 0;
   }
   EXPECT(TOK_END);
-  EXPECT(TOK_DOT);
+  EXPECT('.');
 
   // leave last global in acc (compatibility)
   if (last_var_slot >= 0)
