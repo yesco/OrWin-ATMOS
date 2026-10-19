@@ -71,6 +71,11 @@
 // ivm: 1000: (/ (- 6789427 5236649) 1000) = 1552 cycles / loop
 // savee: (- 333 317) = 16 bytes! (2 bytes per >=2 calls same fun!)
 
+// - Reverses communitative operands (+) if better code
+// ivm: 1000: (/ (- 8086719 5182360) 1000) = 2904 cycles / loop
+// savee: (- 317 309) = 8 bytes 
+// (/ (- 8156974 8086719) 1000) saves 70c / Two-par-function call
+
 
 #include <stdio.h>
 #include <stddef.h>
@@ -694,6 +699,7 @@ int primary(char *out_kind, unsigned int *out_val) {
 }
 
 // Expression → result in ACC
+// Expression → result in ACC with commutative poop-hole checks
 int expression(void) {
   char left_kind, right_kind;
   unsigned int left_val, right_val;
@@ -715,7 +721,7 @@ int expression(void) {
 
     if (!primary(&right_kind, &right_val)) return 0;
 
-    // Constant folding.
+    // 1) Constant folding.
     if (left_kind == OP_IMM && right_kind == OP_IMM) {
       if (op == '-')
         left_val -= right_val;
@@ -724,8 +730,18 @@ int expression(void) {
       continue;
     }
 
-    // A function call on the right returns its value in ACC.
-    // Spill it, restore the left operand, then apply the operator.
+    // 2) Commutative "Poop-hole" Optimization:
+    // If the right side is a function/expression output already sitting in ACC,
+    // and the operator is commutative (+), we flip them to save a spill cycle!
+    if (right_kind == OP_ACC && op == '+') {
+      // Reversing the args: right_val (which is ACC) + left_val (MEM or IMM)
+      emit_add_to_acc(left_kind, left_val);
+      left_kind = OP_ACC;
+      left_val = 0;
+      continue;
+    }
+
+    // 3) Non-commutative fallback when RHS returns in ACC (e.g., A - Func())
     if (right_kind == OP_ACC) {
       int tmp = alloc_temp();
       emitop2('S', (char)tmp);
@@ -736,6 +752,7 @@ int expression(void) {
       continue;
     }
 
+    // 4) Baseline evaluation: Left side forced to ACC, then apply right side
     force_acc(left_kind, left_val);
 
     if (op == '-')
@@ -1257,7 +1274,7 @@ void dump_bytecode(void) {
       printf("\\0\n"); n= 0; }
     else if (isprint(c) && c > ' ') {
       // single byte ops
-      if (strchr("#$(),.0123456789;<=>?ADEKNPRU~", c)
+      if (strchr("#$(),.0123456789;<=>?ADEIJKNPRU~", c)
         || islower(c)) {
         printf("%c   ", c);
         if (c == ';') { n= 0; putchar('\n'); }
