@@ -21,7 +21,7 @@ end;
 FUNCTION TestMath(a: INTEGER; b: INTEGER): INTEGER;
 BEGIN
   { Standard baseline tests }
-  WRITELN("Math checks:");
+  WRITELN("--Math checks:");
   WRITELN(a + b);
   WRITELN(a - b);
   WRITELN(a * b);
@@ -56,26 +56,26 @@ begin
    writeln(beta);
 
    { Test: 54 = Two parameter function calling }
-   writeln("Two:");
+   writeln("--Two:");
    writeln(Two(alpha, beta));
 
-   writeln("Magical injected input parameter X=");
+   writeln("--Magical injected input parameter X=");
    writeln(X); { is 42 }
 
    { Test: looping sum }
    sum := 0;
    for i := 1 to 0 do sum := sum + i;
-   writeln("Sum:");
+   writeln("--Sum:");
    writeln(sum);
 
    { Test: looping funsum }
    fsum := 0;
    for i := 1 to 1000 do fsum := Two(fsum, i);
-   writeln("FumSum:");
+   writeln("--FumSum:");
    writeln(fsum);
 
    { Test Case 6: Literal subtraction }
-   writeln("Subtraction tests:");
+   writeln("--Subtraction tests:");
    writeln(20 - 3);       { expected 17 }
    writeln(100 - 10 - 5); { expected 85 }
 
@@ -90,4 +90,7 @@ begin
 
    { Test Case 10: Subtraction with a function on each side }
    writeln(Mul2(10) - Mul2(3)); { expected 14 }
+
+   writeln(TestMath(42,  33));
+   writeln(TestMath(17, 255));
 end.

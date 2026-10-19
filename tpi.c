@@ -95,21 +95,32 @@
 #include <string.h>
 #include <ctype.h>
 #include <setjmp.h>
+#include <assert.h>
 
 // --- options
 #define TPDUMP
 
-#define MAX_SRC_LEN   2048
-#define MAX_SYM_LEN   64
-#define MAX_BIN_LEN   4096
-#define MAX_SYMBOLS   64
-#define MAX_SLOTS     256
-#define MAX_CONSTS    64
-#define MAX_VECTORS   64 // opcodes 0xC0 .. 0xFF
-#define MAX_PATCHES   128
-#define MAX_PARAMS    4 // max arguments per function
-#define GLOBAL_LIMIT  32 // preferred global area 0-31
-#define FRAME_BASE    32 // frames start here
+// --- config
+#define MAX_SRC_LEN   4096
+#define MAX_BIN_LEN   2048
+
+#define MAX_PATCHES    128
+
+#define MAX_SYM_LEN     64 // TODO: static do strdup
+#define MAX_SYMBOLS     64
+
+// TOOO: this should not be hardcoded, just walk n items in table?
+#define MAX_PARAMS       4 // max arguments per function
+
+// --- limits
+#define MAX_SLOTS      256
+#define MAX_CONSTS      64
+
+#define MAX_VECTORS     64 // # subroutines: opcodes 0xC0 .. 0xFF
+
+// TODO: "REGISTER" prefix" or special loop-index variables?
+#define GLOBAL_LIMIT    32 // preferred global area 0-31
+#define FRAME_BASE      32 // frames mixed with overflow global
 
 // ---------------------------------------------------------------------------
 // Tokens
@@ -649,6 +660,16 @@ int primary(char *out_kind, unsigned int *out_val) {
   Symbol *sym;
   int i, pi;
 
+  // Track parenthesized sub-expressions recursively
+  if (curr_tok.type == '(') {
+    next_token();
+    if (!expression()) return 0;
+    EXPECT(')');
+    *out_kind = OP_ACC;
+    *out_val = 0;
+    return 1;
+  }
+
   if (curr_tok.type == TOK_NUM) {
     *out_kind = OP_IMM;
     *out_val = (unsigned int)curr_tok.value;
@@ -811,6 +832,7 @@ int statement(void) {
         && bin[i]=='L' && bin[i+2]=='+' && bin[i+4]=='S'
         && bin[i+1]==bin[i+5]
       ) {
+        #if 0
         printf("====> poophole 'U' %d: %c%02x %c%02x %c%02x   >> %.30s\n"
           , bin_ptr - i
           , bin[i + 0]
@@ -821,6 +843,7 @@ int statement(void) {
           , bin[i + 5]
           , src_buf + jj
         );
+        #endif
         
         {
           char d= bin[i+3], s= bin[i+1];
@@ -1391,12 +1414,15 @@ void dump_bytecode(void) {
 
 // ---------------------------------------------------------------------------
 int main(void) {
+  char* filename= "stdin.p";
   int ch, ret, buf_idx = 0;
 
   // READ whole "file"
   memset(src_buf, 0, MAX_SRC_LEN);
-  while ((ch = getchar()) != EOF && ch != 0xff && buf_idx < MAX_SRC_LEN - 1)
+  while ((ch = getchar()) != EOF && ch != 0xff) {
     src_buf[buf_idx++] = (char)ch;
+    assert(buf_idx < MAX_SRC_LEN - 1);
+  }
   src_buf[buf_idx] = 0;
   if (!buf_idx) return 0;
 
@@ -1404,13 +1430,13 @@ int main(void) {
   if (setjmp(fail_jmp) || !compile_pipeline()) {
     // ERROR: show line
     unsigned int err_pos = src_pos;
-    printf(">> FAIL on line %d:\n", lnum);
+    printf("\n>> FAIL on line %d\n%s(%d): ", lnum, filename, lnum);
     src_pos = cur_line;
     do {
       if (src_pos == err_pos) printf(" <<<ERROR<<< ");
       putchar(NEXT);
     } while (C && C != '\n');
-    putchar('\n');
+    printf("\n\n");
     return 1;
   }
 
