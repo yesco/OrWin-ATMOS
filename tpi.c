@@ -1249,8 +1249,8 @@ void dump_bytecode(void) {
   for (; i < bin_ptr; i++) {
     char c = bin[i];
     if (!c) { n= 0; printf("\\0  \n"); }
-    else if (c >= 0xC0) printf("V%02x ", c - 0xC0);
-    else if (c >= 0x80) printf("J%02x ", c - 0x80);
+    else if (c >= 0xC0) printf("(%02x)", c - 0xC0);
+    else if (c >= 0x80) printf("<%02x>", c - 0x80);
     else if (c == ' ')  printf("_   ", c);
     else if (c == '"') {
       putchar('\n'); do putchar(c); while((c=bin[++i]));
