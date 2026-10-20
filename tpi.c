@@ -98,6 +98,17 @@
 // (/ (- 3880227 2927271) 1000)  952 sum
 // (/ (- 5066227 2927271) 1000) 2138 fsum
 
+// - "better smaller/cleaner compiler" - but SLOWER!
+// - VERY SLOW???
+// (/ (- 10586159 9111306) 1000) -> 1474 sum  from 1373
+// (/ (- 11638157 9111306) 1000) -> 2526 fsum from 2506
+
+// - oscar -Os 13081 bytes - FASTER fsum
+// (/ (- 3647717 2694535) 1000)  953 sum  from  952
+// (/ (- 4692714 2694535) 1000) 1998 fsum from 2138
+
+
+
 #include <stdio.h>
 #include <stddef.h>
 #include <stdlib.h>
@@ -441,10 +452,11 @@ char as_addr(char a) {
   return a;
 }
 
-void emit_load_const(unsigned int v) {
-  if (v == 0) { emitop('0'); return; }
-  if (v == (unsigned int)-1) { emitop('9'); return; }
-  emitop2('L', add_const(v));
+// Map a numeric value to IMM0 / IMM1 / pooled const address
+char lit_addr(unsigned int v) {
+  if (v == 0) return IMM0;
+  if (v == (unsigned int)-1) return IMM1;
+  return add_const(v);
 }
 
 // ---------------------------------------------------------------------------
@@ -500,18 +512,6 @@ void add_symbol(const char* name, SymbolType type, char address) {
   syms[nsym].ret_slot = 0xff;
   syms[nsym].ret_addr_slot = 0xff;
   nsym++;
-}
-
-int lookup_symbol(const char* name, SymbolType* type, char* address) {
-  int i;
-  for (i = nsym - 1; i >= 0; i--) {
-    if (strcmp(syms[i].name, name) == 0) {
-      *type = syms[i].type;
-      *address = syms[i].address;
-      return i;
-    }
-  }
-  return -1;
 }
 
 Symbol* lookup_sym(const char* name) {
@@ -647,21 +647,23 @@ void expect(TokenType expected) {
 // ---------------------------------------------------------------------------
 #define is_acc(k) ((k) == 0)
 
-// Emit load value if value in acc nothat of addr
-//
-// If already is: ignore
-// if value==0: emit: "0"
-// if       -1: emit: "9"
-// else       : emit  "Laa"
+// Ensure ACC holds addr (or already holds the value).
+// Skips emit if ACC already mirrors addr; uses opcodes 0/9 for ±0 literals.
 void emitload(char in_acc, char addr) {
   if (in_acc) return;
   if (acc_valid && acc_slot == addr) return;
-  if (addr == IMM0 || (isconst(addr) && const_val(addr) == 0))
-    emitop('0');
-  else if (addr == IMM1 || (isconst(addr) && const_val(addr) == (unsigned int)-1))
-    emitop('9');
-  else
-    emitop2('L', addr);
+
+  if (addr == IMM0 || (isconst(addr) && const_val(addr) == 0)) {
+    emit('0');           // raw — avoid emitop invalidate then re-set
+    acc_set_slot(IMM0);  // next emitload(IMM0) is free
+    return;
+  }
+  if (addr == IMM1 || (isconst(addr) && const_val(addr) == (unsigned int)-1)) {
+    emit('9');
+    acc_set_slot(IMM1);
+    return;
+  }
+  emitop2('L', addr);    // L sets acc_slot via emitop2
 }
 
 // Parse a primary simple type
@@ -683,13 +685,7 @@ int primary(char *out_acc, char *out_addr) {
   // NUMBER
   if (curr_tok.type == TOK_NUM) {
     *out_acc = 0;
-    // 0 / -1 stay unpooled until needed as an address operand
-    if (curr_tok.value == 0)
-      *out_addr = IMM0;
-    else if (curr_tok.value == -1)
-      *out_addr = IMM1;
-    else
-      *out_addr = add_const((unsigned int)curr_tok.value);
+    *out_addr = lit_addr((unsigned int)curr_tok.value);
     next_token();
     return 1;
   }
@@ -778,12 +774,8 @@ int expression(void) {
         case '^': lv ^= rv; break;
       }
 
-      // TODO: why is this logic repeated?
-      // don't we have fun somewhere
       left_acc = 0;
-      if      (lv == 0) left_addr = IMM0;
-      else if (lv == (unsigned int)-1) left_addr = IMM1;
-      else left_addr = add_const(lv);
+      left_addr = lit_addr(lv);
       continue;
     }
 
