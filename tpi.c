@@ -787,14 +787,13 @@ int expression() {
       continue;
     }
 
-    // Right operand is a function call returning its value in ACC
+    // Right is function result in ACC: commutative → ACC op= left (no spill)
     if (right_kind == OP_ACC) {
-      // Commutative optimization: if not - or /, swap processing order directly
       if (op != '-' && op != '/') {
-        emitop2(op, (char)(left_kind == OP_MEM ? left_val : (0x80 | (add_const(left_val) & 0x7F))));
+        emitop2(op, (char)(left_kind == OP_MEM ? left_val
+                         : (0x80 | (add_const(left_val) & 0x7F))));
         left_kind = OP_ACC; left_val = 0; continue;
       }
-      // Non-commutative fallback (spill RHS, restore LHS, apply op)
       {
         int tmp = alloc_temp();
         emitop2('S', (char)tmp);
@@ -804,9 +803,31 @@ int expression() {
       }
     }
 
-    // Standard evaluation path: force LHS to ACC, apply RHS operation directly via table
+    // Commutative + ACC already holds right MEM (e.g. last param): ACC op= left
+    // Two: a+b with ACC=b → "+a" only, no "L a + b"
+    if (op != '-' && op != '/' && right_kind == OP_MEM &&
+        acc_valid && acc_slot == (char)right_val) {
+      if (left_kind == OP_MEM)
+        emitop2(op, (char)left_val);
+      else if (left_kind == OP_IMM) {
+        if (left_val != 0 || op != '+') // +0 no-op; else need const
+          emitop2(op, (char)(0x80 | (add_const(left_val) & 0x7F)));
+      }
+      left_kind = OP_ACC; left_val = 0; continue;
+    }
+
+    // Standard: LHS → ACC, then ACC op= right
     force_acc(left_kind, left_val);
-    emitop2(op, (char)(right_kind == OP_MEM ? right_val : (0x80 | (add_const(right_val) & 0x7F))));
+    if (right_kind == OP_MEM) {
+      // val+val with ACC already val: +slot (S only if mem not just stored)
+      if (op == '+' && acc_valid && acc_slot == (char)right_val) {
+        if (!(bin_ptr >= 2 && bin[bin_ptr-2] == 'S' &&
+              bin[bin_ptr-1] == (char)right_val))
+          emitop2('S', (char)right_val);
+      }
+      emitop2(op, (char)right_val);
+    } else
+      emitop2(op, (char)(0x80 | (add_const(right_val) & 0x7F)));
 
     left_kind = OP_ACC;
     left_val = 0;
