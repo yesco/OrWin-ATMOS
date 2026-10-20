@@ -407,26 +407,26 @@ unsigned int const_pool[MAX_CONSTS];
 
 int nconst = 0;
 
+// Returns address 0x80+idx (same form as a variable slot)
 int add_const(unsigned int v) {
   int i;
   for (i = 0; i < nconst; i++)
-    if (const_pool[i] == v) return i;
+    if (const_pool[i] == v) return 0x80 + i;
   if (nconst >= MAX_CONSTS) {
     printf("\nERROR: constant pool full\n");
     longjmp(fail_jmp, 1);
   }
   const_pool[nconst] = v;
-  return nconst++;
+  return 0x80 + nconst++;
 }
 
-// Emit a load of a constant: L (0x80+idx)
+#define isconst(a) ((unsigned char)(a) >= 0x80)
+#define const_val(a) (const_pool[(unsigned char)(a) - 0x80])
+
 void emit_load_const(unsigned int v) {
-  int idx;
   if (v == 0) { emitop('0'); return; }
   if (v == (unsigned int)-1) { emitop('9'); return; }
-  idx = add_const(v);
-  emitop('L');
-  emit((char)(0x80 + idx));
+  emitop2('L', (char)add_const(v));
 }
 
 // ---------------------------------------------------------------------------
@@ -628,35 +628,20 @@ void expect(TokenType expected) {
 }
 
 // ---------------------------------------------------------------------------
-// Operand descriptors (in-situ codegen, no peephole pass)
-// kind: 0=ACC 1=MEM 2=IMM
-// Passed as separate scalar parameters to eliminate struct/pointer overhead on cc65.
+// Operands: value is in ACC, or at a mem address (var slot or const 0x80+n).
+// Constants and variables are the same — isconst(addr) distinguishes for folding.
 // ---------------------------------------------------------------------------
-#define OP_ACC 0
-#define OP_MEM 1
-#define OP_IMM 2
+#define is_acc(k) ((k) == 0)
 
-void force_acc(char kind, unsigned int val) {
-  int idx;
-  if (kind == OP_ACC)
+void force_acc(char in_acc, char addr) {
+  if (in_acc)
     return;
-  if (kind == OP_MEM) {
-    if (acc_valid && acc_slot == (char)val)
-      return;
-    emitop2('L', (char)val);
+  if (acc_valid && acc_slot == addr)
     return;
-  }
-  // OP_IMM
-  if (val == 0) { emitop('0'); return; }
-  if (val == (unsigned int)-1) { emitop('9'); return; }
-  idx = add_const(val);
-  emitop('L');
-  emit((char)(0x80 + idx));
-  acc_invalidate();
+  emitop2('L', addr);
 }
 
-// Emit operand byte for ACC op= X (MEM slot or const pool ref)
-int primary(char *out_kind, unsigned int *out_val) {
+int primary(char *out_acc, char *out_addr) {
   char name[MAX_SYM_LEN + 1];
   Symbol *sym;
   int i, pi;
@@ -665,14 +650,14 @@ int primary(char *out_kind, unsigned int *out_val) {
     next_token();
     if (!expression()) return 0;
     EXPECT(')');
-    *out_kind = OP_ACC;
-    *out_val = 0;
+    *out_acc = 1;
+    *out_addr = 0;
     return 1;
   }
 
   if (curr_tok.type == TOK_NUM) {
-    *out_kind = OP_IMM;
-    *out_val = (unsigned int)curr_tok.value;
+    *out_acc = 0;
+    *out_addr = (char)add_const((unsigned int)curr_tok.value);
     next_token();
     return 1;
   }
@@ -716,13 +701,13 @@ int primary(char *out_kind, unsigned int *out_val) {
       }
       emit((char)(0xC0 | (sym->address & 0x3F)));
       acc_invalidate();
-      *out_kind = OP_ACC;
-      *out_val = 0;
+      *out_acc = 1;
+      *out_addr = 0;
       return 1;
     }
 
-    *out_kind = OP_MEM;
-    *out_val = (unsigned int)sym->address;
+    *out_acc = 0;
+    *out_addr = sym->address;
     return 1;
   }
 
@@ -731,85 +716,78 @@ int primary(char *out_kind, unsigned int *out_val) {
   return 0;
 }
 
-// Expression → ACC
-// One loop, a few cases — not one path per operator:
-//   1) fold IMM op IMM
-//   2) right in ACC (call): commutative → op left; else spill
-//   3) ACC already holds right MEM (last param): commutative → op left
-//   4) else force left, op right
-int expression() {
-  char left_kind, right_kind;
-  unsigned int left_val, right_val;
+int expression(void) {
+  char left_acc, right_acc;
+  char left_addr, right_addr;
   char op, comm;
+  unsigned int lv, rv;
 
-  if (!primary(&left_kind, &left_val)) return 0;
+  if (!primary(&left_acc, &left_addr)) return 0;
 
   while (strchr("+-*/&|^", curr_tok.type)) {
     op = curr_tok.type;
     next_token();
     comm = (op != '-' && op != '/');
 
-    // ACC left would be killed by RHS — spill first
-    if (left_kind == OP_ACC) {
+    if (left_acc) {
       int tmp = alloc_temp();
       emitop2('S', (char)tmp);
-      left_kind = OP_MEM;
-      left_val = (unsigned int)(unsigned char)tmp;
+      left_acc = 0;
+      left_addr = (char)tmp;
     }
 
-    if (!primary(&right_kind, &right_val)) return 0;
+    if (!primary(&right_acc, &right_addr)) return 0;
 
-    // 1) constant fold
-    if (left_kind == OP_IMM && right_kind == OP_IMM) {
+    // constant fold when both sides are const addresses
+    if (!left_acc && !right_acc && isconst(left_addr) && isconst(right_addr)) {
+      lv = const_val(left_addr);
+      rv = const_val(right_addr);
       switch (op) {
-        case '+': left_val += right_val; break;
-        case '-': left_val -= right_val; break;
-        case '*': left_val *= right_val; break;
-        case '/': if (right_val) left_val /= right_val; break;
-        case '&': left_val &= right_val; break;
-        case '|': left_val |= right_val; break;
-        case '^': left_val ^= right_val; break;
+        case '+': lv += rv; break;
+        case '-': lv -= rv; break;
+        case '*': lv *= rv; break;
+        case '/': if (rv) lv /= rv; break;
+        case '&': lv &= rv; break;
+        case '|': lv |= rv; break;
+        case '^': lv ^= rv; break;
       }
+      left_acc = 0;
+      left_addr = (char)add_const(lv);
       continue;
     }
 
-    // 2) right is ACC (function result)
-    if (right_kind == OP_ACC) {
+    // right in ACC (call result)
+    if (right_acc) {
       if (comm)
-        emitop2(op, left_kind == OP_MEM ? (char)left_val : (char)(0x80 + add_const(left_val)));
+        emitop2(op, left_addr);
       else {
         int tmp = alloc_temp();
         emitop2('S', (char)tmp);
-        force_acc(left_kind, left_val);
+        force_acc(left_acc, left_addr);
         emitop2(op, (char)tmp);
       }
-      left_kind = OP_ACC; left_val = 0;
+      left_acc = 1;
       continue;
     }
 
-    // 3) commutative and ACC already holds right MEM
-    if (comm && right_kind == OP_MEM &&
-        acc_valid && acc_slot == (char)right_val) {
-      emitop2(op, left_kind == OP_MEM ? (char)left_val : (char)(0x80 + add_const(left_val)));
-      left_kind = OP_ACC; left_val = 0;
+    // ACC already holds right (e.g. last param)
+    if (comm && acc_valid && acc_slot == right_addr) {
+      emitop2(op, left_addr);
+      left_acc = 1;
       continue;
     }
 
-    // 4) standard: left → ACC, then ACC op= right
-    force_acc(left_kind, left_val);
-    if (right_kind == OP_MEM && op == '+' &&
-        acc_valid && acc_slot == (char)right_val) {
-      // val+val: need mem copy of ACC
-      if (!(bin_ptr >= 2 && bin[bin_ptr-2] == 'S' &&
-            bin[bin_ptr-1] == (char)right_val))
-        emitop2('S', (char)right_val);
+    // standard: left → ACC, ACC op= right
+    force_acc(left_acc, left_addr);
+    if (op == '+' && acc_valid && acc_slot == right_addr) {
+      if (!(bin_ptr >= 2 && bin[bin_ptr-2] == 'S' && bin[bin_ptr-1] == right_addr))
+        emitop2('S', right_addr);
     }
-    emitop2(op, right_kind == OP_MEM ? (char)right_val : (char)(0x80 + add_const(right_val)));
-    left_kind = OP_ACC;
-    left_val = 0;
+    emitop2(op, right_addr);
+    left_acc = 1;
   }
 
-  force_acc(left_kind, left_val);
+  force_acc(left_acc, left_addr);
   return 1;
 }
 
