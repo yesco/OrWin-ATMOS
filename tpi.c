@@ -464,20 +464,18 @@ char lit_addr(unsigned int v) {
 // ---------------------------------------------------------------------------
 int vectors[MAX_VECTORS]; // bytecode offset during compile
 char *vptr[MAX_VECTORS]; // resolved absolute pointers (finalise)
-char vec_link[MAX_VECTORS]; // mem slot: return NEXT (ipc) per function
-char vec_val[MAX_VECTORS]; // mem slot: return VALUE per function
+char vec_link[MAX_VECTORS];   // mem slot: RETURN / saved ipc
+char vec_val[MAX_VECTORS];    // mem slot: return VALUE
+char vec_caller[MAX_VECTORS]; // mem slot: previous cur_func (in-frame chain)
 char nvector = 0;
 
 int main_offset = 0;
 char *main_entry = 0;
 char is_code_addr[MAX_CONSTS];
 
-// threaded call chain: which function is active (0xFF = main)
-#define MAX_CALL_DEPTH 8
-#define FUNC_MAIN      ((char)0xFF)
-char cur_func; // TODO: maybe register
-char fstack[MAX_CALL_DEPTH];
-char fsp;
+// Active function (0xFF = main). Caller chain is in frame slots, not fstack[].
+#define FUNC_MAIN ((char)0xFF)
+char cur_func;
 
 int add_vector(int entry_offset) {
   if (nvector >= MAX_VECTORS) FAIL("too many functions");
@@ -1032,7 +1030,7 @@ int statement(void) {
 void compile_function(void) {
   char func_name[MAX_SYM_LEN + 1];
   char param_name[MAX_SYM_LEN + 1];
-  char ret_addr_slot, ret_val_slot;
+  char ret_addr_slot, ret_val_slot, caller_slot;
   int entry_offset, vec_idx;
   int nparams, i;
   char param_slots[MAX_PARAMS];
@@ -1044,9 +1042,10 @@ void compile_function(void) {
   EXPECT(TOK_IDENT);
   EXPECT('(');
 
-  // frame: ret_addr, ret_val, then params
+  // frame: RETURN (ipc), ret_val, CALLER (prev cur_func), then params
   ret_addr_slot = alloc_frame_slot();
   ret_val_slot  = alloc_frame_slot();
+  caller_slot   = alloc_frame_slot();
 
   // parse parameter list: name : INTEGER [, name : INTEGER]*
   nparams = 0;
@@ -1099,8 +1098,9 @@ void compile_function(void) {
   // the entry point is right here
   entry_offset = bin_ptr;
   vec_idx = add_vector(entry_offset);
-  vec_link[vec_idx] = ret_addr_slot; // NEXT pointer slot (compact, one per fn)
-  vec_val[vec_idx]  = ret_val_slot; // return VALUE slot
+  vec_link[vec_idx]   = ret_addr_slot;
+  vec_val[vec_idx]    = ret_val_slot;
+  vec_caller[vec_idx] = caller_slot;
   fsym->address = vec_idx;
 
   // TODO: mustbe after previous section. WHY?
@@ -1292,7 +1292,6 @@ unsigned int run_ivm(void) {
   ipc = main_entry;
   acc = 0;
   cur_func = FUNC_MAIN;
-  fsp = 0;
 
 #ifdef __CC65__
 #define PAR mem[*ipc]
@@ -1324,31 +1323,19 @@ unsigned int run_ivm(void) {
     // ';' = ACC <- ret_val, then return
   case ';':
     // TODO: remove this once we call by subroutine call!
-    if (cur_func == FUNC_MAIN) {
-      printf("\n[IVM] return from main\n");
-      goto done;
-    }
+    if (cur_func == FUNC_MAIN) goto done;
     acc = mem[vec_val[cur_func]];
     // fall-through
 
     // \0: return
-  case 0:
+  case 0: // return, keep ACC
     op = vec_link[cur_func];
-    // restore program counter
-
 #ifdef __CC65__
     ipc = (char *)mem[op];
 #else
     ipc = bin + mem[op];
 #endif
-
-    // TODO: let's remove this fake limited stack
-    if (fsp <= 0) {
-      printf("\n[IVM] call chain underflow\n");
-      goto done;
-    }
-    cur_func = fstack[--fsp];
-
+    cur_func = (char)mem[vec_caller[cur_func]];
     goto xnext;
     
     // ---- parameter ops ----
@@ -1412,27 +1399,18 @@ unsigned int run_ivm(void) {
   default:
     if ((op & 0xc0) == 0xc0) {
 
-      // JSR [op]
-
-      // TODO: we don't want stack and tests at runtime!
-      if (fsp >= MAX_CALL_DEPTH) {
-        FAIL("call chain overflow");
-      }
-      fstack[fsp++] = cur_func;
-
-      cur_func = op & 0x3f;
-
-
-      // save IPC and set new one from vector
+      // JSR: chain lives in callee frame (no fstack)
+      {
+        char v = op & 0x3f;
+        mem[vec_caller[v]] = cur_func;
 #ifdef __CC65__
-      mem[vec_link[cur_func]] = (unsigned int)ipc;
+        mem[vec_link[v]] = (unsigned int)ipc;
 #else
-      mem[vec_link[cur_func]] = (unsigned int)(ipc - bin);
+        mem[vec_link[v]] = (unsigned int)(ipc - bin);
 #endif
-
-      // set new
-      ipc = vptr[cur_func];
-      
+        cur_func = v;
+        ipc = vptr[v];
+      }
       goto xnext;
     }
 
