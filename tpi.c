@@ -221,6 +221,17 @@ const char* tok_name(TokenType t) {
 
 jmp_buf fail_jmp;
 
+// Central fail — never returns. Prefer this over printf+longjmp everywhere.
+#define FAIL(msg) do { \
+  printf("\n%s <---- ERROR: %s\n", curr_tok.lexeme, (msg)); \
+  longjmp(fail_jmp, 1); \
+} while (0)
+
+#define FAIL0(msg) do { \
+  printf("\nERROR: %s\n", (msg)); \
+  longjmp(fail_jmp, 1); \
+} while (0)
+
 // ---------------------------------------------------------------------------
 // Source / token state
 // ---------------------------------------------------------------------------
@@ -271,8 +282,7 @@ void acc_set_slot(char slot) {
 
 void emit(char c) {
   if (bin_ptr >= MAX_BIN_LEN - 1) {
-    printf("\nERROR: bytecode buffer overflow\n");
-    longjmp(fail_jmp, 1);
+    FAIL0("bytecode buffer overflow");
   }
   bin[bin_ptr++] = c;
 }
@@ -316,8 +326,7 @@ void emitreturn(char ret_slot) {
 
 void add_patch(int offset, int kind, int value) {
   if (npatch >= MAX_PATCHES) {
-    printf("\nERROR: too many patches\n");
-    longjmp(fail_jmp, 1);
+    FAIL0("too many patches");
   }
   patches[npatch].offset = offset;
   patches[npatch].kind   = kind;
@@ -348,8 +357,7 @@ char alloc_global(void) {
     }
     next_frame++;
   }
-  printf("\nERROR: out of slots\n");
-  longjmp(fail_jmp, 1);
+  FAIL0("out of slots");
   return (char)0xff;
 }
 
@@ -361,8 +369,7 @@ char alloc_frame_slot(void) {
     }
     next_frame++;
   }
-  printf("\nERROR: out of frame slots\n");
-  longjmp(fail_jmp, 1);
+  FAIL0("out of frame slots");
   return (char)0xff;
 }
 
@@ -406,8 +413,7 @@ char add_const(unsigned int v) {
   for (i = 0; i < nconst; i++)
     if (const_pool[i] == v) return (char)(0x80 + i);
   if (nconst >= MAX_CONSTS) {
-    printf("\nERROR: constant pool full\n");
-    longjmp(fail_jmp, 1);
+    FAIL0("constant pool full");
   }
   const_pool[nconst] = v;
   return (char)(0x80 + nconst++);
@@ -464,8 +470,7 @@ char fsp;
 
 int add_vector(int entry_offset) {
   if (nvector >= MAX_VECTORS) {
-    printf("\nERROR: too many functions (max %d)\n", MAX_VECTORS);
-    longjmp(fail_jmp, 1);
+    FAIL0("too many functions");
   }
   vectors[nvector] = entry_offset;
   return nvector++;
@@ -491,8 +496,7 @@ char nsym = 0;
 
 void add_symbol(const char* name, SymbolType type, char address) {
   if (nsym >= MAX_SYMBOLS) {
-    printf("\nERROR: symbol table full\n");
-    longjmp(fail_jmp, 1);
+    FAIL0("symbol table full");
   }
   strcpy(syms[nsym].name, name);
   syms[nsym].type = type;
@@ -630,7 +634,6 @@ void next_token(void) {
     return;
   }
   printf("\n%c <---- ERROR: unknown character\n", C);
-  curr_tok.type = TOK_ERROR;
   longjmp(fail_jmp, 1);
 }
 
@@ -668,7 +671,7 @@ int primary(char *out_acc, char *out_addr) {
 
   if (curr_tok.type == '(') {
     next_token();
-    if (!expression()) return 0;
+    expression();
     EXPECT(')');
     *out_acc = 1;
     *out_addr = 0;
@@ -698,8 +701,7 @@ int primary(char *out_acc, char *out_addr) {
       }
     }
     if (!sym) {
-      printf("\n%s <---- ERROR: Undeclared identifier\n", name);
-      longjmp(fail_jmp, 1);
+      FAIL("Undeclared identifier");
     }
     next_token();
 
@@ -716,15 +718,11 @@ int primary(char *out_acc, char *out_addr) {
       EXPECT('(');
       for (pi = 0; pi < sym->nparams; pi++) {
         if (pi > 0) EXPECT(',');
-        if (!expression()) return 0;
+        expression();
         if (pi < sym->nparams - 1)
           emitop2('S', sym->param_slot[pi]);
       }
       EXPECT(')');
-      if (sym->address >= nvector) {
-        printf("\nERROR: bad vector index for %s\n", name);
-        longjmp(fail_jmp, 1);
-      }
       emit((char)(0xC0 | (sym->address & 0x3F)));
       acc_invalidate();
       *out_acc = 1;
@@ -737,9 +735,7 @@ int primary(char *out_acc, char *out_addr) {
     return 1;
   }
 
-  printf("\n%s <---- ERROR: Expected expression\n", curr_tok.lexeme);
-  longjmp(fail_jmp, 1);
-  return 0;
+  FAIL("Expected expression");
 }
 
 int expression(void) {
@@ -748,7 +744,7 @@ int expression(void) {
   char op, comm;
   unsigned int lv, rv;
 
-  if (!primary(&left_acc, &left_addr)) return 0;
+  primary(&left_acc, &left_addr);
 
   while (strchr("+-*/&|^", curr_tok.type)) {
     op = curr_tok.type;
@@ -762,7 +758,7 @@ int expression(void) {
       left_addr = tmp;
     }
 
-    if (!primary(&right_acc, &right_addr)) return 0;
+    primary(&right_acc, &right_addr);
 
     // constant fold when both sides are numeric literals
     if (!left_acc && !right_acc && is_lit(left_addr) && is_lit(right_addr)) {
@@ -827,7 +823,7 @@ void beginend() {
 
   while (curr_tok.type != TOK_END && curr_tok.type != TOK_EOF) {
     // TODO: doesn't statement do this already
-    if (!statement()) longjmp(fail_jmp, 1);
+    statement();
   }
 
   EXPECT(TOK_END);
@@ -842,14 +838,13 @@ int statement(void) {
     Symbol* sym = lookup_sym(curr_tok.lexeme); // ?? safe
     strcpy(target, curr_tok.lexeme);
     if (!sym || sym->type != SYM_VAR) {
-      printf("\n%s <---- ERROR: Unknown variable\n", target);
-      longjmp(fail_jmp, 1);
+      FAIL("Unknown variable");
     }
 
 #if 0
     EXPECT(TOK_IDENT);
     EXPECT(TOK_ASSIGN);
-    if (!expression()) return 0;
+    expression();
     emitop2('S', sym->address);
     EXPECT(';');
 #else
@@ -858,7 +853,7 @@ int statement(void) {
 
       EXPECT(TOK_IDENT);
       EXPECT(TOK_ASSIGN);
-      if (!expression()) return 0;
+      expression();
       emitop2('S', sym->address);
       EXPECT(';');
 
@@ -901,7 +896,7 @@ int statement(void) {
       emit(0);
       EXPECT(TOK_STRING);
     } else {
-      if (!expression()) return 0;
+      expression();
       emitop('.');
     }
     emitop('N');
@@ -917,24 +912,22 @@ int statement(void) {
 
     EXPECT(TOK_FOR);
     if (curr_tok.type != TOK_IDENT) {
-      printf("\nERROR: expected control variable\n");
-      longjmp(fail_jmp, 1);
+      FAIL0("expected control variable");
     }
     strcpy(ctrl_name, curr_tok.lexeme);
     ctrl = lookup_sym(ctrl_name);
     if (!ctrl || ctrl->type != SYM_VAR) {
-      printf("\n%s <---- ERROR: undeclared control variable\n", ctrl_name);
-      longjmp(fail_jmp, 1);
+      FAIL("undeclared control variable");
     }
     EXPECT(TOK_IDENT);
     EXPECT(TOK_ASSIGN);
 
-    if (!expression()) return 0;
+    expression();
     emitop2('S', ctrl->address);
 
     EXPECT(TOK_TO);
     high_slot = alloc_temp();
-    if (!expression()) return 0;
+    expression();
     emitop2('S', high_slot);
 
     EXPECT(TOK_DO);
@@ -946,7 +939,7 @@ int statement(void) {
     exit_patch = bin_ptr;
     emitop('G'); emit(0); // G <delta> conditional forward (acc > 0)
 
-    if (!statement()) return 0;
+    statement();
 
     // increment
     emitop2('I', ctrl->address);
@@ -974,7 +967,7 @@ int statement(void) {
 
     EXPECT(TOK_IF);
 
-    if (!expression()) return 0;
+    expression();
 
     // Condition value is now in ACC.
     // If ACC is 0 (false), jump past the THEN body.
@@ -985,7 +978,7 @@ int statement(void) {
 
     EXPECT(TOK_THEN);
 
-    if (!statement()) return 0;
+    statement();
 
     // Check for optional ELSE branch
     if (curr_tok.type == TOK_ELSE) {
@@ -1006,7 +999,7 @@ int statement(void) {
       // Patch the initial false jump to target this ELSE entry point
       bin[patch_then] = bin_ptr - (patch_then + 1);
 
-      if (!statement()) return 0;
+      statement();
 
       // Patch the ELSE exit jump to target right after the ELSE body
       bin[patch_else] = bin_ptr - (patch_else + 1);
@@ -1193,7 +1186,7 @@ int compile_pipeline(void) {
   main_offset = bin_ptr;
 
   while (curr_tok.type != TOK_END && curr_tok.type != TOK_EOF) {
-    if (!statement()) return 0;
+    statement();
   }
   EXPECT(TOK_END);
   EXPECT('.');
