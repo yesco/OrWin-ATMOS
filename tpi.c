@@ -104,6 +104,7 @@
 #include <string.h>
 #include <ctype.h>
 #include <setjmp.h>
+#include <stdint.h>
 #include <assert.h>
 
 // --- options
@@ -221,16 +222,17 @@ const char* tok_name(TokenType t) {
 
 jmp_buf fail_jmp;
 
-// Central fail — never returns. Prefer this over printf+longjmp everywhere.
-#define FAIL(msg) do { \
-  printf("\n%s <---- ERROR: %s\n", curr_tok.lexeme, (msg)); \
-  longjmp(fail_jmp, 1); \
-} while (0)
-
-#define FAIL0(msg) do { \
-  printf("\nERROR: %s\n", (msg)); \
-  longjmp(fail_jmp, 1); \
-} while (0)
+// FAIL: message printed once at setjmp — no printf at each site.
+// 6502: pointer fits in int → longjmp(jb, msg).
+// Host: int is 32-bit, pointers 64-bit → stash in fail_msg.
+#ifdef __CC65__
+#define FAIL(msg)  longjmp(fail_jmp, (int)(msg))
+#define FAIL0(msg) longjmp(fail_jmp, (int)(msg))
+#else
+const char *fail_msg;
+#define FAIL(msg)  do { fail_msg = (msg); longjmp(fail_jmp, 1); } while (0)
+#define FAIL0(msg) do { fail_msg = (msg); longjmp(fail_jmp, 1); } while (0)
+#endif
 
 // ---------------------------------------------------------------------------
 // Source / token state
@@ -633,15 +635,15 @@ void next_token(void) {
     NEXT;
     return;
   }
-  printf("\n%c <---- ERROR: unknown character\n", C);
-  longjmp(fail_jmp, 1);
+  FAIL0("unknown character");
 }
 
 void expect(TokenType expected) {
+  static char msg[48];
   if (curr_tok.type == expected) { next_token(); return; }
-  printf("\n%s <---- ERROR: Expected %s but found %s\n",
-         curr_tok.lexeme, tok_name(expected), tok_name(curr_tok.type));
-  longjmp(fail_jmp, 1);
+  sprintf(msg, "Expected %s but found %s",
+          tok_name(expected), tok_name(curr_tok.type));
+  FAIL(msg);
 }
 
 // ---------------------------------------------------------------------------
@@ -948,8 +950,7 @@ int statement(void) {
     {
       int delta = (bin_ptr + 2) - loop_start;
       if (delta > 255) {
-        printf("\nFOR body too large\n");
-        longjmp(fail_jmp, 1);
+        FAIL0("FOR body too large");
       }
       emitop('B'); emit((char)delta);
     }
@@ -1017,8 +1018,7 @@ int statement(void) {
   
   // --- ERROR
   else {
-    printf("\n%s <---- ERROR: expected statement\n", curr_tok.lexeme);
-    longjmp(fail_jmp, 1);
+    FAIL("expected statement");
   }
 
   return 1;
@@ -1057,8 +1057,7 @@ void compile_function(void) {
   if (curr_tok.type == TOK_IDENT) {
     while (1) {
       if (nparams >= MAX_PARAMS) {
-        printf("\nERROR: too many parameters (max %d)\n", MAX_PARAMS);
-        longjmp(fail_jmp, 1);
+        FAIL0("too many parameters");
       }
       strcpy(param_name, curr_tok.lexeme);
       param_slots[nparams] = alloc_frame_slot();
@@ -1421,8 +1420,7 @@ unsigned int run_ivm(void) {
 
       // TODO: we don't want stack and tests at runtime!
       if (fsp >= MAX_CALL_DEPTH) {
-        printf("\n[IVM] call chain overflow\n");
-        longjmp(fail_jmp, 1);
+        FAIL0("call chain overflow");
       }
       fstack[fsp++] = cur_func;
 
@@ -1529,17 +1527,28 @@ int main(void) {
   src_buf[buf_idx] = 0;
   if (!buf_idx) return 0;
 
-  // COMPILE
-  if (setjmp(fail_jmp) || !compile_pipeline()) {
-    // ERROR: show line
-    unsigned int err_pos = src_pos;
-    printf("\n>> FAIL on line %d\n%s(%d): ", lnum, filename, lnum);
-    src_pos = cur_line;
-    do {
-      if (src_pos == err_pos) printf(" <<<ERROR<<< ");
-      putchar(NEXT);
-    } while (C && C != '\n');
-    printf("\n\n");
+  // COMPILE — longjmp value is error message pointer (or 1 if bare)
+  {
+    int err = setjmp(fail_jmp);
+    if (err) {
+      unsigned int err_pos = src_pos;
+#ifdef __CC65__
+      printf("\nNear: %s\nERROR: %s\n", curr_tok.lexeme, (const char *)err);
+#else
+      printf("\nNear: %s\nERROR: %s\n", curr_tok.lexeme, fail_msg ? fail_msg : "(failed)");
+#endif
+      printf(">> FAIL on line %d\n%s(%d): ", lnum, filename, lnum);
+      src_pos = cur_line;
+      do {
+        if (src_pos == err_pos) printf(" <<<ERROR<<< ");
+        putchar(NEXT);
+      } while (C && C != '\n');
+      printf("\n\n");
+      return 1;
+    }
+  }
+  if (!compile_pipeline()) {
+    printf("\n>> FAIL on line %d\n", lnum);
     return 1;
   }
 
