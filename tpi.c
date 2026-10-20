@@ -647,13 +647,13 @@ void expect(TokenType expected) {
 // ---------------------------------------------------------------------------
 #define is_acc(k) ((k) == 0)
 
-// Force acc value to be that of addr
+// Emit load value if value in acc nothat of addr
+//
 // If already is: ignore
-// Otherwise:
 // if value==0: emit: "0"
 // if       -1: emit: "9"
 // else       : emit  "Laa"
-void force_acc(char in_acc, char addr) {
+void emitload(char in_acc, char addr) {
   if (in_acc) return;
   if (acc_valid && acc_slot == addr) return;
   if (addr == IMM0 || (isconst(addr) && const_val(addr) == 0))
@@ -696,29 +696,25 @@ int primary(char *out_acc, char *out_addr) {
 
   // IDENT
   if (curr_tok.type == TOK_IDENT) {
+    char type= SYM_VAR;
     sym = NULL;
     strcpy(name, curr_tok.lexeme);
-    // looks for last match which is "func"-var
+
+    // ? FUNCALL ( ... )
+    next_token();
+    if (curr_tok.type == '(') type= SYM_FUNC;
+    
+    // search backwards (lexical!)
     for (i = nsym - 1; i >= 0; i--) {
-      if (strcmp(syms[i].name, name) == 0) {
-        if (syms[i].type == SYM_FUNC) { sym = &syms[i]; break; }
-        if (!sym) sym = &syms[i];
+      if (strcmp(syms[i].name, name) == 0 && syms[i].type == type) {
+        sym= syms+i; break;
       }
     }
     if (!sym) FAIL("Undeclared identifier");
 
     // FUNCALL ( ... )
-    next_token();
-    if (sym->type == SYM_VAR && curr_tok.type == '(') {
-      for (i = nsym - 1; i >= 0; i--) {
-        if (strcmp(syms[i].name, name) == 0 && syms[i].type == SYM_FUNC) {
-          sym = &syms[i];
-          break;
-        }
-      }
-    }
+    if (type == SYM_FUNC) {
 
-    if (sym->type == SYM_FUNC) {
       EXPECT('(');
       for (pi = 0; pi < sym->nparams; pi++) {
         if (pi > 0) EXPECT(',');
@@ -727,7 +723,9 @@ int primary(char *out_acc, char *out_addr) {
           emitop2('S', sym->param_slot[pi]);
       }
       EXPECT(')');
+
       emit((char)(0xC0 | (sym->address & 0x3F)));
+
       acc_invalidate();
       *out_acc = 1;
       *out_addr = 0;
@@ -755,6 +753,7 @@ int expression(void) {
     next_token();
     comm = (op != '-' && op != '/');
 
+    // save if result of primary is in acc
     if (left_acc) {
       char tmp = alloc_temp();
       emitop2('S', tmp);
@@ -764,8 +763,9 @@ int expression(void) {
 
     primary(&right_acc, &right_addr);
 
-    // constant fold when both sides are numeric literals
+    // FOLD CONSTANTS
     if (!left_acc && !right_acc && is_lit(left_addr) && is_lit(right_addr)) {
+
       lv = lit_val(left_addr);
       rv = lit_val(right_addr);
       switch (op) {
@@ -777,8 +777,11 @@ int expression(void) {
         case '|': lv |= rv; break;
         case '^': lv ^= rv; break;
       }
+
+      // TODO: why is this logic repeated?
+      // don't we have fun somewhere
       left_acc = 0;
-      if (lv == 0) left_addr = IMM0;
+      if      (lv == 0) left_addr = IMM0;
       else if (lv == (unsigned int)-1) left_addr = IMM1;
       else left_addr = add_const(lv);
       continue;
@@ -786,12 +789,13 @@ int expression(void) {
 
     // right in ACC (call result)
     if (right_acc) {
+
       if (comm)
         emitop2(op, as_addr(left_addr));
       else {
         char tmp = alloc_temp();
         emitop2('S', tmp);
-        force_acc(left_acc, left_addr);
+        emitload(left_acc, left_addr);
         emitop2(op, tmp);
       }
       left_acc = 1;
@@ -806,7 +810,7 @@ int expression(void) {
     }
 
     // standard: left → ACC, ACC op= right
-    force_acc(left_acc, left_addr);
+    emitload(left_acc, left_addr);
     if (op == '+' && acc_valid && acc_slot == right_addr) {
       if (!(bin_ptr >= 2 && bin[bin_ptr-2] == 'S' && bin[bin_ptr-1] == right_addr))
         emitop2('S', right_addr);
@@ -815,7 +819,7 @@ int expression(void) {
     left_acc = 1;
   }
 
-  force_acc(left_acc, left_addr);
+  emitload(left_acc, left_addr);
   return 1;
 }
 
@@ -1482,7 +1486,7 @@ void dump_bytecode(void) {
           printf("%c%02x ", c, bin[++i]);
     }
     else printf("$%02x ", c);
-    if (++n == wrap) { printf("\n"); n= 0; }
+    if (c == 'N' || ++n == wrap) { printf("\n"); n= 0; }
   }
 
   if (nvector) {
