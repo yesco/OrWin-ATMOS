@@ -655,24 +655,13 @@ void force_acc(char kind, unsigned int val) {
   acc_invalidate();
 }
 
-void emit_add_to_acc(char kind, unsigned int val) {
-  int idx;
-  char slot;
-  if (kind == OP_MEM) {
-    slot = (char)val;
-    // ACC holds this slot: need mem copy for +slot. S unless just stored.
-    if (acc_valid && acc_slot == slot) {
-      if (!(bin_ptr >= 2 && bin[bin_ptr-2] == 'S' && bin[bin_ptr-1] == slot))
-        emitop2('S', slot);
-    }
-    emitop2('+', slot);
-    return;
-  }
-  if (kind == OP_IMM) {
-    if (val == 0) return;
-    idx = add_const(val);
-    emitop2('+', (char)(0x80 | (idx & 0x7F)));
-    return;
+// Emit operand byte for ACC op= X (MEM slot or const pool ref)
+void emit_op_arg(char op, char kind, unsigned int val) {
+  if (kind == OP_MEM)
+    emitop2(op, (char)val);
+  else if (kind == OP_IMM) {
+    if (op == '+' && val == 0) return;
+    emitop2(op, (char)(0x80 | (add_const(val) & 0x7F)));
   }
 }
 
@@ -681,7 +670,6 @@ int primary(char *out_kind, unsigned int *out_val) {
   Symbol *sym;
   int i, pi;
 
-  // Track parenthesized sub-expressions recursively
   if (curr_tok.type == '(') {
     next_token();
     if (!expression()) return 0;
@@ -724,7 +712,6 @@ int primary(char *out_kind, unsigned int *out_val) {
 
     if (sym->type == SYM_FUNC) {
       EXPECT('(');
-      // store all but last param; last stays in ACC for callee to S at entry
       for (pi = 0; pi < sym->nparams; pi++) {
         if (pi > 0) EXPECT(',');
         if (!expression()) return 0;
@@ -737,7 +724,7 @@ int primary(char *out_kind, unsigned int *out_val) {
         longjmp(fail_jmp, 1);
       }
       emit((char)(0xC0 | (sym->address & 0x3F)));
-      acc_invalidate(); // return value in ACC, not a known slot
+      acc_invalidate();
       *out_kind = OP_ACC;
       *out_val = 0;
       return 1;
@@ -753,19 +740,25 @@ int primary(char *out_kind, unsigned int *out_val) {
   return 0;
 }
 
-// Expression → result in ACC using commutative optimization
+// Expression → ACC
+// One loop, a few cases — not one path per operator:
+//   1) fold IMM op IMM
+//   2) right in ACC (call): commutative → op left; else spill
+//   3) ACC already holds right MEM (last param): commutative → op left
+//   4) else force left, op right
 int expression() {
   char left_kind, right_kind;
   unsigned int left_val, right_val;
-  char op;
+  char op, comm;
 
   if (!primary(&left_kind, &left_val)) return 0;
 
   while (strchr("+-*/&|^", curr_tok.type)) {
     op = curr_tok.type;
     next_token();
+    comm = (op != '-' && op != '/');
 
-    // Spill a left-hand function result before evaluating the RHS.
+    // ACC left would be killed by RHS — spill first
     if (left_kind == OP_ACC) {
       int tmp = alloc_temp();
       emitop2('S', (char)tmp);
@@ -775,60 +768,52 @@ int expression() {
 
     if (!primary(&right_kind, &right_val)) return 0;
 
-    // Constant folding
+    // 1) constant fold
     if (left_kind == OP_IMM && right_kind == OP_IMM) {
-      if (op == '+') left_val += right_val;
-      else if (op == '-') left_val -= right_val;
-      else if (op == '*') left_val *= right_val;
-      else if (op == '/') { if (right_val) left_val /= right_val; }
-      else if (op == '&') left_val &= right_val;
-      else if (op == '|') left_val |= right_val;
-      else if (op == '^') left_val ^= right_val;
+      switch (op) {
+        case '+': left_val += right_val; break;
+        case '-': left_val -= right_val; break;
+        case '*': left_val *= right_val; break;
+        case '/': if (right_val) left_val /= right_val; break;
+        case '&': left_val &= right_val; break;
+        case '|': left_val |= right_val; break;
+        case '^': left_val ^= right_val; break;
+      }
       continue;
     }
 
-    // Right is function result in ACC: commutative → ACC op= left (no spill)
+    // 2) right is ACC (function result)
     if (right_kind == OP_ACC) {
-      if (op != '-' && op != '/') {
-        emitop2(op, (char)(left_kind == OP_MEM ? left_val
-                         : (0x80 | (add_const(left_val) & 0x7F))));
-        left_kind = OP_ACC; left_val = 0; continue;
-      }
-      {
+      if (comm)
+        emit_op_arg(op, left_kind, left_val);
+      else {
         int tmp = alloc_temp();
         emitop2('S', (char)tmp);
         force_acc(left_kind, left_val);
         emitop2(op, (char)tmp);
-        left_kind = OP_ACC; left_val = 0; continue;
       }
+      left_kind = OP_ACC; left_val = 0;
+      continue;
     }
 
-    // Commutative + ACC already holds right MEM (e.g. last param): ACC op= left
-    // Two: a+b with ACC=b → "+a" only, no "L a + b"
-    if (op != '-' && op != '/' && right_kind == OP_MEM &&
+    // 3) commutative and ACC already holds right MEM
+    if (comm && right_kind == OP_MEM &&
         acc_valid && acc_slot == (char)right_val) {
-      if (left_kind == OP_MEM)
-        emitop2(op, (char)left_val);
-      else if (left_kind == OP_IMM) {
-        if (left_val != 0 || op != '+') // +0 no-op; else need const
-          emitop2(op, (char)(0x80 | (add_const(left_val) & 0x7F)));
-      }
-      left_kind = OP_ACC; left_val = 0; continue;
+      emit_op_arg(op, left_kind, left_val);
+      left_kind = OP_ACC; left_val = 0;
+      continue;
     }
 
-    // Standard: LHS → ACC, then ACC op= right
+    // 4) standard: left → ACC, then ACC op= right
     force_acc(left_kind, left_val);
-    if (right_kind == OP_MEM) {
-      // val+val with ACC already val: +slot (S only if mem not just stored)
-      if (op == '+' && acc_valid && acc_slot == (char)right_val) {
-        if (!(bin_ptr >= 2 && bin[bin_ptr-2] == 'S' &&
-              bin[bin_ptr-1] == (char)right_val))
-          emitop2('S', (char)right_val);
-      }
-      emitop2(op, (char)right_val);
-    } else
-      emitop2(op, (char)(0x80 | (add_const(right_val) & 0x7F)));
-
+    if (right_kind == OP_MEM && op == '+' &&
+        acc_valid && acc_slot == (char)right_val) {
+      // val+val: need mem copy of ACC
+      if (!(bin_ptr >= 2 && bin[bin_ptr-2] == 'S' &&
+            bin[bin_ptr-1] == (char)right_val))
+        emitop2('S', (char)right_val);
+    }
+    emit_op_arg(op, right_kind, right_val);
     left_kind = OP_ACC;
     left_val = 0;
   }
