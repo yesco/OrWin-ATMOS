@@ -330,8 +330,8 @@ void add_patch(int offset, int kind, int value) {
 // ---------------------------------------------------------------------------
 unsigned int mem[MAX_SLOTS]; // runtime memory
 char slot_used[MAX_SLOTS]; // allocation map
-int next_global = 0; // next candidate in 0-31
-int next_frame  = FRAME_BASE; // next candidate from 32
+char next_global = 0; // next candidate in 0-31
+char next_frame  = FRAME_BASE; // next candidate from 32
 
 char alloc_global(void) {
   while (next_global < GLOBAL_LIMIT) {
@@ -398,11 +398,11 @@ unsigned int const_pool[MAX_CONSTS];
 //     load using different base pointer. (complicated)
 
 
-int nconst = 0;
+char nconst = 0;
 
 // Returns byte address 0x80+idx (same form as a var slot)
 char add_const(unsigned int v) {
-  int i;
+  char i;
   for (i = 0; i < nconst; i++)
     if (const_pool[i] == v) return (char)(0x80 + i);
   if (nconst >= MAX_CONSTS) {
@@ -415,6 +415,27 @@ char add_const(unsigned int v) {
 
 #define isconst(a) ((unsigned char)(a) >= 0x80)
 #define const_val(a) (const_pool[(unsigned char)(a) - 0x80])
+
+// Literals 0 / -1: not pooled until needed as an op address (RHS of + etc.)
+#define IMM0 ((char)0xfe)
+#define IMM1 ((char)0xfd)
+
+int is_lit(char a) {
+  return a == IMM0 || a == IMM1 || isconst(a);
+}
+
+unsigned int lit_val(char a) {
+  if (a == IMM0) return 0;
+  if (a == IMM1) return (unsigned int)-1;
+  return const_val(a);
+}
+
+// Address usable as emitop2 arg (intern IMM0/IMM1 if needed)
+char as_addr(char a) {
+  if (a == IMM0) return add_const(0);
+  if (a == IMM1) return add_const((unsigned int)-1);
+  return a;
+}
 
 void emit_load_const(unsigned int v) {
   if (v == 0) { emitop('0'); return; }
@@ -429,7 +450,7 @@ int vectors[MAX_VECTORS]; // bytecode offset during compile
 char *vptr[MAX_VECTORS]; // resolved absolute pointers (finalise)
 char vec_link[MAX_VECTORS]; // mem slot: return NEXT (ipc) per function
 char vec_val[MAX_VECTORS]; // mem slot: return VALUE per function
-int nvector = 0;
+char nvector = 0;
 int main_offset = 0;
 char *main_entry = 0;
 char is_code_addr[MAX_CONSTS];
@@ -466,7 +487,7 @@ typedef struct {
 } Symbol;
 
 Symbol syms[MAX_SYMBOLS];
-int nsym = 0;
+char nsym = 0;
 
 void add_symbol(const char* name, SymbolType type, char address) {
   if (nsym >= MAX_SYMBOLS) {
@@ -631,9 +652,11 @@ void force_acc(char in_acc, char addr) {
     return;
   if (acc_valid && acc_slot == addr)
     return;
-  if (isconst(addr)) {
-    if (const_val(addr) == 0) { emitop('0'); return; }
-    if (const_val(addr) == (unsigned int)-1) { emitop('9'); return; }
+  if (addr == IMM0 || (isconst(addr) && const_val(addr) == 0)) {
+    emitop('0'); return;
+  }
+  if (addr == IMM1 || (isconst(addr) && const_val(addr) == (unsigned int)-1)) {
+    emitop('9'); return;
   }
   emitop2('L', addr);
 }
@@ -654,7 +677,13 @@ int primary(char *out_acc, char *out_addr) {
 
   if (curr_tok.type == TOK_NUM) {
     *out_acc = 0;
-    *out_addr = add_const((unsigned int)curr_tok.value);
+    // 0 / -1 stay unpooled until needed as an address operand
+    if (curr_tok.value == 0)
+      *out_addr = IMM0;
+    else if (curr_tok.value == -1)
+      *out_addr = IMM1;
+    else
+      *out_addr = add_const((unsigned int)curr_tok.value);
     next_token();
     return 1;
   }
@@ -735,10 +764,10 @@ int expression(void) {
 
     if (!primary(&right_acc, &right_addr)) return 0;
 
-    // constant fold when both sides are const addresses
-    if (!left_acc && !right_acc && isconst(left_addr) && isconst(right_addr)) {
-      lv = const_val(left_addr);
-      rv = const_val(right_addr);
+    // constant fold when both sides are numeric literals
+    if (!left_acc && !right_acc && is_lit(left_addr) && is_lit(right_addr)) {
+      lv = lit_val(left_addr);
+      rv = lit_val(right_addr);
       switch (op) {
         case '+': lv += rv; break;
         case '-': lv -= rv; break;
@@ -749,14 +778,16 @@ int expression(void) {
         case '^': lv ^= rv; break;
       }
       left_acc = 0;
-      left_addr = add_const(lv);
+      if (lv == 0) left_addr = IMM0;
+      else if (lv == (unsigned int)-1) left_addr = IMM1;
+      else left_addr = add_const(lv);
       continue;
     }
 
     // right in ACC (call result)
     if (right_acc) {
       if (comm)
-        emitop2(op, left_addr);
+        emitop2(op, as_addr(left_addr));
       else {
         char tmp = alloc_temp();
         emitop2('S', tmp);
@@ -769,7 +800,7 @@ int expression(void) {
 
     // ACC already holds right (e.g. last param)
     if (comm && acc_valid && acc_slot == right_addr) {
-      emitop2(op, left_addr);
+      emitop2(op, as_addr(left_addr));
       left_acc = 1;
       continue;
     }
@@ -780,7 +811,7 @@ int expression(void) {
       if (!(bin_ptr >= 2 && bin[bin_ptr-2] == 'S' && bin[bin_ptr-1] == right_addr))
         emitop2('S', right_addr);
     }
-    emitop2(op, right_addr);
+    emitop2(op, as_addr(right_addr));
     left_acc = 1;
   }
 
