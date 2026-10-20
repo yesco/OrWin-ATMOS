@@ -123,7 +123,7 @@
 #define MAX_PARAMS       4 // max arguments per function
 
 // --- limits
-#define MAX_SLOTS      256
+#define MAX_SLOTS      255 // Last one not used, is error
 #define MAX_CONSTS      64
 
 #define MAX_VECTORS     64 // # subroutines: opcodes 0xC0 .. 0xFF
@@ -203,6 +203,7 @@ Keyword keywords[] = {
 
 typedef struct {
   TokenType type;
+  // TODO: this also used for strings, maybe strdup?
   char lexeme[MAX_SYM_LEN + 1];
   int value;
 } Token;
@@ -227,11 +228,9 @@ jmp_buf fail_jmp;
 // Host: int is 32-bit, pointers 64-bit → stash in fail_msg.
 #ifdef __CC65__
 #define FAIL(msg)  longjmp(fail_jmp, (int)(msg))
-#define FAIL0(msg) longjmp(fail_jmp, (int)(msg))
 #else
 const char *fail_msg;
 #define FAIL(msg)  do { fail_msg = (msg); longjmp(fail_jmp, 1); } while (0)
-#define FAIL0(msg) do { fail_msg = (msg); longjmp(fail_jmp, 1); } while (0)
 #endif
 
 // ---------------------------------------------------------------------------
@@ -283,9 +282,7 @@ void acc_set_slot(char slot) {
 }
 
 void emit(char c) {
-  if (bin_ptr >= MAX_BIN_LEN - 1) {
-    FAIL0("bytecode buffer overflow");
-  }
+  if (bin_ptr >= MAX_BIN_LEN - 1) FAIL("bytecode buffer overflow");
   bin[bin_ptr++] = c;
 }
 
@@ -327,9 +324,7 @@ void emitreturn(char ret_slot) {
 }
 
 void add_patch(int offset, int kind, int value) {
-  if (npatch >= MAX_PATCHES) {
-    FAIL0("too many patches");
-  }
+  if (npatch >= MAX_PATCHES) FAIL("too many patches");
   patches[npatch].offset = offset;
   patches[npatch].kind   = kind;
   patches[npatch].value  = value;
@@ -359,8 +354,8 @@ char alloc_global(void) {
     }
     next_frame++;
   }
-  FAIL0("out of slots");
-  return (char)0xff;
+  FAIL("out of slots");
+  return 0xff;
 }
 
 char alloc_frame_slot(void) {
@@ -371,8 +366,8 @@ char alloc_frame_slot(void) {
     }
     next_frame++;
   }
-  FAIL0("out of frame slots");
-  return (char)0xff;
+  FAIL("out of frame slots");
+  return 0xff;
 }
 
 char alloc_temp(void) {
@@ -409,16 +404,17 @@ unsigned int const_pool[MAX_CONSTS];
 
 char nconst = 0;
 
-// Returns byte address 0x80+idx (same form as a var slot)
+// Returns byte address of constant.
+// Adds constant if not there already.
+// 
+
 char add_const(unsigned int v) {
   char i;
   for (i = 0; i < nconst; i++)
-    if (const_pool[i] == v) return (char)(0x80 + i);
-  if (nconst >= MAX_CONSTS) {
-    FAIL0("constant pool full");
-  }
+    if (const_pool[i] == v) return 0x80 + i;
+  if (nconst >= MAX_CONSTS) FAIL("constant pool full");
   const_pool[nconst] = v;
-  return (char)(0x80 + nconst++);
+  return 0x80 | nconst++;
 }
 
 #define isconst(a) ((unsigned char)(a) >= 0x80)
@@ -459,6 +455,7 @@ char *vptr[MAX_VECTORS]; // resolved absolute pointers (finalise)
 char vec_link[MAX_VECTORS]; // mem slot: return NEXT (ipc) per function
 char vec_val[MAX_VECTORS]; // mem slot: return VALUE per function
 char nvector = 0;
+
 int main_offset = 0;
 char *main_entry = 0;
 char is_code_addr[MAX_CONSTS];
@@ -471,9 +468,7 @@ char fstack[MAX_CALL_DEPTH];
 char fsp;
 
 int add_vector(int entry_offset) {
-  if (nvector >= MAX_VECTORS) {
-    FAIL0("too many functions");
-  }
+  if (nvector >= MAX_VECTORS) FAIL("too many functions");
   vectors[nvector] = entry_offset;
   return nvector++;
 }
@@ -497,9 +492,7 @@ Symbol syms[MAX_SYMBOLS];
 char nsym = 0;
 
 void add_symbol(const char* name, SymbolType type, char address) {
-  if (nsym >= MAX_SYMBOLS) {
-    FAIL0("symbol table full");
-  }
+  if (nsym >= MAX_SYMBOLS) FAIL("symbol table full");
   strcpy(syms[nsym].name, name);
   syms[nsym].type = type;
   syms[nsym].address = address;
@@ -565,9 +558,10 @@ void next_token(void) {
     break;
   }
 
+  // *EOF*
   if (!C) {
+    // TODO: is failure? maybe not in script?
     curr_tok.type = TOK_EOF;
-    strcpy(curr_tok.lexeme, "EOF");
     return;
   }
 
@@ -623,6 +617,7 @@ void next_token(void) {
   if (C == ':' && src_buf[src_pos + 1] == '=') {
     NEXT; NEXT;
     curr_tok.type = TOK_ASSIGN;
+    // TODO: remove, why needed? for error message?
     strcpy(curr_tok.lexeme, ":=");
     return;
   }
@@ -635,15 +630,15 @@ void next_token(void) {
     NEXT;
     return;
   }
-  FAIL0("unknown character");
+
+  FAIL("unknown character");
 }
 
 void expect(TokenType expected) {
-  static char msg[48];
   if (curr_tok.type == expected) { next_token(); return; }
-  sprintf(msg, "Expected %s but found %s",
-          tok_name(expected), tok_name(curr_tok.type));
-  FAIL(msg);
+  printf("\n%%Expected %s but found %s",
+    tok_name(expected), tok_name(curr_tok.type));
+  FAIL("expected");
 }
 
 // ---------------------------------------------------------------------------
@@ -652,25 +647,30 @@ void expect(TokenType expected) {
 // ---------------------------------------------------------------------------
 #define is_acc(k) ((k) == 0)
 
+// Force acc value to be that of addr
+// If already is: ignore
+// Otherwise:
+// if value==0: emit: "0"
+// if       -1: emit: "9"
+// else       : emit  "Laa"
 void force_acc(char in_acc, char addr) {
-  if (in_acc)
-    return;
-  if (acc_valid && acc_slot == addr)
-    return;
-  if (addr == IMM0 || (isconst(addr) && const_val(addr) == 0)) {
-    emitop('0'); return;
-  }
-  if (addr == IMM1 || (isconst(addr) && const_val(addr) == (unsigned int)-1)) {
-    emitop('9'); return;
-  }
-  emitop2('L', addr);
+  if (in_acc) return;
+  if (acc_valid && acc_slot == addr) return;
+  if (addr == IMM0 || (isconst(addr) && const_val(addr) == 0))
+    emitop('0');
+  else if (addr == IMM1 || (isconst(addr) && const_val(addr) == (unsigned int)-1))
+    emitop('9');
+  else
+    emitop2('L', addr);
 }
 
+// Parse a primary simple type
 int primary(char *out_acc, char *out_addr) {
   char name[MAX_SYM_LEN + 1];
   Symbol *sym;
   int i, pi;
 
+  // ( expression )
   if (curr_tok.type == '(') {
     next_token();
     expression();
@@ -680,6 +680,7 @@ int primary(char *out_acc, char *out_addr) {
     return 1;
   }
 
+  // NUMBER
   if (curr_tok.type == TOK_NUM) {
     *out_acc = 0;
     // 0 / -1 stay unpooled until needed as an address operand
@@ -693,20 +694,21 @@ int primary(char *out_acc, char *out_addr) {
     return 1;
   }
 
+  // IDENT
   if (curr_tok.type == TOK_IDENT) {
     sym = NULL;
     strcpy(name, curr_tok.lexeme);
+    // looks for last match which is "func"-var
     for (i = nsym - 1; i >= 0; i--) {
       if (strcmp(syms[i].name, name) == 0) {
         if (syms[i].type == SYM_FUNC) { sym = &syms[i]; break; }
         if (!sym) sym = &syms[i];
       }
     }
-    if (!sym) {
-      FAIL("Undeclared identifier");
-    }
-    next_token();
+    if (!sym) FAIL("Undeclared identifier");
 
+    // FUNCALL ( ... )
+    next_token();
     if (sym->type == SYM_VAR && curr_tok.type == '(') {
       for (i = nsym - 1; i >= 0; i--) {
         if (strcmp(syms[i].name, name) == 0 && syms[i].type == SYM_FUNC) {
@@ -914,7 +916,7 @@ int statement(void) {
 
     EXPECT(TOK_FOR);
     if (curr_tok.type != TOK_IDENT) {
-      FAIL0("expected control variable");
+      FAIL("expected control variable");
     }
     strcpy(ctrl_name, curr_tok.lexeme);
     ctrl = lookup_sym(ctrl_name);
@@ -950,7 +952,7 @@ int statement(void) {
     {
       int delta = (bin_ptr + 2) - loop_start;
       if (delta > 255) {
-        FAIL0("FOR body too large");
+        FAIL("FOR body too large");
       }
       emitop('B'); emit((char)delta);
     }
@@ -1017,9 +1019,7 @@ int statement(void) {
   else if (curr_tok.type == ';') EXPECT(';');
   
   // --- ERROR
-  else {
-    FAIL("expected statement");
-  }
+  else FAIL("expected statement");
 
   return 1;
 }
@@ -1057,7 +1057,7 @@ void compile_function(void) {
   if (curr_tok.type == TOK_IDENT) {
     while (1) {
       if (nparams >= MAX_PARAMS) {
-        FAIL0("too many parameters");
+        FAIL("too many parameters");
       }
       strcpy(param_name, curr_tok.lexeme);
       param_slots[nparams] = alloc_frame_slot();
@@ -1420,7 +1420,7 @@ unsigned int run_ivm(void) {
 
       // TODO: we don't want stack and tests at runtime!
       if (fsp >= MAX_CALL_DEPTH) {
-        FAIL0("call chain overflow");
+        FAIL("call chain overflow");
       }
       fstack[fsp++] = cur_func;
 
@@ -1531,16 +1531,16 @@ int main(void) {
   {
     int err = setjmp(fail_jmp);
     if (err) {
+      #ifdef __CC65__
+      char* fail_msg= (char*) err;
+      #endif        
       unsigned int err_pos = src_pos;
-#ifdef __CC65__
-      printf("\nNear: %s\nERROR: %s\n", curr_tok.lexeme, (const char *)err);
-#else
-      printf("\nNear: %s\nERROR: %s\n", curr_tok.lexeme, fail_msg ? fail_msg : "(failed)");
-#endif
-      printf(">> FAIL on line %d\n%s(%d): ", lnum, filename, lnum);
+
+      printf("\n%%ERROR: %s\n%s:%d.%d (%d): ", fail_msg, filename,
+        lnum, err_pos-cur_line, cur_line);
       src_pos = cur_line;
       do {
-        if (src_pos == err_pos) printf(" <<<ERROR<<< ");
+        if (src_pos == err_pos) printf(" >>> %s <<<ERROR<<< ", curr_tok.lexeme);
         putchar(NEXT);
       } while (C && C != '\n');
       printf("\n\n");
