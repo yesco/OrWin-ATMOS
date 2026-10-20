@@ -426,7 +426,7 @@ void emit_load_const(unsigned int v) {
   if (v == (unsigned int)-1) { emitop('9'); return; }
   idx = add_const(v);
   emitop('L');
-  emit((char)(0x80 | (idx & 0x7F)));
+  emit((char)(0x80 + idx));
 }
 
 // ---------------------------------------------------------------------------
@@ -651,20 +651,11 @@ void force_acc(char kind, unsigned int val) {
   if (val == (unsigned int)-1) { emitop('9'); return; }
   idx = add_const(val);
   emitop('L');
-  emit((char)(0x80 | (idx & 0x7F)));
+  emit((char)(0x80 + idx));
   acc_invalidate();
 }
 
 // Emit operand byte for ACC op= X (MEM slot or const pool ref)
-void emit_op_arg(char op, char kind, unsigned int val) {
-  if (kind == OP_MEM)
-    emitop2(op, (char)val);
-  else if (kind == OP_IMM) {
-    if (op == '+' && val == 0) return;
-    emitop2(op, (char)(0x80 | (add_const(val) & 0x7F)));
-  }
-}
-
 int primary(char *out_kind, unsigned int *out_val) {
   char name[MAX_SYM_LEN + 1];
   Symbol *sym;
@@ -785,7 +776,7 @@ int expression() {
     // 2) right is ACC (function result)
     if (right_kind == OP_ACC) {
       if (comm)
-        emit_op_arg(op, left_kind, left_val);
+        emitop2(op, left_kind == OP_MEM ? (char)left_val : (char)(0x80 + add_const(left_val)));
       else {
         int tmp = alloc_temp();
         emitop2('S', (char)tmp);
@@ -799,7 +790,7 @@ int expression() {
     // 3) commutative and ACC already holds right MEM
     if (comm && right_kind == OP_MEM &&
         acc_valid && acc_slot == (char)right_val) {
-      emit_op_arg(op, left_kind, left_val);
+      emitop2(op, left_kind == OP_MEM ? (char)left_val : (char)(0x80 + add_const(left_val)));
       left_kind = OP_ACC; left_val = 0;
       continue;
     }
@@ -813,7 +804,7 @@ int expression() {
             bin[bin_ptr-1] == (char)right_val))
         emitop2('S', (char)right_val);
     }
-    emit_op_arg(op, right_kind, right_val);
+    emitop2(op, right_kind == OP_MEM ? (char)right_val : (char)(0x80 + add_const(right_val)));
     left_kind = OP_ACC;
     left_val = 0;
   }
