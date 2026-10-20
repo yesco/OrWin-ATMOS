@@ -982,8 +982,9 @@ int statement(void) {
       // If the THEN body executed, we must unconditionally jump past the ELSE body.
       /// emitop('1'); // TODO: ???
 
-      emitop('9'); // TRUE (but its neg!) lol
+//      emitop('9'); // TRUE (but its neg!) lol
 //      emitop('?'); // ???
+      emitop('0');
       emitop('?'); // ???
 
       emitop('G'); // Forward unconditional jump
@@ -1364,11 +1365,17 @@ unsigned int run_ivm(void) {
 
   case 'U': acc= (mem[ipc[0]]+= mem[ipc[1]]); ipc+=2; goto next;
 
+// TODO: <> ? LOL
+  case '<': acc= acc < PAR; goto pnext;
+  case '=': acc= acc == PAR; goto pnext;
+  case '>': acc= acc > PAR; goto pnext;
+
     // ---- no-arg ops ----
   case ' ':               goto next;
   case '0': acc = 0;      goto next;
   case '9': acc = 0xffff; goto next;
 
+// TODO: add keyword NOT !
   case '?': acc = !acc;         goto next;
   case '~': acc = ~acc;         goto next;
   case '.': printf("%u", acc);  goto next;
