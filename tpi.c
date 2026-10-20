@@ -86,8 +86,17 @@
 // 6 ops / loop with new Iss and Ussdd
 // (/ 1373 6) = 228c / op
 
-// 7688330
-// (/ (- 7720424 5213578) 1000) = 2506 c / loop ?
+// -- cc65 1516 bytes
+// (/ (- 6568864 5194953) 1000) = 1373 ksum
+// (/ (- 7720424 5213578) 1000) = 2506 fsum
+
+// -- oscar 15K (no explicit opt) (-O3: 18K nearly, but 20% faster)
+// (/ (- 4294849 3357946) 1000) =  936 sum
+// (/ (- 5466849 3357946) 1000) = 2108 fsum
+
+// -- oscar  -Os => 14386 bytes
+// (/ (- 3880227 2927271) 1000)  952 sum
+// (/ (- 5066227 2927271) 1000) 2138 fsum
 
 #include <stdio.h>
 #include <stddef.h>
@@ -141,25 +150,25 @@ typedef char TokenType;
 
 // keywords — letters, unique
 // free: A C H J M O QRS U XYZ
-#define TOK_PROGRAM  'P'
-#define TOK_VAR      'V'
-#define TOK_BEGIN    'B'
-#define TOK_END      'E'
-#define TOK_INTEGER  'N'
-#define TOK_WRITE    'W' // WRITELN
-#define TOK_FUNCTION 'F'
+#define TOK_PROGRAM  ((TokenType)'P')
+#define TOK_VAR      ((TokenType)'V')
+#define TOK_BEGIN    ((TokenType)'B')
+#define TOK_END      ((TokenType)'E')
+#define TOK_INTEGER  ((TokenType)'N')
+#define TOK_WRITE    ((TokenType)'W') // WRITELN
+#define TOK_FUNCTION ((TokenType)'F')
 
-#define TOK_IF       'I'
-#define TOK_THEN     'T'
-#define TOK_ELSE     'L'
+#define TOK_IF       ((TokenType)'I')
+#define TOK_THEN     ((TokenType)'T')
+#define TOK_ELSE     ((TokenType)'L')
 
-#define TOK_FOR      'O' // F taken by FUNCTION
-#define TOK_TO       'G'
-#define TOK_DO       'D'
+#define TOK_FOR      ((TokenType)'O') // F taken by FUNCTION
+#define TOK_TO       ((TokenType)'G')
+#define TOK_DO       ((TokenType)'D')
 
 typedef struct {
-  char *name;
-  TokenType type;
+  const char *name;
+  const TokenType type;
 } Keyword;
 
 // Real keywords + "combi" names for specials (printer only).
@@ -189,7 +198,7 @@ Keyword keywords[] = {
   {"*STRING*", TOK_STRING},
   {":=",       TOK_ASSIGN},
 };
-#define NKEYWORDS ((int)(sizeof keywords / sizeof keywords[0]))
+#define NKEYWORDS ((int)(sizeof(keywords) / sizeof(keywords[0])))
 
 typedef struct {
   TokenType type;
@@ -198,7 +207,7 @@ typedef struct {
 } Token;
 
 char tok_name_buf[4];
-char* tok_name(TokenType t) {
+const char* tok_name(TokenType t) {
   int i;
   for (i = 0; i < NKEYWORDS; i++)
     if (keywords[i].type == t) return keywords[i].name;
@@ -475,8 +484,8 @@ void add_symbol(const char* name, SymbolType type, int address) {
   syms[nsym].type = type;
   syms[nsym].address = address;
   syms[nsym].nparams = 0;
-  syms[nsym].ret_slot = -1;
-  syms[nsym].ret_addr_slot = -1;
+  syms[nsym].ret_slot = 0xff;
+  syms[nsym].ret_addr_slot = 0xff;
   nsym++;
 }
 
@@ -1270,6 +1279,12 @@ void finalise(void) {
 // Host-side IVM interpreter
 // ---------------------------------------------------------------------------
 
+// Oscar doesn't have
+// TODO: maybe _zoropage ? but on parameter?
+#ifndef __CC65__
+#define register
+#endif
+
 unsigned int run_ivm(void) {
   // Classic single-switch + goto dispatch (ivm.c style).
   // - opcode 0   = halt (program end) — no explicit pre-test in the loop
@@ -1294,7 +1309,7 @@ unsigned int run_ivm(void) {
 #define PAR mem[(unsigned char)(*ipc)]
 #endif
 
-  goto next;
+  goto xnext;
 
   // Eat up one byte parameter from last op
  pnext:
@@ -1306,7 +1321,9 @@ unsigned int run_ivm(void) {
   //   avg (+ 3  8    5    1   (* 13 4)) = 69c
   //   69c dispatch-overhead AT LEAST!
 
- next:
+  // TODO: oscar64 gives strange error if this is changed to next!
+  //   maybe thinking it's c++? LOL: std::next() ???
+ xnext:
   switch ((op= *ipc++)) {
 
     // OS: quit program (C: exit)
@@ -1341,7 +1358,7 @@ unsigned int run_ivm(void) {
     }
     cur_func = fstack[--fsp];
 
-    goto next;
+    goto xnext;
     
     // ---- parameter ops ----
 
@@ -1363,7 +1380,7 @@ unsigned int run_ivm(void) {
   case 'I': acc= (PAR++); goto pnext;
   case 'J': acc= (PAR--); goto pnext;
 
-  case 'U': acc= (mem[ipc[0]]+= mem[ipc[1]]); ipc+=2; goto next;
+  case 'U': acc= (mem[ipc[0]]+= mem[ipc[1]]); ipc+=2; goto xnext;
 
 // TODO: <> ? LOL
   case '<': acc= acc < PAR; goto pnext;
@@ -1371,16 +1388,16 @@ unsigned int run_ivm(void) {
   case '>': acc= acc > PAR; goto pnext;
 
     // ---- no-arg ops ----
-  case ' ':               goto next;
-  case '0': acc = 0;      goto next;
-  case '9': acc = 0xffff; goto next;
+  case ' ':               goto xnext;
+  case '0': acc = 0;      goto xnext;
+  case '9': acc = 0xffff; goto xnext;
 
 // TODO: add keyword NOT !
-  case '?': acc = !acc;         goto next;
-  case '~': acc = ~acc;         goto next;
-  case '.': printf("%u", acc);  goto next;
-  case 'N': putchar('\n');      goto next;
-  case 'E': putchar((char)acc); goto next;
+  case '?': acc = !acc;         goto xnext;
+  case '~': acc = ~acc;         goto xnext;
+  case '.': printf("%u", acc);  goto xnext;
+  case 'N': putchar('\n');      goto xnext;
+  case 'E': putchar((char)acc); goto xnext;
 
   case '"': // inline string ends at 0
     while (*ipc) putchar(*ipc++);
@@ -1426,7 +1443,7 @@ unsigned int run_ivm(void) {
       // set new
       ipc = vptr[cur_func];
       
-      goto next;
+      goto xnext;
     }
 
     // ZJMP [op] (forward)
@@ -1449,7 +1466,8 @@ void dump_bytecode(void) {
     if (!c) { n= 0; printf("\\0  \n"); }
     else if (c >= 0xC0) printf("(%02x)", c - 0xC0);
     else if (c >= 0x80) printf("<%02x>", c - 0x80);
-    else if (c == ' ')  printf("_   ", c);
+
+    else if (c == ' ')  printf("_   ");
     else if (c == '"') {
       putchar('\n'); do putchar(c); while((c=bin[++i]));
       printf("\\0\n"); n= 0; }
@@ -1503,7 +1521,7 @@ void dump_bytecode(void) {
 
 // ---------------------------------------------------------------------------
 int main(void) {
-  char* filename= "stdin.p";
+  const char* filename= "stdin.p";
   int ch, ret, buf_idx = 0;
 
   // READ whole "file"
