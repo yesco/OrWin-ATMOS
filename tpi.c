@@ -333,47 +333,40 @@ char slot_used[MAX_SLOTS]; // allocation map
 int next_global = 0; // next candidate in 0-31
 int next_frame  = FRAME_BASE; // next candidate from 32
 
-// TODO: char
-int alloc_global(void) {
-  // Prefer 0-31; if exhausted continue from next_frame, skipping used slots
+char alloc_global(void) {
   while (next_global < GLOBAL_LIMIT) {
     if (!slot_used[next_global]) {
       slot_used[next_global] = 1;
-      return next_global++;
+      return (char)next_global++;
     }
     next_global++;
   }
-  // fall into frame area
   while (next_frame < MAX_SLOTS) {
     if (!slot_used[next_frame]) {
       slot_used[next_frame] = 1;
-      return next_frame++;
+      return (char)next_frame++;
     }
     next_frame++;
   }
   printf("\nERROR: out of slots\n");
   longjmp(fail_jmp, 1);
-  return -1;
+  return (char)0xff;
 }
 
-// TODO: char
-int alloc_frame_slot(void) {
+char alloc_frame_slot(void) {
   while (next_frame < MAX_SLOTS) {
     if (!slot_used[next_frame]) {
       slot_used[next_frame] = 1;
-      return next_frame++;
+      return (char)next_frame++;
     }
     next_frame++;
   }
   printf("\nERROR: out of frame slots\n");
   longjmp(fail_jmp, 1);
-  return -1;
+  return (char)0xff;
 }
 
-// Temporaries for expression evaluation also come from the frame area
-
-// TODO: char
-int alloc_temp(void) {
+char alloc_temp(void) {
   return alloc_frame_slot();
 }
 
@@ -407,17 +400,17 @@ unsigned int const_pool[MAX_CONSTS];
 
 int nconst = 0;
 
-// Returns address 0x80+idx (same form as a variable slot)
-int add_const(unsigned int v) {
+// Returns byte address 0x80+idx (same form as a var slot)
+char add_const(unsigned int v) {
   int i;
   for (i = 0; i < nconst; i++)
-    if (const_pool[i] == v) return 0x80 + i;
+    if (const_pool[i] == v) return (char)(0x80 + i);
   if (nconst >= MAX_CONSTS) {
     printf("\nERROR: constant pool full\n");
     longjmp(fail_jmp, 1);
   }
   const_pool[nconst] = v;
-  return 0x80 + nconst++;
+  return (char)(0x80 + nconst++);
 }
 
 #define isconst(a) ((unsigned char)(a) >= 0x80)
@@ -426,7 +419,7 @@ int add_const(unsigned int v) {
 void emit_load_const(unsigned int v) {
   if (v == 0) { emitop('0'); return; }
   if (v == (unsigned int)-1) { emitop('9'); return; }
-  emitop2('L', (char)add_const(v));
+  emitop2('L', add_const(v));
 }
 
 // ---------------------------------------------------------------------------
@@ -475,7 +468,7 @@ typedef struct {
 Symbol syms[MAX_SYMBOLS];
 int nsym = 0;
 
-void add_symbol(const char* name, SymbolType type, int address) {
+void add_symbol(const char* name, SymbolType type, char address) {
   if (nsym >= MAX_SYMBOLS) {
     printf("\nERROR: symbol table full\n");
     longjmp(fail_jmp, 1);
@@ -489,7 +482,7 @@ void add_symbol(const char* name, SymbolType type, int address) {
   nsym++;
 }
 
-int lookup_symbol(const char* name, SymbolType* type, int* address) {
+int lookup_symbol(const char* name, SymbolType* type, char* address) {
   int i;
   for (i = nsym - 1; i >= 0; i--) {
     if (strcmp(syms[i].name, name) == 0) {
@@ -638,6 +631,10 @@ void force_acc(char in_acc, char addr) {
     return;
   if (acc_valid && acc_slot == addr)
     return;
+  if (isconst(addr)) {
+    if (const_val(addr) == 0) { emitop('0'); return; }
+    if (const_val(addr) == (unsigned int)-1) { emitop('9'); return; }
+  }
   emitop2('L', addr);
 }
 
@@ -657,7 +654,7 @@ int primary(char *out_acc, char *out_addr) {
 
   if (curr_tok.type == TOK_NUM) {
     *out_acc = 0;
-    *out_addr = (char)add_const((unsigned int)curr_tok.value);
+    *out_addr = add_const((unsigned int)curr_tok.value);
     next_token();
     return 1;
   }
@@ -730,10 +727,10 @@ int expression(void) {
     comm = (op != '-' && op != '/');
 
     if (left_acc) {
-      int tmp = alloc_temp();
-      emitop2('S', (char)tmp);
+      char tmp = alloc_temp();
+      emitop2('S', tmp);
       left_acc = 0;
-      left_addr = (char)tmp;
+      left_addr = tmp;
     }
 
     if (!primary(&right_acc, &right_addr)) return 0;
@@ -752,7 +749,7 @@ int expression(void) {
         case '^': lv ^= rv; break;
       }
       left_acc = 0;
-      left_addr = (char)add_const(lv);
+      left_addr = add_const(lv);
       continue;
     }
 
@@ -761,10 +758,10 @@ int expression(void) {
       if (comm)
         emitop2(op, left_addr);
       else {
-        int tmp = alloc_temp();
-        emitop2('S', (char)tmp);
+        char tmp = alloc_temp();
+        emitop2('S', tmp);
         force_acc(left_acc, left_addr);
-        emitop2(op, (char)tmp);
+        emitop2(op, tmp);
       }
       left_acc = 1;
       continue;
@@ -884,7 +881,7 @@ int statement(void) {
   // FOR
   else if (curr_tok.type == TOK_FOR) {
     char ctrl_name[MAX_SYM_LEN + 1];
-    int high_slot, loop_start, exit_patch;
+    char high_slot; int loop_start, exit_patch;
     Symbol* ctrl;
 
     EXPECT(TOK_FOR);
@@ -1015,7 +1012,7 @@ int statement(void) {
 void compile_function(void) {
   char func_name[MAX_SYM_LEN + 1];
   char param_name[MAX_SYM_LEN + 1];
-  int ret_addr_slot, ret_val_slot;
+  char ret_addr_slot, ret_val_slot;
   int entry_offset, vec_idx;
   int nparams, i;
   char param_slots[MAX_PARAMS];
@@ -1130,7 +1127,7 @@ int compile_pipeline(void) {
 
   // implicit X (global)
   {
-    int xslot = alloc_global();
+    char xslot = alloc_global();
     add_symbol("X", SYM_VAR, xslot);
   }
 
@@ -1144,7 +1141,7 @@ int compile_pipeline(void) {
     if (curr_tok.type == TOK_VAR) {
       next_token();
       while (curr_tok.type == TOK_IDENT) {
-        int slot = alloc_global();
+        char slot = alloc_global();
         add_symbol(curr_tok.lexeme, SYM_VAR, slot);
         last_var_slot = slot;
         EXPECT(TOK_IDENT);
