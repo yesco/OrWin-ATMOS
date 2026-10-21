@@ -463,19 +463,24 @@ char lit_addr(unsigned int v) {
 // Vectors (function entry points)
 // ---------------------------------------------------------------------------
 int vectors[MAX_VECTORS]; // bytecode offset during compile
-char *vptr[MAX_VECTORS]; // resolved absolute pointers (finalise)
-char vec_link[MAX_VECTORS];   // mem slot: RETURN / saved ipc
-char vec_val[MAX_VECTORS];    // mem slot: return VALUE
-char vec_caller[MAX_VECTORS]; // mem slot: previous cur_func (in-frame chain)
+char *vptr[MAX_VECTORS]; // resolved entry pointers (finalise)
+char frame_base[MAX_VECTORS]; // subr# → fp base in mem (fixed per program)
 char nvector = 0;
 
 int main_offset = 0;
 char *main_entry = 0;
 char is_code_addr[MAX_CONSTS];
 
-// Active function (0xFF = main). Caller chain is in frame slots, not fstack[].
-#define FUNC_MAIN ((char)0xFF)
-char cur_func;
+// Frame layout at fp (contiguous slots from alloc_frame_slot):
+//   fp+0  RETURN ipc
+//   fp+1  return value
+//   fp+2  previous fp
+//   fp+3… params / locals
+#define FR_RET  0
+#define FR_VAL  1
+#define FR_PREV 2
+#define FP_MAIN ((char)0xFF)
+char fp; // current frame pointer (index into mem), FP_MAIN = main
 
 int add_vector(int entry_offset) {
   if (nvector >= MAX_VECTORS) FAIL("too many functions");
@@ -1098,9 +1103,8 @@ void compile_function(void) {
   // the entry point is right here
   entry_offset = bin_ptr;
   vec_idx = add_vector(entry_offset);
-  vec_link[vec_idx]   = ret_addr_slot;
-  vec_val[vec_idx]    = ret_val_slot;
-  vec_caller[vec_idx] = caller_slot;
+  // subr# → frame base (== RETURN slot index); FR_VAL/FR_PREV are +1/+2
+  frame_base[vec_idx] = ret_addr_slot;
   fsym->address = vec_idx;
 
   // TODO: mustbe after previous section. WHY?
@@ -1291,7 +1295,7 @@ unsigned int run_ivm(void) {
   // Start at resolved main entry
   ipc = main_entry;
   acc = 0;
-  cur_func = FUNC_MAIN;
+  fp = FP_MAIN;
 
 #ifdef __CC65__
 #define PAR mem[*ipc]
@@ -1322,20 +1326,18 @@ unsigned int run_ivm(void) {
 
     // ';' = ACC <- ret_val, then return
   case ';':
-    // TODO: remove this once we call by subroutine call!
-    if (cur_func == FUNC_MAIN) goto done;
-    acc = mem[vec_val[cur_func]];
+    if (fp == FP_MAIN) goto done;
+    acc = mem[fp + FR_VAL];
     // fall-through
 
-    // \0: return
   case 0: // return, keep ACC
-    op = vec_link[cur_func];
+    if (fp == FP_MAIN) goto done;
 #ifdef __CC65__
-    ipc = (char *)mem[op];
+    ipc = (char *)mem[fp + FR_RET];
 #else
-    ipc = bin + mem[op];
+    ipc = bin + mem[fp + FR_RET];
 #endif
-    cur_func = (char)mem[vec_caller[cur_func]];
+    fp = (char)mem[fp + FR_PREV];
     goto xnext;
     
     // ---- parameter ops ----
@@ -1399,16 +1401,17 @@ unsigned int run_ivm(void) {
   default:
     if ((op & 0xc0) == 0xc0) {
 
-      // JSR: chain lives in callee frame (no fstack)
+      // JSR: fp chain in callee frame; frame_base[v] is fixed per program
       {
         char v = op & 0x3f;
-        mem[vec_caller[v]] = cur_func;
+        char nfp = frame_base[v];
+        mem[nfp + FR_PREV] = fp;
 #ifdef __CC65__
-        mem[vec_link[v]] = (unsigned int)ipc;
+        mem[nfp + FR_RET] = (unsigned int)ipc;
 #else
-        mem[vec_link[v]] = (unsigned int)(ipc - bin);
+        mem[nfp + FR_RET] = (unsigned int)(ipc - bin);
 #endif
-        cur_func = v;
+        fp = nfp;
         ipc = vptr[v];
       }
       goto xnext;
