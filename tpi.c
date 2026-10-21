@@ -1198,81 +1198,94 @@ int compile_pipeline(void) {
   return 1;
 }
 
-// ---------------------------------------------------------------------------
-// Final layout: copy constants into mem[0x80..] and apply any patches
-// ---------------------------------------------------------------------------
+// ===========================================================================
+// PROGRAM BLOB / LOAD / PROCESS / RUN  (design)
+// ===========================================================================
+//
+// finalise() builds an *offset-only* blob (no constant copy into mem[0x80]).
+// Layout of the blob (all multi-byte fields are offsets from blob base until
+// loader() rewrites them to absolute pointers):
+//
+//   <prefix vectors>   // fixed roles (main, const base, code base, data, …)
+//   <call vectors>     // one entry per FUNCTION (code entry offset)
+//   <const vectors>    // one entry per pooled constant (or inline values)
+//   <fp byte array>    // frame_base[v]: subr# → frame pointer (slot index)
+//   <code array>       // bytecode (bin[])
+//   <data array>       // strings / future data referred to by const vectors
+//
+// Prefix vectors point *into* later regions of the same blob (still as
+// offsets until load). Call vectors, const vectors, and the fp table are
+// themselves "vectors" in that offset sense.
+//
+// loader(blob):
+//   Walks every offset vector in the prefix/call/const regions and replaces
+//   offset → (blob_base + offset). Leaves a $0000 end marker intact if used.
+//   Result is a *loaded* blob: all vectors are absolute pointers.
+//
+// Nevm(loaded_blob) → Process (heap):
+//   Allocates a process state roughly:
+//
+//     struct Process {
+//       // copy of resolved prefix pointers (and any other entry vectors)
+//       void   *main, *consts, *code, *data, …;
+//       char   *ipc;       // instruction pointer
+//       char    curfp;     // current frame pointer (slot index)
+//       uint16_t *mem;     // vars / frames for this instance
+//       // followed by instance memory + private data bytes
+//       …
+//     };
+//
+//   One loaded program blob may back many Process instances.
+//
+// run(Process *p):
+//   On entry:  copy all live vectors *up to and including memptr* from p
+//              into zero page (ipc, curfp, mem base, prefix ptrs, …).
+//   Run the interpreter (today: until 'q' / completion).
+//   On exit:   copy those ZP fields back into p so the process can resume.
+//
+//   Eventually run() may return early at a self-programmatic yield point
+//   (timer / opcode / quota): state is already in ZP → save to p → return.
+//   A later run(p) restores ZP and continues. Multi-tasker: 4 ms slices.
+//
+// INTERIM (host today): finalise() still resolves vptr[]/main_entry against
+// bin[] and copies const_pool into mem[0x80+] so the current interpreter
+// keeps working. Blob/loader/Nevm are the target; no constant *runtime*
+// copy once PAR reads through const vectors in the loaded image.
+// ===========================================================================
+
 void finalise(void) {
   int i;
 
-  // Constants at 0x80+idx (plain values and code offsets for return IPs).
-  // Code offsets stay relative to bin[]; only vectors/main become direct
-  // pointers — the code image does not move after this.
+  // --- interim: keep current host IVM alive ---
   for (i = 0; i < nconst; i++)
     mem[0x80 + i] = const_pool[i];
 
-  // TODO: seems to have forgotten my memory layout design:
-  // 
-  // - all code "loaded from disk" should be a blob
-  // - during loaded all vectors up to $0000 are relocated
-  //   by adding actual start address. $0000 is left intact
-
-
-// PROGRAM MEMORY LAYOUT
-// ---------------------
-// There may be several programs at any time and any
-// program could have several instances. So, each
-// execution of a process will depend on a few zero
-// page globals. The interpretive loop runs for at most
-// 4 ms. These are restored/saved by the multi-tasker.
-//  
-//   // - pure byte addressing program
-//   char      *program;
-//   // - program as vectors (this 
-//   #define   VPROGRAM ((uint16_t*)program)
-//
-//   // - slots of vars/constants indexed by 0-255 max
-//   uint16_t  *vars; 
-//   
-//   // - program running info
-//   char      *ipc;
-
-
-// PROGRAM VECTORS
-// ---------------
-// This is a vector interpretation of program bytes.
-// Each is 2 bytes uint16_t relative to 0==program
-// Patch at load time to actual addresses, until
-// a final $0000 subroutine vector.
-
-// 0: 1 byte index C=start of constants, N=number
-// 1: P=start of actual program
-// 2: subroutine code vectors... (max 64)
-//    ..... relocated subs
-// C: constant to copy start
-//    ..... relocated constants! (like str ptr)
-//    $0000 = end marker, relocate till here
-//    .....
-// P: program start
-//    ...init...
-//    jmp main (M)
-//    ...subs...
-// M: main program
-//    rts
-// S: strings/data referre to by relocated constants
-//    ....
-
-
-  // Function vectors → direct pointers (no bin+ at each CALL)
   for (i = 0; i < nvector; i++)
     vptr[i] = bin + vectors[i];
 
-  // Main entry → direct pointer (replaces absolute G jump at program start)
   main_entry = bin + main_offset;
+
+  // --- target: emit offset-only blob ---
+  // blob = prefix_vectors | call_vectors | const_vectors
+  //      | fp_byte_array  | code_array   | data_array
+  // Do NOT copy constants into a side mem[0x80] table in the final design;
+  // const vectors reference the const/data region inside the blob.
+  // loader(blob) then turns offsets into pointers; Nevm() clones prefix
+  // state into a Process; run() shuttles Process ↔ ZP.
 }
 
+// loader: relocate offset vectors in blob to absolute pointers (stub)
+// void loader(char *blob);
+
+// Nevm: Process *Nevm(char *loaded_blob);
+//   heap process = resolved prefix copy + ipc + curfp + memptr + mem/data
+
 // ---------------------------------------------------------------------------
-// Host-side IVM interpreter
+// Host-side IVM interpreter  (becomes run(Process *p))
 // ---------------------------------------------------------------------------
+// run(p): ZP ← p (vectors through memptr); interpret; p ← ZP on exit.
+// Yield: same save path, return early; later run(p) continues.
+//
 
 // Oscar doesn't have
 // TODO: maybe _zoropage ? but on parameter?
@@ -1282,12 +1295,11 @@ void finalise(void) {
 
 unsigned int run_ivm(void) {
   // Classic single-switch + goto dispatch (ivm.c style).
-  // - opcode 0   = halt (program end) — no explicit pre-test in the loop
-  // - opcode ';' = return from function (following byte = slot with return IP)
-  // - parameter ops use PAR then goto pnext (pnext skips the arg byte)
-  // - zero-arg ops goto next
+  // - opcode 0   = return from function (keep ACC); with fp==FP_MAIN → done
+  // - opcode ';' = ACC ← ret_val at fp, then return
+  // - parameter ops use PAR then goto pnext
+  // - zero-arg ops goto xnext
 
-  // faster than ZP?
   register char *ipc;
   register unsigned int acc;
   register char op;
