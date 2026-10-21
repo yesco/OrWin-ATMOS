@@ -1528,8 +1528,113 @@ void dump_bytecode(void) {
 
   printf("---------------------------\n\n");
 }
+
+void dump_blob(void) {
+  BlobHeader *h;
+  unsigned char *p;
+  uint16_t *w;
+  int i, j, v;
+  Symbol *s;
+
+  h = (BlobHeader *)blob;
+  printf("\n--- BLOB (%d bytes) ---\n", blob_len);
+
+  // header
+  printf("HEADER\n");
+  printf("  main  %u  (code+%u)\n", h->main, h->main - h->code);
+  printf("  code  %u\n", h->code);
+  printf("  call  %u\n", h->call);
+  printf("  fp    %u\n", h->fp);
+  printf("  con   %u\n", h->con);
+  printf("  data  %u\n", h->data);
+  printf("  memsz %u\n", h->memsz);
+
+  // call vectors until 0000
+  printf("CALL VECTORS\n");
+  w = (uint16_t *)(blob + h->call);
+  for (i = 0; ; i++) {
+    if (w[i] == 0) {
+      printf("  [%d] 0000  (end reloc)\n", i);
+      break;
+    }
+    // name from SYM_FUNC with address == vector index
+    s = 0;
+    for (j = 0; j < nsym; j++)
+      if (syms[j].type == SYM_FUNC && (unsigned char)syms[j].address == i) {
+        s = &syms[j];
+        break;
+      }
+    printf("  [%d] %u  code+%u", i, w[i], w[i] - h->code);
+    if (s)
+      printf("  %s", s->name);
+    printf("\n");
+  }
+
+  // constants
+  printf("CONSTANTS\n");
+  w = (uint16_t *)(blob + h->con);
+  for (i = 0; i < nconst; i++)
+    printf("  C%02x  %u  ($%04x)\n", 0x80 + i, w[i], w[i]);
+
+  // frame bases + slot names from symbols
+  printf("FRAME BASES\n");
+  p = blob + h->fp;
+  for (i = 0; i < nvector; i++) {
+    s = 0;
+    for (j = 0; j < nsym; j++)
+      if (syms[j].type == SYM_FUNC && (unsigned char)syms[j].address == i) {
+        s = &syms[j];
+        break;
+      }
+    printf("  V%02x  fp=%u", i, p[i]);
+    if (s) {
+      printf("  %s", s->name);
+      if (s->ret_addr_slot != 0xff)
+        printf("  RETURN@%u", (unsigned char)s->ret_addr_slot);
+      if (s->ret_slot != 0xff)
+        printf("  RETVAL@%u", (unsigned char)s->ret_slot);
+      for (j = 0; j < s->nparams; j++)
+        printf("  p%d@%u", j, (unsigned char)s->param_slot[j]);
+    }
+    printf("\n");
+  }
+
+  // mem slots: walk 0..max used, name from SYM_VAR
+  printf("MEM SLOTS (named)\n");
+  {
+    int maxs = 0;
+    for (j = 0; j < nsym; j++) {
+      if (syms[j].type != SYM_VAR)
+        continue;
+      v = (unsigned char)syms[j].address;
+      if (v > maxs && v < 0x80)
+        maxs = v;
+    }
+    for (i = 0; i <= maxs; i++) {
+      int any = 0;
+      for (j = 0; j < nsym; j++) {
+        if (syms[j].type == SYM_VAR && (unsigned char)syms[j].address == i)
+          any = 1;
+      }
+      if (!any)
+        continue;
+      printf("  %02x", i);
+      for (j = 0; j < nsym; j++) {
+        if (syms[j].type == SYM_VAR && (unsigned char)syms[j].address == i)
+          printf("  %s", syms[j].name);
+      }
+      printf("\n");
+    }
+  }
+
+  printf("CODE  @%u  %d bytes\n", h->code, bin_ptr);
+  printf("DATA  @%u\n", h->data);
+  printf("---------------------------\n\n");
+}
+
 #else
 #define dump_bytecode() (void)0
+#define dump_blob() (void)0
 #endif // TPDUMP
 
 // ---------------------------------------------------------------------------
@@ -1573,6 +1678,7 @@ int main(void) {
 
   finalise();
   dump_bytecode();
+  dump_blob();
 
   printf("--- RUN IVM (%d bytes, blob %d, %d vectors, %d consts) ---\n",
     bin_ptr, blob_len, nvector, nconst);
