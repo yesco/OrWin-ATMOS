@@ -389,7 +389,7 @@ char alloc_temp(void) {
 // Constants (separate array, referenced as 0x80+n)
 // ---------------------------------------------------------------------------
 
-unsigned int const_pool[MAX_CONSTS];
+uint16_t const_pool[MAX_CONSTS];
 
 // NO NO NO NO NO ! ! !
 
@@ -462,7 +462,7 @@ char lit_addr(unsigned int v) {
 // ---------------------------------------------------------------------------
 // Vectors (function entry points)
 // ---------------------------------------------------------------------------
-int vectors[MAX_VECTORS]; // bytecode offset during compile
+uint16_t vectors[MAX_VECTORS]; // bytecode offset during compile
 char *vptr[MAX_VECTORS]; // resolved entry pointers (finalise)
 char frame_base[MAX_VECTORS]; // subr# → fp base in mem (fixed per program)
 char nvector = 0;
@@ -1199,75 +1199,80 @@ int compile_pipeline(void) {
 }
 
 // ===========================================================================
-// BLOB: header struct + u16 vectors + 0000 + payload. Pack via struct/memcpy.
-// loader: walk u16s from start until 0000, add base. Nevm: calloc + memcpy hdr.
-// run_ivm unchanged (still fed mem/vptr/main_entry at end of finalise).
+// BLOB: sequential pack, header struct, memcpy sections, 0000 ends reloc.
+// loader(blob) relocates u16 vectors until 0000.
+// Nevm(loaded) — template already relocated; does not call loader.
+// run_ivm unchanged (mem/vptr/main_entry filled here for it).
 // ===========================================================================
 
 typedef struct BlobHeader {
-  unsigned short main;   /* blob-relative offset of main entry in code */
-  unsigned short code;   /* start of code */
-  unsigned short call;   /* call vector table */
-  unsigned short fp;     /* frame_base bytes */
-  unsigned short con;    /* const u16 values (after 0000) */
-  unsigned short data;   /* data / strings */
-  unsigned short memsz;  /* process mem cells needed */
+  uint16_t main;
+  uint16_t code;
+  uint16_t call;
+  uint16_t fp;
+  uint16_t con;
+  uint16_t data;
+  uint16_t memsz;
 } BlobHeader;
+
+typedef struct Process {
+  BlobHeader hdr;
+  char *ipc;
+  char curfp;
+  unsigned int *memptr;
+  unsigned int acc;
+  unsigned int mem[1];
+} Process;
 
 #define MAX_BLOB_LEN 4096
 unsigned char blob[MAX_BLOB_LEN];
 int blob_len;
 
-typedef struct Process {
-  BlobHeader hdr;        /* memcpy of blob header (same layout) */
-  char *ipc;
-  char curfp;
-  unsigned int *memptr;
-  unsigned int acc;
-  unsigned int mem[1];   /* flexible — calloc(hdr.memsz cells) */
-} Process;
-
 void finalise(void) {
-  BlobHeader *h;
-  unsigned short *w;
-  unsigned short off_call, off_const, off_fp, off_code, off_data;
+  BlobHeader h;
+  unsigned char *p;
   int i;
 
-  off_call  = (unsigned short)sizeof(BlobHeader);
-  off_const = (unsigned short)(off_call + nvector * 2 + 2); /* +2 = 0000 */
-  off_fp    = (unsigned short)(off_const + nconst * 2);
-  off_code  = (unsigned short)(off_fp + nvector);
-  off_data  = (unsigned short)(off_code + bin_ptr);
+  p = blob + sizeof(BlobHeader);
 
-  h = (BlobHeader *)blob;
-  h->main  = (unsigned short)(off_code + main_offset);
-  h->code  = off_code;
-  h->call  = off_call;
-  h->fp    = off_fp;
-  h->con   = off_const;
-  h->data  = off_data;
-  h->memsz = (unsigned short)MAX_SLOTS;
+  // call vectors + 0000 (values filled after h.code is known)
+  h.call = p - blob;
+  p += nvector * sizeof(uint16_t);
+  p[0] = 0;
+  p[1] = 0;
+  p += 2;
 
-  /* call vectors + terminating 0000 — write through pointer, no stack temp */
-  w = (unsigned short *)(blob + off_call);
-  for (i = 0; i < nvector; i++)
-    w[i] = (unsigned short)(off_code + vectors[i]);
-  w[nvector] = 0;
+  // constants — after 0000, not relocated
+  h.con = p - blob;
+  if (nconst)
+    memcpy(p, const_pool, (unsigned)nconst * sizeof(uint16_t));
+  p += nconst * sizeof(uint16_t);
 
-  /* const u16s */
-  w = (unsigned short *)(blob + off_const);
-  for (i = 0; i < nconst; i++)
-    w[i] = (unsigned short)(const_pool[i] & 0xffff);
-
+  // frame bases
+  h.fp = p - blob;
   if (nvector)
-    memcpy(blob + off_fp, frame_base, (unsigned)nvector);
-  if (bin_ptr)
-    memcpy(blob + off_code, bin, (unsigned)bin_ptr);
+    memcpy(p, frame_base, (unsigned)nvector);
+  p += nvector;
 
-  blob_len = off_data;
+  // code
+  h.code = p - blob;
+  h.main = h.code + main_offset;
+  if (bin_ptr)
+    memcpy(p, bin, (unsigned)bin_ptr);
+  p += bin_ptr;
+
+  h.data = p - blob;
+  h.memsz = MAX_SLOTS;
+
+  // call table: code-relative vectors[] + h.code → blob-absolute (for loader)
+  for (i = 0; i < nvector; i++)
+    ((uint16_t *)(blob + h.call))[i] = vectors[i] + h.code;
+
+  memcpy(blob, &h, sizeof h);
+  blob_len = p - blob;
   if (blob_len >= MAX_BLOB_LEN) FAIL("blob overflow");
 
-  /* engine unchanged */
+  // engine unchanged
   for (i = 0; i < nconst; i++)
     mem[0x80 + i] = const_pool[i];
   for (i = 0; i < nvector; i++)
@@ -1275,31 +1280,37 @@ void finalise(void) {
   main_entry = bin + main_offset;
 }
 
-/* Relocate every u16 from blob start until 0000. */
+// Relocate every u16 from start until 0000 (in-place). 6502 only.
 void loader(unsigned char *base) {
-  unsigned short *v = (unsigned short *)base;
+  uint16_t *v;
+
+  v = (uint16_t *)base;
   while (*v) {
 #ifdef __CC65__
-    *v = (unsigned short)((unsigned)base + *v);
+    *v = *v + (uint16_t)base;
 #endif
     v++;
   }
 }
 
-Process *Nevm(unsigned char *b) {
+// loaded = output of loader; template for processes (no loader call here)
+Process *Nevm(unsigned char *loaded) {
   Process *p;
   unsigned int cells, bytes;
+  BlobHeader *bh;
 
-  loader(b);
-  cells = ((BlobHeader *)b)->memsz;
-  if (!cells) cells = MAX_SLOTS;
+  bh = (BlobHeader *)loaded;
+  cells = bh->memsz;
+  if (!cells)
+    cells = MAX_SLOTS;
   bytes = (unsigned int)(sizeof(Process) - sizeof(unsigned int)
                          + cells * sizeof(unsigned int));
   p = (Process *)calloc(1, bytes);
-  if (!p) FAIL("Nevm calloc");
+  if (!p)
+    FAIL("Nevm calloc");
 
-  memcpy(&p->hdr, b, sizeof(BlobHeader));
-  p->ipc = (char *)(b + p->hdr.main);
+  memcpy(&p->hdr, loaded, sizeof(BlobHeader));
+  p->ipc = (char *)(loaded + p->hdr.main);
   p->curfp = FP_MAIN;
   p->memptr = p->mem;
   p->acc = 0;
