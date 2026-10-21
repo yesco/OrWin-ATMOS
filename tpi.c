@@ -1199,93 +1199,112 @@ int compile_pipeline(void) {
 }
 
 // ===========================================================================
-// PROGRAM BLOB / LOAD / PROCESS / RUN  (design)
+// BLOB: header struct + u16 vectors + 0000 + payload. Pack via struct/memcpy.
+// loader: walk u16s from start until 0000, add base. Nevm: calloc + memcpy hdr.
+// run_ivm unchanged (still fed mem/vptr/main_entry at end of finalise).
 // ===========================================================================
-//
-// finalise() builds an *offset-only* blob (no constant copy into mem[0x80]).
-// Layout of the blob (all multi-byte fields are offsets from blob base until
-// loader() rewrites them to absolute pointers):
-//
-//   <prefix vectors>   // fixed roles (main, const base, code base, data, …)
-//   <call vectors>     // one entry per FUNCTION (code entry offset)
-//   <const vectors>    // one entry per pooled constant (or inline values)
-//   <fp byte array>    // frame_base[v]: subr# → frame pointer (slot index)
-//   <code array>       // bytecode (bin[])
-//   <data array>       // strings / future data referred to by const vectors
-//
-// Prefix vectors point *into* later regions of the same blob (still as
-// offsets until load). Call vectors, const vectors, and the fp table are
-// themselves "vectors" in that offset sense.
-//
-// loader(blob):
-//   Walks every offset vector in the prefix/call/const regions and replaces
-//   offset → (blob_base + offset). Leaves a $0000 end marker intact if used.
-//   Result is a *loaded* blob: all vectors are absolute pointers.
-//
-// Nevm(loaded_blob) → Process (heap):
-//   Allocates a process state roughly:
-//
-//     struct Process {
-//       // copy of resolved prefix pointers (and any other entry vectors)
-//       void   *main, *consts, *code, *data, …;
-//       char   *ipc;       // instruction pointer
-//       char    curfp;     // current frame pointer (slot index)
-//       uint16_t *mem;     // vars / frames for this instance
-//       // followed by instance memory + private data bytes
-//       …
-//     };
-//
-//   One loaded program blob may back many Process instances.
-//
-// run(Process *p):
-//   On entry:  copy all live vectors *up to and including memptr* from p
-//              into zero page (ipc, curfp, mem base, prefix ptrs, …).
-//   Run the interpreter (today: until 'q' / completion).
-//   On exit:   copy those ZP fields back into p so the process can resume.
-//
-//   Eventually run() may return early at a self-programmatic yield point
-//   (timer / opcode / quota): state is already in ZP → save to p → return.
-//   A later run(p) restores ZP and continues. Multi-tasker: 4 ms slices.
-//
-// INTERIM (host today): finalise() still resolves vptr[]/main_entry against
-// bin[] and copies const_pool into mem[0x80+] so the current interpreter
-// keeps working. Blob/loader/Nevm are the target; no constant *runtime*
-// copy once PAR reads through const vectors in the loaded image.
-// ===========================================================================
+
+typedef struct BlobHeader {
+  unsigned short main;   /* blob-relative offset of main entry in code */
+  unsigned short code;   /* start of code */
+  unsigned short call;   /* call vector table */
+  unsigned short fp;     /* frame_base bytes */
+  unsigned short con;    /* const u16 values (after 0000) */
+  unsigned short data;   /* data / strings */
+  unsigned short memsz;  /* process mem cells needed */
+} BlobHeader;
+
+#define MAX_BLOB_LEN 4096
+unsigned char blob[MAX_BLOB_LEN];
+int blob_len;
+
+typedef struct Process {
+  BlobHeader hdr;        /* memcpy of blob header (same layout) */
+  char *ipc;
+  char curfp;
+  unsigned int *memptr;
+  unsigned int acc;
+  unsigned int mem[1];   /* flexible — calloc(hdr.memsz cells) */
+} Process;
 
 void finalise(void) {
+  BlobHeader *h;
+  unsigned short *w;
+  unsigned short off_call, off_const, off_fp, off_code, off_data;
   int i;
 
-  // --- interim: keep current host IVM alive ---
+  off_call  = (unsigned short)sizeof(BlobHeader);
+  off_const = (unsigned short)(off_call + nvector * 2 + 2); /* +2 = 0000 */
+  off_fp    = (unsigned short)(off_const + nconst * 2);
+  off_code  = (unsigned short)(off_fp + nvector);
+  off_data  = (unsigned short)(off_code + bin_ptr);
+
+  h = (BlobHeader *)blob;
+  h->main  = (unsigned short)(off_code + main_offset);
+  h->code  = off_code;
+  h->call  = off_call;
+  h->fp    = off_fp;
+  h->con   = off_const;
+  h->data  = off_data;
+  h->memsz = (unsigned short)MAX_SLOTS;
+
+  /* call vectors + terminating 0000 — write through pointer, no stack temp */
+  w = (unsigned short *)(blob + off_call);
+  for (i = 0; i < nvector; i++)
+    w[i] = (unsigned short)(off_code + vectors[i]);
+  w[nvector] = 0;
+
+  /* const u16s */
+  w = (unsigned short *)(blob + off_const);
+  for (i = 0; i < nconst; i++)
+    w[i] = (unsigned short)(const_pool[i] & 0xffff);
+
+  if (nvector)
+    memcpy(blob + off_fp, frame_base, (unsigned)nvector);
+  if (bin_ptr)
+    memcpy(blob + off_code, bin, (unsigned)bin_ptr);
+
+  blob_len = off_data;
+  if (blob_len >= MAX_BLOB_LEN) FAIL("blob overflow");
+
+  /* engine unchanged */
   for (i = 0; i < nconst; i++)
     mem[0x80 + i] = const_pool[i];
-
   for (i = 0; i < nvector; i++)
     vptr[i] = bin + vectors[i];
-
   main_entry = bin + main_offset;
-
-  // --- target: emit offset-only blob ---
-  // blob = prefix_vectors | call_vectors | const_vectors
-  //      | fp_byte_array  | code_array   | data_array
-  // Do NOT copy constants into a side mem[0x80] table in the final design;
-  // const vectors reference the const/data region inside the blob.
-  // loader(blob) then turns offsets into pointers; Nevm() clones prefix
-  // state into a Process; run() shuttles Process ↔ ZP.
 }
 
-// loader: relocate offset vectors in blob to absolute pointers (stub)
-// void loader(char *blob);
+/* Relocate every u16 from blob start until 0000. */
+void loader(unsigned char *base) {
+  unsigned short *v = (unsigned short *)base;
+  while (*v) {
+#ifdef __CC65__
+    *v = (unsigned short)((unsigned)base + *v);
+#endif
+    v++;
+  }
+}
 
-// Nevm: Process *Nevm(char *loaded_blob);
-//   heap process = resolved prefix copy + ipc + curfp + memptr + mem/data
+Process *Nevm(unsigned char *b) {
+  Process *p;
+  unsigned int cells, bytes;
 
-// ---------------------------------------------------------------------------
-// Host-side IVM interpreter  (becomes run(Process *p))
-// ---------------------------------------------------------------------------
-// run(p): ZP ← p (vectors through memptr); interpret; p ← ZP on exit.
-// Yield: same save path, return early; later run(p) continues.
-//
+  loader(b);
+  cells = ((BlobHeader *)b)->memsz;
+  if (!cells) cells = MAX_SLOTS;
+  bytes = (unsigned int)(sizeof(Process) - sizeof(unsigned int)
+                         + cells * sizeof(unsigned int));
+  p = (Process *)calloc(1, bytes);
+  if (!p) FAIL("Nevm calloc");
+
+  memcpy(&p->hdr, b, sizeof(BlobHeader));
+  p->ipc = (char *)(b + p->hdr.main);
+  p->curfp = FP_MAIN;
+  p->memptr = p->mem;
+  p->acc = 0;
+  return p;
+}
 
 // Oscar doesn't have
 // TODO: maybe _zoropage ? but on parameter?
@@ -1541,15 +1560,13 @@ int main(void) {
     return 1;
   }
 
-  // "LOAD"
   finalise();
   dump_bytecode();
 
-  // RUN
-  printf("--- RUN IVM (%d bytes, %d vectors, %d consts) ---\n",
-    bin_ptr, nvector, nconst);
+  printf("--- RUN IVM (%d bytes, blob %d, %d vectors, %d consts) ---\n",
+    bin_ptr, blob_len, nvector, nconst);
 
-  ret= run_ivm();
+  ret = run_ivm();
 
   printf("--- END ---\n");
   printf("acc = %u\n", ret);
