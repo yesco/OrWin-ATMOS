@@ -1,5 +1,8 @@
-	.export _run_ivm
-	.import _main_entry, _frame_base, _vptr, _mem, _putchar, _printf
+;;; 1) Don't change any line if not needed.
+;;; 2) Don't remove comments.
+	
+.export _run_ivm
+.import _main_entry, _frame_base, _vptr, _mem, _putchar, _printf
 
 	.zeropage
 vm_ipc:     .res 2      ; Virtual Instruction Pointer (16-bit ZP pointer)
@@ -117,7 +120,7 @@ op_semi:
 	bne :+
 	jmp done
 :	
-	;; TODO: Y=0, why adding 
+	;; TODO: Y=0, why adding?
 	clc
 	adc #FR_VAL
 	tay
@@ -148,6 +151,7 @@ op_zero:
 	lda _mem+FR_PREV,y
 	sta vm_fp
 	jmp dispatch_xnext
+
 
 op_plus:
 ;;; 26c 1 B      ; '+': acc += PAR
@@ -198,7 +202,7 @@ op_clear:
 	sta vm_acc+1
 	jmp dispatch_xnext
 
-op_max:
+op_true:
 ;;; 9c  0 B      ; '9': Set accumulator to 0xFFFF
 	lda #$FF
 	sta vm_acc
@@ -217,7 +221,7 @@ op_echo:
 	jsr _putchar
 	jmp dispatch_xnext
 
-op_B:
+op_back:
 ;;; 24c 1 B      ; 'B': Branch backward relative
 	ldy #0
 	lda (vm_ipc),y
@@ -269,9 +273,9 @@ dispatch_table_lo:
         .elseif I = '0'
             .byte <op_clear
         .elseif I = '9'
-            .byte <op_max
+            .byte <op_true
         .elseif I = 'B'
-            .byte <op_B
+            .byte <op_back
         .elseif I = 'N'
             .byte <op_newline
         .elseif I = 'E'
@@ -298,9 +302,9 @@ dispatch_table_hi:
         .elseif I = '0'
             .byte >op_clear
         .elseif I = '9'
-            .byte >op_max
+            .byte >op_true
         .elseif I = 'B'
-            .byte >op_B
+            .byte >op_back
         .elseif I = 'N'
             .byte >op_newline
         .elseif I = 'E'
