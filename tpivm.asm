@@ -9,6 +9,7 @@ vm_ipc:     .res 2      ; Virtual Instruction Pointer (16-bit ZP pointer)
 vm_acc:     .res 2      ; 16-bit Virtual Accumulator (Low: vm_acc, High: vm_acc+1)
 vm_fp:      .res 1      ; Virtual Frame Pointer (8-bit index)
 tmp:        .res 2      ; Scratchpad for jump tables / expressions
+vm_mem:     .res 2      ; Pointer to active process memory space (16-bit ZP pointer)
 
 	FP_MAIN     = $00
 	FR_VAL      = 0
@@ -26,6 +27,12 @@ _run_ivm:
 	lda _main_entry+1
 	sta vm_ipc+1
 	
+	; Initialize our indirect process memory base address
+	lda _mem
+	sta vm_mem
+	lda _mem+1
+	sta vm_mem+1
+
 	lda #0
 	sta vm_acc
 	sta vm_acc+1
@@ -87,12 +94,15 @@ do_vector_call:
 	tax
 	
 	lda vm_fp
-	sta _mem+FR_PREV,x
+	ldy #FR_PREV
+	sta (vm_mem),y
 	
 	lda vm_ipc
-	sta _mem+FR_RET,x
+	ldy #FR_RET
+	sta (vm_mem),y
 	lda vm_ipc+1
-	sta _mem+FR_RET+1,x
+	iny
+	sta (vm_mem),y
 	
 	stx vm_fp
 	
@@ -126,9 +136,10 @@ op_semi:
 	tay
 
 	;; ACC = return value
-	lda _mem,y
+	lda (vm_mem),y
 	sta vm_acc
-	lda _mem+1,y
+	iny
+	lda (vm_mem),y
 	sta vm_acc+1
 	;; fall-through directly into op_zero, matching C loop behavior
 
@@ -143,12 +154,22 @@ op_zero:
 	jmp done
 :	
 	ldy vm_fp
-	lda _mem+FR_RET,y
+	tya
+	clc
+	adc #FR_RET
+	tay
+	lda (vm_mem),y
 	sta vm_ipc
-	lda _mem+FR_RET+1,y
+	iny
+	lda (vm_mem),y
 	sta vm_ipc+1
 	
-	lda _mem+FR_PREV,y
+	ldy vm_fp
+	tya
+	clc
+	adc #FR_PREV
+	tay
+	lda (vm_mem),y
 	sta vm_fp
 	jmp dispatch_xnext
 
@@ -158,8 +179,9 @@ op_plus:
 	ldy #0
 	lda (vm_ipc),y      ; Fetch parameter slot index directly
 	tay
-	lda _mem,y          ; Load low byte of PAR
-	ldx _mem+1,y        ; Load high byte of PAR
+	lda (vm_mem),y      ; Load low byte of PAR via ZP pointer
+	iny
+	ldx (vm_mem),y      ; Load high byte of PAR via ZP pointer
 	
 	clc
 	adc vm_acc
@@ -177,10 +199,11 @@ op_minus:
 	
 	lda vm_acc
 	sec
-	sbc _mem,y
+	sbc (vm_mem),y
 	sta vm_acc
+	iny
 	lda vm_acc+1
-	sbc _mem+1,y
+	sbc (vm_mem),y
 	sta vm_acc+1
 	jmp dispatch_pnext
 
@@ -189,9 +212,10 @@ op_L:
 	ldy #0
 	lda (vm_ipc),y
 	tay
-	lda _mem,y
+	lda (vm_mem),y
 	sta vm_acc
-	lda _mem+1,y
+	iny
+	lda (vm_mem),y
 	sta vm_acc+1
 	jmp dispatch_pnext
 
@@ -248,68 +272,64 @@ done:
 	ldx vm_acc+1
 	rts
 
-
-
-.segment "RODATA"
-
 ; -----------------------------------------------------------------------------
 ; 128-Slot Jump Table (Covers ASCII $00 - $7F)
 ; -----------------------------------------------------------------------------
 .segment "RODATA"
 dispatch_table_lo:
-    .repeat 128, I
-        .if I = 'q'
-            .byte <op_q
-        .elseif I = ';'
-            .byte <op_semi
-        .elseif I = 0
-            .byte <op_zero
-        .elseif I = '+'
-            .byte <op_plus
-        .elseif I = '-'
-            .byte <op_minus
-        .elseif I = 'L'
-            .byte <op_L
-        .elseif I = '0'
-            .byte <op_clear
-        .elseif I = '9'
-            .byte <op_true
-        .elseif I = 'B'
-            .byte <op_back
-        .elseif I = 'N'
-            .byte <op_newline
-        .elseif I = 'E'
-            .byte <op_echo
-        .else
-            .byte <op_unknown
-        .endif
-    .endrepeat
+	.repeat 128, I
+		.if I = 'q'
+			.byte <op_q
+		.elseif I = ';'
+			.byte <op_semi
+		.elseif I = 0
+			.byte <op_zero
+		.elseif I = '+'
+			.byte <op_plus
+		.elseif I = '-'
+			.byte <op_minus
+		.elseif I = 'L'
+			.byte <op_L
+		.elseif I = '0'
+			.byte <op_clear
+		.elseif I = '9'
+			.byte <op_true
+		.elseif I = 'B'
+			.byte <op_back
+		.elseif I = 'N'
+			.byte <op_newline
+		.elseif I = 'E'
+			.byte <op_echo
+		.else
+			.byte <op_unknown
+		.endif
+	.endrepeat
 
 dispatch_table_hi:
-    .repeat 128, I
-        .if I = 'q'
-            .byte >op_q
-        .elseif I = ';'
-            .byte >op_semi
-        .elseif I = 0
-            .byte >op_zero
-        .elseif I = '+'
-            .byte >op_plus
-        .elseif I = '-'
-            .byte >op_minus
-        .elseif I = 'L'
-            .byte >op_L
-        .elseif I = '0'
-            .byte >op_clear
-        .elseif I = '9'
-            .byte >op_true
-        .elseif I = 'B'
-            .byte >op_back
-        .elseif I = 'N'
-            .byte >op_newline
-        .elseif I = 'E'
-            .byte >op_echo
-        .else
-            .byte >op_unknown
-        .endif
-    .endrepeat
+	.repeat 128, I
+		.if I = 'q'
+			.byte >op_q
+		.elseif I = ';'
+			.byte >op_semi
+		.elseif I = 0
+			.byte >op_zero
+		.elseif I = '+'
+			.byte >op_plus
+		.elseif I = '-'
+			.byte >op_minus
+		.elseif I = 'L'
+			.byte >op_L
+		.elseif I = '0'
+			.byte >op_clear
+		.elseif I = '9'
+			.byte >op_true
+		.elseif I = 'B'
+			.byte >op_back
+		.elseif I = 'N'
+			.byte >op_newline
+		.elseif I = 'E'
+			.byte >op_echo
+		.else
+			.byte >op_unknown
+		.endif
+	.endrepeat
