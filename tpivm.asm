@@ -22,12 +22,13 @@ vm_mem:     .res 2      ; Pointer to active process memory space (16-bit ZP poin
 ;;; unsigned int run_ivm(void);
 ;;; -----------------------------------------------------------------------------
 _run_ivm:
+	;; Enter main as if it was a function
 	lda _main_entry
-	sta vm_ipc
 	lda _main_entry+1
+	sta vm_ipc
 	sta vm_ipc+1
 	
-	; Initialize our indirect process memory base address
+	;; Initialize our indirect process memory base address
 	lda _mem
 	sta vm_mem
 	lda _mem+1
@@ -37,6 +38,7 @@ _run_ivm:
 	sta vm_acc
 	sta vm_acc+1
 	sta vm_fp
+
 	jmp dispatch_xnext
 
 ;;; -----------------------------------------------------------------------------
@@ -44,59 +46,81 @@ _run_ivm:
 ;;; -----------------------------------------------------------------------------
 
 dispatch_pnext:
-;;; 5c  1 B      ; pnext: Advance IPC past the 1-byte parameter
+;;; 10-12c  6 B  ; pnext: Advance IPC past the 1-byte parameter
 	inc vm_ipc
-	bne dispatch_xnext
+	bne :+
 	inc vm_ipc+1
-
+:	
 dispatch_xnext:
-;;; 5c  1 B      ; xnext: Fetch next opcode
+;;; 10-12c  6 B      ; xnext: Fetch next opcode
+	;; step first!
+	inc vm_ipc
+	bne :+
+	inc vm_ipc+1
+:	
+
+;;; dispatch without advancing ipc
+;;; TODO: like from call/ret/jmp?
+dispatch_rnext:
+;;; 32c (+ 2 5 2 23)
 	ldy #0
 	lda (vm_ipc),y
-	inc vm_ipc
-	bne @no_carry
-	inc vm_ipc+1
-	@no_carry:
 
-	;; Check high bit ($80-$FF) immediately
+	;; Check high bit ($80-$FF)
 	bmi handle_high_bit
 	
-	;; Dispatch remaining 0-127 opcodes via 128-slot jump table
+	;; Dispatch ASCII 0-127 opcodes
+	;; 23c
 	tax
 	lda dispatch_table_lo,x
 	sta tmp
 	lda dispatch_table_hi,x
 	sta tmp+1
+	
 	jmp (tmp)
+
+	;; ALT-selfmodify
+	;; TODO: use when only patch last byte
+	;;  requires page-aligned table
 
 	;; --- High Bit Router ---
 handle_high_bit:
-				;; If (op & $C0) == $C0, it's a vector call. Otherwise it's a ZJMP ($80-$BF)
+;;; 5c
+	;; If (op & $C0) == $C0, it's a vector call. Otherwise it's a ZJMP ($80-$BF)
 	cmp #$C0
-	bcs do_vector_call
-
-op_zjmp:
-;;; 12c 0 B      ; ZJMP placeholder for $80-$BF
-	jmp dispatch_xnext
-
+	bcc do_zjmp
+	;; fall-througn
 
 ;;; -----------------------------------------------------------------------------
 ;;; Opcode Execution Blocks
 ;;; -----------------------------------------------------------------------------
 
+;;; fall-througn
+;;; NOTE: Don't put anything before do_vector_call!
+
 ;;; --- Vectorized Call ($C0 - $FF) ---
 do_vector_call:
 ;;; 45c 0 B      ; Default high bit vectorized JSR
+	;; from op extract index 0-31
 	and #$3F
 	tay
 	
-	lda _frame_base,y
-	tax
+	;; x= load new fp
+	ldx _frame_base,y
+
+	;; save subroutine lookup index
+	asl
+	pha
 	
+	;; TODO: make these adjacent so just "copy 3 bytes"
+	;; 36c
+
+	;; store fp in callee slot
 	lda vm_fp
 	ldy #FR_PREV
 	sta (vm_mem),y
 	
+	;; store ipc in callee slot
 	lda vm_ipc
 	ldy #FR_RET
 	sta (vm_mem),y
@@ -104,16 +128,31 @@ do_vector_call:
 	iny
 	sta (vm_mem),y
 	
+	;; use new fp
 	stx vm_fp
 	
-	tya
-	asl
+
+	;; lookup subroutine address
+	;; TODO: all vectors should be hi/lo tables?
+	pla
 	tay
+	
 	lda _vptr,y
 	sta vm_ipc
 	lda _vptr+1,y
 	sta vm_ipc+1
-	jmp dispatch_xnext
+
+	jmp dispatch_rnext
+
+
+op_zjmp:
+;;; 12c 0 B      ; ZJMP placeholder for $80-$BF
+
+;;; TODO: need to think about what calls 
+;;;   make sense, I think many are IF THEN... ELSE not as much
+;;;   loop, not as much, and maybe need longer thus 'B'
+	
+	jmp dispatch_rnext
 
 
 op_q:
@@ -126,11 +165,19 @@ op_semi:
 
 	;; TODO: remove, just make fun call to enter,
 	;;   or require 'q'uit
+	;; 5c Added at every function call for uncommon top  call!
+	;; TODO: and shouln't it just be zero  after restore, so
+	;; TODO: mvoe test to later!
+fixfix
+	;;   better inject call to done as reutrn address!!
+	;;   when starting
 	cmp #FP_MAIN
 	bne :+
 	jmp done
 :	
-	;; TODO: Y=0, why adding?
+
+	;; TODO: Y=1???, why adding? - this seems all wrong!
+fixfixfix
 	clc
 	adc #FR_VAL
 	tay
@@ -153,6 +200,8 @@ op_zero:
 	bne :+
 	jmp done
 :	
+
+	;; more...?
 	ldy vm_fp
 	tya
 	clc
@@ -176,13 +225,14 @@ op_zero:
 
 op_plus:
 ;;; 26c 1 B      ; '+': acc += PAR
-	ldy #0
 	lda (vm_ipc),y      ; Fetch parameter slot index directly
 	tay
 	lda (vm_mem),y      ; Load low byte of PAR via ZP pointer
 	iny
 	ldx (vm_mem),y      ; Load high byte of PAR via ZP pointer
 	
+fixfix, why are we not jjust adding w adc (vm_mem),y???
+
 	clc
 	adc vm_acc
 	sta vm_acc
@@ -193,11 +243,11 @@ op_plus:
 
 op_minus:
 ;;; 28c 1 B      ; '-': acc -= PAR
-	ldy #0
 	lda (vm_ipc),y
+
 	tay
-	
 	lda vm_acc
+
 	sec
 	sbc (vm_mem),y
 	sta vm_acc
@@ -205,18 +255,20 @@ op_minus:
 	lda vm_acc+1
 	sbc (vm_mem),y
 	sta vm_acc+1
+
 	jmp dispatch_pnext
 
-op_L:
+op_load:
 ;;; 19c 1 B      ; 'L': acc = PAR
-	ldy #0
 	lda (vm_ipc),y
+
 	tay
 	lda (vm_mem),y
 	sta vm_acc
 	iny
 	lda (vm_mem),y
 	sta vm_acc+1
+	
 	jmp dispatch_pnext
 
 op_clear:
@@ -224,6 +276,7 @@ op_clear:
 	lda #0
 	sta vm_acc
 	sta vm_acc+1
+
 	jmp dispatch_xnext
 
 op_true:
@@ -231,26 +284,33 @@ op_true:
 	lda #$FF
 	sta vm_acc
 	sta vm_acc+1
+
 	jmp dispatch_xnext
+
+
+;;; TODO: do the clever woz RTS loop, so we can tail call!
 
 op_newline:
 ;;; 12c 0 B      ; 'N': Print newline character
 	lda #10
 	jsr _putchar
+
 	jmp dispatch_xnext
 
 op_echo:
 ;;; 10c 0 B      ; 'E': Output low byte of ACC
 	lda vm_acc
 	jsr _putchar
+
 	jmp dispatch_xnext
 
 op_back:
 ;;; 24c 1 B      ; 'B': Branch backward relative
-	ldy #0
 	lda (vm_ipc),y
 	sta tmp
 	
+	;; just do xor a ; adc ? no need store tmp
+fixfix
 	lda vm_ipc
 	sec
 	sbc tmp
@@ -258,18 +318,24 @@ op_back:
 	lda vm_ipc+1
 	sbc #0
 	sta vm_ipc+1
+
 	jmp dispatch_pnext
 
 op_unknown:
 ;;; 8c  0 B      ; Unknown lower ASCII op fallback
+
+	// TODO: how to handle errors?
+	
 	jmp dispatch_xnext
 
 ;;; -----------------------------------------------------------------------------
 ;;; Shutdown
 ;;; -----------------------------------------------------------------------------
 done:
+;;; 'q'uit, return ACC in A/X for cc65
 	lda vm_acc
 	ldx vm_acc+1
+	;; TODO: if do clever woz-rts-loop, need pla;pal;rts
 	rts
 
 ; -----------------------------------------------------------------------------
@@ -289,7 +355,7 @@ dispatch_table_lo:
 		.elseif I = '-'
 			.byte <op_minus
 		.elseif I = 'L'
-			.byte <op_L
+			.byte <op_load
 		.elseif I = '0'
 			.byte <op_clear
 		.elseif I = '9'
@@ -318,7 +384,7 @@ dispatch_table_hi:
 		.elseif I = '-'
 			.byte >op_minus
 		.elseif I = 'L'
-			.byte >op_L
+			.byte >op_load
 		.elseif I = '0'
 			.byte >op_clear
 		.elseif I = '9'
