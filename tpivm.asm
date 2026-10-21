@@ -18,9 +18,9 @@ vm_mem:     .res 2      ; Pointer to active process memory space (16-bit ZP poin
 
 	.segment "CODE"
 
-;;; -----------------------------------------------------------------------------
+;;; ---------------------------
 ;;; unsigned int run_ivm(void);
-;;; -----------------------------------------------------------------------------
+
 _run_ivm:
 	;; Enter main as if it was a function
 	lda _main_entry
@@ -41,9 +41,9 @@ _run_ivm:
 
 	jmp dispatch_xnext
 
-;;; -----------------------------------------------------------------------------
+;;; -------------------------------------------------
 ;;; Dispatch Entry Points (Fall-through architecture)
-;;; -----------------------------------------------------------------------------
+
 
 dispatch_pnext:
 ;;; 10-12c  6 B  ; pnext: Advance IPC past the 1-byte parameter
@@ -83,7 +83,7 @@ dispatch_rnext:
 	;; TODO: use when only patch last byte
 	;;  requires page-aligned table
 
-	;; --- High Bit Router ---
+	;; high bit custom inline data ops
 handle_high_bit:
 ;;; 5c
 	;; If (op & $C0) == $C0, it's a vector call. Otherwise it's a ZJMP ($80-$BF)
@@ -91,9 +91,8 @@ handle_high_bit:
 	bcc do_zjmp
 	;; fall-througn
 
-;;; -----------------------------------------------------------------------------
+;;; -----------------------
 ;;; Opcode Execution Blocks
-;;; -----------------------------------------------------------------------------
 
 ;;; fall-througn
 ;;; NOTE: Don't put anything before do_vector_call!
@@ -328,9 +327,9 @@ op_unknown:
 	
 	jmp dispatch_xnext
 
-;;; -----------------------------------------------------------------------------
+;;; --------
 ;;; Shutdown
-;;; -----------------------------------------------------------------------------
+
 done:
 ;;; 'q'uit, return ACC in A/X for cc65
 	lda vm_acc
@@ -338,9 +337,9 @@ done:
 	;; TODO: if do clever woz-rts-loop, need pla;pal;rts
 	rts
 
-; -----------------------------------------------------------------------------
+; --------------------------------------------
 ; 128-Slot Jump Table (Covers ASCII $00 - $7F)
-; -----------------------------------------------------------------------------
+
 .segment "RODATA"
 dispatch_table_lo:
 	.repeat 128, I
