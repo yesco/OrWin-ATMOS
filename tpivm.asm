@@ -4,19 +4,19 @@
 .export _run_ivm
 .import _main_entry, _frame_base, _vptr, _mem, _putchar, _printf
 
-	.zeropage
+.zeropage
 vm_ipc:     .res 2      ; Virtual Instruction Pointer (16-bit ZP pointer)
 vm_acc:     .res 2      ; 16-bit Virtual Accumulator (Low: vm_acc, High: vm_acc+1)
 vm_fp:      .res 1      ; Virtual Frame Pointer (8-bit index)
 tmp:        .res 2      ; Scratchpad for jump tables / expressions
 vm_mem:     .res 2      ; Pointer to active process memory space (16-bit ZP pointer)
 
-	FP_MAIN     = $00
-	FR_VAL      = 0
-	FR_RET      = 1
-	FR_PREV     = 3
+FP_MAIN     = $00
+FR_VAL      = 0
+FR_RET      = 1
+FR_PREV     = 3
 
-	.segment "CODE"
+.segment "CODE"
 
 ;;; ---------------------------
 ;;; unsigned int run_ivm(void);
@@ -24,8 +24,8 @@ vm_mem:     .res 2      ; Pointer to active process memory space (16-bit ZP poin
 _run_ivm:
 	;; Enter main as if it was a function
 	lda _main_entry
-	lda _main_entry+1
 	sta vm_ipc
+	lda _main_entry+1
 	sta vm_ipc+1
 	
 	;; Initialize our indirect process memory base address
@@ -45,12 +45,57 @@ _run_ivm:
 ;;; Dispatch Entry Points (Fall-through architecture)
 
 
+
+.ifdef SUPEROPT
+;;; Dispatch Entry Points (Y = ipc_low, no carry checks!)
+;;; jump table needs to be page aligned
+
 dispatch_pnext:
-;;; 10-12c  6 B  ; pnext: Advance IPC past the 1-byte parameter
-	inc vm_ipc
-	bne :+
+;;; 2c  1 B  ; pnext: Advance IPC past the 1-byte parameter
+	iny
+
+dispatch_xnext:
+;;; 2c  1 B  ; xnext: Fetch next opcode
+;	iny                  ; Simply advance to the next byte
+
+dispatch_rnext:
+;;; 17c Total Dispatch Overhead!
+	lda (vm_ipc),y       ; Fetch opcode using our page-aligned base
+
+;;; TODO: beweare of opcodes that assumes Y==0
+
+	;; advance Y pointer to parameter pos/next instuction already
+	iny
+
+	;; Check high bit ($80-$FF)
+	bmi handle_high_bit
+	
+	;; Dispatch ASCII 0-127 opcodes via self-modified indirect JMP
+	asl                  ; Shift opcode left to form 2-byte word pointer index
+	sta indirect_jmp+1   ; Overwrite ONLY the low byte of the indirect pointer address
+
+indirect_jmp:
+	jmp (dispatch_table_page) ; High byte locked to your page-aligned vector table!
+
+handle_high_bit:
+;;; 6c
+	cmp #$C0
+	bcc do_zjmp
+	;; 
+	;; fall-through to call vector!
+
+.else ;; super-opt
+
+dispatch_pnext:
+;;; 12-17c  6 B  ; pnext: Advance IPC past the 1-byte parameter
+	lda vm_ipc
+	clc
+	adc #2
+	sta vm_ipc
+	bcc dispatch_rnext
 	inc vm_ipc+1
-:	
+	bne dispatch_rnext
+
 dispatch_xnext:
 ;;; 10-12c  6 B      ; xnext: Fetch next opcode
 	;; step first!
@@ -89,7 +134,9 @@ handle_high_bit:
 	;; If (op & $C0) == $C0, it's a vector call. Otherwise it's a ZJMP ($80-$BF)
 	cmp #$C0
 	bcc do_zjmp
-	;; fall-througn
+
+.endif ;; super=opt
+
 
 ;;; -----------------------
 ;;; Opcode Execution Blocks
@@ -144,7 +191,7 @@ do_vector_call:
 	jmp dispatch_rnext
 
 
-op_zjmp:
+do_zjmp:
 ;;; 12c 0 B      ; ZJMP placeholder for $80-$BF
 
 ;;; TODO: need to think about what calls 
@@ -167,7 +214,6 @@ op_semi:
 	;; 5c Added at every function call for uncommon top  call!
 	;; TODO: and shouln't it just be zero  after restore, so
 	;; TODO: mvoe test to later!
-fixfix
 	;;   better inject call to done as reutrn address!!
 	;;   when starting
 	cmp #FP_MAIN
@@ -176,10 +222,7 @@ fixfix
 :	
 
 	;; TODO: Y=1???, why adding? - this seems all wrong!
-fixfixfix
-	clc
-	adc #FR_VAL
-	tay
+	ldy vm_fp
 
 	;; ACC = return value
 	lda (vm_mem),y
@@ -226,16 +269,14 @@ op_plus:
 ;;; 26c 1 B      ; '+': acc += PAR
 	lda (vm_ipc),y      ; Fetch parameter slot index directly
 	tay
-	lda (vm_mem),y      ; Load low byte of PAR via ZP pointer
-	iny
-	ldx (vm_mem),y      ; Load high byte of PAR via ZP pointer
 	
-fixfix, why are we not jjust adding w adc (vm_mem),y???
-
+	;; why are we not jjust adding w adc (vm_mem),y???
 	clc
+	lda (vm_mem),y
 	adc vm_acc
 	sta vm_acc
-	txa
+	iny
+	lda (vm_mem),y
 	adc vm_acc+1
 	sta vm_acc+1
 	jmp dispatch_pnext
@@ -251,8 +292,8 @@ op_minus:
 	sbc (vm_mem),y
 	sta vm_acc
 	iny
-	lda vm_acc+1
-	sbc (vm_mem),y
+	lda (vm_mem),y
+	sbc vm_acc+1
 	sta vm_acc+1
 
 	jmp dispatch_pnext
@@ -306,19 +347,25 @@ op_echo:
 op_back:
 ;;; 24c 1 B      ; 'B': Branch backward relative
 	lda (vm_ipc),y
-	sta tmp
 	
 	;; just do xor a ; adc ? no need store tmp
-fixfix
-	lda vm_ipc
 	sec
-	sbc tmp
+	eor #$FF
+	adc vm_ipc
 	sta vm_ipc
-	lda vm_ipc+1
-	sbc #0
+	lda #$FF
+	adc vm_ipc+1
 	sta vm_ipc+1
 
 	jmp dispatch_pnext
+
+;;; Insert this during compilation as last instruction in
+;;; every PAGE. If the instruction you're going to write doesn't
+;;; leave 1 byte extra, you'll have trouble. LOL
+op_nextpage:
+	inc vm_ipc+1         ; Move base pointer to the next 256-byte code page
+	ldy #0               ; Reset our low pointer back to the beginning of the page
+	jmp dispatch_rnext   ; Keep rolling
 
 op_unknown:
 ;;; 8c  0 B      ; Unknown lower ASCII op fallback
@@ -337,9 +384,9 @@ done:
 	;; TODO: if do clever woz-rts-loop, need pla;pal;rts
 	rts
 
-; --------------------------------------------
+; -----------------------------------------------------------------------------
 ; 128-Slot Jump Table (Covers ASCII $00 - $7F)
-
+; -----------------------------------------------------------------------------
 .segment "RODATA"
 dispatch_table_lo:
 	.repeat 128, I
@@ -365,6 +412,8 @@ dispatch_table_lo:
 			.byte <op_newline
 		.elseif I = 'E'
 			.byte <op_echo
+		.elseif I = $ff
+			.byte >op_nextpage
 		.else
 			.byte <op_unknown
 		.endif
@@ -394,6 +443,8 @@ dispatch_table_hi:
 			.byte >op_newline
 		.elseif I = 'E'
 			.byte >op_echo
+		.elseif I = $ff
+			.byte >op_nextpage
 		.else
 			.byte >op_unknown
 		.endif
