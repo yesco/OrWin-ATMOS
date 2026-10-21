@@ -1262,7 +1262,14 @@ void finalise(void) {
   p += bin_ptr;
 
   h.data = p - blob;
-  h.memsz = MAX_SLOTS;
+  // actual cells needed = highest allocated slot + 1 (not MAX_SLOTS)
+  {
+    int top = 0;
+    for (i = 0; i < MAX_SLOTS; i++)
+      if (slot_used[i])
+        top = i;
+    h.memsz = top + 1;
+  }
 
   // call table: code-relative vectors[] + h.code → blob-absolute (for loader)
   for (i = 0; i < nvector; i++)
@@ -1533,51 +1540,50 @@ void dump_blob(void) {
   BlobHeader *h;
   unsigned char *p;
   uint16_t *w;
-  int i, j, v;
+  int i, j, ncall, nbytes;
   Symbol *s;
 
   h = (BlobHeader *)blob;
-  printf("\n--- BLOB (%d bytes) ---\n", blob_len);
+  ncall = nvector;
+  nbytes = blob_len;
 
-  // header
-  printf("HEADER\n");
-  printf("  main  %u  (code+%u)\n", h->main, h->main - h->code);
-  printf("  code  %u\n", h->code);
-  printf("  call  %u\n", h->call);
-  printf("  fp    %u\n", h->fp);
-  printf("  con   %u\n", h->con);
-  printf("  data  %u\n", h->data);
-  printf("  memsz %u\n", h->memsz);
+  printf("\n--- BLOB (%d bytes) ---\n", nbytes);
+  printf("HEADER  overview\n");
+  printf("  section     offset  bytes  slots\n");
+  printf("  header      %5u  %5u  %5u\n", 0, (unsigned)sizeof(BlobHeader), (unsigned)(sizeof(BlobHeader) / 2));
+  printf("  call        %5u  %5u  %5u\n", h->call, (unsigned)((ncall + 1) * 2), ncall + 1);
+  printf("  const       %5u  %5u  %5u\n", h->con, (unsigned)(nconst * 2), nconst);
+  printf("  fp          %5u  %5u  %5u\n", h->fp, nvector, nvector);
+  printf("  code        %5u  %5u\n", h->code, bin_ptr);
+  printf("  data        %5u\n", h->data);
+  printf("  main        %5u  (code+%u)\n", h->main, h->main - h->code);
+  printf("  memsz       %5u  cells\n", h->memsz);
 
-  // call vectors until 0000
-  printf("CALL VECTORS\n");
+  printf("CALL VECTORS  (%d + 0000)\n", ncall);
   w = (uint16_t *)(blob + h->call);
   for (i = 0; ; i++) {
     if (w[i] == 0) {
-      printf("  [%d] 0000  (end reloc)\n", i);
+      printf("  [%2d]  %5u  end reloc\n", i, 0);
       break;
     }
-    // name from SYM_FUNC with address == vector index
     s = 0;
     for (j = 0; j < nsym; j++)
       if (syms[j].type == SYM_FUNC && (unsigned char)syms[j].address == i) {
         s = &syms[j];
         break;
       }
-    printf("  [%d] %u  code+%u", i, w[i], w[i] - h->code);
+    printf("  [%2d]  %5u  code+%-5u", i, w[i], w[i] - h->code);
     if (s)
       printf("  %s", s->name);
     printf("\n");
   }
 
-  // constants
-  printf("CONSTANTS\n");
+  printf("CONSTANTS  (%d)\n", nconst);
   w = (uint16_t *)(blob + h->con);
   for (i = 0; i < nconst; i++)
-    printf("  C%02x  %u  ($%04x)\n", 0x80 + i, w[i], w[i]);
+    printf("  C%02x   %5u  ($%04x)\n", 0x80 + i, w[i], w[i]);
 
-  // frame bases + slot names from symbols
-  printf("FRAME BASES\n");
+  printf("FRAME BASES  (%d)\n", nvector);
   p = blob + h->fp;
   for (i = 0; i < nvector; i++) {
     s = 0;
@@ -1586,49 +1592,46 @@ void dump_blob(void) {
         s = &syms[j];
         break;
       }
-    printf("  V%02x  fp=%u", i, p[i]);
+    printf("  V%02x   fp=%-3u", i, p[i]);
     if (s) {
-      printf("  %s", s->name);
+      printf("  %-12s", s->name);
       if (s->ret_addr_slot != 0xff)
-        printf("  RETURN@%u", (unsigned char)s->ret_addr_slot);
+        printf("  RETURN@%-3u", (unsigned char)s->ret_addr_slot);
       if (s->ret_slot != 0xff)
-        printf("  RETVAL@%u", (unsigned char)s->ret_slot);
+        printf("  RETVAL@%-3u", (unsigned char)s->ret_slot);
       for (j = 0; j < s->nparams; j++)
-        printf("  p%d@%u", j, (unsigned char)s->param_slot[j]);
+        printf("  p%d@%-3u", j, (unsigned char)s->param_slot[j]);
     }
     printf("\n");
   }
 
-  // mem slots: walk 0..max used, name from SYM_VAR
-  printf("MEM SLOTS (named)\n");
+  printf("MEM SLOTS  (named, memsz=%u)\n", h->memsz);
   {
     int maxs = 0;
     for (j = 0; j < nsym; j++) {
       if (syms[j].type != SYM_VAR)
         continue;
-      v = (unsigned char)syms[j].address;
-      if (v > maxs && v < 0x80)
-        maxs = v;
+      i = (unsigned char)syms[j].address;
+      if (i > maxs && i < 0x80)
+        maxs = i;
     }
     for (i = 0; i <= maxs; i++) {
       int any = 0;
-      for (j = 0; j < nsym; j++) {
+      for (j = 0; j < nsym; j++)
         if (syms[j].type == SYM_VAR && (unsigned char)syms[j].address == i)
           any = 1;
-      }
       if (!any)
         continue;
-      printf("  %02x", i);
-      for (j = 0; j < nsym; j++) {
+      printf("  %3u ", i);
+      for (j = 0; j < nsym; j++)
         if (syms[j].type == SYM_VAR && (unsigned char)syms[j].address == i)
-          printf("  %s", syms[j].name);
-      }
+          printf(" %s", syms[j].name);
       printf("\n");
     }
   }
 
-  printf("CODE  @%u  %d bytes\n", h->code, bin_ptr);
-  printf("DATA  @%u\n", h->data);
+  printf("CODE   @%5u  %5d bytes\n", h->code, bin_ptr);
+  printf("DATA   @%5u\n", h->data);
   printf("---------------------------\n\n");
 }
 
