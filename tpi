@@ -28,7 +28,7 @@ echo
 echo
 echo "=== tpi.c: `./wcode tpi.c` LOC ===" 
 echo
-ls -l $name.c $name.prg $name.sim $name.ivm
+ls -ugGlf $name.p $name.pas $name.c $name.prg $name.sim $name.ivm
 
 
 

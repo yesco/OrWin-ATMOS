@@ -1309,9 +1309,10 @@ int compile_pipeline(void) {
 // Layout (all multi-byte fields are offsets from blob base until loader
 // rewrites them; reloc walk stops at 0000):
 //
-//   <prefix / BlobHeader>  // main, code, call, fp, con, data, memsz
+//   <prefix / BlobHeader>  // main,code,call,fp,con,data = offsets; memsz = COUNT
 //   <call vectors>         // one word per FUNCTION (code entry offset)
 //   <0000>                 // end of relocatable vector region
+//   NOTE: loader +base must NOT treat memsz as an offset — it is a cell count.
 //   <const words>          // pooled constants (NOT relocated)
 //   <fp byte array>        // frame_base[v] — subr# → frame pointer slot
 //   <code array>           // bytecode
@@ -1425,8 +1426,16 @@ void finalise(void) {
 }
 
 // relocating first vectors till 0000
+// Intent: every word from blob start through the call table is a blob-relative
+// offset; add base so they become absolute pointers (6502 address space).
+// memsz sits in the header but is a *count*, not an offset — preserve it.
 void loader(uchar *base) {
   word *v;
+  word save_memsz;
+  BlobHeader *h;
+
+  h = (BlobHeader *)base;
+  save_memsz = h->memsz; // NOT an offset
 
   v = (word *)base;
   while (*v) {
@@ -1435,6 +1444,8 @@ void loader(uchar *base) {
     #endif
     v++;
   }
+
+  h->memsz = save_memsz;
 }
 
 // loaded = output of loader; does not call loader
@@ -2023,3 +2034,4 @@ int main(int argc, char **argv) {
   run_loaded_blob();
   return 0;
 }
+
