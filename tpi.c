@@ -979,24 +979,22 @@ int statement(void) {
 
   // FOR
   else if (curr_tok.type == TOK_FOR) {
-    char ctrl_name[MAX_SYM_LEN + 1];
-    char high_slot; int loop_start, exit_patch;
+    char high_slot, ctrl_name[MAX_SYM_LEN + 1];
+    int loop_start, exit_patch;
     Symbol* ctrl;
 
     EXPECT(TOK_FOR);
-    if (curr_tok.type != TOK_IDENT) {
-      FAIL("expected control variable");
-    }
+    if (curr_tok.type != TOK_IDENT) FAIL("expected control variable");
     strcpy(ctrl_name, curr_tok.lexeme);
     ctrl = lookup_sym(ctrl_name);
-    if (!ctrl || ctrl->type != SYM_VAR) {
-      FAIL("undeclared control variable");
-    }
+    if (!ctrl || ctrl->type != SYM_VAR) FAIL("undeclared control variable");
     EXPECT(TOK_IDENT);
     EXPECT(TOK_ASSIGN);
 
     expressionsave(ctrl->address);
 
+    // PASCAL FOR i:=1 TO 4711+39
+    // : it saves the limit so evaluated only once
     EXPECT(TOK_TO);
     high_slot = alloc_temp();
     expressionsave(high_slot);
@@ -1005,6 +1003,7 @@ int statement(void) {
     loop_start = bin_ptr;
 
     // test: acc = ctrl - high;  if (acc > 0) exit
+// TODO: fuse? 
     emitop2('L', ctrl->address);
     emitop2('-', high_slot);
     exit_patch = bin_ptr;
@@ -1019,15 +1018,12 @@ int statement(void) {
     // backward jump B <delta>
     {
       int delta = (bin_ptr + 2) - loop_start;
-      if (delta > 255) {
-        FAIL("FOR body too large");
-      }
+      if (delta > 255) FAIL("FOR body too large");
       // TODO: emitop2?
       emitop('B'); emit((char)delta);
-    }
-    // patch forward exit
-    {
-      int delta = bin_ptr - (exit_patch + 2);
+
+      // patch forward exit
+      delta = bin_ptr - (exit_patch + 2);
       bin[exit_patch + 1] = (char)delta;
     }
   }
@@ -1059,6 +1055,10 @@ int statement(void) {
 
       // If the THEN body executed, we must unconditionally jump past the ELSE body.
       /// emitop('1'); // TODO: ???
+
+
+// TODO:!!!!
+
 
 //      emitop('9'); // TRUE (but its neg!) lol
 //      emitop('?'); // ???
@@ -1405,14 +1405,13 @@ Process *Nevm(unsigned char *loaded) {
 // Byte codes used:
 // 
 
-// 1-31: 
-//
-//  !#$'()12345678:
-// @ACDFHLMNQRSTXYZ[\]^_
-// `abcdefghijklmnoprstuvwxyz{|}
-//
-// 64: TODO: conditional relative jump forward
-// 64: (xx) - vector calls   
+// 1-31: fast var, TODO: 0 get it back!
+// #$ ' , () : \ _ `
+// 12345678 - actual numbers? lol
+// ACD FHM QR TVXY
+// 26: a-z  : OrwinOS API
+// 64: 00-3f: conditional relative jump forward
+// 64: (xx) : vector calls   
  unsigned int run_ivm(void) {
   // Classic single-switch + goto dispatch (ivm.c style).
   // - opcode 0   = return from function (keep ACC); with fp==FP_MAIN → done
@@ -1483,9 +1482,17 @@ Process *Nevm(unsigned char *loaded) {
   case '|': acc |= PAR; goto pnext;
   case '^': acc ^= PAR; goto pnext;
 
-  case 'L': acc  = PAR; goto pnext;
+  case '[': acc <<= PAR; goto pnext;
+  case ']': acc >>= PAR; goto pnext;
+  case '{': PAR <<= acc; goto pnext;
+  case '}': PAR >>= acc; goto pnext;
+
+  case 'L': acc = PAR;  goto pnext;
   case 'S': PAR = acc;  goto pnext;
   case 'Z': PAR = 0;    goto pnext;
+    // TODO: char? and then explicit for indexing : _ ???
+  case '@': acc = mem[PAR]; goto pnext; // read  pointer
+  case '!': mem[PAR] = acc; goto pnext; // write pointer
 
   #ifdef OPTMOREPARAMS
     // TODO: only useful for 3 or moe parameters...
@@ -1496,8 +1503,10 @@ Process *Nevm(unsigned char *loaded) {
   //case ',': mem[++lastv]= acc; goto xnext;
   #endif
 
-  case 'I': acc= (PAR++); goto pnext;
-  case 'J': acc= (PAR--); goto pnext;
+  case 'I': acc= ++PAR; goto pnext;
+  case 'J': acc= --PAR; goto pnext;
+//  case 'I': acc= PAR++; goto pnext;
+//  case 'J': acc= PAR--; goto pnext;
 
   case 'U': acc= (mem[ipc[0]]+= mem[ipc[1]]); ipc+=2; goto xnext;
 
@@ -1515,49 +1524,52 @@ Process *Nevm(unsigned char *loaded) {
   case '~': acc = ~acc;         goto xnext;
 
     // printers
-  case 'K': acc= getchar();     goto xnext;
-  case 'E': putchar(acc);       goto xnext;
-  case 'N': putchar('\n');      goto xnext;
-  case 'P': printf("%s", acc);  goto xnext;
-  case 'O': putchar(PAR);       goto pnext;
-  case 'W': printf("%u", PAR);  goto pnext;
-  case '.': printf("%u", acc);  goto xnext;
-  case '"': // inline string ends at 0
+  case 'K': acc= getchar();     goto xnext; // key
+  case 'E': putchar(acc);       goto xnext; // putchar
+  case 'N': putchar('\n');      goto xnext; // newline
+  case 'P': printf("%s", acc);  goto xnext; // print strptr
+  case 'O': putchar(PAR);       goto pnext; // out letter
+  case 'W': printf("%u", PAR);  goto pnext; // write var
+  case '.': printf("%u", acc);  goto xnext; // print num
+  case '"': // inline string ends at 0      // print "const"
     while (*ipc) putchar(*ipc++);
     goto pnext; // skip the terminating 0
 
-// TODO: reconsider: We need Zjump lol
-    
     // ---- relative jumps (uppercase, single opcode each) ----
-    // G <delta>  conditional forward if acc > 0
-  case 'G':
-    if ((int)acc > 0) ipc += (unsigned char)*ipc;
-    goto pnext;
+    // B  <delta>  2 byte: AGAIN= unconditional backward
+    // G  <delta>  2 byte: LOOP = conditional acc>0 forward
+    // 00-63       1 byte: IF   = conditional acc=0 forward
+    // relative jumps (byte code stats: jvm p-code etc)
+    //     0-15: 70-75%, 0-31: 85-90%, 32+: 10-15
 
-    // B <delta>  unconditional backward
-  case 'B':
-    ipc -= (unsigned char)*ipc;
-    goto pnext;
-
-    // ---- vectorised call (one byte) ----
-    // push cur_func; cur_func=vec; mem[vec_link[vec]]=ipc; ipc=vptr[vec]
+  case 'G': if ((int)acc > 0) ipc += *ipc;    goto pnext;
+  case 'B':                   ipc -= *ipc;    goto pnext;
+    
   default:
-    if ((op & 0xc0) == 0xc0) {
+    if (op >= 0x80) {
+      if (op < 0xc0) { // 0b10
 
-      // JSR: fp chain in callee frame; frame_base[v] is fixed per program
-      {
+        // relative jumps
+        if (!acc)   ipc += op & 0b111111;    goto xnext;
+
+      } else { // 0b11
+
+        // ---- vectorised call (one byte) ----
+        // push cur_func; cur_func=vec; mem[vec_link[vec]]=ipc; ipc=vptr[vec]
+
+        // JSR: fp chain in callee frame; frame_base[v] is fixed per program
         char v = op & 0x3f;
         char nfp = frame_base[v];
         mem[nfp + FR_PREV] = fp;
-#ifdef __CC65__
-        mem[nfp + FR_RET] = (unsigned int)ipc;
-#else
-        mem[nfp + FR_RET] = (unsigned int)(ipc - bin);
-#endif
+        #ifdef __CC65__
+          mem[nfp + FR_RET] = (unsigned int)ipc;
+        #else
+          mem[nfp + FR_RET] = (unsigned int)(ipc - bin);
+        #endif
         fp = nfp;
         ipc = vptr[v];
+        goto xnext;
       }
-      goto xnext;
     }
 
     // ZJMP [op] (forward)
