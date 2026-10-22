@@ -129,10 +129,12 @@ typedef uint16_t word; // blob / vector cell width (6502)
 #define TPDUMP
 
 // --- config
-#define MAX_SRC_LEN   4096
+#define MAX_SRC_LEN   8192
 #define MAX_BIN_LEN   2048
 
 #define MAX_PATCHES    128
+
+// TODO: this is used for strings too? do NOT!
 
 #define MAX_SYM_LEN     64 // TODO: static do strdup
 #define MAX_SYMBOLS     64
@@ -735,6 +737,7 @@ void primary(char *out_acc, char *out_addr) {
     emitop('?');
     *out_acc = 1;
     *out_addr = 0;
+    return;
   }
 
   // ( expression )
@@ -744,6 +747,7 @@ void primary(char *out_acc, char *out_addr) {
     EXPECT(')');
     *out_acc = 1;
     *out_addr = 0;
+    return;
   }
 
   // NUMBER
@@ -751,6 +755,7 @@ void primary(char *out_acc, char *out_addr) {
     *out_acc = 0;
     *out_addr = lit_addr((unsigned int)curr_tok.value);
     next_token();
+    return;
   }
 
   // IDENT
@@ -793,10 +798,12 @@ void primary(char *out_acc, char *out_addr) {
       acc_invalidate();
       *out_acc = 1;
       *out_addr = 0;
+      return;
     }
 
     *out_acc = 0;
     *out_addr = sym->address;
+    return;
   }
 
   FAIL("Expected expression");
@@ -1439,9 +1446,13 @@ Process *Nevm(uchar *loaded) {
   bh = (BlobHeader *)loaded;
   cells = bh->memsz;
   if (!cells) cells = MAX_SLOTS;
+
   bytes = (unsigned int)(sizeof(ProcessHead) + cells * sizeof(unsigned int));
   p = (Process *)calloc(1, bytes);
-  if (!p) FAIL("Nevm calloc");
+  if (!p) {
+    printf("calloc fail %u bytes (%u slots)\n", bytes, cells);
+    FAIL("Nevm calloc");
+  }
 
   memcpy(&p->h.hdr, loaded, sizeof(BlobHeader));
   #ifdef __CC65__
@@ -1880,6 +1891,10 @@ static int load_file(const char *path, char *buf, int maxn) {
     return -1;
   }
   n = (int)fread(buf, 1, (unsigned)maxn - 1, f);
+  if (n == maxn-1) {
+    printf("too large source - truncated\n");
+    return -1;
+  }
   fclose(f);
   buf[n] = 0;
   return n;
@@ -1961,8 +1976,7 @@ int main(int argc, char **argv) {
   }
 
   buf_idx = load_file(filename, src_buf, MAX_SRC_LEN);
-  if (buf_idx < 0)
-    return 1;
+  if (buf_idx < 0) return 1;
   if (!buf_idx) {
     printf("empty source %s\n", filename);
     return 1;

@@ -65,6 +65,61 @@ begin
    
 end;
 
+{ Test = < > NOT SHL SHR }
+
+VAR
+  a : INTEGER;
+  b : INTEGER;
+  r : INTEGER;
+
+FUNCTION TCmp(x : INTEGER; y : INTEGER) : INTEGER;
+BEGIN
+  IF x = y THEN BEGIN
+    TCmp := 1;
+  END ELSE BEGIN
+    IF x < y THEN BEGIN
+      TCmp := 2;
+    END ELSE BEGIN
+      TCmp := 3;
+    END;
+  END;
+END;
+
+FUNCTION TNot(x : INTEGER) : INTEGER;
+BEGIN
+  IF NOT (x = 0) THEN BEGIN
+    TNot := 1;
+  END ELSE BEGIN
+    TNot := 0;
+  END;
+END;
+
+FUNCTION TShl(x : INTEGER; n : INTEGER) : INTEGER;
+BEGIN
+  TShl := x SHL n;
+END;
+
+FUNCTION TShr(x : INTEGER; n : INTEGER) : INTEGER;
+BEGIN
+  TShr := x SHR n;
+END;
+
+FUNCTION TestOps(dummy : INTEGER) : INTEGER;
+BEGIN
+  WRITELN("cmp 5=5"); WRITELN(TCmp(5, 5));
+  WRITELN("cmp 3<9"); WRITELN(TCmp(3, 9));
+  WRITELN("cmp 9>3"); WRITELN(TCmp(9, 3));
+  WRITELN("not 0"); WRITELN(TNot(0));
+  WRITELN("not 7"); WRITELN(TNot(7));
+  a := 1;
+  r := TShl(a, 3);
+  WRITELN("1 shl 3"); WRITELN(r);
+  r := TShr(16, 2);
+  WRITELN("16 shr 2"); WRITELN(r);
+  r := (3 SHL 2) + (20 SHR 2);
+  WRITELN("3shl2+20shr2"); WRITELN(r);
+END;
+
 var
    alpha : integer;
    beta	 : integer;
@@ -125,5 +180,7 @@ begin
 
    writeln(TestIf(0));
    writeln(TestIf(1));
+
+   writeln(TestOps(666));
 end.
 
