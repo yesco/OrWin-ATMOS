@@ -1365,9 +1365,9 @@ void loader(unsigned char *base) {
 
   v = (uint16_t *)base;
   while (*v) {
-#ifdef __CC65__
+    #ifdef __CC65__
     *v = *v + (uint16_t)base;
-#endif
+    #endif
     v++;
   }
 }
