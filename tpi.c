@@ -6,6 +6,7 @@
 //  3) use // comment - do NOT: // no no no
 //  4) don't change any lines if not needed
 //  5) char is unsigned on cc65 & oscar64 & clang
+//  6) sizeof needs sizeof(xxx) on oscar64
 
 // Target model (as specified):
 //
@@ -107,6 +108,9 @@
 // (/ (- 3647717 2694535) 1000)  953 sum  from  952
 // (/ (- 4692714 2694535) 1000) 1998 fsum from 2138
 
+// - compile to file, loader/Nevm/run_ivm
+// (/ (- 2570914 752081) 1000) 1818c/loop sum, was 1474 from 1373
+// (/ (- 4844460 752081) 1000) 4092c/loop fsum, was 2526 from 2506
 
 
 #include <stdio.h>
@@ -116,13 +120,10 @@
 #include <ctype.h>
 #include <setjmp.h>
 #include <stdint.h>
-#include <assert.h>
 
-
-#ifndef WORD
 typedef unsigned char uchar;
 typedef uint16_t word; // blob / vector cell width (6502)
-#endif
+#include <assert.h>
 
 // --- options
 #define TPDUMP
@@ -192,7 +193,6 @@ typedef struct {
 // Real keywords + "combi" names for specials (printer only).
 // Names starting with * never match lexer (non-alpha won't enter IDENT).
 Keyword keywords[] = {
-// TODO: make it sorted, then can binsearch / stop earlier
   {"PROGRAM",  TOK_PROGRAM},
   {"VAR",      TOK_VAR},
   {"BEGIN",    TOK_BEGIN},
@@ -239,18 +239,17 @@ const char* tok_name(TokenType t) {
   return "?";
 }
 
-// jump to there using FAIL during compilation error
-
 jmp_buf fail_jmp;
 
 // FAIL: message printed once at setjmp — no printf at each site.
 // 6502: pointer fits in int → longjmp(jb, msg).
 // Host: int is 32-bit, pointers 64-bit → stash in fail_msg.
-#ifdef __CC65__
-#define FAIL(msg)  longjmp(fail_jmp, (int)(msg))
-#else
 const char *fail_msg;
-#define FAIL(msg)  do { fail_msg = (msg); longjmp(fail_jmp, 1); } while (0)
+
+#ifdef __CC65__
+  #define FAIL(msg)  longjmp(fail_jmp, (int)(msg))
+#else
+  #define FAIL(msg)  do { fail_msg = (msg); longjmp(fail_jmp, 1); } while (0)
 #endif
 
 // ---------------------------------------------------------------------------
@@ -1825,33 +1824,147 @@ void dump_blob(void) {
 #endif // TPDUMP
 
 // ---------------------------------------------------------------------------
-int main(void) {
-  const char* filename= "stdin.p";
-  int ch, ret, buf_idx = 0;
+// file buffers global — cc65 stack cannot hold large locals
+static char outname[256];
 
-  // READ whole "file"
-  memset(src_buf, 0, MAX_SRC_LEN);
-  while ((ch = getchar()) != EOF && ch != 0xff) {
-    src_buf[buf_idx++] = (char)ch;
-    assert(buf_idx < MAX_SRC_LEN - 1);
+// ends_with(name, ".ivm") etc — C89 / cc65 friendly
+static int ends_with(const char *s, const char *suf) {
+  int n, m;
+  n = (int)strlen(s);
+  m = (int)strlen(suf);
+  if (n < m) return 0;
+  return strcmp(s + n - m, suf) == 0;
+}
+
+// foo.p / foo.pas → foo.ivm
+static void ivm_name_from(char *out, const char *in) {
+  int n, i;
+  n = (int)strlen(in);
+  strcpy(out, in);
+  if (ends_with(in, ".pas")) {
+    out[n - 3] = 'i';
+    out[n - 2] = 'v';
+    out[n - 1] = 'm';
+  } else if (ends_with(in, ".p")) {
+    out[n - 1] = 0;
+    strcat(out, "ivm");
+  } else {
+    strcat(out, ".ivm");
   }
-  src_buf[buf_idx] = 0;
-  if (!buf_idx) return 0;
+  (void)i;
+}
+
+static int load_file(const char *path, char *buf, int maxn) {
+  FILE *f;
+  int n;
+  f = fopen(path, "rb");
+  if (!f) {
+    printf("cannot open %s\n", path);
+    return -1;
+  }
+  n = (int)fread(buf, 1, (unsigned)maxn - 1, f);
+  fclose(f);
+  buf[n] = 0;
+  return n;
+}
+
+static int save_blob(const char *path) {
+  FILE *f;
+  f = fopen(path, "wb");
+  if (!f) {
+    printf("cannot write %s\n", path);
+    return 0;
+  }
+  if ((int)fwrite(blob, 1, (unsigned)blob_len, f) != blob_len) {
+    printf("write failed %s\n", path);
+    fclose(f);
+    return 0;
+  }
+  fclose(f);
+  printf("wrote %s (%d bytes)\n", path, blob_len);
+  return 1;
+}
+
+static int load_blob(const char *path) {
+  FILE *f;
+  int n;
+  f = fopen(path, "rb");
+  if (!f) {
+    printf("cannot open %s\n", path);
+    return 0;
+  }
+  n = (int)fread(blob, 1, MAX_BLOB_LEN, f);
+  fclose(f);
+  if (n <= 0) {
+    printf("empty %s\n", path);
+    return 0;
+  }
+  blob_len = n;
+  printf("loaded %s (%d bytes)\n", path, blob_len);
+  return 1;
+}
+
+static int run_loaded_blob(void) {
+  Process *proc;
+  unsigned int ret;
+
+  loader(blob);
+  proc = Nevm(blob);
+  printf("--- RUN IVM (blob %d) ---\n", blob_len);
+  ret = run_ivm(proc);
+  printf("--- END ---\n");
+  printf("acc = %u\n", ret);
+  return (int)ret;
+}
+
+int main(int argc, char **argv) {
+  const char *filename;
+  int buf_idx;
+
+  if (argc < 2) {
+    printf("usage: %s file.[ p | pas | ivm ]\n", argv[0]);
+    printf("  .p/.pas  compile → file.ivm, then load+run that .ivm\n");
+    printf("  .ivm     load blob, Nevm, run_ivm\n");
+    return 1;
+  }
+  filename = argv[1];
+
+  // ----- run mode: pure .ivm -----
+  if (ends_with(filename, ".ivm")) {
+    if (!load_blob(filename))
+      return 1;
+    run_loaded_blob();
+    return 0;
+  }
+
+  // ----- compile mode: .p / .pas -----
+  if (!ends_with(filename, ".p") && !ends_with(filename, ".pas")) {
+    printf("need .p, .pas, or .ivm: %s\n", filename);
+    return 1;
+  }
+
+  buf_idx = load_file(filename, src_buf, MAX_SRC_LEN);
+  if (buf_idx < 0)
+    return 1;
+  if (!buf_idx) {
+    printf("empty source %s\n", filename);
+    return 1;
+  }
 
   // COMPILE — longjmp value is error message pointer (or 1 if bare)
   {
     int err = setjmp(fail_jmp);
     if (err) {
       #ifdef __CC65__
-      char* fail_msg= (char*) err;
-      #endif        
-      unsigned int err_pos = src_pos;
+      fail_msg = (char*) err;
+      #endif
+      buf_idx = (int)src_pos;
 
       printf("\n%%ERROR: %s\n%s:%d.%d (%d): ", fail_msg, filename,
-        lnum, err_pos-cur_line, cur_line);
+        lnum, buf_idx-cur_line, cur_line);
       src_pos = cur_line;
       do {
-        if (src_pos == err_pos) printf(" >>> %s <<<ERROR<<< ", curr_tok.lexeme);
+        if ((int)src_pos == buf_idx) printf(" >>> %s <<<ERROR<<< ", curr_tok.lexeme);
         putchar(NEXT);
       } while (C && C != '\n');
       printf("\n\n");
@@ -1867,16 +1980,15 @@ int main(void) {
   dump_bytecode();
   dump_blob();
 
-  loader(blob);
-  {
-    Process *proc = Nevm(blob);
-    printf("--- RUN IVM (%d bytes, blob %d, %d vectors, %d consts) ---\n",
-      bin_ptr, blob_len, nvector, nconst);
-    ret = run_ivm(proc);
-  }
+  ivm_name_from(outname, filename);
+  if (!save_blob(outname))
+    return 1;
 
-  printf("--- END ---\n");
-  printf("acc = %u\n", ret);
-
+  // true round-trip: clear and reload from disk
+  memset(blob, 0, sizeof(blob));
+  blob_len = 0;
+  if (!load_blob(outname))
+    return 1;
+  run_loaded_blob();
   return 0;
 }

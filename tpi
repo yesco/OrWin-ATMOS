@@ -1,12 +1,30 @@
 cc65 -Oirs -T tpi.c -t sim6502
 ca65 -l tpi.asm tpi.s
 
-cl65 -Oirs -t sim6502 -m tpi.map -o tpi.sim tpi.c && sim65 -c tpi.sim
+name=$1
+echo
+echo "--------------- $name.p"
+echo
+
+cl65 -Oirs -t sim6502 -m tpi.map -o tpi.sim tpi.c && sim65 -c tpi.sim $name.p
+echo
 echo
 ls -l tpi.sim
 wc tpi.c
+
+echo
+echo
+echo "=== Run from BLOB ==="
+echo
+sim65 -c tpi.sim $name.ivm
+echo
+echo
+
 echo
 echo "=== tpi.c: `./wcode tpi.c` LOC ===" 
+echo
+ls -l $name.c $name.prg $name.sim $name.ivm
+
 
 
 
