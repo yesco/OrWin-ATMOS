@@ -93,14 +93,14 @@ begin
 
    { Test: looping sum }
    sum := 0;
-   for i := 1 to 0 do sum := sum + i;
+   for i := 1 to 1000 do sum := sum + i;
    writeln("--Sum:");
    writeln(sum);
 
    { Test: looping funsum }
    fsum := 0;
    for i := 1 to 1000 do fsum := Two(fsum, i);
-   writeln("--FumSum:");
+   writeln("--FunSum:");
    writeln(fsum);
 
    { Test Case 6: Literal subtraction }
