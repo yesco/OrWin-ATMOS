@@ -118,6 +118,12 @@
 #include <stdint.h>
 #include <assert.h>
 
+
+#ifndef WORD
+typedef unsigned char uchar;
+typedef uint16_t word; // blob / vector cell width (6502)
+#endif
+
 // --- options
 #define TPDUMP
 
@@ -186,6 +192,7 @@ typedef struct {
 // Real keywords + "combi" names for specials (printer only).
 // Names starting with * never match lexer (non-alpha won't enter IDENT).
 Keyword keywords[] = {
+// TODO: make it sorted, then can binsearch / stop earlier
   {"PROGRAM",  TOK_PROGRAM},
   {"VAR",      TOK_VAR},
   {"BEGIN",    TOK_BEGIN},
@@ -231,6 +238,8 @@ const char* tok_name(TokenType t) {
   }
   return "?";
 }
+
+// jump to there using FAIL during compilation error
 
 jmp_buf fail_jmp;
 
@@ -1272,127 +1281,166 @@ int compile_pipeline(void) {
 
 // ===========================================================================
 // BLOB: sequential pack, header struct, memcpy sections, 0000 ends reloc.
-// loader(blob) relocates u16 vectors until 0000.
-// Nevm(loaded) — template already relocated; does not call loader.
-// run_ivm unchanged (mem/vptr/main_entry filled here for it).
+// ===========================================================================
+// PROGRAM BLOB / LOAD / PROCESS / RUN
+// ===========================================================================
+//
+// finalise() builds an *offset-only* blob (constants live in the blob, not
+// copied into a 0x80 band of mem as the permanent store).
+//
+// Layout (all multi-byte fields are offsets from blob base until loader
+// rewrites them; reloc walk stops at 0000):
+//
+//   <prefix / BlobHeader>  // main, code, call, fp, con, data, memsz
+//   <call vectors>         // one word per FUNCTION (code entry offset)
+//   <0000>                 // end of relocatable vector region
+//   <const words>          // pooled constants (NOT relocated)
+//   <fp byte array>        // frame_base[v] — subr# → frame pointer slot
+//   <code array>           // bytecode
+//   <data array>           // future / strings if externalised
+//
+// loader(base):
+//   Relocate first vectors until 0000: while (*v) { *v += base; v++; }
+//   That covers BlobHeader prefix + call table. Const section follows 0000
+//   and is left as raw values.
+//
+// Nevm(loaded) → Process:
+//   loaded is already relocated (template). Allocates process state:
+//     hdr (copy of prefix), ipc, fp, memptr, acc, then mem[memsz].
+//   Resolves ipc from main; memptr → process mem[]; consts via hdr.con.
+//   One loaded blob can back many Process instances.
+//
+// run_ivm(Process *p):
+//   memcpy Process head → ZP globals (same layout), interpret, memcpy back.
+//   PAR: if operand & 0x80 → consts[n], else memptr[slot]
+//   (0x80+n is still the bytecode encoding for const indices; can change later)
 // ===========================================================================
 
 typedef struct BlobHeader {
-  uint16_t main;
-  uint16_t code;
-  uint16_t call;
-  uint16_t fp;
-  uint16_t con;
-  uint16_t data;
-  uint16_t memsz;
+  word main;
+  word code;
+  word call;
+  word fp;
+  word con;
+  word data;
+  word memsz;
 } BlobHeader;
 
-typedef struct Process {
+// Process head — layout of ZP image (memcpy in/out of run_ivm)
+typedef struct ProcessHead {
   BlobHeader hdr;
-  char *ipc;
-  char curfp;
+  uchar *ipc;
+  char fp;
   unsigned int *memptr;
   unsigned int acc;
+} ProcessHead;
+
+typedef struct Process {
+  ProcessHead h;
   unsigned int mem[1];
 } Process;
 
 #define MAX_BLOB_LEN 4096
-unsigned char blob[MAX_BLOB_LEN];
+uchar blob[MAX_BLOB_LEN];
 int blob_len;
+uchar *g_loaded;
+
+// ZP global (same layout as ProcessHead)
+ProcessHead zp;
+word *consts; // loaded const table (PAR high-bit path)
+uchar op;
+
+// append n bytes of data at *pp; return offset from base
+static word memadd(uchar *base, uchar **pp, void *data, word n) {
+  word off = (word)(*pp - base);
+  if (data && n)
+    memcpy(*pp, data, n);
+  *pp += n;
+  return off;
+}
 
 void finalise(void) {
   BlobHeader h;
-  unsigned char *p;
+  uchar *p;
+  word zero;
   int i;
 
   p = blob + sizeof(BlobHeader);
+  zero = 0;
 
-  // call vectors + 0000 (values filled after h.code is known)
-  h.call = p - blob;
-  p += nvector * sizeof(uint16_t);
-  p[0] = 0;
-  p[1] = 0;
-  p += 2;
+  // call vectors (blob-absolute entries filled after code offset known)
+  h.call = memadd(blob, &p, 0, (word)(nvector * sizeof(word)));
+  // 0000 ends relocatable vector region (loader stops here)
+  memadd(blob, &p, &zero, sizeof(zero));
 
   // constants — after 0000, not relocated
-  h.con = p - blob;
-  if (nconst)
-    memcpy(p, const_pool, (unsigned)nconst * sizeof(uint16_t));
-  p += nconst * sizeof(uint16_t);
+  h.con = memadd(blob, &p, const_pool, (word)(nconst * sizeof(word)));
 
   // frame bases
-  h.fp = p - blob;
-  if (nvector)
-    memcpy(p, frame_base, (unsigned)nvector);
-  p += nvector;
+  h.fp = memadd(blob, &p, frame_base, (word)nvector);
 
   // code
-  h.code = p - blob;
+  h.code = memadd(blob, &p, bin, (word)bin_ptr);
   h.main = h.code + main_offset;
-  if (bin_ptr)
-    memcpy(p, bin, (unsigned)bin_ptr);
-  p += bin_ptr;
 
-  h.data = p - blob;
-  // actual cells needed = highest allocated slot + 1 (not MAX_SLOTS)
+  h.data = (word)(p - blob);
   {
     int top = 0;
     for (i = 0; i < MAX_SLOTS; i++)
       if (slot_used[i])
         top = i;
-    h.memsz = top + 1;
+    h.memsz = (word)(top + 1);
   }
 
-  // call table: code-relative vectors[] + h.code → blob-absolute (for loader)
+  // fill call table: code entry offsets (blob-absolute before loader +base)
   for (i = 0; i < nvector; i++)
-    ((uint16_t *)(blob + h.call))[i] = vectors[i] + h.code;
+    ((word *)(blob + h.call))[i] = vectors[i] + h.code;
 
-  memcpy(blob, &h, sizeof h);
-  blob_len = p - blob;
+  memcpy(blob, &h, sizeof(h));
+  blob_len = (int)(p - blob);
   if (blob_len >= MAX_BLOB_LEN) FAIL("blob overflow");
 
-  // engine unchanged
-  for (i = 0; i < nconst; i++)
-    mem[0x80 + i] = const_pool[i];
+  // dump helpers only
   for (i = 0; i < nvector; i++)
     vptr[i] = bin + vectors[i];
   main_entry = bin + main_offset;
 }
 
-// Relocate every u16 from start until 0000 (in-place). 6502 only.
-void loader(unsigned char *base) {
-  uint16_t *v;
+// relocating first vectors till 0000
+void loader(uchar *base) {
+  word *v;
 
-  v = (uint16_t *)base;
+  v = (word *)base;
   while (*v) {
     #ifdef __CC65__
-    *v = *v + (uint16_t)base;
+    *v = *v + (word)base;
     #endif
     v++;
   }
 }
 
-// loaded = output of loader; template for processes (no loader call here)
-Process *Nevm(unsigned char *loaded) {
+// loaded = output of loader; does not call loader
+Process *Nevm(uchar *loaded) {
   Process *p;
   unsigned int cells, bytes;
   BlobHeader *bh;
 
   bh = (BlobHeader *)loaded;
   cells = bh->memsz;
-  if (!cells)
-    cells = MAX_SLOTS;
-  bytes = (unsigned int)(sizeof(Process) - sizeof(unsigned int)
-                         + cells * sizeof(unsigned int));
+  if (!cells) cells = MAX_SLOTS;
+  bytes = (unsigned int)(sizeof(ProcessHead) + cells * sizeof(unsigned int));
   p = (Process *)calloc(1, bytes);
-  if (!p)
-    FAIL("Nevm calloc");
+  if (!p) FAIL("Nevm calloc");
 
-  memcpy(&p->hdr, loaded, sizeof(BlobHeader));
-  p->ipc = (char *)(loaded + p->hdr.main);
-  p->curfp = FP_MAIN;
-  p->memptr = p->mem;
-  p->acc = 0;
+  memcpy(&p->h.hdr, loaded, sizeof(BlobHeader));
+  #ifdef __CC65__
+  p->h.ipc = (uchar *)(unsigned)p->h.hdr.main;
+  #else
+  p->h.ipc = loaded + p->h.hdr.main;
+  #endif
+  p->h.fp = FP_MAIN;
+  p->h.memptr = p->mem;
+  p->h.acc = 0;
   return p;
 }
 
@@ -1412,29 +1460,33 @@ Process *Nevm(unsigned char *loaded) {
 // 26: a-z  : OrwinOS API
 // 64: 00-3f: conditional relative jump forward
 // 64: (xx) : vector calls   
-unsigned int run_ivm(void) {
+unsigned int run_ivm(Process *p) {
   // Classic single-switch + goto dispatch (ivm.c style).
   // - opcode 0   = return from function (keep ACC); with fp==FP_MAIN → done
   // - opcode ';' = ACC ← ret_val at fp, then return
   // - parameter ops use PAR then goto pnext
   // - zero-arg ops goto xnext
+  //
+  // ZP: memcpy Process head ↔ globals (ivm_hdr, ipc, fp, memptr, acc)
 
-  register char *ipc;
-  register unsigned int acc;
-  register unsigned char op;
+  // load process head → ZP global
+  memcpy(&zp, &p->h, sizeof(zp));
+  zp.memptr = p->mem;
+  #ifdef __CC65__
+  consts = (word *)(unsigned)zp.hdr.con;
+  #else
+  g_loaded = (uchar *)p->h.ipc - p->h.hdr.main;
+  consts = (word *)(g_loaded + zp.hdr.con);
+  #endif
 
-  // Start at resolved main entry
-  ipc = main_entry;
-  acc = 0;
-  fp = FP_MAIN;
-
-  #define PAR mem[*ipc]
+  // operand: high bit → const table; else process mem
+  #define PAR ((*zp.ipc & 0x80) ? consts[*zp.ipc & 0x7f] : zp.memptr[*zp.ipc])
 
   goto xnext;
 
   // Eat up one byte parameter from last op
  pnext:
-  ++ipc;
+  ++zp.ipc;
 
   // Next when no parameters
   // TODO: 26 x cmp beq ...
@@ -1445,7 +1497,7 @@ unsigned int run_ivm(void) {
   // TODO: oscar64 gives strange error if this is changed to next!
   //   maybe thinking it's c++? LOL: std::next() ???
  xnext:
-  switch ((op= *ipc++)) {
+  switch ((op= *zp.ipc++)) {
 
     // OS: quit program (C: exit)
   case 'q': 
@@ -1453,18 +1505,18 @@ unsigned int run_ivm(void) {
 
     // ';' = ACC <- ret_val, then return
   case ';':
-    if (fp == FP_MAIN) goto done;
-    acc = mem[fp + FR_VAL];
+    if (zp.fp == FP_MAIN) goto done;
+    zp.acc = zp.memptr[zp.fp + FR_VAL];
     // fall-through
 
   case 0: // return, keep ACC
-    if (fp == FP_MAIN) goto done;
+    if (zp.fp == FP_MAIN) goto done;
     #ifdef __CC65__
-      ipc = (char *)mem[fp + FR_RET];
+    zp.ipc = (uchar *)zp.memptr[zp.fp + FR_RET];
     #else
-      ipc = bin + mem[fp + FR_RET];
+    zp.ipc = g_loaded + zp.memptr[zp.fp + FR_RET];
     #endif
-    fp = (char)mem[fp + FR_PREV];
+    zp.fp = (char)zp.memptr[zp.fp + FR_PREV];
     goto xnext;
     
     // ---- parameter ops ----
@@ -1472,103 +1524,112 @@ unsigned int run_ivm(void) {
     // TODO: cc65 '+' becomes 72 c include goto pnext
     // ~150++ cycles per instruction 
     // (/ 1000000 150) = 6666 ops/s (18K ok for asm 50c)
-  case '+': acc += PAR; goto pnext;
-  case '-': acc -= PAR; goto pnext;
-  case '*': acc *= PAR; goto pnext;
-  case '/': if (PAR) acc /= PAR; goto pnext;
-  case '%': if (PAR) acc %= PAR; goto pnext;
+  case '+': zp.acc += PAR; goto pnext;
+  case '-': zp.acc -= PAR; goto pnext;
+  case '*': zp.acc *= PAR; goto pnext;
+  case '/': if (PAR) zp.acc /= PAR; goto pnext;
+  case '%': if (PAR) zp.acc %= PAR; goto pnext;
 
-  case '&': acc &= PAR; goto pnext;
-  case '|': acc |= PAR; goto pnext;
-  case '^': acc ^= PAR; goto pnext;
+  case '&': zp.acc &= PAR; goto pnext;
+  case '|': zp.acc |= PAR; goto pnext;
+  case '^': zp.acc ^= PAR; goto pnext;
 
-  case '[': acc <<= PAR; goto pnext;
-  case ']': acc >>= PAR; goto pnext;
-  case '{': PAR <<= acc; goto pnext;
-  case '}': PAR >>= acc; goto pnext;
+  case '[': zp.acc <<= PAR; goto pnext;
+  case ']': zp.acc >>= PAR; goto pnext;
+  case '{': zp.memptr[*zp.ipc] <<= zp.acc; goto pnext;
+  case '}': zp.memptr[*zp.ipc] >>= zp.acc; goto pnext;
 
-  case 'L': acc = PAR;  goto pnext;
-  case 'S': PAR = acc;  goto pnext;
-  case 'Z': PAR = 0;    goto pnext;
+  case 'L': zp.acc = PAR;  goto pnext;
+  case 'S': zp.memptr[*zp.ipc] = zp.acc;  goto pnext;
+  case 'Z': zp.memptr[*zp.ipc] = 0;    goto pnext;
     // TODO: char? and then explicit for indexing : _ ???
-  case '@': acc = mem[PAR]; goto pnext; // read  pointer
-  case '!': mem[PAR] = acc; goto pnext; // write pointer
+  case '@': zp.acc = zp.memptr[PAR]; goto pnext; // read  pointer
+  case '!': zp.memptr[PAR] = zp.acc; goto pnext; // write pointer
 
   #ifdef OPTMOREPARAMS
     // TODO: only useful for 3 or moe parameters...
     //   in linux/kernel/big projects
     //   7-10% take 3 parameters, and <5% take 4+ ...
-  // case 'S': PAR = acc;  lastv= *ipc; goto pnext;
-  //case 'V': mem[++lastv]= PAR; goto pnext;
-  //case ',': mem[++lastv]= acc; goto xnext;
+  // case 'S': PAR = zp.acc;  lastv= *zp.ipc; goto pnext;
+  //case 'V': zp.memptr[++lastv]= PAR; goto pnext;
+  //case ',': zp.memptr[++lastv]= zp.acc; goto xnext;
   #endif
 
-  case 'I': acc= ++PAR; goto pnext;
-  case 'J': acc= --PAR; goto pnext;
-//  case 'I': acc= PAR++; goto pnext;
-//  case 'J': acc= PAR--; goto pnext;
+  case 'I': zp.acc= ++zp.memptr[*zp.ipc]; goto pnext;
+  case 'J': zp.acc= --zp.memptr[*zp.ipc]; goto pnext;
+//  case 'I': zp.acc= PAR++; goto pnext;
+//  case 'J': zp.acc= PAR--; goto pnext;
 
-  case 'U': acc= (mem[ipc[0]]+= mem[ipc[1]]); ipc+=2; goto xnext;
+  case 'U': zp.acc= (zp.memptr[zp.ipc[0]]+= zp.memptr[zp.ipc[1]]); zp.ipc+=2; goto xnext;
 
-  case '<': acc= acc < PAR; goto pnext;
-  case '=': acc= acc == PAR; goto pnext;
-  case '>': acc= acc > PAR; goto pnext;
+  case '<': zp.acc= zp.acc < PAR; goto pnext;
+  case '=': zp.acc= zp.acc == PAR; goto pnext;
+  case '>': zp.acc= zp.acc > PAR; goto pnext;
 
     // ---- no-arg ops ----
   case ' ':               goto xnext;
-  case '0': acc = 0;      goto xnext;
-  case '9': acc = 0xffff; goto xnext;
+  case '0': zp.acc = 0;      goto xnext;
+  case '9': zp.acc = 0xffff; goto xnext;
 
 // TODO: add keyword NOT !
-  case '?': acc = !acc;         goto xnext;
-  case '~': acc = ~acc;         goto xnext;
+  case '?': zp.acc = !zp.acc;         goto xnext;
+  case '~': zp.acc = ~zp.acc;         goto xnext;
 
     // printers
-  case 'K': acc= getchar();     goto xnext; // key
-  case 'E': putchar(acc);       goto xnext; // putchar
+  case 'K': zp.acc= getchar();     goto xnext; // key
+  case 'E': putchar(zp.acc);       goto xnext; // putchar
   case 'N': putchar('\n');      goto xnext; // newline
-  case 'P': printf("%s", acc);  goto xnext; // print strptr
+  case 'P': printf("%s", zp.acc);  goto xnext; // print strptr
   case 'O': putchar(PAR);       goto pnext; // out letter
   case 'W': printf("%u", PAR);  goto pnext; // write var
-  case '.': printf("%u", acc);  goto xnext; // print num
+  case '.': printf("%u", zp.acc);  goto xnext; // print num
   case '"': // inline string ends at 0      // print "const"
-    while (*ipc) putchar(*ipc++);
+    while (*zp.ipc) putchar(*zp.ipc++);
     goto pnext; // skip the terminating 0
 
     // ---- relative jumps (uppercase, single opcode each) ----
     // B  <delta>  2 byte: AGAIN= unconditional backward
-    // G  <delta>  2 byte: LOOP = conditional acc>0 forward
-    // 00-63       1 byte: IF   = conditional acc=0 forward
+    // G  <delta>  2 byte: LOOP = conditional zp.acc>0 forward
+    // 00-63       1 byte: IF   = conditional zp.acc=0 forward
     // relative jumps (byte code stats: jvm p-code etc)
     //     0-15: 70-75%, 0-31: 85-90%, 32+: 10-15
 
-  case 'G': if ((int)acc > 0) ipc += *ipc;    goto pnext;
-  case 'B':                   ipc -= *ipc;    goto pnext;
+  case 'G': if ((int)zp.acc > 0) zp.ipc += *zp.ipc;    goto pnext;
+  case 'B':                   zp.ipc -= *zp.ipc;    goto pnext;
     
   default:
-    // unsigned: host char is signed; 0xC0 must not be treated as negative
     if (op >= 0x80) {
       if (op < 0xc0) { // 0b10
 
         // relative jumps
-        if (!acc)   ipc += op & 0x3f;    goto xnext;
+        if (!zp.acc)   zp.ipc += op & 0x3f;    goto xnext;
 
       } else { // 0b11
 
         // ---- vectorised call (one byte) ----
-        // push cur_func; cur_func=vec; mem[vec_link[vec]]=ipc; ipc=vptr[vec]
+        // push cur_func; cur_func=vec; zp.memptr[vec_link[vec]]=zp.ipc; zp.ipc=vptr[vec]
 
-        // JSR: fp chain in callee frame; frame_base[v] is fixed per program
-        char v = op & 0x3f;
-        char nfp = frame_base[v];
-        mem[nfp + FR_PREV] = fp;
-        #ifdef __CC65__
-          mem[nfp + FR_RET] = (unsigned int)ipc;
-        #else
-          mem[nfp + FR_RET] = ipc - bin;
-        #endif
-        fp = nfp;
-        ipc = vptr[v];
+        // JSR: zp.fp chain in callee frame; fptab/call from loaded blob
+        {
+          char v = op & 0x3f;
+          char nfp;
+          word *callv;
+          #ifdef __CC65__
+          nfp = ((uchar *)(unsigned)zp.hdr.fp)[v];
+          callv = (word *)(unsigned)zp.hdr.call;
+          zp.memptr[nfp + FR_PREV] = zp.fp;
+          zp.memptr[nfp + FR_RET] = (unsigned int)zp.ipc;
+          zp.fp = nfp;
+          zp.ipc = (uchar *)(unsigned)callv[v];
+          #else
+          nfp = g_loaded[zp.hdr.fp + v];
+          callv = (word *)(g_loaded + zp.hdr.call);
+          zp.memptr[nfp + FR_PREV] = zp.fp;
+          zp.memptr[nfp + FR_RET] = (unsigned int)(zp.ipc - g_loaded);
+          zp.fp = nfp;
+          zp.ipc = g_loaded + callv[v];
+          #endif
+        }
         goto xnext;
       }
     }
@@ -1579,7 +1640,9 @@ unsigned int run_ivm(void) {
   }
 
  done:
-  return acc;
+  // save ZP global → process head
+  memcpy(&p->h, &zp, sizeof(zp));
+  return zp.acc;
 
 #undef PAR
 }
@@ -1804,10 +1867,13 @@ int main(void) {
   dump_bytecode();
   dump_blob();
 
-  printf("--- RUN IVM (%d bytes, blob %d, %d vectors, %d consts) ---\n",
-    bin_ptr, blob_len, nvector, nconst);
-
-  ret = run_ivm();
+  loader(blob);
+  {
+    Process *proc = Nevm(blob);
+    printf("--- RUN IVM (%d bytes, blob %d, %d vectors, %d consts) ---\n",
+      bin_ptr, blob_len, nvector, nconst);
+    ret = run_ivm(proc);
+  }
 
   printf("--- END ---\n");
   printf("acc = %u\n", ret);
