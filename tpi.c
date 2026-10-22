@@ -176,7 +176,8 @@ typedef char TokenType;
 #define TOK_BEGIN    ((TokenType)'B')
 #define TOK_END      ((TokenType)'E')
 #define TOK_INTEGER  ((TokenType)'N')
-#define TOK_WRITE    ((TokenType)'W') // WRITELN
+#define TOK_WRITE    ((TokenType)'w') // WRITE  (no newline)
+#define TOK_WRITELN  ((TokenType)'W') // WRITELN
 #define TOK_FUNCTION ((TokenType)'F')
 
 #define TOK_IF       ((TokenType)'I')
@@ -200,7 +201,8 @@ Keyword keywords[] = {
   {"BEGIN",    TOK_BEGIN},
   {"END",      TOK_END},
   {"INTEGER",  TOK_INTEGER},
-  {"WRITELN",  TOK_WRITE},
+  {"WRITE",    TOK_WRITE},
+  {"WRITELN",  TOK_WRITELN},
   {"FUNCTION", TOK_FUNCTION},
 
   {"IF",       TOK_IF},
@@ -681,7 +683,7 @@ void next_token(void) {
 
 void expect(TokenType expected) {
   if (curr_tok.type == expected) { next_token(); return; }
-  printf("\n%%Expected %s but found %s",
+  printf("\n%%Expected %s but found '%s'",
     tok_name(expected), tok_name(curr_tok.type));
   FAIL("expected");
 }
@@ -968,39 +970,61 @@ int statement(void) {
     }
   }
 
-  // WRITELN
-  else if (curr_tok.type == TOK_WRITE) {
-    int i;
-    EXPECT(TOK_WRITE);
+  // WRITE / WRITELN ( 0..n args, comma-separated )
+  // WRITELN: newline — if last arg is an inline string, append \n before 0;
+  //          otherwise emit opcode 'N' after all args (also for zero args).
+  // WRITE:   never adds newline.
+  else if (curr_tok.type == TOK_WRITE || curr_tok.type == TOK_WRITELN) {
+    int i, nargs, last_was_str, nl;
+    nl = (curr_tok.type == TOK_WRITELN);
+    next_token(); // WRITE / WRITELN
     EXPECT('(');
 
-    if (curr_tok.type == TOK_STRING) {
-
-      // inline string
-      emitop('"');
-      for (i = 0; curr_tok.lexeme[i]; i++)
-        emit(curr_tok.lexeme[i]);
-      emit(0);
-      EXPECT(TOK_STRING);
-
-    } else {
-      int pos= bin_ptr;
-      // expression
-
-      expression();
-
-      // TODO: only valid if not near IF...
-      //   C: putchar(var ? 0 : a) !!! (pascal no have)
-
-      // "poophole opt" "Lxx." => "Wxx"
-      if (bin_ptr - pos == 2 && bin[pos] == 'L') {
-        // printing (integer) var
-        bin[pos]= 'W';
-      } else
-        emitop('.');
+    nargs = 0;
+    last_was_str = 0;
+    if (curr_tok.type != ')') {
+      while (1) {
+        last_was_str = 0;
+        if (curr_tok.type == TOK_STRING) {
+          // inline string
+          emitop('"');
+          for (i = 0; curr_tok.lexeme[i]; i++)
+            emit(curr_tok.lexeme[i]);
+          // WRITELN + last arg decided after loop; stash string open, close later
+          // emit terminator after optional \n once we know if this is last
+          EXPECT(TOK_STRING);
+          // temporarily close without \n; fixed if last + nl below
+          emit(0);
+          last_was_str = 1;
+        } else {
+          int pos = bin_ptr;
+          expression();
+          // "poophole" Lxx. => Wxx
+          if (bin_ptr - pos == 2 && bin[pos] == 'L')
+            bin[pos] = 'W';
+          else
+            emitop('.');
+        }
+        nargs++;
+        if (curr_tok.type != ',')
+          break;
+        next_token(); // ,
+      }
     }
 
-    emitop('N');
+    // WRITELN newline policy
+    if (nl) {
+      if (last_was_str && nargs > 0) {
+        // rewrite trailing 0 of last string to \n 0
+        if (bin_ptr >= 1 && bin[bin_ptr - 1] == 0) {
+          bin[bin_ptr - 1] = '\n';
+          emit(0);
+        }
+      } else {
+        emitop('N');
+      }
+    }
+
     EXPECT(')');
     EXPECT(';');
   }
@@ -1972,7 +1996,7 @@ static int run_loaded_blob(void) {
   proc = Nevm(blob);
   printf("--- RUN IVM (blob %d) ---\n", blob_len);
   ret = run_ivm(proc);
-  printf("--- END ---\n");
+  printf("\n--- END ---\n");
   printf("acc = %u\n", ret);
   return (int)ret;
 }
@@ -2019,8 +2043,8 @@ int main(int argc, char **argv) {
       #endif
       buf_idx = (int)src_pos;
 
-      printf("\n%%ERROR: %s\n%s:%d.%d (%d): ", fail_msg, filename,
-        lnum, buf_idx-cur_line, cur_line);
+      printf("\n%%ERROR: %s\n%s:%d.%d: ", fail_msg, filename,
+        lnum, buf_idx-cur_line);
       src_pos = cur_line;
       do {
         if ((int)src_pos == buf_idx) printf(" >>> %s <<<ERROR<<< ", curr_tok.lexeme);

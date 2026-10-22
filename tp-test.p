@@ -119,6 +119,16 @@ BEGIN
   WRITELN("3shl2+20shr2"); WRITELN(r);
 END;
 
+{ TODO: Procedure }
+function TestWrites() : integer;
+begin
+   writeln("--TestWrrites");
+   writeln("a", "b", "c");
+   writeln(1,2,3);
+   write("a", "b", "c"); writeln();
+   write(1,2,3); writeln();
+end;
+
 var
    alpha : integer;
    beta	 : integer;
@@ -181,5 +191,8 @@ begin
    writeln(TestIf(1));
 
    writeln(TestOps(666));
+
+   writeln(TestWrites());
+   { TestWrites(); }
 end.
 

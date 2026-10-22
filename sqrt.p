@@ -49,18 +49,20 @@ BEGIN
   END;
 END;
 
+FUNCTION Test(n	: INTEGER) : INTEGER;
+BEGIN
+  Test := ISqrt(n);
+  WRITELN();
+  WRITE("sqrt ", n, " = ");
+END;
+
 VAR
-  n : INTEGER;
+  i : INTEGER;
   r : INTEGER;
 
 BEGIN
   WRITELN("Integer sqrt (floor)");
 
-  n := 0;   r := ISqrt(n); WRITELN("sqrt 0 =");   WRITELN(r);
-  n := 1;   r := ISqrt(n); WRITELN("sqrt 1 =");   WRITELN(r);
-  n := 15;  r := ISqrt(n); WRITELN("sqrt 15 =");  WRITELN(r);
-  n := 16;  r := ISqrt(n); WRITELN("sqrt 16 =");  WRITELN(r);
-  n := 100; r := ISqrt(n); WRITELN("sqrt 100 ="); WRITELN(r);
-  n := 200; r := ISqrt(n); WRITELN("sqrt 200 ="); WRITELN(r);
-  n := 255; r := ISqrt(n); WRITELN("sqrt 255 ="); WRITELN(r);
+  WRITE(Test(0), Test(1), Test(15), Test(16), Test(100),
+	Test(200), Test(255), Test(49));
 END.
