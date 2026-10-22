@@ -313,8 +313,8 @@ void emit(char c) {
 
 void emitop(char op) {
   emit(op);
-  // TODO: make bitmask for detection
-  if (op == '0' || op == '9' || op == '~')
+  // control-flow / ACC-clobbering ops — mirror is invalid after these
+  if (op == '0' || op == '9' || op == '~' || op == '?' || op == 'G' || op == 'B')
     acc_invalidate();
 }
 
@@ -1054,6 +1054,7 @@ int statement(void) {
       delta = bin_ptr - (exit_patch + 2);
       bin[exit_patch + 1] = (char)delta;
     }
+    acc_invalidate();
   }
 
   // IF expr THEN stmt [ELSE stmt]
@@ -1108,6 +1109,8 @@ int statement(void) {
       // No ELSE branch: patch the false jump to land right here
       bin[patch_then] = bin_ptr - (patch_then + 1);
     }
+    // both branches merge — ACC content unknown
+    acc_invalidate();
   }
 
   // BEGIN ... END
@@ -1123,9 +1126,16 @@ int statement(void) {
 }
 
 // ---------------------------------------------------------------------------
-// VAR name : INTEGER; ...
-// local=0 → globals (slots 0..); local=1 → frame slots (same as params for now)
+// Compile a whole function (called from the declaration loop)
+// Layout of a function frame (allocated from FRAME_BASE upward):
+//   ret_addr_slot
+//   ret_val_slot
+//   param_slot          (single argument for now)
+//   … possible locals later
+// The vector entry points at the first instruction of the body.
 // ---------------------------------------------------------------------------
+// VAR name : INTEGER; ...
+// local=0 globals; local=1 frame slots (same as params for now)
 void parsevars(char local) {
   EXPECT(TOK_VAR);
   while (curr_tok.type == TOK_IDENT) {
@@ -1142,16 +1152,6 @@ void parsevars(char local) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Compile a whole function (called from the declaration loop)
-// Layout of a function frame (allocated from FRAME_BASE upward):
-//   ret_addr_slot
-//   ret_val_slot
-//   CALLER
-//   params
-//   locals (optional VAR before BEGIN)
-// The vector entry points at the first instruction of the body.
-// ---------------------------------------------------------------------------
 void compile_function(void) {
   char func_name[MAX_SYM_LEN + 1];
   char param_name[MAX_SYM_LEN + 1];
@@ -1220,7 +1220,6 @@ void compile_function(void) {
   // Expose RETURN as a local name for the return-address slot
   add_symbol("RETURN", SYM_VAR, ret_addr_slot);
 
-  // optional locals: VAR x : INTEGER; ... before BEGIN
   if (curr_tok.type == TOK_VAR)
     parsevars(1);
 
@@ -1286,8 +1285,7 @@ int compile_pipeline(void) {
   // declarations
   while (curr_tok.type == TOK_VAR || curr_tok.type == TOK_FUNCTION) {
     if (curr_tok.type == TOK_VAR) {
-      parsevars(0); // globals
-      // last_var_slot: last global for legacy "leave in ACC"
+      parsevars(0);
       if (nsym > 0 && syms[nsym - 1].type == SYM_VAR)
         last_var_slot = (unsigned char)syms[nsym - 1].address;
     }
@@ -2053,4 +2051,5 @@ int main(int argc, char **argv) {
   run_loaded_blob();
   return 0;
 }
+
 

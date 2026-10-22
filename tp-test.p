@@ -67,11 +67,6 @@ end;
 
 { Test = < > NOT SHL SHR }
 
-VAR
-  a : INTEGER;
-  b : INTEGER;
-  r : INTEGER;
-
 FUNCTION TCmp(x : INTEGER; y : INTEGER) : INTEGER;
 BEGIN
   IF x = y THEN BEGIN
@@ -105,6 +100,10 @@ BEGIN
 END;
 
 FUNCTION TestOps(dummy : INTEGER) : INTEGER;
+VAR
+  a : INTEGER;
+  b : INTEGER;
+  r : INTEGER;
 BEGIN
   WRITELN("cmp 5=5"); WRITELN(TCmp(5, 5));
   WRITELN("cmp 3<9"); WRITELN(TCmp(3, 9));
