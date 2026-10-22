@@ -892,16 +892,30 @@ int statement(void) {
     int i;
     EXPECT(TOK_WRITE);
     EXPECT('(');
+
     if (curr_tok.type == TOK_STRING) {
+
+      // inline string
       emitop('"');
       for (i = 0; curr_tok.lexeme[i]; i++)
         emit(curr_tok.lexeme[i]);
       emit(0);
       EXPECT(TOK_STRING);
+
     } else {
+      int pos= bin_ptr;
+      // expression
+
       expression();
-      emitop('.');
+
+      // "poophole opt" "Lxx." => "Wxx"
+      if (bin_ptr - pos == 2 && bin[pos] == 'L') {
+        // printing (integer) var
+        bin[pos]= 'W';
+      } else
+        emitop('.');
     }
+
     emitop('N');
     EXPECT(')');
     EXPECT(';');
@@ -1346,11 +1360,7 @@ unsigned int run_ivm(void) {
   acc = 0;
   fp = FP_MAIN;
 
-#ifdef __CC65__
-#define PAR mem[*ipc]
-#else
-#define PAR mem[(unsigned char)(*ipc)]
-#endif
+  #define PAR mem[*ipc]
 
   goto xnext;
 
@@ -1381,11 +1391,11 @@ unsigned int run_ivm(void) {
 
   case 0: // return, keep ACC
     if (fp == FP_MAIN) goto done;
-#ifdef __CC65__
-    ipc = (char *)mem[fp + FR_RET];
-#else
-    ipc = bin + mem[fp + FR_RET];
-#endif
+    #ifdef __CC65__
+      ipc = (char *)mem[fp + FR_RET];
+    #else
+      ipc = bin + mem[fp + FR_RET];
+    #endif
     fp = (char)mem[fp + FR_PREV];
     goto xnext;
     
@@ -1411,7 +1421,6 @@ unsigned int run_ivm(void) {
 
   case 'U': acc= (mem[ipc[0]]+= mem[ipc[1]]); ipc+=2; goto xnext;
 
-// TODO: <> ? LOL
   case '<': acc= acc < PAR; goto pnext;
   case '=': acc= acc == PAR; goto pnext;
   case '>': acc= acc > PAR; goto pnext;
@@ -1424,10 +1433,15 @@ unsigned int run_ivm(void) {
 // TODO: add keyword NOT !
   case '?': acc = !acc;         goto xnext;
   case '~': acc = ~acc;         goto xnext;
-  case '.': printf("%u", acc);  goto xnext;
-  case 'N': putchar('\n');      goto xnext;
-  case 'E': putchar((char)acc); goto xnext;
 
+    // printers
+  case 'K': acc= getchar();     goto xnext;
+  case 'E': putchar(acc);       goto xnext;
+  case 'N': putchar('\n');      goto xnext;
+  case 'P': printf("%s", acc);  goto xnext;
+  case 'O': putchar(PAR);       goto pnext;
+  case 'W': printf("%d", PAR);  goto pnext;
+  case '.': printf("%u", acc);  goto xnext;
   case '"': // inline string ends at 0
     while (*ipc) putchar(*ipc++);
     goto pnext; // skip the terminating 0
