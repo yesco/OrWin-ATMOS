@@ -709,7 +709,7 @@ void emitstore(char addr) {
   } else 
     emitop2('S', addr);
 }
-#endif OPTMOREPARAMS
+#endif // OPTMOREPARAMS
 
 // Parse a primary simple type
 int primary(char *out_acc, char *out_addr) {
@@ -1412,7 +1412,7 @@ Process *Nevm(unsigned char *loaded) {
 // 26: a-z  : OrwinOS API
 // 64: 00-3f: conditional relative jump forward
 // 64: (xx) : vector calls   
- unsigned int run_ivm(void) {
+unsigned int run_ivm(void) {
   // Classic single-switch + goto dispatch (ivm.c style).
   // - opcode 0   = return from function (keep ACC); with fp==FP_MAIN → done
   // - opcode ';' = ACC ← ret_val at fp, then return
@@ -1421,7 +1421,7 @@ Process *Nevm(unsigned char *loaded) {
 
   register char *ipc;
   register unsigned int acc;
-  register char op;
+  register unsigned char op;
 
   // Start at resolved main entry
   ipc = main_entry;
@@ -1546,11 +1546,12 @@ Process *Nevm(unsigned char *loaded) {
   case 'B':                   ipc -= *ipc;    goto pnext;
     
   default:
+    // unsigned: host char is signed; 0xC0 must not be treated as negative
     if (op >= 0x80) {
       if (op < 0xc0) { // 0b10
 
         // relative jumps
-        if (!acc)   ipc += op & 0b111111;    goto xnext;
+        if (!acc)   ipc += op & 0x3f;    goto xnext;
 
       } else { // 0b11
 
@@ -1564,7 +1565,7 @@ Process *Nevm(unsigned char *loaded) {
         #ifdef __CC65__
           mem[nfp + FR_RET] = (unsigned int)ipc;
         #else
-          mem[nfp + FR_RET] = (unsigned int)(ipc - bin);
+          mem[nfp + FR_RET] = ipc - bin;
         #endif
         fp = nfp;
         ipc = vptr[v];
@@ -1711,27 +1712,41 @@ void dump_blob(void) {
     printf("\n");
   }
 
-  printf("MEM SLOTS  (named, memsz=%u)\n", h->memsz);
+  printf("MEM SLOTS  (all used, memsz=%u)\n", h->memsz);
   {
-    int maxs = 0;
-    for (j = 0; j < nsym; j++) {
-      if (syms[j].type != SYM_VAR)
-        continue;
-      i = (unsigned char)syms[j].address;
-      if (i > maxs && i < 0x80)
-        maxs = i;
-    }
-    for (i = 0; i <= maxs; i++) {
+    int tmpn = 0;
+    unsigned char *fb = blob + h->fp;
+    for (i = 0; i < (int)h->memsz; i++) {
       int any = 0;
-      for (j = 0; j < nsym; j++)
-        if (syms[j].type == SYM_VAR && (unsigned char)syms[j].address == i)
-          any = 1;
-      if (!any)
+      int role = 0; // 1=RETURN 2=RETVAL 3=FP
+      if (!slot_used[i])
         continue;
       printf("  %3u ", i);
-      for (j = 0; j < nsym; j++)
-        if (syms[j].type == SYM_VAR && (unsigned char)syms[j].address == i)
+      for (j = 0; j < nsym; j++) {
+        if (syms[j].type == SYM_VAR && (unsigned char)syms[j].address == i) {
           printf(" %s", syms[j].name);
+          any = 1;
+        }
+      }
+      for (j = 0; j < nvector; j++) {
+        unsigned char base = fb[j];
+        if (i == base + FR_RET)
+          role = 1;
+        else if (i == base + FR_VAL)
+          role = 2;
+        else if (i == base + FR_PREV)
+          role = 3;
+      }
+      if (role == 1 && !any)
+        printf(" *RETURN*");
+      else if (role == 2 && !any)
+        printf(" *RETVAL*");
+      else if (role == 3)
+        printf(" *FP*");
+      else if (!any) {
+        tmpn++;
+        printf(" *TMP%d*", tmpn);
+      }
       printf("\n");
     }
   }
