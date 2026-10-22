@@ -1,7 +1,12 @@
+rm -f tpi.asm tpi.s tpi.sim
+
 cc65 -Oirs -T tpi.c -t sim6502
 ca65 -l tpi.asm tpi.s
 
 name=$1
+
+rm $name.ivm
+
 echo
 echo "--------------- $name.p"
 echo

@@ -209,6 +209,10 @@ Keyword keywords[] = {
   {"TO",       TOK_TO},
   {"DO",       TOK_DO},
 
+  {"NOT",      (TokenType)'?'},  // logical not → opcode '?'
+  {"SHL",      (TokenType)'['},  // acc << PAR
+  {"SHR",      (TokenType)']'},  // acc >> PAR
+
   // TODO: insert a 0 entry to end matching during tokenization
   {"*EOF*",    TOK_EOF},
   {"*ERROR*",  TOK_ERROR},
@@ -664,7 +668,7 @@ void next_token(void) {
   // single-char: token type is the character itself
   curr_tok.lexeme[0] = C;
   curr_tok.lexeme[1] = 0;
-  if (strchr(";:.,()+-*'*/&|^", C)) {
+  if (strchr(";:.,()+-*'*/&|^<>=", C)) {
     curr_tok.type = C;
     NEXT;
     return;
@@ -718,10 +722,20 @@ void emitstore(char addr) {
 #endif // OPTMOREPARAMS
 
 // Parse a primary simple type
-int primary(char *out_acc, char *out_addr) {
+void primary(char *out_acc, char *out_addr) {
   char name[MAX_SYM_LEN + 1];
   Symbol *sym;
   int i, pi;
+
+  // NOT expr  (opcode '?')
+  if (curr_tok.type == (TokenType)'?') {
+    next_token();
+    primary(out_acc, out_addr);
+    emitload(*out_acc, *out_addr);
+    emitop('?');
+    *out_acc = 1;
+    *out_addr = 0;
+  }
 
   // ( expression )
   if (curr_tok.type == '(') {
@@ -730,7 +744,6 @@ int primary(char *out_acc, char *out_addr) {
     EXPECT(')');
     *out_acc = 1;
     *out_addr = 0;
-    return 1;
   }
 
   // NUMBER
@@ -738,7 +751,6 @@ int primary(char *out_acc, char *out_addr) {
     *out_acc = 0;
     *out_addr = lit_addr((unsigned int)curr_tok.value);
     next_token();
-    return 1;
   }
 
   // IDENT
@@ -781,12 +793,10 @@ int primary(char *out_acc, char *out_addr) {
       acc_invalidate();
       *out_acc = 1;
       *out_addr = 0;
-      return 1;
     }
 
     *out_acc = 0;
     *out_addr = sym->address;
-    return 1;
   }
 
   FAIL("Expected expression");
@@ -800,10 +810,10 @@ void expression(void) {
 
   primary(&left_acc, &left_addr);
 
-  while (strchr("+-*/&|^", curr_tok.type)) {
+  while (strchr("+-*/&|^<>=[]", curr_tok.type)) {
     op = curr_tok.type;
     next_token();
-    comm = (op != '-' && op != '/');
+    comm = strchr("-/<>[]", op) == NULL;
 
     // save if result of primary is in acc
     if (left_acc) {
@@ -828,6 +838,11 @@ void expression(void) {
         case '&': lv &= rv; break;
         case '|': lv |= rv; break;
         case '^': lv ^= rv; break;
+        case '<': lv = lv < rv; break;
+        case '=': lv = lv == rv; break;
+        case '>': lv = lv > rv; break;
+        case '[': lv = lv << rv; break;
+        case ']': lv = lv >> rv; break;
       }
 
       left_acc = 0;
@@ -1043,10 +1058,9 @@ int statement(void) {
 
     expression();
 
-    // Condition value is now in ACC.
-    // If ACC is 0 (false), jump past the THEN body.
-    // We emit a conditional forward jump.
-    // TODO: emitop2?
+    // Condition in ACC (0 = false, nonzero = true).
+    // G jumps if ACC > 0 — invert so we skip THEN when false.
+    emitop('?');
     emitop('G');
     patch_then = bin_ptr;
     emit(0); // Placeholder for forward jump delta
@@ -1536,9 +1550,9 @@ unsigned int run_ivm(Process *p) {
   case '{': zp.mem[*zp.ipc] <<= zp.acc; goto pnext;
   case '}': zp.mem[*zp.ipc] >>= zp.acc; goto pnext;
 
-  case 'L': zp.acc = PAR;  goto pnext;
-  case 'S': zp.mem[*zp.ipc] = zp.acc;  goto pnext;
-  case 'Z': zp.mem[*zp.ipc] = 0;    goto pnext;
+  case 'L': zp.acc = PAR;             goto pnext;
+  case 'S': zp.mem[*zp.ipc] = zp.acc; goto pnext;
+  case 'Z': zp.mem[*zp.ipc] = 0;      goto pnext;
     // TODO: char? and then explicit for indexing : _ ???
 
   #ifdef __CC65__
@@ -1559,6 +1573,8 @@ unsigned int run_ivm(Process *p) {
 
   case 'I': zp.acc= ++zp.mem[*zp.ipc]; goto pnext;
   case 'J': zp.acc= --zp.mem[*zp.ipc]; goto pnext;
+//  case 'I': zp.acc= PAR++; goto pnext;
+//  case 'J': zp.acc= PAR--; goto pnext;
 
   case 'U': zp.acc= (zp.mem[zp.ipc[0]]+= zp.mem[zp.ipc[1]]); zp.ipc+=2; goto xnext;
 
@@ -1572,21 +1588,20 @@ unsigned int run_ivm(Process *p) {
   case '9': zp.acc = 0xffff; goto xnext;
 
 // TODO: add keyword NOT !
-  case '?': zp.acc = !zp.acc;         goto xnext;
-  case '~': zp.acc = ~zp.acc;         goto xnext;
+  case '?': zp.acc = !zp.acc; goto xnext;
+  case '~': zp.acc = ~zp.acc; goto xnext;
 
     // printers
-  case 'K': zp.acc= getchar();     goto xnext; // key
-  case 'E': putchar(zp.acc);       goto xnext; // putchar
-  case 'N': putchar('\n');         goto xnext; // newline
-  case 'P': printf("%s", zp.acc);  goto xnext; // print strptr
-  case 'O': putchar(PAR);          goto pnext; // out letter
-  case 'W': printf("%u", PAR);     goto pnext; // write var
-  case '.': printf("%u", zp.acc);  goto xnext; // print num
-  case '"': // inline string ends at 0         // print "const"
+  case 'K': zp.acc= getchar();    goto xnext; // key
+  case 'E': putchar(zp.acc);      goto xnext; // putchar
+  case 'N': putchar('\n');        goto xnext; // newline
+  case 'P': printf("%s", zp.acc); goto xnext; // print strptr
+  case 'O': putchar(PAR);         goto pnext; // out letter
+  case 'W': printf("%u", PAR);    goto pnext; // write var
+  case '.': printf("%u", zp.acc); goto xnext; // print num
+  case '"': // inline string ends at 0      // print "const"
     while (*zp.ipc) putchar(*zp.ipc++);
     goto pnext; // skip the terminating 0
-
 
     // ---- relative jumps (uppercase, single opcode each) ----
     // B  <delta>  2 byte: AGAIN= unconditional backward
@@ -1594,8 +1609,9 @@ unsigned int run_ivm(Process *p) {
     // 00-63       1 byte: IF   = conditional zp.acc=0 forward
     // relative jumps (byte code stats: jvm p-code etc)
     //     0-15: 70-75%, 0-31: 85-90%, 32+: 10-15
+
   case 'G': if ((int)zp.acc > 0) zp.ipc += *zp.ipc;    goto pnext;
-  case 'B':                   zp.ipc -= *zp.ipc;    goto pnext;
+  case 'B':                      zp.ipc -= *zp.ipc;    goto pnext;
     
   default:
     if (op >= 0x80) {
@@ -1615,19 +1631,19 @@ unsigned int run_ivm(Process *p) {
           char nfp;
           word *callv;
           #ifdef __CC65__
-            nfp = ((uchar *)(unsigned)zp.hdr.fp)[v];
-            callv = (word *)(unsigned)zp.hdr.call;
-            zp.mem[nfp + FR_PREV] = zp.fp;
-            zp.mem[nfp + FR_RET] = (unsigned int)zp.ipc;
-            zp.fp = nfp;
-            zp.ipc = (uchar *)(unsigned)callv[v];
+          nfp = ((uchar *)(unsigned)zp.hdr.fp)[v];
+          callv = (word *)(unsigned)zp.hdr.call;
+          zp.mem[nfp + FR_PREV] = zp.fp;
+          zp.mem[nfp + FR_RET] = (unsigned int)zp.ipc;
+          zp.fp = nfp;
+          zp.ipc = (uchar *)(unsigned)callv[v];
           #else
-            nfp = g_loaded[zp.hdr.fp + v];
-            callv = (word *)(g_loaded + zp.hdr.call);
-            zp.mem[nfp + FR_PREV] = zp.fp;
-            zp.mem[nfp + FR_RET] = (unsigned int)(zp.ipc - g_loaded);
-            zp.fp = nfp;
-            zp.ipc = g_loaded + callv[v];
+          nfp = g_loaded[zp.hdr.fp + v];
+          callv = (word *)(g_loaded + zp.hdr.call);
+          zp.mem[nfp + FR_PREV] = zp.fp;
+          zp.mem[nfp + FR_RET] = (unsigned int)(zp.ipc - g_loaded);
+          zp.fp = nfp;
+          zp.ipc = g_loaded + callv[v];
           #endif
         }
         goto xnext;
@@ -1923,7 +1939,7 @@ int main(int argc, char **argv) {
   int buf_idx;
 
   if (argc < 2) {
-    printf("usage: %s file.[ p | pas | ivm ]\n", argv[0]);
+    printf("usage: %s file.p|file.pas|file.ivm\n", argv[0]);
     printf("  .p/.pas  compile → file.ivm, then load+run that .ivm\n");
     printf("  .ivm     load blob, Nevm, run_ivm\n");
     return 1;
