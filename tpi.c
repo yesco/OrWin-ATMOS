@@ -1541,8 +1541,10 @@ unsigned int run_ivm(Process *p) {
   case 'Z': zp.mem[*zp.ipc] = 0;    goto pnext;
     // TODO: char? and then explicit for indexing : _ ???
 
-  case 'M': zp.acc = zp.mem[PAR] = calloc(zp.acc, 1); goto pnext;
-  case 'F': PAR = 0; free(PAR);               goto pnext;
+  #ifdef __CC65__
+  case 'M': zp.acc = zp.mem[PAR] = (int)calloc(zp.acc, 1);    goto pnext;
+  case 'F': free((void*)zp.mem[*zp.ipc]); zp.mem[*zp.ipc]= 0; goto pnext;
+  #endif
   case '@': zp.acc = zp.mem[PAR]; goto pnext; // read  pointer
   case '!': zp.mem[PAR] = zp.acc; goto pnext; // write pointer
 
