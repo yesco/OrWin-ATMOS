@@ -317,6 +317,10 @@ void emitop2(char op, char arg) {
 }
 
 // Generate function return (pascal: exit)
+
+// TODO: optimization INVALID if code part of
+//        IF THEN ELSE / GOTO / LOOP !!!!
+
 //
 // - If ACC already holds the return-value slot, emit 0 (return without reload).
 // - Otherwise emit ';' (load ret slot, then return).
@@ -325,12 +329,37 @@ void emitop2(char op, char arg) {
 // Opcode ';' = ACC <- ret_val, then return
 // Opcode 'q' = quit program (C: exit).
 void emitreturn(char ret_slot) {
-  if (acc_valid && acc_slot == ret_slot) {
-    // "poophole": drop END "S ret_slot" — ACC is == value already
+  if (0 && acc_valid && acc_slot == ret_slot) {
+    // TODO: IF == NOT CORRECT!
+    // if "Gxx ... 0 (here) ;" canNOT!!
+    // only for return can "; ... 0 ;" lol, 
+
+    // "poophole": remove save to return slot before return
+    //                      "S ret_slot" RETURN    => "\0"
     if (bin_ptr >= 2 && bin[bin_ptr - 2] == 'S' && bin[bin_ptr - 1] == ret_slot)
       bin_ptr -= 2;
-    emit(0); // return, keep ACC
+
+    emitop(0); // return, keep ACC
+
+  } else if (0 && bin_ptr >= 2 && bin[bin_ptr - 2] == 'Z' && bin[bin_ptr - 1] == ret_slot) {
+    // TODO: IF == NOT CORRECT!
+    // if "Gxx ... 0 (here) ;" canNOT!!
+    // only for return can "; ... 0 ;" lol, 
+
+    // TODO: keep track of last patch point DESTINATION!
+    //   cannot poophole before that pos...
+
+    // "poophole": remove zero save to return slot before return
+    //             "0 S ret_slot" became
+    //             "Z ret_slot" RETURN    => "0 \0"
+    // LOL: restore '0'
+    bin_ptr -= 2;
+    // TODO: 0 return, 1 return, -1 return?
+    emitop('0');
+    emitop(0);
+
   } else
+    // Normal return
     emitop(';'); // ACC <- ret_val, then return
 }
 
@@ -529,7 +558,8 @@ Symbol* lookup_sym(const char* name) {
 // ---------------------------------------------------------------------------
 void next_token(void);
 void expect(TokenType expected);
-int expression(void);
+void expression(void);
+void expressionsave(char addr);
 int statement(void);
 #define EXPECT(expected) expect(expected)
 
@@ -657,17 +687,29 @@ void emitload(char in_acc, char addr) {
   if (acc_valid && acc_slot == addr) return;
 
   if (addr == IMM0 || (isconst(addr) && const_val(addr) == 0)) {
-    emit('0');           // raw — avoid emitop invalidate then re-set
+    emitop('0');           // raw — avoid emitop invalidate then re-set
     acc_set_slot(IMM0);  // next emitload(IMM0) is free
     return;
   }
   if (addr == IMM1 || (isconst(addr) && const_val(addr) == (unsigned int)-1)) {
-    emit('9');
+    emitop('9');
     acc_set_slot(IMM1);
     return;
   }
   emitop2('L', addr);    // L sets acc_slot via emitop2
 }
+
+int lastv= -666;
+
+#ifdef OPTMOREPARAMS
+void emitstore(char addr) {
+  if (addr == lastv+1) {
+    ++lastv;
+    emitop(',');
+  } else 
+    emitop2('S', addr);
+}
+#endif OPTMOREPARAMS
 
 // Parse a primary simple type
 int primary(char *out_acc, char *out_addr) {
@@ -712,18 +754,23 @@ int primary(char *out_acc, char *out_addr) {
     if (!sym) FAIL("Undeclared identifier");
 
     // FUNCALL ( ... )
+    // TODO: WARNING: foo(2, foo(3,4)) will do wrong!
     if (type == SYM_FUNC) {
 
       EXPECT('(');
       for (pi = 0; pi < sym->nparams; pi++) {
         if (pi > 0) EXPECT(',');
-        expression();
+
         if (pi < sym->nparams - 1)
-          emitop2('S', sym->param_slot[pi]);
+          // opt for 0 Spp => Zpp
+          expressionsave(sym->param_slot[pi]);
+        else
+          // last param in ACC
+          expression();
       }
       EXPECT(')');
 
-      emit((char)(0xC0 | (sym->address & 0x3F)));
+      emitop((char)(0xC0 | (sym->address & 0x3F)));
 
       acc_invalidate();
       *out_acc = 1;
@@ -739,7 +786,7 @@ int primary(char *out_acc, char *out_addr) {
   FAIL("Expected expression");
 }
 
-int expression(void) {
+void expression(void) {
   char left_acc, right_acc;
   char left_addr, right_addr;
   char op, comm;
@@ -815,7 +862,20 @@ int expression(void) {
   }
 
   emitload(left_acc, left_addr);
-  return 1;
+}
+
+void expressionsave(char addr) {
+  int ptr= bin_ptr;
+
+  expression();
+
+  // TODO: only valid if no jump dest near!
+
+  // Poophole optimization 0 Sxx => Zxx
+  if (bin_ptr - ptr == 1 && bin[ptr] == '0') {
+    bin[ptr]= 'Z'; emit(addr);
+  } else
+    emitop2('S', addr);
 }
 
 // ---------------------------------------------------------------------------
@@ -844,21 +904,15 @@ int statement(void) {
       FAIL("Unknown variable");
     }
 
-#if 0
-    EXPECT(TOK_IDENT);
-    EXPECT(TOK_ASSIGN);
-    expression();
-    emitop2('S', sym->address);
-    EXPECT(';');
-#else
     // "Poophole" optimization: sum:= sum+i; sum:= i+sum;
     { int i= bin_ptr;
 
       EXPECT(TOK_IDENT);
       EXPECT(TOK_ASSIGN);
-      expression();
-      emitop2('S', sym->address);
+      expressionsave(sym->address);
       EXPECT(';');
+
+      // TODO: only valid if no jumps "near"
 
       if (bin_ptr-i==6
         && bin[i]=='L' && bin[i+2]=='+' && bin[i+4]=='S'
@@ -884,7 +938,6 @@ int statement(void) {
         }
       }
     }
-#endif // POOP
   }
 
   // WRITELN
@@ -907,6 +960,9 @@ int statement(void) {
       // expression
 
       expression();
+
+      // TODO: only valid if not near IF...
+      //   C: putchar(var ? 0 : a) !!! (pascal no have)
 
       // "poophole opt" "Lxx." => "Wxx"
       if (bin_ptr - pos == 2 && bin[pos] == 'L') {
@@ -939,13 +995,11 @@ int statement(void) {
     EXPECT(TOK_IDENT);
     EXPECT(TOK_ASSIGN);
 
-    expression();
-    emitop2('S', ctrl->address);
+    expressionsave(ctrl->address);
 
     EXPECT(TOK_TO);
     high_slot = alloc_temp();
-    expression();
-    emitop2('S', high_slot);
+    expressionsave(high_slot);
 
     EXPECT(TOK_DO);
     loop_start = bin_ptr;
@@ -954,6 +1008,7 @@ int statement(void) {
     emitop2('L', ctrl->address);
     emitop2('-', high_slot);
     exit_patch = bin_ptr;
+    // TDOO: emitop2?
     emitop('G'); emit(0); // G <delta> conditional forward (acc > 0)
 
     statement();
@@ -967,6 +1022,7 @@ int statement(void) {
       if (delta > 255) {
         FAIL("FOR body too large");
       }
+      // TODO: emitop2?
       emitop('B'); emit((char)delta);
     }
     // patch forward exit
@@ -988,6 +1044,7 @@ int statement(void) {
     // Condition value is now in ACC.
     // If ACC is 0 (false), jump past the THEN body.
     // We emit a conditional forward jump.
+    // TODO: emitop2?
     emitop('G');
     patch_then = bin_ptr;
     emit(0); // Placeholder for forward jump delta
@@ -1008,6 +1065,7 @@ int statement(void) {
       emitop('0');
       emitop('?'); // ???
 
+      // TODO: emitop2?
       emitop('G'); // Forward unconditional jump
       patch_else = bin_ptr;
       emit(0); // Placeholder for forward jump delta
@@ -1344,7 +1402,18 @@ Process *Nevm(unsigned char *loaded) {
 #define register
 #endif
 
-unsigned int run_ivm(void) {
+// Byte codes used:
+// 
+
+// 1-31: 
+//
+//  !#$'()12345678:
+// @ACDFHLMNQRSTXYZ[\]^_
+// `abcdefghijklmnoprstuvwxyz{|}
+//
+// 64: TODO: conditional relative jump forward
+// 64: (xx) - vector calls   
+ unsigned int run_ivm(void) {
   // Classic single-switch + goto dispatch (ivm.c style).
   // - opcode 0   = return from function (keep ACC); with fp==FP_MAIN → done
   // - opcode ';' = ACC ← ret_val at fp, then return
@@ -1408,6 +1477,7 @@ unsigned int run_ivm(void) {
   case '-': acc -= PAR; goto pnext;
   case '*': acc *= PAR; goto pnext;
   case '/': if (PAR) acc /= PAR; goto pnext;
+  case '%': if (PAR) acc %= PAR; goto pnext;
 
   case '&': acc &= PAR; goto pnext;
   case '|': acc |= PAR; goto pnext;
@@ -1415,6 +1485,16 @@ unsigned int run_ivm(void) {
 
   case 'L': acc  = PAR; goto pnext;
   case 'S': PAR = acc;  goto pnext;
+  case 'Z': PAR = 0;    goto pnext;
+
+  #ifdef OPTMOREPARAMS
+    // TODO: only useful for 3 or moe parameters...
+    //   in linux/kernel/big projects
+    //   7-10% take 3 parameters, and <5% take 4+ ...
+  // case 'S': PAR = acc;  lastv= *ipc; goto pnext;
+  //case 'V': mem[++lastv]= PAR; goto pnext;
+  //case ',': mem[++lastv]= acc; goto xnext;
+  #endif
 
   case 'I': acc= (PAR++); goto pnext;
   case 'J': acc= (PAR--); goto pnext;
@@ -1440,7 +1520,7 @@ unsigned int run_ivm(void) {
   case 'N': putchar('\n');      goto xnext;
   case 'P': printf("%s", acc);  goto xnext;
   case 'O': putchar(PAR);       goto pnext;
-  case 'W': printf("%d", PAR);  goto pnext;
+  case 'W': printf("%u", PAR);  goto pnext;
   case '.': printf("%u", acc);  goto xnext;
   case '"': // inline string ends at 0
     while (*ipc) putchar(*ipc++);
