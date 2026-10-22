@@ -3,15 +3,6 @@ PROGRAM SqrtDemo;
 { Integer floor square root by binary search.
   Compare mid with n/mid so mid*mid never overflows 16-bit. }
 
-VAR
-  lo : INTEGER;
-  hi : INTEGER;
-  mid : INTEGER;
-  q : INTEGER;
-  i : INTEGER;
-  n : INTEGER;
-  r : INTEGER;
-
 FUNCTION Min(a : INTEGER; b : INTEGER) : INTEGER;
 BEGIN
   IF a < b THEN BEGIN
@@ -22,6 +13,13 @@ BEGIN
 END;
 
 FUNCTION ISqrt(n : INTEGER) : INTEGER;
+VAR
+  lo : INTEGER;
+  hi : INTEGER;
+  mid : INTEGER;
+  q : INTEGER;
+  i : INTEGER;
+
 BEGIN
   IF n < 2 THEN BEGIN
     ISqrt := n;
@@ -50,6 +48,10 @@ BEGIN
     ISqrt := lo;
   END;
 END;
+
+VAR
+  n : INTEGER;
+  r : INTEGER;
 
 BEGIN
   WRITELN("Integer sqrt (floor)");

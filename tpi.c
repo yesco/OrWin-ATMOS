@@ -1123,12 +1123,33 @@ int statement(void) {
 }
 
 // ---------------------------------------------------------------------------
+// VAR name : INTEGER; ...
+// local=0 → globals (slots 0..); local=1 → frame slots (same as params for now)
+// ---------------------------------------------------------------------------
+void parsevars(char local) {
+  EXPECT(TOK_VAR);
+  while (curr_tok.type == TOK_IDENT) {
+    char slot;
+    if (local)
+      slot = alloc_frame_slot();
+    else
+      slot = alloc_global();
+    add_symbol(curr_tok.lexeme, SYM_VAR, slot);
+    EXPECT(TOK_IDENT);
+    EXPECT(':');
+    EXPECT(TOK_INTEGER);
+    EXPECT(';');
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Compile a whole function (called from the declaration loop)
 // Layout of a function frame (allocated from FRAME_BASE upward):
 //   ret_addr_slot
 //   ret_val_slot
-//   param_slot          (single argument for now)
-//   … possible locals later
+//   CALLER
+//   params
+//   locals (optional VAR before BEGIN)
 // The vector entry points at the first instruction of the body.
 // ---------------------------------------------------------------------------
 void compile_function(void) {
@@ -1199,6 +1220,10 @@ void compile_function(void) {
   // Expose RETURN as a local name for the return-address slot
   add_symbol("RETURN", SYM_VAR, ret_addr_slot);
 
+  // optional locals: VAR x : INTEGER; ... before BEGIN
+  if (curr_tok.type == TOK_VAR)
+    parsevars(1);
+
   // the entry point is right here
   entry_offset = bin_ptr;
   vec_idx = add_vector(entry_offset);
@@ -1261,16 +1286,10 @@ int compile_pipeline(void) {
   // declarations
   while (curr_tok.type == TOK_VAR || curr_tok.type == TOK_FUNCTION) {
     if (curr_tok.type == TOK_VAR) {
-      next_token();
-      while (curr_tok.type == TOK_IDENT) {
-        char slot = alloc_global();
-        add_symbol(curr_tok.lexeme, SYM_VAR, slot);
-        last_var_slot = slot;
-        EXPECT(TOK_IDENT);
-        EXPECT(':');
-        EXPECT(TOK_INTEGER);
-        EXPECT(';');
-      }
+      parsevars(0); // globals
+      // last_var_slot: last global for legacy "leave in ACC"
+      if (nsym > 0 && syms[nsym - 1].type == SYM_VAR)
+        last_var_slot = (unsigned char)syms[nsym - 1].address;
     }
     else { // FUNCTION
       compile_function();
