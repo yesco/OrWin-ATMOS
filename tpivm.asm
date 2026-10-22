@@ -4,19 +4,20 @@
 .export _run_ivm
 .import _main_entry, _frame_base, _vptr, _mem, _putchar, _printf
 
-.zeropage
+	.zeropage
 vm_ipc:     .res 2      ; Virtual Instruction Pointer (16-bit ZP pointer)
 vm_acc:     .res 2      ; 16-bit Virtual Accumulator (Low: vm_acc, High: vm_acc+1)
 vm_fp:      .res 1      ; Virtual Frame Pointer (8-bit index)
 tmp:        .res 2      ; Scratchpad for jump tables / expressions
 vm_mem:     .res 2      ; Pointer to active process memory space (16-bit ZP pointer)
+savey:      .res 1      ; Dedicated ZP location to hold active low IPC during context switches
 
-FP_MAIN     = $00
-FR_VAL      = 0
-FR_RET      = 1
-FR_PREV     = 3
+	FP_MAIN     = $00
+	FR_VAL      = 0
+	FR_RET      = 1
+	FR_PREV     = 3
 
-.segment "CODE"
+	.segment "CODE"
 
 ;;; ---------------------------
 ;;; unsigned int run_ivm(void);
@@ -45,10 +46,34 @@ _run_ivm:
 ;;; Dispatch Entry Points (Fall-through architecture)
 
 
-
 .ifdef SUPEROPT
 ;;; Dispatch Entry Points (Y = ipc_low, no carry checks!)
 ;;; jump table needs to be page aligned
+
+	.macro NEXTR
+		jmp dispatch_rnext
+	.endmacro
+
+	.macro NEXTP
+		jmp pnext_reload_y
+	.endmacro
+
+	.macro NEXTY
+		sty savey
+	.endmacro
+
+	.macro NEXTPY
+		sty savey
+	.endmacro
+
+	.macro REQUIRYZERO
+		lda (vm_ipc),y
+		tay
+	.endmacro
+
+	.macro EXIT_CONTEXT
+		jmp next_reload_y
+	.endmacro
 
 dispatch_pnext:
 ;;; 2c  1 B  ; pnext: Advance IPC past the 1-byte parameter
@@ -85,6 +110,30 @@ handle_high_bit:
 	;; fall-through to call vector!
 
 .else ;; super-opt
+
+	.macro NEXTR
+		jmp dispatch_rnext
+	.endmacro
+
+	.macro NEXTP
+		jmp dispatch_pnext
+	.endmacro
+
+	.macro NEXTY
+		jmp dispatch_xnext
+	.endmacro
+
+	.macro NEXTPY
+		jmp dispatch_pnext
+	.endmacro
+
+	.macro REQUIRYZERO
+		tay
+	.endmacro
+
+	.macro EXIT_CONTEXT
+		jmp dispatch_xnext
+	.endmacro
 
 dispatch_pnext:
 ;;; 12-17c  6 B  ; pnext: Advance IPC past the 1-byte parameter
@@ -147,6 +196,7 @@ handle_high_bit:
 ;;; --- Vectorized Call ($C0 - $FF) ---
 do_vector_call:
 ;;; 45c 0 B      ; Default high bit vectorized JSR
+	NEXTY                ; Stash active IPC or handle next transition
 	;; from op extract index 0-31
 	and #$3F
 	tay
@@ -188,6 +238,7 @@ do_vector_call:
 	lda _vptr+1,y
 	sta vm_ipc+1
 
+	ldy #0               ; Explicit clean page line low byte initialization
 	jmp dispatch_rnext
 
 
@@ -222,6 +273,7 @@ op_semi:
 :	
 
 	;; TODO: Y=1???, why adding? - this seems all wrong!
+	NEXTY
 	ldy vm_fp
 
 	;; ACC = return value
@@ -262,13 +314,15 @@ op_zero:
 	tay
 	lda (vm_mem),y
 	sta vm_fp
-	jmp dispatch_xnext
+	
+	EXIT_CONTEXT
 
 
 op_plus:
 ;;; 26c 1 B      ; '+': acc += PAR
-	lda (vm_ipc),y      ; Fetch parameter slot index directly
-	tay
+	NEXTPY
+	lda (vm_ipc),y
+	REQUIRYZERO
 	
 	;; why are we not jjust adding w adc (vm_mem),y???
 	clc
@@ -279,13 +333,13 @@ op_plus:
 	lda (vm_mem),y
 	adc vm_acc+1
 	sta vm_acc+1
-	jmp dispatch_pnext
+	NEXTP
 
 op_minus:
 ;;; 28c 1 B      ; '-': acc -= PAR
+	NEXTPY
 	lda (vm_ipc),y
-
-	tay
+	REQUIRYZERO
 	lda vm_acc
 
 	sec
@@ -296,20 +350,20 @@ op_minus:
 	sbc vm_acc+1
 	sta vm_acc+1
 
-	jmp dispatch_pnext
+	NEXTP
 
 op_load:
 ;;; 19c 1 B      ; 'L': acc = PAR
+	NEXTPY
 	lda (vm_ipc),y
-
-	tay
+	REQUIRYZERO
 	lda (vm_mem),y
 	sta vm_acc
 	iny
 	lda (vm_mem),y
 	sta vm_acc+1
 	
-	jmp dispatch_pnext
+	NEXTP
 
 op_clear:
 ;;; 9c  0 B      ; '0': Clear accumulator
@@ -317,7 +371,7 @@ op_clear:
 	sta vm_acc
 	sta vm_acc+1
 
-	jmp dispatch_xnext
+	NEXTR
 
 op_true:
 ;;; 9c  0 B      ; '9': Set accumulator to 0xFFFF
@@ -325,30 +379,45 @@ op_true:
 	sta vm_acc
 	sta vm_acc+1
 
-	jmp dispatch_xnext
+	NEXTR
 
 
 ;;; TODO: do the clever woz RTS loop, so we can tail call!
 
 op_newline:
 ;;; 12c 0 B      ; 'N': Print newline character
+	NEXTY
 	lda #10
 	jsr _putchar
 
-	jmp dispatch_xnext
+	EXIT_CONTEXT
 
 op_echo:
 ;;; 10c 0 B      ; 'E': Output low byte of ACC
+	NEXTY
 	lda vm_acc
 	jsr _putchar
 
-	jmp dispatch_xnext
+	EXIT_CONTEXT
 
 op_back:
 ;;; 24c 1 B      ; 'B': Branch backward relative
 	lda (vm_ipc),y
 	
 	;; just do xor a ; adc ? no need store tmp
+.ifdef SUPEROPT
+	sec
+	eor #$FF
+	clc
+	adc #1               ; Adjust for the fact that Y was pushed 1 byte deep already
+	adc vm_ipc
+	sta vm_ipc
+	lda #$FF
+	adc vm_ipc+1
+	sta vm_ipc+1
+	ldy #0               ; Reset pointer boundary context following a direct segment shift
+	jmp dispatch_rnext
+.else
 	sec
 	eor #$FF
 	adc vm_ipc
@@ -358,21 +427,28 @@ op_back:
 	sta vm_ipc+1
 
 	jmp dispatch_pnext
-
-;;; Insert this during compilation as last instruction in
-;;; every PAGE. If the instruction you're going to write doesn't
-;;; leave 1 byte extra, you'll have trouble. LOL
-op_nextpage:
-	inc vm_ipc+1         ; Move base pointer to the next 256-byte code page
-	ldy #0               ; Reset our low pointer back to the beginning of the page
-	jmp dispatch_rnext   ; Keep rolling
+.endif
 
 op_unknown:
 ;;; 8c  0 B      ; Unknown lower ASCII op fallback
 
 	// TODO: how to handle errors?
 	
-	jmp dispatch_xnext
+	NEXTR
+
+;;; -------------------------------------------------
+;;; SUPEROPT Unified Y Pointer Reload Routines
+;;; -------------------------------------------------
+.ifdef SUPEROPT
+pnext_reload_y:
+	ldy savey
+	iny                  ; Cleanly consume the 1-byte parameter before returning to fetch loop
+	jmp dispatch_rnext
+
+next_reload_y:
+	ldy savey
+	jmp dispatch_rnext
+.endif
 
 ;;; --------
 ;;; Shutdown
@@ -388,8 +464,37 @@ done:
 ; 128-Slot Jump Table (Covers ASCII $00 - $7F)
 ; -----------------------------------------------------------------------------
 .segment "RODATA"
+.align 256  ; Force table to align precisely on a $00 low-byte boundary for the SUPEROPT indirect JMP pointer
+dispatch_table_page:
 dispatch_table_lo:
 	.repeat 128, I
+	.ifdef SUPEROPT
+		.if I = 'q'
+			.word op_q
+		.elseif I = ';'
+			.word op_semi
+		.elseif I = 0
+			.word op_zero
+		.elseif I = '+'
+			.word op_plus
+		.elseif I = '-'
+			.word op_minus
+		.elseif I = 'L'
+			.word op_load
+		.elseif I = '0'
+			.word op_clear
+		.elseif I = '9'
+			.word op_true
+		.elseif I = 'B'
+			.word op_back
+		.elseif I = 'N'
+			.word op_newline
+		.elseif I = 'E'
+			.word op_echo
+		.else
+			.word op_unknown
+		.endif
+	.else
 		.if I = 'q'
 			.byte <op_q
 		.elseif I = ';'
@@ -412,13 +517,13 @@ dispatch_table_lo:
 			.byte <op_newline
 		.elseif I = 'E'
 			.byte <op_echo
-		.elseif I = $ff
-			.byte >op_nextpage
 		.else
 			.byte <op_unknown
 		.endif
+	.endif
 	.endrepeat
 
+.ifndef SUPEROPT
 dispatch_table_hi:
 	.repeat 128, I
 		.if I = 'q'
@@ -443,9 +548,8 @@ dispatch_table_hi:
 			.byte >op_newline
 		.elseif I = 'E'
 			.byte >op_echo
-		.elseif I = $ff
-			.byte >op_nextpage
 		.else
 			.byte >op_unknown
 		.endif
 	.endrepeat
+.endif
