@@ -413,15 +413,10 @@ char alloc_global(void) {
 }
 
 char alloc_frame_slot(void) {
-  while (next_frame < MAX_SLOTS) {
-    if (!slot_used[next_frame]) {
-      slot_used[next_frame] = 1;
-      return (char)next_frame++;
-    }
-    next_frame++;
-  }
-  FAIL("out of frame slots");
-  return 0xff;
+  // contiguous (packed bases may overlap across functions)
+  if (next_frame >= MAX_SLOTS) FAIL("out of frame slots");
+  slot_used[next_frame] = 1;
+  return (char)next_frame++;
 }
 
 char alloc_temp(void) {
@@ -509,10 +504,19 @@ uint16_t vectors[MAX_VECTORS]; // bytecode offset during compile
 char *vptr[MAX_VECTORS]; // resolved entry pointers (finalise)
 char frame_base[MAX_VECTORS]; // subr# → fp base in mem (fixed per program)
 char func_high[MAX_VECTORS];  // highest slot used by function
-char func_ncalls[MAX_VECTORS];
-char func_calls[MAX_VECTORS][MAX_VECTORS]; // callees (vector indices)
+char func_slots[MAX_VECTORS];
+char func_names[MAX_VECTORS][MAX_SYM_LEN+1];
+char func_ncalls[MAX_VECTORS]; // unique callees listed
+char func_calls[MAX_VECTORS][MAX_VECTORS];
+char func_nsites[MAX_VECTORS]; // how many times THIS func is called
+int  func_code0[MAX_VECTORS];  // bin_ptr at entry
+int  func_code_bytes[MAX_VECTORS];
+int  func_code_prev[MAX_VECTORS]; // previous pass size for -O delta
+char opt_base[MAX_VECTORS]; // 0 = sequential; else forced base
 char cur_vec; // function being compiled (0xff = none)
 char nvector = 0;
+int opt_level;
+int opt_pass; // 0 first, 1 second...
 
 int main_offset = 0;
 char *main_entry = 0;
@@ -800,14 +804,18 @@ void primary(char *out_acc, char *out_addr) {
       EXPECT(')');
 
       emitop((char)(0xC0 | (sym->address & 0x3F)));
-      // record callee for current function summary
-      if (cur_vec != (char)0xff) {
+      {
         char cv = (char)(sym->address & 0x3F);
-        char k, found = 0;
-        for (k = 0; k < func_ncalls[(unsigned char)cur_vec]; k++)
-          if (func_calls[(unsigned char)cur_vec][k] == cv) { found = 1; break; }
-        if (!found && func_ncalls[(unsigned char)cur_vec] < MAX_VECTORS)
-          func_calls[(unsigned char)cur_vec][func_ncalls[(unsigned char)cur_vec]++] = cv;
+        unsigned char uc = (unsigned char)cv;
+        func_nsites[uc]++;
+        if (cur_vec != (char)0xff) {
+          char k, found = 0;
+          unsigned char uv = (unsigned char)cur_vec;
+          for (k = 0; k < func_ncalls[uv]; k++)
+            if (func_calls[uv][k] == cv) { found = 1; break; }
+          if (!found && func_ncalls[uv] < MAX_VECTORS)
+            func_calls[uv][func_ncalls[uv]++] = cv;
+        }
       }
 
       acc_invalidate();
@@ -1204,6 +1212,9 @@ void compile_function(void) {
   EXPECT(TOK_IDENT);
   EXPECT('(');
 
+  if (opt_base[nvector])
+    next_frame = opt_base[nvector];
+
   // frame: RETURN (ipc), ret_val, CALLER (prev cur_func), then params
   ret_addr_slot = alloc_frame_slot();
   ret_val_slot  = alloc_frame_slot();
@@ -1268,7 +1279,7 @@ void compile_function(void) {
   fsym->address = vec_idx;
   cur_vec = (char)vec_idx;
   func_ncalls[vec_idx] = 0;
-  func_high[vec_idx] = ret_addr_slot; // until end
+  func_code0[vec_idx] = entry_offset;
 
   // TODO: mustbe after previous section. WHY?
   
@@ -1290,20 +1301,100 @@ void compile_function(void) {
     char high = (char)(next_frame - 1);
     char slots, k;
     uchar uv = (uchar)vec_idx;
+    int nbytes, delta;
     func_high[uv] = high;
     slots = (char)(high - ret_addr_slot + 1);
-    printf("%-16s nparams=%d slots=%d base=%02x calls:",
-      func_name, nparams, slots, (uchar)ret_addr_slot);
+    func_slots[uv] = slots;
+    strcpy(func_names[uv], func_name);
+    nbytes = bin_ptr - func_code0[uv];
+    func_code_bytes[uv] = nbytes;
+    printf("%-16s nparams=%d slots=%d base=%02x code=%d sites=%u calls:",
+      func_name, nparams, slots, (uchar)ret_addr_slot, nbytes,
+      (unsigned)func_nsites[uv]);
     for (k = 0; k < func_ncalls[uv]; k++) {
       uchar c = (uchar)func_calls[uv][k];
       printf(" %02x:%u", c, (uchar)func_high[c]);
     }
     if (func_ncalls[uv] == 0) printf(" -");
+    if (opt_pass > 0) {
+      delta = func_code_prev[uv] - nbytes;
+      if (delta > 0)
+        printf("  (%s -%d bytes)", func_name, delta);
+      else if (delta < 0)
+        printf("  (%s +%d bytes)", func_name, -delta);
+    }
     putchar('\n');
   }
   cur_vec = 0xff;
 }
 
+
+
+int pack_frames(void) {
+  int i, j, changed, iter;
+  int seq_top, pack_top, saved;
+  unsigned char b, h, c;
+
+  for (i = 0; i < nvector; i++)
+    opt_base[i] = FRAME_BASE;
+  for (iter = 0; iter < nvector + 2; iter++) {
+    changed = 0;
+    for (i = 0; i < nvector; i++) {
+      b = FRAME_BASE;
+      for (j = 0; j < func_ncalls[i]; j++) {
+        c = (unsigned char)func_calls[i][j];
+        h = (unsigned char)func_high[c];
+        if ((int)h + 1 > (int)b)
+          b = (unsigned char)(h + 1);
+      }
+      if (opt_base[i] != (char)b) {
+        opt_base[i] = (char)b;
+        changed = 1;
+      }
+      func_high[i] = (char)(opt_base[i] + func_slots[i] - 1);
+    }
+    if (!changed) break;
+  }
+  seq_top = FRAME_BASE - 1;
+  pack_top = FRAME_BASE - 1;
+  for (i = 0; i < nvector; i++) {
+    h = (unsigned char)(frame_base[i] + func_slots[i] - 1);
+    if ((int)h > seq_top) seq_top = h;
+    h = (unsigned char)func_high[i];
+    if ((int)h > pack_top) pack_top = h;
+  }
+  saved = seq_top - pack_top;
+  if (saved < 0) saved = 0;
+  return saved;
+}
+
+int estimate_s12_save(void) {
+  int i, n = 0;
+  for (i = 0; i < bin_ptr - 1; i++)
+    if ((bin[i] == 'L' || bin[i] == 'S') && (unsigned char)bin[i + 1] < 16)
+      n++;
+  return n;
+}
+
+int estimate_slot32_save(void) {
+  int i, n = 0;
+  for (i = 0; i < bin_ptr - 1; i++)
+    if ((bin[i] == 'L' || bin[i] == 'S') && (unsigned char)bin[i + 1] < 32)
+      n++;
+  return n;
+}
+
+void opt_phase_report(int slot_saved) {
+  int s12, s32, code_saved, i;
+  s12 = estimate_s12_save();
+  s32 = estimate_slot32_save();
+  code_saved = 0;
+  if (opt_pass > 0)
+    for (i = 0; i < nvector; i++)
+      code_saved += func_code_prev[i] - func_code_bytes[i];
+  printf("--- opt:%d  saved %d frame slots, ~%d S12 bytes, ~%d slot<32 L/S, code %+d bytes, %d vectors ---\n",
+    opt_pass, slot_saved, s12, s32, code_saved, nvector);
+}
 
 // ---------------------------------------------------------------------------
 // Top-level compilation
@@ -1322,6 +1413,7 @@ int compile_pipeline(void) {
   cur_vec = (char)0xff;
   memset(func_ncalls, 0, sizeof(func_ncalls));
   memset(func_high, 0, sizeof(func_high));
+  memset(func_nsites, 0, sizeof(func_nsites));
   main_offset = 0;
   next_global = 0;
   next_frame  = FRAME_BASE;
@@ -1372,6 +1464,20 @@ int compile_pipeline(void) {
     emitop2('L', last_var_slot);
 
   emitop('q'); // quit program
+
+  // pack + phase report after main (call sites complete)
+  {
+    int slot_saved = 0;
+    int i;
+    if (nvector)
+      slot_saved = pack_frames();
+    // refresh sites on function lines already printed — summary:
+    for (i = 0; i < nvector; i++)
+      printf("  sites %-16s %u\n", func_names[i], (unsigned)func_nsites[i]);
+    opt_phase_report(slot_saved);
+    if (slot_saved > 0 && opt_level <= 0)
+      printf("  hint: re-run with -O to place frames (save %d slots)\n", slot_saved);
+  }
   return 1;
 }
 
@@ -2042,13 +2148,24 @@ int main(int argc, char **argv) {
   const char *filename;
   int buf_idx;
 
-  if (argc < 2) {
-    printf("usage: %s file.p|file.pas|file.ivm\n", argv[0]);
-    printf("  .p/.pas  compile → file.ivm, then load+run that .ivm\n");
-    printf("  .ivm     load blob, Nevm, run_ivm\n");
+  opt_level = 0;
+  opt_pass = 0;
+  filename = 0;
+  {
+    int ai;
+    for (ai = 1; ai < argc; ai++) {
+      if (argv[ai][0] == '-' && argv[ai][1] == 'O') {
+        opt_level = argv[ai][2] ? argv[ai][2] - '0' : 1;
+        if (opt_level < 1) opt_level = 1;
+      } else if (!filename)
+        filename = argv[ai];
+    }
+  }
+  if (!filename) {
+    printf("usage: %s [-O] file.p|file.pas|file.ivm\n", argv[0]);
+    printf("  -O  second pass with packed frame bases\n");
     return 1;
   }
-  filename = argv[1];
 
   // ----- run mode: pure .ivm -----
   if (ends_with(filename, ".ivm")) {
@@ -2091,9 +2208,23 @@ int main(int argc, char **argv) {
       return 1;
     }
   }
+  if (!opt_level)
+    memset(opt_base, 0, sizeof(opt_base));
+  opt_pass = 0;
   if (!compile_pipeline()) {
     printf("\n>> FAIL on line %d\n", lnum);
     return 1;
+  }
+  if (opt_level > 0) {
+    int i;
+    for (i = 0; i < nvector; i++)
+      func_code_prev[i] = func_code_bytes[i];
+    opt_pass = 1;
+    printf("--- opt:%d applying packed bases ---\n", opt_pass);
+    if (!compile_pipeline()) {
+      printf("\n>> FAIL on line %d\n", lnum);
+      return 1;
+    }
   }
 
   finalise();

@@ -11,7 +11,7 @@ echo
 echo "--------------- $name.p"
 echo
 
-cl65 -Oirs -t sim6502 -m tpi.map -o tpi.sim tpi.c && sim65 -c tpi.sim $name.p
+cl65 -Oirs -t sim6502 -m tpi.map -o tpi.sim tpi.c && sim65 -c tpi.sim -O $name.p
 echo
 echo
 ls -l tpi.sim
