@@ -508,6 +508,10 @@ char lit_addr(unsigned int v) {
 uint16_t vectors[MAX_VECTORS]; // bytecode offset during compile
 char *vptr[MAX_VECTORS]; // resolved entry pointers (finalise)
 char frame_base[MAX_VECTORS]; // subr# → fp base in mem (fixed per program)
+char func_high[MAX_VECTORS];  // highest slot used by function
+char func_ncalls[MAX_VECTORS];
+char func_calls[MAX_VECTORS][MAX_VECTORS]; // callees (vector indices)
+char cur_vec; // function being compiled (0xff = none)
 char nvector = 0;
 
 int main_offset = 0;
@@ -796,6 +800,15 @@ void primary(char *out_acc, char *out_addr) {
       EXPECT(')');
 
       emitop((char)(0xC0 | (sym->address & 0x3F)));
+      // record callee for current function summary
+      if (cur_vec != (char)0xff) {
+        char cv = (char)(sym->address & 0x3F);
+        char k, found = 0;
+        for (k = 0; k < func_ncalls[(unsigned char)cur_vec]; k++)
+          if (func_calls[(unsigned char)cur_vec][k] == cv) { found = 1; break; }
+        if (!found && func_ncalls[(unsigned char)cur_vec] < MAX_VECTORS)
+          func_calls[(unsigned char)cur_vec][func_ncalls[(unsigned char)cur_vec]++] = cv;
+      }
 
       acc_invalidate();
       *out_acc = 1;
@@ -1253,6 +1266,9 @@ void compile_function(void) {
   // subr# → frame base (== RETURN slot index); FR_VAL/FR_PREV are +1/+2
   frame_base[vec_idx] = ret_addr_slot;
   fsym->address = vec_idx;
+  cur_vec = (char)vec_idx;
+  func_ncalls[vec_idx] = 0;
+  func_high[vec_idx] = ret_addr_slot; // until end
 
   // TODO: mustbe after previous section. WHY?
   
@@ -1268,6 +1284,24 @@ void compile_function(void) {
 
   // return: 0 if ACC already is return value, else ';' (reload then return)
   emitreturn(ret_val_slot);
+
+  // frame high = last frame slot allocated for this function
+  {
+    char high = (char)(next_frame - 1);
+    char slots, k;
+    uchar uv = (uchar)vec_idx;
+    func_high[uv] = high;
+    slots = (char)(high - ret_addr_slot + 1);
+    printf("%-16s nparams=%d slots=%d base=%02x calls:",
+      func_name, nparams, slots, (uchar)ret_addr_slot);
+    for (k = 0; k < func_ncalls[uv]; k++) {
+      uchar c = (uchar)func_calls[uv][k];
+      printf(" %02x:%u", c, (uchar)func_high[c]);
+    }
+    if (func_ncalls[uv] == 0) printf(" -");
+    putchar('\n');
+  }
+  cur_vec = 0xff;
 }
 
 
@@ -1285,6 +1319,9 @@ int compile_pipeline(void) {
   nconst = 0;
   nvector = 0;
   npatch = 0;
+  cur_vec = (char)0xff;
+  memset(func_ncalls, 0, sizeof(func_ncalls));
+  memset(func_high, 0, sizeof(func_high));
   main_offset = 0;
   next_global = 0;
   next_frame  = FRAME_BASE;
