@@ -1646,8 +1646,7 @@ uchar *g_loaded;
 
 // ZP global (same layout as ProcessHead)
 ProcessHead zp;
-word *consts;
-word const_slot[256]; // absolute slot → value (PAR, no subtract)
+word *consts; // unused if PAR is mem-only
 uchar op;
 
 // append n bytes of data at *pp; return offset from base
@@ -1657,6 +1656,118 @@ static word memadd(uchar *base, uchar **pp, void *data, word n) {
     memcpy(*pp, data, n);
   *pp += n;
   return off;
+}
+
+
+// Process memory layout (after compile, before finalise):
+//   [hot globals by L][packed frames][cold globals][constants]
+// Remap bytecode operands; memsz = total cells. Nevm copies const words into mem[].
+// PAR is always mem[idx] — no separate const path in the dispatch loop.
+uchar slot_map[256];
+uchar slot_mapped[256];
+uchar layout_order[256]; // global: cc65 stack too small for local[256]
+word layout_memsz;
+uchar layout_next;
+
+void layout_process_mem(void) {
+  uchar i, j, norder, oldb, slots, k, base;
+
+  layout_next = 0;
+  norder = 0;
+  for (i = 0; i < 255; i++) {
+    slot_map[i] = i;
+    slot_mapped[i] = 0;
+  }
+
+  // 1) globals below FRAME_BASE, hottest loads first
+  for (i = 0; i < FRAME_BASE; i++)
+    if (slot_used[i] || slot_loads[i] || slot_stores[i])
+      layout_order[norder++] = i;
+  for (i = 0; i < norder; i++)
+    for (j = i + 1; j < norder; j++)
+      if (slot_loads[layout_order[j]] > slot_loads[layout_order[i]]) {
+        uchar t = layout_order[i];
+        layout_order[i] = layout_order[j];
+        layout_order[j] = t;
+      }
+  for (i = 0; i < norder; i++) {
+    slot_map[layout_order[i]] = layout_next;
+    slot_mapped[layout_order[i]] = 1;
+    layout_next++;
+  }
+
+  // 2) frames at emit-time bases
+  for (i = 0; i < nvector; i++) {
+    oldb = frame_base[i];
+    slots = func_slots[i];
+    if (!slots) continue;
+    for (k = 0; k < slots; k++) {
+      slot_map[oldb + k] = layout_next + k;
+      slot_mapped[oldb + k] = 1;
+    }
+    frame_base[i] = layout_next;
+    layout_next += slots;
+  }
+
+  // 3) leftover used non-const slots
+  for (i = 0; i < MAX_SLOTS; i++) {
+    if (slot_used[i] && !slot_mapped[i] && (i < constidx || constidx == 255)) {
+      slot_map[i] = layout_next++;
+      slot_mapped[i] = 1;
+    }
+  }
+
+  // 4) constants last: pool[i] at base+i
+  if (nconst) {
+    base = layout_next;
+    for (i = 0; i < nconst; i++) {
+      oldb = CONST_TOP - i;
+      slot_map[oldb] = base + i;
+      slot_mapped[oldb] = 1;
+    }
+    constidx = base;
+    layout_next += nconst;
+  }
+
+  layout_memsz = layout_next;
+  printf("layout: memsz=%u constidx=%u nconst=%d frames=%d\n",
+    (unsigned)layout_memsz, (unsigned)constidx, nconst, nvector);
+}
+
+void remap_bytecode(void) {
+  int i;
+  uchar c, a;
+  i = 0;
+  while (i < bin_ptr) {
+    c = bin[i++];
+    if (c < 32) {
+      if (slot_mapped[c] && slot_map[c] < 32)
+        bin[i - 1] = slot_map[c];
+    } else if (c == '"') {
+      while (i < bin_ptr && bin[i]) i++;
+      if (i < bin_ptr) i++;
+    } else if (c >= 0xC0) {
+      ;
+    } else if (c >= 0x80) {
+      ;
+    } else if (c == 'G' || c == 'B') {
+      if (i < bin_ptr) i++;
+    } else if (c == 'U') {
+      if (i + 1 < bin_ptr) {
+        a = bin[i];
+        if (slot_mapped[a]) bin[i] = slot_map[a];
+        a = bin[i + 1];
+        if (slot_mapped[a]) bin[i + 1] = slot_map[a];
+        i += 2;
+      }
+    } else if (strchr("LS+-*/%&|^[]{}@!IMFWZ=<>?", c)) {
+      if (i < bin_ptr) {
+        a = bin[i];
+        if (slot_mapped[a]) bin[i] = slot_map[a];
+        i++;
+      }
+    }
+  }
 }
 
 void finalise(void) {
@@ -1684,7 +1795,9 @@ void finalise(void) {
   h.main = h.code + main_offset;
 
   h.data = (word)(p - blob);
-  {
+  if (layout_memsz)
+    h.memsz = layout_memsz;
+  else {
     int top = 0;
     for (i = 0; i < MAX_SLOTS; i++)
       if (slot_used[i])
@@ -1760,6 +1873,21 @@ Process *Nevm(uchar *loaded) {
   p->h.fp = FP_MAIN;
   p->h.mem = p->mem;
   p->h.acc = 0;
+
+  // Install constants into process mem[] (PAR = mem[idx] only)
+  if (bh->constidx != 255 && bh->memsz > bh->constidx) {
+    word *pool;
+    word nc = bh->memsz - bh->constidx;
+    word i;
+    #ifdef __CC65__
+    pool = (word *)(unsigned)bh->con;
+    #else
+    pool = (word *)(loaded + bh->con);
+    #endif
+    // pool[i] lives at mem[constidx + i]
+    for (i = 0; i < nc; i++)
+      p->mem[bh->constidx + i] = pool[i];
+  }
   return p;
 }
 
@@ -1793,23 +1921,14 @@ unsigned int run_ivm(Process *p) {
   // load process head → ZP global
   memcpy(&zp, &p->h, sizeof(zp));
   zp.mem = p->mem;
-  {
-    word *pool;
-    uchar a;
-    #ifdef __CC65__
-    pool = (word *)(unsigned)zp.hdr.con;
-    #else
-    g_loaded = (uchar *)p->h.ipc - p->h.hdr.main;
-    pool = (word *)(g_loaded + zp.hdr.con);
-    #endif
-    // Map absolute const slots → values once (no subtract in PAR)
-    for (a = zp.hdr.constidx; a <= CONST_TOP && zp.hdr.constidx != 255; a++)
-      const_slot[a] = pool[CONST_TOP - a];
-    consts = const_slot;
-  }
+  #ifdef __CC65__
+  /* pool only used if needed elsewhere */
+  #else
+  g_loaded = (uchar *)p->h.ipc - p->h.hdr.main;
+  #endif
 
-  // consts[slot] already absolute-indexed
-  #define PAR ((*zp.ipc >= zp.hdr.constidx) ? consts[*zp.ipc] : zp.mem[*zp.ipc])
+  // Unified address space: consts were copied into mem[] by Nevm
+  #define PAR (zp.mem[*zp.ipc])
 
   goto xnext;
 
@@ -2368,6 +2487,8 @@ int main(int argc, char **argv) {
     }
   }
 
+  layout_process_mem();
+  remap_bytecode();
   finalise();
   dump_bytecode();
   dump_blob();

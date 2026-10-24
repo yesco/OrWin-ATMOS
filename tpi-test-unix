@@ -1,0 +1,1 @@
+clang tpi.c && (./a.out -O tp-test.p ; echo "--------------------" ; ./a.out tp-test.ivm)
