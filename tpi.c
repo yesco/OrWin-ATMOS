@@ -124,6 +124,12 @@
 typedef unsigned char uchar; // plain char is unsigned on cc65/oscar64/clang*-unsigned
 typedef uint16_t word; // blob / vector cell width (6502)
 
+#ifndef IVMVARTYPE
+#define IVMVARTYPE uint16_t
+#endif
+typedef IVMVARTYPE ivmvar;
+
+
 void note_load(uchar addr);
 void note_store(uchar addr);
 
@@ -136,14 +142,15 @@ extern word slot_refs[]; // def near slot_used
 #define TPDUMP
 
 // --- config
-#define MAX_SRC_LEN   8192
-#define MAX_BIN_LEN   2048
+#define MAX_SRC_LEN   (6*1024)
+#define MAX_BIN_LEN   (MAX_SRC_LEN/3)
 
 #define MAX_PATCHES    128
 
 // TODO: this is used for strings too? do NOT!
 
-#define MAX_SYM_LEN     64 // TODO: static do strdup
+#define MAX_TOK_LEN     32 // lexer / string literal cap
+#define MAX_SYM_LEN     MAX_TOK_LEN
 #define MAX_SYMBOLS     64
 
 // TOOO: this should not be hardcoded, just walk n items in table?
@@ -153,7 +160,7 @@ extern word slot_refs[]; // def near slot_used
 #define MAX_SLOTS      255 // Last one not used, is error
 #define MAX_CONSTS      64
 
-#define MAX_VECTORS     64 // # subroutines: opcodes 0xC0 .. 0xFF
+#define MAX_VECTORS     64 // func_calls is V*V
 
 // TODO: "REGISTER" prefix" or special loop-index variables?
 #define GLOBAL_LIMIT    96 // globals prefer low slots
@@ -238,7 +245,7 @@ Keyword keywords[] = {
 typedef struct {
   TokenType type;
   // TODO: this also used for strings, maybe strdup?
-  char lexeme[MAX_SYM_LEN + 1];
+  char lexeme[MAX_TOK_LEN + 1];
   int value;
 } Token;
 
@@ -272,6 +279,21 @@ const char *fail_msg;
 // Source / token state
 // ---------------------------------------------------------------------------
 char src_buf[MAX_SRC_LEN];
+char strpool[1024];
+int strpool_n;
+
+char *pool_str(const char *s) {
+  int n;
+  char *p;
+  for (n = 0; s[n]; n++)
+    ;
+  n++;
+  if (strpool_n + n > (int)sizeof(strpool)) FAIL("strpool full");
+  p = strpool + strpool_n;
+  memcpy(p, s, n);
+  strpool_n += n;
+  return p;
+}
 int src_pos = 0;
 int lnum = 1;
 int last_lnum = 0;
@@ -399,7 +421,7 @@ void add_patch(int offset, int kind, int value) {
 // ---------------------------------------------------------------------------
 // Slot allocation (globals 0-31, frames from 32)
 // ---------------------------------------------------------------------------
-unsigned int mem[MAX_SLOTS]; // runtime memory
+ivmvar mem[MAX_SLOTS]; // runtime / compile-time cell scratch
 char slot_used[MAX_SLOTS]; // allocation map
 word slot_loads[MAX_SLOTS];  // global loads  (L / fused) — want low indices
 word slot_stores[MAX_SLOTS]; // global stores (S) — future S# benefit
@@ -535,7 +557,7 @@ char *vptr[MAX_VECTORS]; // resolved entry pointers (finalise)
 char frame_base[MAX_VECTORS]; // subr# → fp base in mem (fixed per program)
 char func_high[MAX_VECTORS];  // highest slot used by function
 char func_slots[MAX_VECTORS];
-char func_names[MAX_VECTORS][MAX_SYM_LEN+1];
+char *func_names[MAX_VECTORS]; // strpool
 char func_ncalls[MAX_VECTORS]; // unique callees listed
 char func_calls[MAX_VECTORS][MAX_VECTORS];
 char func_nsites[MAX_VECTORS]; // how many times THIS func is called
@@ -575,13 +597,13 @@ int add_vector(int entry_offset) {
 typedef enum { SYM_VAR, SYM_FUNC } SymbolType;
 
 typedef struct {
-  char name[MAX_SYM_LEN + 1];
+  char *name; // in strpool
   SymbolType type;
-  char address; // slot number (var) or vector index (func)
-  char nparams; // number of parameters
-  char param_slot[MAX_PARAMS]; // slots for each parameter
-  char ret_slot; // for functions: slot of the return value
-  char ret_addr_slot; // for functions: slot that holds return ipc
+  uchar address; // slot or vector index
+  uchar nparams;
+  uchar param_slot[MAX_PARAMS];
+  uchar ret_slot;
+  uchar ret_addr_slot;
 } Symbol;
 
 Symbol syms[MAX_SYMBOLS];
@@ -589,7 +611,7 @@ char nsym = 0;
 
 void add_symbol(const char* name, SymbolType type, char address) {
   if (nsym >= MAX_SYMBOLS) FAIL("symbol table full");
-  strcpy(syms[nsym].name, name);
+  syms[nsym].name = pool_str(name);
   syms[nsym].type = type;
   syms[nsym].address = address;
   syms[nsym].nparams = 0;
@@ -1364,10 +1386,10 @@ void compile_function(void) {
     func_high[uv] = high;
     slots = (char)(high - ret_addr_slot + 1);
     func_slots[uv] = slots;
-    strcpy(func_names[uv], func_name);
+    func_names[uv] = pool_str(func_name);
     nbytes = bin_ptr - func_code0[uv];
     func_code_bytes[uv] = nbytes;
-    printf("%-16s nparams=%d slots=%d base=%02x code=%d sites=%u calls:",
+    printf("  %-16s nparams=%d slots=%d base=%02x code=%d sites=%u calls:",
       func_name, nparams, slots, ret_addr_slot, nbytes,
       (unsigned)func_nsites[uv]);
     for (k = 0; k < func_ncalls[uv]; k++) {
@@ -1502,6 +1524,7 @@ int compile_pipeline(void) {
   nsym = 0;
   nconst = 0;
   constidx = 255;
+  strpool_n = 0;
   memset(slot_loads, 0, sizeof(slot_loads));
   memset(slot_stores, 0, sizeof(slot_stores));
   nvector = 0;
@@ -1564,7 +1587,7 @@ int compile_pipeline(void) {
   // pack + phase report after main (call sites complete)
   {
     int slot_saved = 0;
-    int i;
+
     if (nvector)
       slot_saved = pack_frames();
     // refresh sites on function lines already printed — summary:
@@ -1630,13 +1653,13 @@ typedef struct ProcessHead {
   BlobHeader hdr;
   uchar *ipc;
   char fp;
-  unsigned int *mem;
-  unsigned int acc;
+  ivmvar *mem;
+  ivmvar acc;
 } ProcessHead;
 
 typedef struct Process {
   ProcessHead h;
-  unsigned int mem[1];
+  ivmvar mem[1];
 } Process;
 
 #define MAX_BLOB_LEN 4096
@@ -1696,17 +1719,51 @@ void layout_process_mem(void) {
     layout_next++;
   }
 
-  // 2) frames at emit-time bases
-  for (i = 0; i < nvector; i++) {
-    oldb = frame_base[i];
-    slots = func_slots[i];
-    if (!slots) continue;
-    for (k = 0; k < slots; k++) {
-      slot_map[oldb + k] = layout_next + k;
-      slot_mapped[oldb + k] = 1;
+  // 2) frames: share bands by opt_base (pack), map from emit-time frame_base
+  {
+    uchar *assigned= malloc(256);
+    uchar *band_sz= malloc(256);
+    uchar ob, nb;
+
+    for (i = 0; i < 255; i++) {
+      assigned[i] = 0xff;
+      band_sz[i] = 0;
     }
-    frame_base[i] = layout_next;
-    layout_next += slots;
+    // max slots per pack-base
+    for (i = 0; i < nvector; i++) {
+      ob = opt_base[i] ? opt_base[i] : frame_base[i];
+      if (func_slots[i] > band_sz[ob])
+        band_sz[ob] = func_slots[i];
+    }
+    for (i = 0; i < nvector; i++) {
+      ob = opt_base[i] ? opt_base[i] : frame_base[i];
+      oldb = frame_base[i];
+      slots = func_slots[i];
+      if (!slots) continue;
+      if (assigned[ob] == 0xff) {
+        assigned[ob] = layout_next;
+        layout_next += band_sz[ob];
+      }
+      nb = assigned[ob];
+      for (k = 0; k < slots; k++) {
+        slot_map[oldb + k] = nb + k;
+        slot_mapped[oldb + k] = 1;
+      }
+      frame_base[i] = nb;
+      // update func symbols' slots for dump
+      for (j = 0; j < nsym; j++) {
+        if (syms[j].type == SYM_FUNC && syms[j].address == i) {
+          if (syms[j].ret_addr_slot != 0xff)
+            syms[j].ret_addr_slot = nb + FR_RET;
+          if (syms[j].ret_slot != 0xff)
+            syms[j].ret_slot = nb + FR_VAL;
+          for (k = 0; k < syms[j].nparams; k++)
+            syms[j].param_slot[k] = nb + FR_PREV + 1 + k;
+        }
+      }
+    }
+    free(assigned);
+    free(band_sz);
   }
 
   // 3) leftover used non-const slots
@@ -1857,7 +1914,7 @@ Process *Nevm(uchar *loaded) {
   cells = bh->memsz;
   if (!cells) cells = MAX_SLOTS;
 
-  bytes = (unsigned int)(sizeof(ProcessHead) + cells * sizeof(unsigned int));
+  bytes = (unsigned int)(sizeof(ProcessHead) + cells * sizeof(ivmvar));
   p = (Process *)calloc(1, bytes);
   if (!p) {
     printf("calloc fail %u bytes (%u slots)\n", bytes, cells);
@@ -1908,7 +1965,7 @@ Process *Nevm(uchar *loaded) {
 // 26: a-z  : OrwinOS API
 // 64: 00-3f: conditional relative jump forward
 // 64: (xx) : vector calls   
-unsigned int run_ivm(Process *p) {
+ivmvar run_ivm(Process *p) {
   // Classic single-switch + goto dispatch (ivm.c style).
   // - opcode 'X' = return keep ACC; 'Q' = return 0; ';' = load ret then return
   // - 0x00..0x1F = fused load mem[n]; '1'..'8' = load mem[fp+k]
@@ -2233,7 +2290,8 @@ void dump_blob(void) {
   printf("CONSTANTS  (%d)\n", nconst);
   w = (uint16_t *)(blob + h->con);
   for (i = 0; i < nconst; i++)
-    printf("  C%02x   %5u  ($%04x)\n", 0x80 + i, w[i], w[i]);
+    printf("  C%02x   %5u  ($%04x)\n",
+      (constidx != 255) ? (constidx + i) : (0x80 + i), w[i], w[i]);
 
   printf("FRAME BASES  (%d)\n", nvector);
   p = blob + h->fp;
@@ -2489,8 +2547,9 @@ int main(int argc, char **argv) {
 
   layout_process_mem();
   remap_bytecode();
-  finalise();
+  printf("--- BYTECODE after layout/remap ---\n");
   dump_bytecode();
+  finalise();
   dump_blob();
 
   ivm_name_from(outname, filename);
