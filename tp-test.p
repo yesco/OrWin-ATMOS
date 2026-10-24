@@ -18,10 +18,14 @@ begin
    Two := a + b;
 end;
 
-{ == 3a + 3b }
-function Locals(a : integer; b: integer) : integer;
+function Local1(a : integer; b: integer) : integer;
 begin
-   Two := a; { + a + b + a + b + a; }
+   Two := a;
+end;
+
+function LocalLast(a : integer; b: integer) : integer;
+begin
+   Two := b;
 end;
 
 FUNCTION TestMath(a: INTEGER; b: INTEGER): INTEGER;
@@ -201,4 +205,3 @@ begin
    writeln(TestWrites());
    { TestWrites(); }
 end.
-

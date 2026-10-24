@@ -151,7 +151,7 @@ extern word slot_refs[]; // def near slot_used
 
 #define MAX_TOK_LEN     32 // lexer / string literal cap
 #define MAX_SYM_LEN     MAX_TOK_LEN
-#define MAX_SYMBOLS     64
+#define MAX_SYMBOLS    128
 
 // TOOO: this should not be hardcoded, just walk n items in table?
 #define MAX_PARAMS       4 // max arguments per function
@@ -438,7 +438,9 @@ void note_store(uchar addr) {
 
 
 char next_global = 0; // next candidate for globals
-char next_frame  = FRAME_BASE; // next candidate for frames
+char next_frame  = FRAME_BASE;
+uchar x_slot_compile;
+uchar x_slot_runtime;
 
 char alloc_global(void) {
   while (next_global < GLOBAL_LIMIT) {
@@ -622,8 +624,27 @@ void add_symbol(const char* name, SymbolType type, char address) {
 
 Symbol* lookup_sym(const char* name) {
   int i;
+  if (cur_vec != (char)0xff) {
+    uchar base = (uchar)frame_base[(uchar)cur_vec];
+    uchar top = (uchar)next_frame;
+    for (i = nsym - 1; i >= 0; i--) {
+      if (syms[i].type == SYM_VAR && strcmp(syms[i].name, name) == 0) {
+        uchar a = (uchar)syms[i].address;
+        if (a >= base && a < top)
+          return &syms[i];
+      }
+    }
+  }
   for (i = nsym - 1; i >= 0; i--)
-    if (strcmp(syms[i].name, name) == 0) return &syms[i];
+    if (syms[i].type == SYM_VAR && strcmp(syms[i].name, name) == 0
+        && (uchar)syms[i].address < (uchar)FRAME_BASE)
+      return &syms[i];
+  for (i = nsym - 1; i >= 0; i--)
+    if (syms[i].type == SYM_VAR && strcmp(syms[i].name, name) == 0)
+      return &syms[i];
+  for (i = nsym - 1; i >= 0; i--)
+    if (syms[i].type == SYM_FUNC && strcmp(syms[i].name, name) == 0)
+      return &syms[i];
   return NULL;
 }
 
@@ -860,13 +881,16 @@ void primary(char *out_acc, char *out_addr) {
     next_token();
     if (curr_tok.type == '(') type= SYM_FUNC;
     
-    // search backwards (lexical!)
-    for (i = nsym - 1; i >= 0; i--) {
-      if (strcmp(syms[i].name, name) == 0 && syms[i].type == type) {
-        sym= syms+i; break;
-      }
-    }
+    if (type == SYM_FUNC) {
+      for (i = nsym - 1; i >= 0; i--)
+        if (syms[i].type == SYM_FUNC && strcmp(syms[i].name, name) == 0) {
+          sym = &syms[i]; break;
+        }
+    } else
+      sym = lookup_sym(name);
     if (!sym) FAIL("Undeclared identifier");
+    if (type == SYM_FUNC && sym->type != SYM_FUNC) FAIL("Undeclared identifier");
+    if (type == SYM_VAR && sym->type != SYM_VAR) FAIL("Undeclared identifier");
 
     // FUNCALL ( ... )
     // TODO: WARNING: foo(2, foo(3,4)) will do wrong!
@@ -1100,17 +1124,8 @@ int statement(void) {
           emit(0);
           last_was_str = 1;
         } else {
-          int pos = bin_ptr;
           expression();
-          // "poophole" Lxx. => Wxx
-          if (bin_ptr - pos == 2 && bin[pos] == 'L')
-            bin[pos] = 'W';
-          else if (bin_ptr - pos == 1 && bin[pos] < 32)
-            emitop('.'); // fused load already in ACC
-          else if (bin_ptr - pos == 1 && bin[pos] >= '1' && bin[pos] <= '8')
-            emitop('.');
-          else
-            emitop('.');
+          emitop('.'); // always print ACC
         }
         nargs++;
         if (curr_tok.type != ',')
@@ -1420,6 +1435,8 @@ int pack_frames(void) {
   int i, j, changed, iter;
   int seq_top, pack_top, saved;
   uchar b, h, c;
+  uchar *band_max = (uchar *)malloc(256);
+  if (!band_max) FAIL("malloc band_max");
 
   for (i = 0; i < nvector; i++)
     opt_base[i] = FRAME_BASE;
@@ -1431,16 +1448,31 @@ int pack_frames(void) {
         c = func_calls[i][j];
         h = func_high[c];
         if ((int)h + 1 > (int)b)
-          b = (h + 1);
+          b = (uchar)(h + 1);
       }
       if (opt_base[i] != (char)b) {
         opt_base[i] = (char)b;
         changed = 1;
       }
-      func_high[i] = (char)(opt_base[i] + func_slots[i] - 1);
+    }
+    // shared base → one band high (avoids partial overlap / slot_map clash)
+    for (i = 0; i < 255; i++)
+      band_max[i] = 0;
+    for (i = 0; i < nvector; i++) {
+      b = (uchar)opt_base[i];
+      if (func_slots[i] > band_max[b])
+        band_max[b] = func_slots[i];
+    }
+    for (i = 0; i < nvector; i++) {
+      uchar nh = (uchar)(opt_base[i] + band_max[(uchar)opt_base[i]] - 1);
+      if (func_high[i] != (char)nh) {
+        func_high[i] = (char)nh;
+        changed = 1;
+      }
     }
     if (!changed) break;
   }
+  free(band_max);
   seq_top = FRAME_BASE - 1;
   pack_top = FRAME_BASE - 1;
   for (i = 0; i < nvector; i++) {
@@ -1541,6 +1573,8 @@ int compile_pipeline(void) {
   main_offset = 0;
   next_global = 0;
   next_frame  = FRAME_BASE;
+  x_slot_compile = 0xff;
+  x_slot_runtime = 0xff;
   memset(slot_used, 0, sizeof(slot_used));
   memset(mem, 0, sizeof(mem));
   memset(is_code_addr, 0, sizeof(is_code_addr));
@@ -1548,10 +1582,11 @@ int compile_pipeline(void) {
   // Functions are emitted first; main_entry is set when we reach BEGIN.
   // finalise() resolves main_entry to a direct pointer — no absolute G opcode.
 
-  // implicit X (global)
   {
     char xslot = alloc_global();
     add_symbol("X", SYM_VAR, xslot);
+    x_slot_compile = (uchar)xslot;
+    x_slot_runtime = (uchar)xslot;
   }
 
   next_token();
@@ -1571,10 +1606,18 @@ int compile_pipeline(void) {
     }
   }
 
-  // main program
+  // main temps ABOVE every function frame (-O pack overlap fix)
+  {
+    uchar ti, top = (uchar)FRAME_BASE;
+    for (ti = 0; ti < nvector; ti++) {
+      uchar t = (uchar)(frame_base[ti] + func_slots[ti]);
+      if (t > top) top = t;
+    }
+    next_frame = top;
+  }
+
   EXPECT(TOK_BEGIN);
 
-  // record main entry offset (resolved to a pointer in finalise)
   main_offset = bin_ptr;
 
   while (curr_tok.type != TOK_END && curr_tok.type != TOK_EOF) {
@@ -1593,7 +1636,7 @@ int compile_pipeline(void) {
   {
     int slot_saved = 0;
 
-    if (nvector)
+    if (nvector && opt_pass == 0)
       slot_saved = pack_frames();
     // refresh sites on function lines already printed — summary:
     print_reg_stats();
@@ -1650,7 +1693,8 @@ typedef struct BlobHeader {
   word con;
   word data;
   word memsz;
-  word constidx; // lowest const slot (not relocated)
+  word constidx;
+  word xslot; // inject X=42 here at Nevm, 0xffff=none
 } BlobHeader;
 
 // Process head — layout of ZP image (memcpy in/out of run_ivm)
@@ -1724,38 +1768,40 @@ void layout_process_mem(void) {
     layout_next++;
   }
 
-  // 2) frames: share bands by opt_base (pack), map from emit-time frame_base
+  // 2) frames: share by emit frame_base only (not recomputed opt_base)
   {
-    uchar *assigned= malloc(256);
-    uchar *band_sz= malloc(256);
-    uchar ob, nb;
-
+    uchar *assigned = (uchar *)malloc(256);
+    uchar *band_sz = (uchar *)malloc(256);
+    uchar *mapped_band = (uchar *)malloc(256);
+    uchar nb;
+    if (!assigned || !band_sz || !mapped_band) FAIL("malloc layout");
     for (i = 0; i < 255; i++) {
       assigned[i] = 0xff;
       band_sz[i] = 0;
-    }
-    // max slots per pack-base
-    for (i = 0; i < nvector; i++) {
-      ob = opt_base[i] ? opt_base[i] : frame_base[i];
-      if (func_slots[i] > band_sz[ob])
-        band_sz[ob] = func_slots[i];
+      mapped_band[i] = 0;
     }
     for (i = 0; i < nvector; i++) {
-      ob = opt_base[i] ? opt_base[i] : frame_base[i];
+      oldb = frame_base[i];
+      if (func_slots[i] > band_sz[oldb])
+        band_sz[oldb] = func_slots[i];
+    }
+    for (i = 0; i < nvector; i++) {
       oldb = frame_base[i];
       slots = func_slots[i];
       if (!slots) continue;
-      if (assigned[ob] == 0xff) {
-        assigned[ob] = layout_next;
-        layout_next += band_sz[ob];
+      if (assigned[oldb] == 0xff) {
+        assigned[oldb] = layout_next;
+        layout_next += band_sz[oldb];
       }
-      nb = assigned[ob];
-      for (k = 0; k < slots; k++) {
-        slot_map[oldb + k] = nb + k;
-        slot_mapped[oldb + k] = 1;
+      nb = assigned[oldb];
+      if (!mapped_band[oldb]) {
+        for (k = 0; k < band_sz[oldb]; k++) {
+          slot_map[oldb + k] = nb + k;
+          slot_mapped[oldb + k] = 1;
+        }
+        mapped_band[oldb] = 1;
       }
       frame_base[i] = nb;
-      // update func symbols' slots for dump
       for (j = 0; j < nsym; j++) {
         if (syms[j].type == SYM_FUNC && syms[j].address == i) {
           if (syms[j].ret_addr_slot != 0xff)
@@ -1769,6 +1815,7 @@ void layout_process_mem(void) {
     }
     free(assigned);
     free(band_sz);
+    free(mapped_band);
   }
 
   // 3) leftover used non-const slots
@@ -1792,8 +1839,13 @@ void layout_process_mem(void) {
   }
 
   layout_memsz = layout_next;
-  printf("layout: memsz=%u constidx=%u nconst=%d frames=%d\n",
-    (unsigned)layout_memsz, (unsigned)constidx, nconst, nvector);
+  if (x_slot_compile != 0xff && slot_mapped[x_slot_compile])
+    x_slot_runtime = slot_map[x_slot_compile];
+  else
+    x_slot_runtime = x_slot_compile;
+  printf("layout: memsz=%u constidx=%u nconst=%d frames=%d x@%u\n",
+    (unsigned)layout_memsz, (unsigned)constidx, nconst, nvector,
+    (unsigned)x_slot_runtime);
 }
 
 void remap_bytecode(void) {
@@ -1803,8 +1855,26 @@ void remap_bytecode(void) {
   while (i < bin_ptr) {
     c = bin[i++];
     if (c < 32) {
-      if (slot_mapped[c] && slot_map[c] < 32)
-        bin[i - 1] = slot_map[c];
+      // fused load: remap; if target >=32 expand to L+slot (never leave 0x60 as opcode)
+      if (slot_mapped[c]) {
+        uchar d = slot_map[c];
+        if (d < 32)
+          bin[i - 1] = d;
+        else {
+          // need 2 bytes: insert L, d — shift tail
+          int j;
+          if (bin_ptr >= MAX_BIN_LEN - 1) FAIL("bytecode overflow remap");
+          for (j = bin_ptr; j >= i; j--)
+            bin[j] = bin[j - 1];
+          bin_ptr++;
+          bin[i - 1] = 'L';
+          bin[i] = d;
+          i++; // skip operand
+          for (j = 0; j < nvector; j++)
+            if (vectors[j] >= i) vectors[j]++;
+          if (main_offset >= i) main_offset++;
+        }
+      }
     } else if (c == '"') {
       while (i < bin_ptr && bin[i]) i++;
       if (i < bin_ptr) i++;
@@ -1867,6 +1937,7 @@ void finalise(void) {
     h.memsz = (word)(top + 1);
   }
   h.constidx = (word)constidx;
+  h.xslot = (x_slot_runtime == 0xff) ? (word)0xffff : (word)x_slot_runtime;
 
   // fill call table: code entry offsets (blob-absolute before loader +base)
   for (i = 0; i < nvector; i++)
@@ -1895,6 +1966,7 @@ void loader(uchar *base) {
   save_memsz = h->memsz; // NOT an offset
   {
     word save_ci = h->constidx;
+    word save_xs = h->xslot;
 
   v = (word *)base;
   while (*v) {
@@ -1906,6 +1978,7 @@ void loader(uchar *base) {
 
   h->memsz = save_memsz;
   h->constidx = save_ci;
+  h->xslot = save_xs;
   }
 }
 
@@ -1935,6 +2008,8 @@ Process *Nevm(uchar *loaded) {
   p->h.fp = FP_MAIN;
   p->h.mem = p->mem;
   p->h.acc = 0;
+  { word xs = p->h.hdr.xslot;
+    if (xs != 0xffff && xs < p->h.hdr.memsz) p->mem[xs] = 42; }
 
   // Install constants into process mem[] (PAR = mem[idx] only)
   if (bh->constidx != 255 && bh->memsz > bh->constidx) {
@@ -2136,8 +2211,8 @@ ivmvar run_ivm(Process *p) {
     // relative jumps (byte code stats: jvm p-code etc)
     //     0-15: 70-75%, 0-31: 85-90%, 32+: 10-15
 
-  case 'G': if ((int)zp.acc > 0) zp.ipc += *zp.ipc;    goto pnext;
-  case 'B':                      zp.ipc -= *zp.ipc;    goto pnext;
+  case 'G': if ((int16_t)zp.acc > 0) zp.ipc += *zp.ipc; goto pnext;
+  case 'B':                        zp.ipc -= *zp.ipc;    goto pnext;
     
   default:
     if (op >= 0x80) {
