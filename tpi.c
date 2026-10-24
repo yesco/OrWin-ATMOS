@@ -121,7 +121,7 @@
 #include <setjmp.h>
 #include <stdint.h>
 
-typedef unsigned char uchar;
+typedef unsigned char uchar; // plain char is unsigned on cc65/oscar64/clang*-unsigned
 typedef uint16_t word; // blob / vector cell width (6502)
 #include <assert.h>
 
@@ -467,8 +467,8 @@ char add_const(unsigned int v) {
   return 0x80 | nconst++;
 }
 
-#define isconst(a) ((unsigned char)(a) >= 0x80)
-#define const_val(a) (const_pool[(unsigned char)(a) - 0x80])
+#define isconst(a) ((uchar)(a) >= 0x80)
+#define const_val(a) (const_pool[(uchar)(a) - 0x80])
 
 // Literals 0 / -1: not pooled until needed as an op address (RHS of + etc.)
 #define IMM0 ((char)0xfe)
@@ -710,7 +710,7 @@ void expect(TokenType expected) {
 //   frame+1..+8   -> '1'..'8'  (fp-relative local)
 //   else          -> 'L' + slot
 void emitload(char in_acc, char addr) {
-  unsigned char ua;
+  uchar ua, base, rel;
   if (in_acc) return;
   if (acc_valid && acc_slot == addr) return;
 
@@ -725,21 +725,21 @@ void emitload(char in_acc, char addr) {
     return;
   }
 
-  ua = (unsigned char)addr;
+  ua = addr;
 
   // fused absolute load slots 0..31
   if (ua < 32) {
-    emit((char)ua);
+    emit(ua);
     acc_set_slot(addr);
     return;
   }
 
   // frame-relative locals '1'..'8' (fp+1 .. fp+8)
   if (cur_vec != (char)0xff) {
-    unsigned char base = (unsigned char)frame_base[(unsigned char)cur_vec];
-    unsigned char rel = (unsigned char)(ua - base);
+    base = frame_base[cur_vec];
+    rel = ua - base;
     if (rel >= 1 && rel <= 8) {
-      emit((char)('0' + rel));
+      emit('0' + rel);
       acc_set_slot(addr);
       return;
     }
@@ -833,11 +833,11 @@ void primary(char *out_acc, char *out_addr) {
       emitop((char)(0xC0 | (sym->address & 0x3F)));
       {
         char cv = (char)(sym->address & 0x3F);
-        unsigned char uc = (unsigned char)cv;
+        uchar uc = cv;
         func_nsites[uc]++;
         if (cur_vec != (char)0xff) {
           char k, found = 0;
-          unsigned char uv = (unsigned char)cur_vec;
+          uchar uv = cur_vec;
           for (k = 0; k < func_ncalls[uv]; k++)
             if (func_calls[uv][k] == cv) { found = 1; break; }
           if (!found && func_ncalls[uv] < MAX_VECTORS)
@@ -1050,7 +1050,7 @@ int statement(void) {
           // "poophole" Lxx. => Wxx
           if (bin_ptr - pos == 2 && bin[pos] == 'L')
             bin[pos] = 'W';
-          else if (bin_ptr - pos == 1 && (unsigned char)bin[pos] < 32)
+          else if (bin_ptr - pos == 1 && bin[pos] < 32)
             emitop('.'); // fused load already in ACC
           else if (bin_ptr - pos == 1 && bin[pos] >= '1' && bin[pos] <= '8')
             emitop('.');
@@ -1331,7 +1331,7 @@ void compile_function(void) {
   {
     char high = (char)(next_frame - 1);
     char slots, k;
-    uchar uv = (uchar)vec_idx;
+    uchar uv = vec_idx;
     int nbytes, delta;
     func_high[uv] = high;
     slots = (char)(high - ret_addr_slot + 1);
@@ -1340,11 +1340,11 @@ void compile_function(void) {
     nbytes = bin_ptr - func_code0[uv];
     func_code_bytes[uv] = nbytes;
     printf("%-16s nparams=%d slots=%d base=%02x code=%d sites=%u calls:",
-      func_name, nparams, slots, (uchar)ret_addr_slot, nbytes,
+      func_name, nparams, slots, ret_addr_slot, nbytes,
       (unsigned)func_nsites[uv]);
     for (k = 0; k < func_ncalls[uv]; k++) {
-      uchar c = (uchar)func_calls[uv][k];
-      printf(" %02x:%u", c, (uchar)func_high[c]);
+      uchar c = func_calls[uv][k];
+      printf(" %02x:%u", c, func_high[c]);
     }
     if (func_ncalls[uv] == 0) printf(" -");
     if (opt_pass > 0) {
@@ -1364,7 +1364,7 @@ void compile_function(void) {
 int pack_frames(void) {
   int i, j, changed, iter;
   int seq_top, pack_top, saved;
-  unsigned char b, h, c;
+  uchar b, h, c;
 
   for (i = 0; i < nvector; i++)
     opt_base[i] = FRAME_BASE;
@@ -1373,10 +1373,10 @@ int pack_frames(void) {
     for (i = 0; i < nvector; i++) {
       b = FRAME_BASE;
       for (j = 0; j < func_ncalls[i]; j++) {
-        c = (unsigned char)func_calls[i][j];
-        h = (unsigned char)func_high[c];
+        c = func_calls[i][j];
+        h = func_high[c];
         if ((int)h + 1 > (int)b)
-          b = (unsigned char)(h + 1);
+          b = (h + 1);
       }
       if (opt_base[i] != (char)b) {
         opt_base[i] = (char)b;
@@ -1389,9 +1389,9 @@ int pack_frames(void) {
   seq_top = FRAME_BASE - 1;
   pack_top = FRAME_BASE - 1;
   for (i = 0; i < nvector; i++) {
-    h = (unsigned char)(frame_base[i] + func_slots[i] - 1);
+    h = (frame_base[i] + func_slots[i] - 1);
     if ((int)h > seq_top) seq_top = h;
-    h = (unsigned char)func_high[i];
+    h = func_high[i];
     if ((int)h > pack_top) pack_top = h;
   }
   saved = seq_top - pack_top;
@@ -1402,7 +1402,7 @@ int pack_frames(void) {
 int estimate_s12_save(void) {
   int i, n = 0;
   for (i = 0; i < bin_ptr - 1; i++)
-    if ((bin[i] == 'L' || bin[i] == 'S') && (unsigned char)bin[i + 1] < 16)
+    if ((bin[i] == 'L' || bin[i] == 'S') && bin[i + 1] < 16)
       n++;
   return n;
 }
@@ -1410,7 +1410,7 @@ int estimate_s12_save(void) {
 int estimate_slot32_save(void) {
   int i, n = 0;
   for (i = 0; i < bin_ptr - 1; i++)
-    if ((bin[i] == 'L' || bin[i] == 'S') && (unsigned char)bin[i + 1] < 32)
+    if ((bin[i] == 'L' || bin[i] == 'S') && bin[i + 1] < 32)
       n++;
   return n;
 }
@@ -1471,7 +1471,7 @@ int compile_pipeline(void) {
     if (curr_tok.type == TOK_VAR) {
       parsevars(0);
       if (nsym > 0 && syms[nsym - 1].type == SYM_VAR)
-        last_var_slot = (unsigned char)syms[nsym - 1].address;
+        last_var_slot = syms[nsym - 1].address;
     }
     else { // FUNCTION
       compile_function();
@@ -1793,7 +1793,7 @@ unsigned int run_ivm(Process *p) {
   // frame-relative load fp+1 .. fp+8
   case '1': case '2': case '3': case '4':
   case '5': case '6': case '7': case '8':
-    zp.acc = zp.mem[(unsigned char)zp.fp + (op - '0')];
+    zp.acc = zp.mem[zp.fp + (op - '0')];
     goto xnext;
 
     // ---- parameter ops ----
@@ -1935,8 +1935,8 @@ void dump_bytecode(void) {
   printf("\n--- BYTECODE (%d bytes) ---\n", bin_ptr);
   for (; i < bin_ptr; i++) {
     char c = bin[i];
-    if ((unsigned char)c < 32) {
-      printf("#%02x ", (unsigned char)c);
+    if (c < 32) {
+      printf("#%02x ", c);
     }
     else if (c >= 0xC0) printf("(%02x)", c - 0xC0);
     else if (c >= 0x80) printf("<%02x>", c - 0x80);
@@ -1961,7 +1961,7 @@ void dump_bytecode(void) {
         } else
           printf("%c%02x ", c, bin[++i]);
     }
-    else printf("$%02x ", (unsigned char)c);
+    else printf("$%02x ", c);
     if (c == 'N' || ++n == wrap) { printf("\n"); n= 0; }
   }
 
@@ -1992,7 +1992,7 @@ void dump_bytecode(void) {
 
 void dump_blob(void) {
   BlobHeader *h;
-  unsigned char *p;
+  uchar *p;
   uint16_t *w;
   int i, j, ncall, nbytes;
   Symbol *s;
@@ -2022,7 +2022,7 @@ void dump_blob(void) {
     }
     s = 0;
     for (j = 0; j < nsym; j++)
-      if (syms[j].type == SYM_FUNC && (unsigned char)syms[j].address == i) {
+      if (syms[j].type == SYM_FUNC && syms[j].address == i) {
         s = &syms[j];
         break;
       }
@@ -2042,7 +2042,7 @@ void dump_blob(void) {
   for (i = 0; i < nvector; i++) {
     s = 0;
     for (j = 0; j < nsym; j++)
-      if (syms[j].type == SYM_FUNC && (unsigned char)syms[j].address == i) {
+      if (syms[j].type == SYM_FUNC && syms[j].address == i) {
         s = &syms[j];
         break;
       }
@@ -2050,11 +2050,11 @@ void dump_blob(void) {
     if (s) {
       printf("  %-12s", s->name);
       if (s->ret_addr_slot != 0xff)
-        printf("  RETURN@%-3u", (unsigned char)s->ret_addr_slot);
+        printf("  RETURN@%-3u", s->ret_addr_slot);
       if (s->ret_slot != 0xff)
-        printf("  RETVAL@%-3u", (unsigned char)s->ret_slot);
+        printf("  RETVAL@%-3u", s->ret_slot);
       for (j = 0; j < s->nparams; j++)
-        printf("  p%d@%-3u", j, (unsigned char)s->param_slot[j]);
+        printf("  p%d@%-3u", j, s->param_slot[j]);
     }
     printf("\n");
   }
@@ -2062,7 +2062,7 @@ void dump_blob(void) {
   printf("MEM SLOTS  (all used, memsz=%u)\n", h->memsz);
   {
     int tmpn = 0;
-    unsigned char *fb = blob + h->fp;
+    uchar *fb = blob + h->fp;
     for (i = 0; i < (int)h->memsz; i++) {
       int any = 0;
       int role = 0; // 1=RETURN 2=RETVAL 3=FP
@@ -2070,13 +2070,13 @@ void dump_blob(void) {
         continue;
       printf("  %3u ", i);
       for (j = 0; j < nsym; j++) {
-        if (syms[j].type == SYM_VAR && (unsigned char)syms[j].address == i) {
+        if (syms[j].type == SYM_VAR && syms[j].address == i) {
           printf(" %s", syms[j].name);
           any = 1;
         }
       }
       for (j = 0; j < nvector; j++) {
-        unsigned char base = fb[j];
+        uchar base = fb[j];
         if (i == base + FR_RET)
           role = 1;
         else if (i == base + FR_VAL)
