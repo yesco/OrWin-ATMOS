@@ -244,8 +244,8 @@ Keyword keywords[] = {
 
 typedef struct {
   TokenType type;
-  // TODO: this also used for strings, maybe strdup?
-  char lexeme[MAX_TOK_LEN + 1];
+  char lexeme[MAX_TOK_LEN + 1]; // idents / numbers only
+  char *str; // TOK_STRING → strpool (not limited by MAX_TOK_LEN)
   int value;
 } Token;
 
@@ -672,17 +672,22 @@ void next_token(void) {
     return;
   }
 
-  // STRING
+  // STRING — body lives in strpool (no MAX_TOK_LEN limit)
   if (C == '"' || C == '\'') {
+    int start;
     quote_char = C;
     NEXT;
-    len = 0;
-    while (C && C != quote_char && len < MAX_SYM_LEN) {
-      curr_tok.lexeme[len++] = C;
+    start = strpool_n;
+    while (C && C != quote_char) {
+      if (strpool_n >= (int)sizeof(strpool) - 1) FAIL("strpool full");
+      strpool[strpool_n++] = C;
       NEXT;
     }
+    strpool[strpool_n++] = 0;
     if (C == quote_char) NEXT;
-    curr_tok.lexeme[len] = 0;
+    else FAIL("unclosed string");
+    curr_tok.str = strpool + start;
+    curr_tok.lexeme[0] = 0;
     curr_tok.type = TOK_STRING;
     return;
   }
@@ -1086,8 +1091,8 @@ int statement(void) {
         if (curr_tok.type == TOK_STRING) {
           // inline string
           emitop('"');
-          for (i = 0; curr_tok.lexeme[i]; i++)
-            emit(curr_tok.lexeme[i]);
+          for (i = 0; curr_tok.str && curr_tok.str[i]; i++)
+            emit(curr_tok.str[i]);
           // WRITELN + last arg decided after loop; stash string open, close later
           // emit terminator after optional \n once we know if this is last
           EXPECT(TOK_STRING);
@@ -2194,7 +2199,7 @@ void dump_bytecode(void) {
       printf("#%02x ", c);
     }
     else if (c >= 0xC0) printf("(%02x)", c - 0xC0);
-    else if (c >= constidx && c <= CONST_TOP) printf("C%02x ", c);
+    else if (c <  32)    printf("<%02x>", c);
 
     else if (c == ' ')  printf("_   ");
     else if (c == '"') {

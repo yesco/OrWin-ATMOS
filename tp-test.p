@@ -18,6 +18,12 @@ begin
    Two := a + b;
 end;
 
+{ == 3a + 3b }
+function Locals(a : integer; b: integer) : integer;
+begin
+   Two := a; { + a + b + a + b + a; }
+end;
+
 FUNCTION TestMath(a: INTEGER; b: INTEGER): INTEGER;
 BEGIN
   { Standard baseline tests }
