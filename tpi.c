@@ -353,7 +353,7 @@ void emitreturn(char ret_slot) {
     if (bin_ptr >= 2 && bin[bin_ptr - 2] == 'S' && bin[bin_ptr - 1] == ret_slot)
       bin_ptr -= 2;
 
-    emitop(0); // return, keep ACC
+    emitop('X'); // return, keep ACC
 
   } else if (0 && bin_ptr >= 2 && bin[bin_ptr - 2] == 'Z' && bin[bin_ptr - 1] == ret_slot) {
     // TODO: IF == NOT CORRECT!
@@ -369,12 +369,13 @@ void emitreturn(char ret_slot) {
     // LOL: restore '0'
     bin_ptr -= 2;
     // TODO: 0 return, 1 return, -1 return?
-    emitop('0');
-    emitop(0);
+    emitop('Q'); // ACC=0; return
 
+  } else if (acc_valid && acc_slot == (char)0xfe) {
+    emitop('Q'); // return 0
   } else
-    // Normal return
-    emitop(';'); // ACC <- ret_val, then return
+    // Normal return: ACC <- ret_val, then return
+    emitop(';');
 }
 
 void add_patch(int offset, int kind, int value) {
@@ -702,15 +703,20 @@ void expect(TokenType expected) {
 // ---------------------------------------------------------------------------
 #define is_acc(k) ((k) == 0)
 
-// Ensure ACC holds addr (or already holds the value).
-// Skips emit if ACC already mirrors addr; uses opcodes 0/9 for ±0 literals.
+// Ensure ACC holds value at addr (or already holds it).
+// Encoding (smallest first):
+//   IMM0/IMM1     -> '0' / '9'
+//   slot 0..31    -> single byte 0x00..0x1F  (fused load)
+//   frame+1..+8   -> '1'..'8'  (fp-relative local)
+//   else          -> 'L' + slot
 void emitload(char in_acc, char addr) {
+  unsigned char ua;
   if (in_acc) return;
   if (acc_valid && acc_slot == addr) return;
 
   if (addr == IMM0 || (isconst(addr) && const_val(addr) == 0)) {
-    emitop('0');           // raw — avoid emitop invalidate then re-set
-    acc_set_slot(IMM0);  // next emitload(IMM0) is free
+    emitop('0');
+    acc_set_slot(IMM0);
     return;
   }
   if (addr == IMM1 || (isconst(addr) && const_val(addr) == (unsigned int)-1)) {
@@ -718,7 +724,28 @@ void emitload(char in_acc, char addr) {
     acc_set_slot(IMM1);
     return;
   }
-  emitop2('L', addr);    // L sets acc_slot via emitop2
+
+  ua = (unsigned char)addr;
+
+  // fused absolute load slots 0..31
+  if (ua < 32) {
+    emit((char)ua);
+    acc_set_slot(addr);
+    return;
+  }
+
+  // frame-relative locals '1'..'8' (fp+1 .. fp+8)
+  if (cur_vec != (char)0xff) {
+    unsigned char base = (unsigned char)frame_base[(unsigned char)cur_vec];
+    unsigned char rel = (unsigned char)(ua - base);
+    if (rel >= 1 && rel <= 8) {
+      emit((char)('0' + rel));
+      acc_set_slot(addr);
+      return;
+    }
+  }
+
+  emitop2('L', addr);
 }
 
 int lastv= -666;
@@ -1023,6 +1050,10 @@ int statement(void) {
           // "poophole" Lxx. => Wxx
           if (bin_ptr - pos == 2 && bin[pos] == 'L')
             bin[pos] = 'W';
+          else if (bin_ptr - pos == 1 && (unsigned char)bin[pos] < 32)
+            emitop('.'); // fused load already in ACC
+          else if (bin_ptr - pos == 1 && bin[pos] >= '1' && bin[pos] <= '8')
+            emitop('.');
           else
             emitop('.');
         }
@@ -1673,13 +1704,15 @@ Process *Nevm(uchar *loaded) {
 // 1-31: fast var, TODO: 0 get it back!
 // #$ ' , () : \ _ `
 // 12345678 - actual numbers? lol
-// ACD FHM QR TVXY
+// ACD H R T VY
+//  cAr Cons cDr  Heap/Here Recurse Tail-call Vector/index? Yndex?
 // 26: a-z  : OrwinOS API
 // 64: 00-3f: conditional relative jump forward
 // 64: (xx) : vector calls   
 unsigned int run_ivm(Process *p) {
   // Classic single-switch + goto dispatch (ivm.c style).
-  // - opcode 0   = return from function (keep ACC); with fp==FP_MAIN → done
+  // - opcode 'X' = return keep ACC; 'Q' = return 0; ';' = load ret then return
+  // - 0x00..0x1F = fused load mem[n]; '1'..'8' = load mem[fp+k]
   // - opcode ';' = ACC ← ret_val at fp, then return
   // - parameter ops use PAR then goto pnext
   // - zero-arg ops goto xnext
@@ -1714,19 +1747,27 @@ unsigned int run_ivm(Process *p) {
   // TODO: oscar64 gives strange error if this is changed to next!
   //   maybe thinking it's c++? LOL: std::next() ???
  xnext:
-  switch ((op= *zp.ipc++)) {
+  op = *zp.ipc++;
+
+  // fused load slots 0..31 (one byte)
+  if (op < 32) {
+    zp.acc = zp.mem[op];
+    goto xnext;
+  }
+
+  switch (op) {
 
     // OS: quit program (C: exit)
-  case 'q': 
+  case 'q':
     goto done;
 
-    // ';' = ACC <- ret_val, then return
-  case ';':
-    if (zp.fp == FP_MAIN) goto done;
-    zp.acc = zp.mem[zp.fp + FR_VAL];
-    // fall-through
+  // 'Q' = return 0 (ACC=0 then return)
+  case 'Q':
+    zp.acc = 0;
+    // fall-through to X
 
-  case 0: // return, keep ACC
+  // 'X' = return, keep ACC (was opcode 0)
+  case 'X':
     if (zp.fp == FP_MAIN) goto done;
     #ifdef __CC65__
       zp.ipc = (uchar *)zp.mem[zp.fp + FR_RET];
@@ -1735,7 +1776,26 @@ unsigned int run_ivm(Process *p) {
     #endif
     zp.fp = (char)zp.mem[zp.fp + FR_PREV];
     goto xnext;
-    
+
+    // ';' = ACC <- ret_val, then return
+  case ';':
+    if (zp.fp == FP_MAIN) goto done;
+    zp.acc = zp.mem[zp.fp + FR_VAL];
+    // fall-through was to 0; now jump like X
+    #ifdef __CC65__
+      zp.ipc = (uchar *)zp.mem[zp.fp + FR_RET];
+    #else
+      zp.ipc = g_loaded + zp.mem[zp.fp + FR_RET];
+    #endif
+    zp.fp = (char)zp.mem[zp.fp + FR_PREV];
+    goto xnext;
+
+  // frame-relative load fp+1 .. fp+8
+  case '1': case '2': case '3': case '4':
+  case '5': case '6': case '7': case '8':
+    zp.acc = zp.mem[(unsigned char)zp.fp + (op - '0')];
+    goto xnext;
+
     // ---- parameter ops ----
 
     // TODO: cc65 '+' becomes 72 c include goto pnext
@@ -1875,7 +1935,9 @@ void dump_bytecode(void) {
   printf("\n--- BYTECODE (%d bytes) ---\n", bin_ptr);
   for (; i < bin_ptr; i++) {
     char c = bin[i];
-    if (!c) { n= 0; printf("\\0  \n"); }
+    if ((unsigned char)c < 32) {
+      printf("#%02x ", (unsigned char)c);
+    }
     else if (c >= 0xC0) printf("(%02x)", c - 0xC0);
     else if (c >= 0x80) printf("<%02x>", c - 0x80);
 
@@ -1885,11 +1947,11 @@ void dump_bytecode(void) {
       printf("\\0\n"); n= 0; }
     else if (isprint(c) && c > ' ') {
 
-      // single byte ops
-      if (strchr("#$(),.0123456789;<=>?ADEKNPR~", c)
+      // single byte ops (incl. X Q return; 1-8 frame loads)
+      if (strchr("#$(),.0123456789;<=>?ADEKNPQR~X", c)
         || islower(c)) {
         printf("%c   ", c);
-        if (c == ';') { n= 0; putchar('\n'); }
+        if (c == ';' || c == 'X' || c == 'Q') { n= 0; putchar('\n'); }
       }
 
       // takes at least one arg
@@ -1899,7 +1961,7 @@ void dump_bytecode(void) {
         } else
           printf("%c%02x ", c, bin[++i]);
     }
-    else printf("$%02x ", c);
+    else printf("$%02x ", (unsigned char)c);
     if (c == 'N' || ++n == wrap) { printf("\n"); n= 0; }
   }
 
