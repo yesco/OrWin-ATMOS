@@ -123,6 +123,13 @@
 
 typedef unsigned char uchar; // plain char is unsigned on cc65/oscar64/clang*-unsigned
 typedef uint16_t word; // blob / vector cell width (6502)
+
+void note_load(uchar addr);
+void note_store(uchar addr);
+
+
+
+extern word slot_refs[]; // def near slot_used
 #include <assert.h>
 
 // --- options
@@ -149,8 +156,9 @@ typedef uint16_t word; // blob / vector cell width (6502)
 #define MAX_VECTORS     64 // # subroutines: opcodes 0xC0 .. 0xFF
 
 // TODO: "REGISTER" prefix" or special loop-index variables?
-#define GLOBAL_LIMIT    32 // preferred global area 0-31
-#define FRAME_BASE      32 // frames mixed with overflow global
+#define GLOBAL_LIMIT    96 // globals prefer low slots
+#define FRAME_BASE      96 // frames before pack; -O may lower into 0-31 band
+#define CONST_TOP      253 // consts grow down 253,252,..; IMM0/1 use 254/255
 
 // ---------------------------------------------------------------------------
 // Tokens
@@ -323,9 +331,11 @@ void emitop(char op) {
 void emitop2(char op, char arg) {
   emitop(op);
   emit(arg);
-  if (op == 'S' || op == 'L' || op == 'U')
+  if (op == 'S' || op == 'L' || op == 'U') {
     acc_set_slot(arg);
-  // TODO: make bitmask for detection
+    if (op == 'L') note_load(arg);
+    if (op == 'S') note_store(arg);
+  }
   else if (strchr("+-*/%&|^IJ[]{}MF@", op))
     acc_invalidate();
 }
@@ -391,8 +401,22 @@ void add_patch(int offset, int kind, int value) {
 // ---------------------------------------------------------------------------
 unsigned int mem[MAX_SLOTS]; // runtime memory
 char slot_used[MAX_SLOTS]; // allocation map
-char next_global = 0; // next candidate in 0-31
-char next_frame  = FRAME_BASE; // next candidate from 32
+word slot_loads[MAX_SLOTS];  // global loads  (L / fused) — want low indices
+word slot_stores[MAX_SLOTS]; // global stores (S) — future S# benefit
+
+// Only globals (below FRAME_BASE). Frames/params are packed as units.
+void note_load(uchar addr) {
+  if (addr < FRAME_BASE)
+    slot_loads[addr]++;
+}
+void note_store(uchar addr) {
+  if (addr < FRAME_BASE)
+    slot_stores[addr]++;
+}
+
+
+char next_global = 0; // next candidate for globals
+char next_frame  = FRAME_BASE; // next candidate for frames
 
 char alloc_global(void) {
   while (next_global < GLOBAL_LIMIT) {
@@ -453,26 +477,31 @@ uint16_t const_pool[MAX_CONSTS];
 
 
 char nconst = 0;
+uchar constidx = 255; // lowest const slot; 255 = no constants
 
-// Returns byte address of constant.
-// Adds constant if not there already.
-// 
-
-char add_const(unsigned int v) {
-  char i;
+// Constants grow downward from CONST_TOP.
+// const_pool[0] @ CONST_TOP, [1] @ CONST_TOP-1, ...
+uchar add_const(unsigned int v) {
+  uchar i, addr;
   for (i = 0; i < nconst; i++)
-    if (const_pool[i] == v) return 0x80 + i;
+    if (const_pool[i] == v)
+      return CONST_TOP - i;
   if (nconst >= MAX_CONSTS) FAIL("constant pool full");
+  if (CONST_TOP - nconst < FRAME_BASE) FAIL("constants collided with frames");
   const_pool[nconst] = v;
-  return 0x80 | nconst++;
+  addr = CONST_TOP - nconst;
+  nconst++;
+  constidx = addr;
+  return addr;
 }
 
-#define isconst(a) ((uchar)(a) >= 0x80)
-#define const_val(a) (const_pool[(uchar)(a) - 0x80])
+#define isconst(a) ((a) >= constidx && (a) <= CONST_TOP)
+#define const_val(a) (const_pool[CONST_TOP - (a)])
 
 // Literals 0 / -1: not pooled until needed as an op address (RHS of + etc.)
-#define IMM0 ((char)0xfe)
-#define IMM1 ((char)0xfd)
+// outside const band (CONST_TOP=253); never emitted as L/S operands
+#define IMM0 ((uchar)0xfe)
+#define IMM1 ((uchar)0xff)
 
 int is_lit(char a) {
   return a == IMM0 || a == IMM1 || isconst(a);
@@ -709,8 +738,8 @@ void expect(TokenType expected) {
 //   slot 0..31    -> single byte 0x00..0x1F  (fused load)
 //   frame+1..+8   -> '1'..'8'  (fp-relative local)
 //   else          -> 'L' + slot
-void emitload(char in_acc, char addr) {
-  uchar ua, base, rel;
+void emitload(char in_acc, uchar addr) {
+  uchar base, rel;
   if (in_acc) return;
   if (acc_valid && acc_slot == addr) return;
 
@@ -725,19 +754,18 @@ void emitload(char in_acc, char addr) {
     return;
   }
 
-  ua = addr;
-
-  // fused absolute load slots 0..31
-  if (ua < 32) {
-    emit(ua);
+  // fused absolute load slots 0..31 (globals / low mem)
+  if (addr < 32) {
+    emit(addr);
     acc_set_slot(addr);
+    note_load(addr);
     return;
   }
 
-  // frame-relative locals '1'..'8' (fp+1 .. fp+8)
+  // frame-relative locals '1'..'8' — not register-global candidates
   if (cur_vec != (char)0xff) {
     base = frame_base[cur_vec];
-    rel = ua - base;
+    rel = addr - base;
     if (rel >= 1 && rel <= 8) {
       emit('0' + rel);
       acc_set_slot(addr);
@@ -1415,6 +1443,40 @@ int estimate_slot32_save(void) {
   return n;
 }
 
+void print_reg_stats(void) {
+  int i, j;
+  int idx[64], nidx = 0;
+  printf("REGISTER candidates (globals < FRAME_BASE):\n");
+  for (i = 0; i < FRAME_BASE && i < MAX_SLOTS; i++)
+    if ((slot_loads[i] || slot_stores[i]) && nidx < 64)
+      idx[nidx++] = i;
+  // sort by loads+stores descending
+  for (i = 0; i < nidx; i++)
+    for (j = i + 1; j < nidx; j++)
+      if (slot_loads[idx[j]] + slot_stores[idx[j]] >
+          slot_loads[idx[i]] + slot_stores[idx[i]]) {
+        int t = idx[i]; idx[i] = idx[j]; idx[j] = t;
+      }
+  for (i = 0; i < nidx; i++) {
+    int s = idx[i];
+    const char *name = "?";
+    for (j = 0; j < nsym; j++)
+      if (syms[j].type == SYM_VAR && syms[j].address == s) {
+        name = syms[j].name;
+        break;
+      }
+    printf("  slot %02x  L=%u S=%u  %s\n",
+      s, (unsigned)slot_loads[s], (unsigned)slot_stores[s], name);
+  }
+  if (!nidx)
+    printf("  (none)\n");
+  printf("CALL sites:\n");
+  for (i = 0; i < nvector; i++)
+    printf("  %-16s sites=%u code=%d slots=%d\n",
+      func_names[i], (unsigned)func_nsites[i],
+      func_code_bytes[i], func_slots[i]);
+}
+
 void opt_phase_report(int slot_saved) {
   int s12, s32, code_saved, i;
   s12 = estimate_s12_save();
@@ -1439,6 +1501,9 @@ int compile_pipeline(void) {
   bin_ptr = 0;
   nsym = 0;
   nconst = 0;
+  constidx = 255;
+  memset(slot_loads, 0, sizeof(slot_loads));
+  memset(slot_stores, 0, sizeof(slot_stores));
   nvector = 0;
   npatch = 0;
   cur_vec = (char)0xff;
@@ -1503,8 +1568,7 @@ int compile_pipeline(void) {
     if (nvector)
       slot_saved = pack_frames();
     // refresh sites on function lines already printed — summary:
-    for (i = 0; i < nvector; i++)
-      printf("  sites %-16s %u\n", func_names[i], (unsigned)func_nsites[i]);
+    print_reg_stats();
     opt_phase_report(slot_saved);
     if (slot_saved > 0 && opt_level <= 0)
       printf("  hint: re-run with -O to place frames (save %d slots)\n", slot_saved);
@@ -1558,6 +1622,7 @@ typedef struct BlobHeader {
   word con;
   word data;
   word memsz;
+  word constidx; // lowest const slot (not relocated)
 } BlobHeader;
 
 // Process head — layout of ZP image (memcpy in/out of run_ivm)
@@ -1581,7 +1646,8 @@ uchar *g_loaded;
 
 // ZP global (same layout as ProcessHead)
 ProcessHead zp;
-word *consts; // loaded const table (PAR high-bit path)
+word *consts;
+word const_slot[256]; // absolute slot → value (PAR, no subtract)
 uchar op;
 
 // append n bytes of data at *pp; return offset from base
@@ -1625,6 +1691,7 @@ void finalise(void) {
         top = i;
     h.memsz = (word)(top + 1);
   }
+  h.constidx = (word)constidx;
 
   // fill call table: code entry offsets (blob-absolute before loader +base)
   for (i = 0; i < nvector; i++)
@@ -1651,6 +1718,8 @@ void loader(uchar *base) {
 
   h = (BlobHeader *)base;
   save_memsz = h->memsz; // NOT an offset
+  {
+    word save_ci = h->constidx;
 
   v = (word *)base;
   while (*v) {
@@ -1661,6 +1730,8 @@ void loader(uchar *base) {
   }
 
   h->memsz = save_memsz;
+  h->constidx = save_ci;
+  }
 }
 
 // loaded = output of loader; does not call loader
@@ -1722,15 +1793,23 @@ unsigned int run_ivm(Process *p) {
   // load process head → ZP global
   memcpy(&zp, &p->h, sizeof(zp));
   zp.mem = p->mem;
-  #ifdef __CC65__
-  consts = (word *)(unsigned)zp.hdr.con;
-  #else
-  g_loaded = (uchar *)p->h.ipc - p->h.hdr.main;
-  consts = (word *)(g_loaded + zp.hdr.con);
-  #endif
+  {
+    word *pool;
+    uchar a;
+    #ifdef __CC65__
+    pool = (word *)(unsigned)zp.hdr.con;
+    #else
+    g_loaded = (uchar *)p->h.ipc - p->h.hdr.main;
+    pool = (word *)(g_loaded + zp.hdr.con);
+    #endif
+    // Map absolute const slots → values once (no subtract in PAR)
+    for (a = zp.hdr.constidx; a <= CONST_TOP && zp.hdr.constidx != 255; a++)
+      const_slot[a] = pool[CONST_TOP - a];
+    consts = const_slot;
+  }
 
-  // operand: high bit → const table; else process mem
-  #define PAR ((*zp.ipc & 0x80) ? consts[*zp.ipc & 0x7f] : zp.mem[*zp.ipc])
+  // consts[slot] already absolute-indexed
+  #define PAR ((*zp.ipc >= zp.hdr.constidx) ? consts[*zp.ipc] : zp.mem[*zp.ipc])
 
   goto xnext;
 
@@ -1939,7 +2018,7 @@ void dump_bytecode(void) {
       printf("#%02x ", c);
     }
     else if (c >= 0xC0) printf("(%02x)", c - 0xC0);
-    else if (c >= 0x80) printf("<%02x>", c - 0x80);
+    else if (c >= constidx && c <= CONST_TOP) printf("C%02x ", c);
 
     else if (c == ' ')  printf("_   ");
     else if (c == '"') {
