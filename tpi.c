@@ -519,29 +519,29 @@ uchar add_const(unsigned int v) {
   return addr;
 }
 
-#define isconst(a) ((a) >= constidx && (a) <= CONST_TOP)
-#define const_val(a) (const_pool[CONST_TOP - (a)])
+#define isconst(a) ((uchar)(a) >= constidx && (uchar)(a) <= CONST_TOP)
+#define const_val(a) (const_pool[CONST_TOP - (uchar)(a)])
 
 // Literals 0 / -1: not pooled until needed as an op address (RHS of + etc.)
 // outside const band (CONST_TOP=253); never emitted as L/S operands
 #define IMM0 ((uchar)0xfe)
 #define IMM1 ((uchar)0xff)
 
-int is_lit(char a) {
+int is_lit(uchar a) {
   return a == IMM0 || a == IMM1 || isconst(a);
 }
 
 unsigned int lit_val(char a) {
-  if (a == IMM0) return 0;
-  if (a == IMM1) return (unsigned int)-1;
+  if ((uchar)a == IMM0) return 0;
+  if ((uchar)a == IMM1) return (unsigned int)-1;
   return const_val(a);
 }
 
 // Address usable as emitop2 arg (intern IMM0/IMM1 if needed)
-char as_addr(char a) {
-  if (a == IMM0) return add_const(0);
-  if (a == IMM1) return add_const((unsigned int)-1);
-  return a;
+char as_addr(uchar a) {
+  if (a == IMM0) return (char)add_const(0);
+  if (a == IMM1) return (char)add_const((unsigned int)-1);
+  return (char)a;
 }
 
 // Map a numeric value to IMM0 / IMM1 / pooled const address
@@ -576,14 +576,16 @@ int main_offset = 0;
 char *main_entry = 0;
 char is_code_addr[MAX_CONSTS];
 
-// Frame layout at fp (contiguous slots from alloc_frame_slot):
-//   fp+0  RETURN ipc
-//   fp+1  return value
-//   fp+2  previous fp
-//   fp+3… params / locals
+// Frame layout at fp:
+//   fp+0  RETURN
+//   fp+1  VAL
+//   fp+2  PREV
+//   fp+3  ACC home / last param  — JSR always stores ACC here (no prologue S)
+//   fp+4… earlier params, then locals
 #define FR_RET  0
 #define FR_VAL  1
 #define FR_PREV 2
+#define FR_ACC  3
 #define FP_MAIN ((char)0xFF)
 char fp; // current frame pointer (index into mem), FP_MAIN = main
 
@@ -810,12 +812,17 @@ void emitload(char in_acc, uchar addr) {
     return;
   }
 
-  // frame-relative locals '1'..'8' — not register-global candidates
+  // '8' = last param at FR_ACC; '1'..'7' = fp+FR_ACC+(1..7)
   if (cur_vec != (char)0xff) {
     base = frame_base[cur_vec];
     rel = addr - base;
-    if (rel >= 1 && rel <= 8) {
-      emit('0' + rel);
+    if (rel == FR_ACC) {
+      emit('8');
+      acc_set_slot(addr);
+      return;
+    }
+    if (rel >= (FR_ACC + 1) && rel <= (FR_ACC + 7)) {
+      emit('0' + (rel - FR_ACC));
       acc_set_slot(addr);
       return;
     }
@@ -1321,75 +1328,73 @@ void compile_function(void) {
   ret_val_slot  = alloc_frame_slot();
   caller_slot   = alloc_frame_slot();
 
-  // parse parameter list: name : INTEGER [, name : INTEGER]*
-  nparams = 0;
-  if (curr_tok.type == TOK_IDENT) {
-    while (1) {
-      if (nparams >= MAX_PARAMS) {
-        FAIL("too many parameters");
+  // names first; last param → FR_ACC (fp+3); earlier → fp+4…
+  {
+    char pnames[MAX_PARAMS][MAX_SYM_LEN + 1];
+    char acc_home;
+    nparams = 0;
+    if (curr_tok.type == TOK_IDENT) {
+      while (1) {
+        if (nparams >= MAX_PARAMS)
+          FAIL("too many parameters");
+        strcpy(pnames[nparams], curr_tok.lexeme);
+        nparams++;
+        EXPECT(TOK_IDENT);
+        EXPECT(':');
+        EXPECT(TOK_INTEGER);
+        if (curr_tok.type == ',' || curr_tok.type == ';') {
+          next_token();
+          if (curr_tok.type != TOK_IDENT)
+            break;
+          continue;
+        }
+        break;
       }
-      strcpy(param_name, curr_tok.lexeme);
-      param_slots[nparams] = alloc_frame_slot();
-      add_symbol(param_name, SYM_VAR, param_slots[nparams]);
-      nparams++;
-      EXPECT(TOK_IDENT);
-      EXPECT(':');
-      EXPECT(TOK_INTEGER);
-      // accept both "," and ";" as parameter separators
-      // (comma is convenient; semicolon is classic Pascal)
-      if (curr_tok.type == ',' || curr_tok.type == ';') {
-        next_token();
-        // trailing separator before ')' is not allowed – loop continues
-        // only if another IDENT follows; otherwise fall through to RPAREN
-        if (curr_tok.type != TOK_IDENT)
-          break;
-        continue;
-      }
-      break;
     }
+    EXPECT(')');
+    EXPECT(':');
+    EXPECT(TOK_INTEGER);
+    EXPECT(';');
+
+    // always reserve fp+3 so JSR can store ACC without nparams test
+    acc_home = alloc_frame_slot();
+    if (nparams > 0) {
+      param_slots[nparams - 1] = acc_home;
+      add_symbol(pnames[nparams - 1], SYM_VAR, acc_home);
+      for (i = 0; i < nparams - 1; i++) {
+        param_slots[i] = alloc_frame_slot();
+        add_symbol(pnames[i], SYM_VAR, param_slots[i]);
+      }
+    }
+
+    add_symbol(func_name, SYM_FUNC, 0);
+    fsym = lookup_sym(func_name);
+    fsym->nparams = nparams;
+    for (i = 0; i < nparams; i++)
+      fsym->param_slot[i] = param_slots[i];
+    fsym->ret_slot = ret_val_slot;
+    fsym->ret_addr_slot = ret_addr_slot;
+
+    add_symbol(func_name, SYM_VAR, ret_val_slot);
+    add_symbol("RETURN", SYM_VAR, ret_addr_slot);
+
+    if (curr_tok.type == TOK_VAR)
+      parsevars(1);
+
+    entry_offset = bin_ptr;
+    vec_idx = add_vector(entry_offset);
+    frame_base[vec_idx] = ret_addr_slot;
+    fsym->address = vec_idx;
+    cur_vec = (char)vec_idx;
+    func_ncalls[vec_idx] = 0;
+    func_code0[vec_idx] = entry_offset;
+
+    // JSR already stored last param at FR_ACC — no prologue S
+    if (nparams > 0)
+      acc_set_slot(param_slots[nparams - 1]);
+    else
+      acc_invalidate();
   }
-  EXPECT(')');
-  EXPECT(':');
-  EXPECT(TOK_INTEGER);
-  EXPECT(';');
-
-  // register the function symbol (vector index filled in a moment)
-  add_symbol(func_name, SYM_FUNC, 0); // temporary
-  fsym = lookup_sym(func_name);
-  fsym->nparams = nparams;
-  for (i = 0; i < nparams; i++)
-    fsym->param_slot[i] = param_slots[i];
-  fsym->ret_slot      = ret_val_slot;
-  fsym->ret_addr_slot = ret_addr_slot;
-
-  // Also expose the function name as a variable that writes the return slot
-  // (classic Pascal:  FuncName := expression;  )
-  add_symbol(func_name, SYM_VAR, ret_val_slot);
-
-  // Expose RETURN as a local name for the return-address slot
-  add_symbol("RETURN", SYM_VAR, ret_addr_slot);
-
-  if (curr_tok.type == TOK_VAR)
-    parsevars(1);
-
-  // the entry point is right here
-  entry_offset = bin_ptr;
-  vec_idx = add_vector(entry_offset);
-  // subr# → frame base (== RETURN slot index); FR_VAL/FR_PREV are +1/+2
-  frame_base[vec_idx] = ret_addr_slot;
-  fsym->address = vec_idx;
-  cur_vec = (char)vec_idx;
-  func_ncalls[vec_idx] = 0;
-  func_code0[vec_idx] = entry_offset;
-
-  // TODO: mustbe after previous section. WHY?
-  
-  // last param arrives in ACC; store into its slot (call sites omit that S)
-  if (nparams > 0) {
-    emitop2('S', param_slots[nparams - 1]);
-    acc_set_slot(param_slots[nparams - 1]);
-  } else
-    acc_invalidate();
 
   beginend();
   EXPECT(';');
@@ -1808,8 +1813,11 @@ void layout_process_mem(void) {
             syms[j].ret_addr_slot = nb + FR_RET;
           if (syms[j].ret_slot != 0xff)
             syms[j].ret_slot = nb + FR_VAL;
-          for (k = 0; k < syms[j].nparams; k++)
-            syms[j].param_slot[k] = nb + FR_PREV + 1 + k;
+          if (syms[j].nparams > 0) {
+            syms[j].param_slot[syms[j].nparams - 1] = nb + FR_ACC;
+            for (k = 0; k < syms[j].nparams - 1; k++)
+              syms[j].param_slot[k] = nb + FR_ACC + 1 + k;
+          }
         }
       }
     }
@@ -1843,9 +1851,16 @@ void layout_process_mem(void) {
     x_slot_runtime = slot_map[x_slot_compile];
   else
     x_slot_runtime = x_slot_compile;
-  printf("layout: memsz=%u constidx=%u nconst=%d frames=%d x@%u\n",
-    (unsigned)layout_memsz, (unsigned)constidx, nconst, nvector,
-    (unsigned)x_slot_runtime);
+  {
+    uchar ng = 0, nf = 0, i2;
+    for (i2 = 0; i2 < constidx && i2 < layout_memsz; i2++) {
+      // rough: before constidx = globals+frames
+    }
+    printf("layout: memsz=%u (globals+frames=%u + const=%d) frames=%d x@%u\n",
+      (unsigned)layout_memsz,
+      (unsigned)(constidx == 255 ? layout_memsz : constidx),
+      nconst, nvector, (unsigned)x_slot_runtime);
+  }
 }
 
 void remap_bytecode(void) {
@@ -1855,26 +1870,10 @@ void remap_bytecode(void) {
   while (i < bin_ptr) {
     c = bin[i++];
     if (c < 32) {
-      // fused load: remap; if target >=32 expand to L+slot (never leave 0x60 as opcode)
-      if (slot_mapped[c]) {
-        uchar d = slot_map[c];
-        if (d < 32)
-          bin[i - 1] = d;
-        else {
-          // need 2 bytes: insert L, d — shift tail
-          int j;
-          if (bin_ptr >= MAX_BIN_LEN - 1) FAIL("bytecode overflow remap");
-          for (j = bin_ptr; j >= i; j--)
-            bin[j] = bin[j - 1];
-          bin_ptr++;
-          bin[i - 1] = 'L';
-          bin[i] = d;
-          i++; // skip operand
-          for (j = 0; j < nvector; j++)
-            if (vectors[j] >= i) vectors[j]++;
-          if (main_offset >= i) main_offset++;
-        }
-      }
+      // fused load: only remap in-place if still <32 (never insert bytes —
+      // that would desync G/B relative jumps and cause unknown opcodes)
+      if (slot_mapped[c] && slot_map[c] < 32)
+        bin[i - 1] = slot_map[c];
     } else if (c == '"') {
       while (i < bin_ptr && bin[i]) i++;
       if (i < bin_ptr) i++;
@@ -1892,7 +1891,8 @@ void remap_bytecode(void) {
         if (slot_mapped[a]) bin[i + 1] = slot_map[a];
         i += 2;
       }
-    } else if (strchr("LS+-*/%&|^[]{}@!IMFWZ=<>?", c)) {
+    } else if (strchr("LS+-*/%&|^[]{}@!IMFWZ=<>", c)) {
+      // note: '?' '~' '.' 'N' etc are ZERO-arg — never consume a following byte
       if (i < bin_ptr) {
         a = bin[i];
         if (slot_mapped[a]) bin[i] = slot_map[a];
@@ -2125,10 +2125,12 @@ ivmvar run_ivm(Process *p) {
     zp.fp = (char)zp.mem[zp.fp + FR_PREV];
     goto xnext;
 
-  // frame-relative load fp+1 .. fp+8
+  case '8':
+    zp.acc = zp.mem[zp.fp + FR_ACC];
+    goto xnext;
   case '1': case '2': case '3': case '4':
-  case '5': case '6': case '7': case '8':
-    zp.acc = zp.mem[zp.fp + (op - '0')];
+  case '5': case '6': case '7':
+    zp.acc = zp.mem[zp.fp + FR_ACC + (op - '0')];
     goto xnext;
 
     // ---- parameter ops ----
@@ -2236,6 +2238,7 @@ ivmvar run_ivm(Process *p) {
           callv = (word *)(unsigned)zp.hdr.call;
           zp.mem[nfp + FR_PREV] = zp.fp;
           zp.mem[nfp + FR_RET] = (unsigned int)zp.ipc;
+          zp.mem[nfp + FR_ACC] = zp.acc; // last param
           zp.fp = nfp;
           zp.ipc = (uchar *)(unsigned)callv[v];
           #else
@@ -2243,6 +2246,7 @@ ivmvar run_ivm(Process *p) {
           callv = (word *)(g_loaded + zp.hdr.call);
           zp.mem[nfp + FR_PREV] = zp.fp;
           zp.mem[nfp + FR_RET] = (unsigned int)(zp.ipc - g_loaded);
+          zp.mem[nfp + FR_ACC] = zp.acc; // last param
           zp.fp = nfp;
           zp.ipc = g_loaded + callv[v];
           #endif
