@@ -2391,7 +2391,7 @@ void dump_blob(void) {
       printf("  [%2d]  %5u  end reloc\n", i, 0);
       break;
     }
-    s = 0;
+    s = NULL;
     for (j = 0; j < nsym; j++)
       if (syms[j].type == SYM_FUNC && syms[j].address == i) {
         s = &syms[j];
@@ -2412,7 +2412,7 @@ void dump_blob(void) {
   printf("FRAME BASES  (%d)\n", nvector);
   p = blob + h->fp;
   for (i = 0; i < nvector; i++) {
-    s = 0;
+    s = NULL;
     for (j = 0; j < nsym; j++)
       if (syms[j].type == SYM_FUNC && syms[j].address == i) {
         s = &syms[j];
@@ -2612,13 +2612,21 @@ static int run_loaded_blob(void) {
   return (int)ret;
 }
 
+#ifdef OSCAR64
+int main(void) {
+  const char* argv[]= { "tpi", "-O", #ARG, 0 };
+  const int argc = 3;
+  
+#else
 int main(int argc, char **argv) {
+#endif
+
   const char *filename;
   int buf_idx;
 
   opt_level = 0;
   opt_pass = 0;
-  filename = 0;
+  filename = NULL;
   {
     int ai;
     for (ai = 1; ai < argc; ai++) {
