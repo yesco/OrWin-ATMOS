@@ -945,6 +945,23 @@ void primary(char *out_acc, char *out_addr) {
   FAIL("Expected expression");
 }
 
+// RHS starts at curr_tok: number or bare ident → no code, ACC preserved.
+// Call, '(', NOT, etc. clobber ACC — spill left first if it lived in ACC.
+static int rhs_is_simple(void) {
+  int i;
+  if (curr_tok.type == TOK_NUM)
+    return 1;
+  if (curr_tok.type == TOK_IDENT) {
+    i = src_pos;
+    while (src_buf[i] == ' ' || src_buf[i] == '\t' || src_buf[i] == '\r' || src_buf[i] == '\n')
+      i++;
+    if (src_buf[i] == '(')
+      return 0;
+    return 1;
+  }
+  return 0;
+}
+
 void expression(void) {
   char left_acc, right_acc;
   char left_addr, right_addr;
@@ -958,8 +975,8 @@ void expression(void) {
     next_token();
     comm = strchr("-/<>[]", op) == NULL;
 
-    // save if result of primary is in acc
-    if (left_acc) {
+    // Only spill ACC-left when RHS will clobber ACC (not for x+1 / a-b with slots)
+    if (left_acc && !rhs_is_simple()) {
       char tmp = alloc_temp();
       emitop2('S', tmp);
       left_acc = 0;

@@ -38,9 +38,9 @@ ls -ugGlf $name.p $name.pas $name.c $name.prg $name.sim $name.ivm
 echo
 if [ -f "$name.out" ]; then
   echo "====================== DIFF ======================="
-  diff -U9999 $name.out $name.log && printf "\n\t\t  -- TESTS OK --\n\n"
+  diff -w -I "cycles" -I "RUN" -I "loaded" -U9999 tp-test.out tp-test.log \
+  && printf "\n\t\t  -- TESTS OK --\n\n"
+  diff -U0 tp-test.out tp-test.log
+
 fi
-
-
-
 

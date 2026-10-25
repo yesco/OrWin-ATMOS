@@ -1,0 +1,5 @@
+$name= $1
+./oscar -Os -ep -DARG=$name.p tpi.c
+ls -ugGlf tpi.prg $name.p $name.ivm
+./oscar -Os -ep -DARG=$name.ivm tpi.c
+
