@@ -2117,7 +2117,7 @@ ivmvar run_ivm(Process *p) {
 
 #ifdef USE_LABELS
   {
-    static void *vt[128];
+    static void *vt[127];
     static uchar inited;
     if (!inited) {
       // build once in a local table, then memcpy → static (no per-op ifdefs)
@@ -2154,6 +2154,8 @@ ivmvar run_ivm(Process *p) {
   }
 
   #define Z(c)
+  #define ZL(label, c) label:
+  #define L(label) label:
   
 
 #else
@@ -2161,17 +2163,19 @@ ivmvar run_ivm(Process *p) {
 
   switch (op) {
 
-  #define Z(c) case (c):
+  #define Z(c)         case (c):
+  #define ZL(label, c) case (c):
+  #define L(label)
 
 #endif
 
 
 // Quit: TODO: replace by syscall!
-op_q:    Z('q')              goto done;
+ZL(op_q,   'q')              goto done;
 
 // ReturnQ= return 0  X= return acc;  ';'=return RETURN;
-op_Q:    Z('Q')  zp.acc = 0; goto op_X;
-op_semi: Z(';')
+ZL(op_Q,   'Q')  zp.acc = 0; goto op_X;
+ZL(op_semi,';')
     zp.acc = zp.mem[zp.fp + FR_VAL];
     // fall through
 op_X:    Z('X')
@@ -2188,38 +2192,38 @@ op_X:    Z('X')
     goto xnext;
 
 // Local/parameters access 1..7, 8=last!
-op_8:    Z('8')  zp.acc = zp.mem[zp.fp + FR_ACC]; goto xnext;
-op_17:   Z('1') Z('2') Z('3') Z('4') Z('5') Z('6') Z('7')
+L(op_8)  Z('8')  zp.acc = zp.mem[zp.fp + FR_ACC]; goto xnext;
+L(op_17) Z('1') Z('2') Z('3') Z('4') Z('5') Z('6') Z('7')
     zp.acc = zp.mem[zp.fp + FR_ACC + (op - '0')];
     goto xnext;
 
 // Math ops
-op_add:  Z('+')  zp.acc += PAR; goto pnext;
-op_sub:  Z('-')  zp.acc -= PAR; goto pnext;
-op_mul:  Z('*')  zp.acc *= PAR; goto pnext;
-op_div:  Z('/')  if (PAR) zp.acc /= PAR; goto pnext;
-op_mod:  Z('%')  if (PAR) zp.acc %= PAR; goto pnext;
-op_and:  Z('&')  zp.acc &= PAR; goto pnext;
-op_or:   Z('|')  zp.acc |= PAR; goto pnext;
-op_xor:  Z('^')  zp.acc ^= PAR; goto pnext;
-op_shl:  Z('[')  zp.acc <<= PAR; goto pnext;
-op_shr:  Z(']')  zp.acc >>= PAR; goto pnext;
-op_shlm: Z('{')  zp.mem[*zp.ipc] <<= zp.acc; goto pnext;
-op_shrm: Z('}')  zp.mem[*zp.ipc] >>= zp.acc; goto pnext;
+ZL(op_add, '+')  zp.acc += PAR; goto pnext;
+ZL(op_sub, '-')  zp.acc -= PAR; goto pnext;
+ZL(op_mul, '*')  zp.acc *= PAR; goto pnext;
+ZL(op_div, '/')  if (PAR) zp.acc /= PAR; goto pnext;
+ZL(op_mod, '%')  if (PAR) zp.acc %= PAR; goto pnext;
+ZL(op_and, '&')  zp.acc &= PAR; goto pnext;
+ZL(op_or,  '|')  zp.acc |= PAR; goto pnext;
+ZL(op_xor, '^')  zp.acc ^= PAR; goto pnext;
+ZL(op_shl, '[')  zp.acc <<= PAR; goto pnext;
+ZL(op_shr, ']')  zp.acc >>= PAR; goto pnext;
+ZL(op_shlm,'{')  zp.mem[*zp.ipc] <<= zp.acc; goto pnext;
+ZL(op_shrm,'}')  zp.mem[*zp.ipc] >>= zp.acc; goto pnext;
 
 // Memory ops
-op_L:    Z('L')  zp.acc = PAR;             goto pnext;
-op_S:    Z('S')  zp.mem[*zp.ipc] = zp.acc; goto pnext;
-op_Z:    Z('Z')  zp.mem[*zp.ipc] = 0;      goto pnext;
+ZL(op_L,   'L')  zp.acc = PAR;             goto pnext;
+ZL(op_S,   'S')  zp.mem[*zp.ipc] = zp.acc; goto pnext;
+ZL(op_Z,   'Z')  zp.mem[*zp.ipc] = 0;      goto pnext;
 
-op_M:    Z('M')
+ZL(op_M,   'M')
     #ifdef __CC65__
       zp.acc = zp.mem[PAR] = (int)calloc(zp.acc, 1);
       // TODO: other platforms have wider pointers
     #endif
     goto pnext;
 
-op_F:    Z('F')
+ZL(op_F,   'F')
     #ifdef __CC65__
       free((void*)zp.mem[*zp.ipc]);
       // TODO: other platforms have wider pointers
@@ -2227,44 +2231,44 @@ op_F:    Z('F')
     zp.mem[*zp.ipc] = 0;
     goto pnext;
 
-op_at:   Z('@')  zp.acc = zp.mem[PAR];       goto pnext;
-op_bang: Z('!')  zp.mem[PAR]= zp.acc;        goto pnext;
+ZL(op_at,  '@')  zp.acc = zp.mem[PAR];       goto pnext;
+ZL(op_bang,'!')  zp.mem[PAR]= zp.acc;        goto pnext;
 
-op_I:    Z('I')  zp.acc = ++zp.mem[*zp.ipc]; goto pnext;
-op_J:    Z('J')  zp.acc = --zp.mem[*zp.ipc]; goto pnext;
-op_U:    Z('U')  zp.acc = (zp.mem[zp.ipc[0]]
+ZL(op_I,   'I')  zp.acc = ++zp.mem[*zp.ipc]; goto pnext;
+ZL(op_J,   'J')  zp.acc = --zp.mem[*zp.ipc]; goto pnext;
+ZL(op_U,   'U')  zp.acc = (zp.mem[zp.ipc[0]]
                         += zp.mem[zp.ipc[1]]);
                                 zp.ipc += 2; goto xnext;
 
-op_lt:   Z('<')  zp.acc = zp.acc < PAR;  goto pnext;
-op_eq:   Z('=')  zp.acc = zp.acc == PAR; goto pnext;
-op_gt:   Z('>')  zp.acc = zp.acc > PAR;  goto pnext;
+ZL(op_lt,  '<')  zp.acc = zp.acc < PAR;  goto pnext;
+ZL(op_eq,  '=')  zp.acc = zp.acc == PAR; goto pnext;
+ZL(op_gt,  '>')  zp.acc = zp.acc > PAR;  goto pnext;
 
-op_sp:   Z(' ')                         goto xnext;
-op_0:    Z('0')  zp.acc = 0;            goto xnext;
-op_9:    Z('9')  zp.acc = 0xffff;       goto xnext;
-op_not:  Z('?')  zp.acc = !zp.acc;      goto xnext;
-op_bnot: Z('~')  zp.acc = ~zp.acc;      goto xnext;
+ZL(op_sp,  ' ')                         goto xnext;
+ZL(op_0,   '0')  zp.acc = 0;            goto xnext;
+ZL(op_9,   '9')  zp.acc = 0xffff;       goto xnext;
+ZL(op_not, '?')  zp.acc = !zp.acc;      goto xnext;
+ZL(op_bnot,'~')  zp.acc = ~zp.acc;      goto xnext;
 
-op_K:    Z('K')  zp.acc = getchar();    goto xnext;
-op_E:    Z('E')  putchar(zp.acc);       goto xnext;
-op_N:    Z('N')  putchar('\n');         goto xnext;
-op_P:    Z('P')  printf("%u", (unsigned)zp.acc); goto xnext;
-op_O:    Z('O')  putchar(PAR);          goto pnext;
-op_W:    Z('W')  printf("%u", PAR);     goto pnext;
-op_dot:  Z('.')  printf("%u", zp.acc);  goto xnext;
-op_str:  Z('"')  while (*zp.ipc) putchar(*zp.ipc++);
+ZL(op_K,   'K')  zp.acc = getchar();    goto xnext;
+ZL(op_E,   'E')  putchar(zp.acc);       goto xnext;
+ZL(op_N,   'N')  putchar('\n');         goto xnext;
+ZL(op_P,   'P')  printf("%u", (unsigned)zp.acc); goto xnext;
+ZL(op_O,   'O')  putchar(PAR);          goto pnext;
+ZL(op_W,   'W')  printf("%u", PAR);     goto pnext;
+ZL(op_dot, '.')  printf("%u", zp.acc);  goto xnext;
+ZL(op_str, '"')  while (*zp.ipc) putchar(*zp.ipc++);
                                         goto pnext;
 
-op_G:    Z('G')  if ((int16_t)zp.acc > 0) zp.ipc += *zp.ipc; goto pnext;
-op_B:    Z('B')  zp.ipc -= *zp.ipc; goto pnext;
+ZL(op_G,   'G')  if ((int16_t)zp.acc > 0) zp.ipc += *zp.ipc; goto pnext;
+ZL(op_B,   'B')  zp.ipc -= *zp.ipc; goto pnext;
 
   #ifndef USE_LABELS
   default:
   #endif
 
-op_unk:
-op_hibit:
+L(op_unk)
+L(op_hibit)
     if (op >= 0x80) {
       if (op < 0xc0) {
         if (!zp.acc)
