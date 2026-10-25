@@ -1,1 +1,3 @@
-clang tpi.c && (./a.out -O tp-test.p ; echo "--------------------" ; ./a.out tp-test.ivm)
+clang -g -DUSE_LABELS tpi.c || exit 1
+
+(./a.out -O tp-test.p ; echo "--------------------" ; time ./a.out tp-test.ivm)

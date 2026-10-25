@@ -7,6 +7,7 @@
 //  4) don't change any lines if not needed
 //  5) char is unsigned on cc65 & oscar64 & clang
 //  6) sizeof needs sizeof(xxx) on oscar64
+//  7) don't change indent especially for #ifdef etc
 
 // Target model (as specified):
 //
@@ -2135,7 +2136,7 @@ ivmvar run_ivm(Process *p) {
       t['{'] = &&op_shlm;t['}'] = &&op_shrm;
       t['L'] = &&op_L;   t['S'] = &&op_S;   t['Z'] = &&op_Z;
       t['M'] = &&op_M;   t['F'] = &&op_F;
-      t['@'] = &&op_at;
+      t['@'] = &&op_at;  t['!'] = &&op_bang;
       t['I'] = &&op_I;   t['J'] = &&op_J;   t['U'] = &&op_U;
       t['<'] = &&op_lt;  t['='] = &&op_eq;  t['>'] = &&op_gt;
       t[' '] = &&op_sp;
@@ -2182,6 +2183,7 @@ op_X:    Z('X')
     #else
       zp.ipc = g_loaded + zp.mem[zp.fp + FR_RET];
     #endif
+
     zp.fp = (char)zp.mem[zp.fp + FR_PREV];
     goto xnext;
 
@@ -2219,16 +2221,20 @@ op_M:    Z('M')
 
 op_F:    Z('F')
     #ifdef __CC65__
-      free((void*)zp.mem[*zp.ipc]); zp.mem[*zp.ipc] = 0;
+      free((void*)zp.mem[*zp.ipc]);
       // TODO: other platforms have wider pointers
     #endif
+    zp.mem[*zp.ipc] = 0;
     goto pnext;
 
-op_at:   Z('@')  zp.acc = zp.mem[PAR]; goto pnext;
+op_at:   Z('@')  zp.acc = zp.mem[PAR];       goto pnext;
+op_bang: Z('!')  zp.mem[PAR]= zp.acc;        goto pnext;
+
 op_I:    Z('I')  zp.acc = ++zp.mem[*zp.ipc]; goto pnext;
 op_J:    Z('J')  zp.acc = --zp.mem[*zp.ipc]; goto pnext;
-op_U:    Z('U')
-    zp.acc = (zp.mem[zp.ipc[0]] += zp.mem[zp.ipc[1]]); zp.ipc += 2; goto xnext;
+op_U:    Z('U')  zp.acc = (zp.mem[zp.ipc[0]]
+                        += zp.mem[zp.ipc[1]]);
+                                zp.ipc += 2; goto xnext;
 
 op_lt:   Z('<')  zp.acc = zp.acc < PAR;  goto pnext;
 op_eq:   Z('=')  zp.acc = zp.acc == PAR; goto pnext;
@@ -2300,8 +2306,13 @@ op_hibit:
 #endif
 
  done:
+
+  // TODO: crashes on linux ./tpi-test-unix when -DUSE_LABELS
+  //   ???
+
   // save ZP global → process head
   memcpy(&p->h, &zp, sizeof(zp));
+
   return zp.acc;
 
 #undef PAR
