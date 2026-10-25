@@ -2200,11 +2200,13 @@ static int load_blob(const char *path) {
   n = (int)fread(blob, 1, MAX_BLOB_LEN, f);
   fclose(f);
   if (n <= 0) {
-    printf("empty %s\n", path);
+    printf("failed to load %s\n", path);
     return 0;
   }
+
   blob_len = n;
   printf("loaded %s (%d bytes)\n", path, blob_len);
+  relocate(blob);
   return 1;
 }
 
@@ -2212,7 +2214,6 @@ static int run_loaded_blob(void) {
   Process *proc;
   unsigned int ret;
 
-  loader(blob);
   proc = Nevm(blob);
   printf("--- RUN IVM (blob %d) ---\n", blob_len);
   ret = run_ivm(proc);

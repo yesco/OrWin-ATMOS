@@ -93,7 +93,7 @@ typedef struct Process {
 // Intent: every word from blob start through the call table is a blob-relative
 // offset; add base so they become absolute pointers (6502 address space).
 // memsz sits in the header but is a *count*, not an offset — preserve it.
-void loader(uchar *base) {
+void relocate(uchar *base) {
   word *v;
   word save_memsz;
   BlobHeader *h;
@@ -226,7 +226,7 @@ ivmvar run_ivm(Process *p) {
   zp.mem = p->mem;
 
   #ifdef __CC65__
-    /* pool only used if needed elsewhere */
+    // pool only used if needed elsewhere
   #else
     g_loaded = (uchar *)p->h.ipc - p->h.hdr.main;
   #endif
