@@ -1772,6 +1772,13 @@ void layout_process_mem(void) {
     slot_mapped[layout_order[i]] = 1;
     layout_next++;
   }
+  for (j = 0; j < nsym; j++) {
+    uchar a;
+    if (syms[j].type != SYM_VAR) continue;
+    a = (uchar)syms[j].address;
+    if (a < FRAME_BASE && slot_mapped[a])
+      syms[j].address = (char)slot_map[a];
+  }
 
   // 2) frames: share by emit frame_base only (not recomputed opt_base)
   {
@@ -1826,12 +1833,20 @@ void layout_process_mem(void) {
     free(mapped_band);
   }
 
-  // 3) leftover used non-const slots
-  for (i = 0; i < MAX_SLOTS; i++) {
-    if (slot_used[i] && !slot_mapped[i] && (i < constidx || constidx == 255)) {
-      slot_map[i] = layout_next++;
-      slot_mapped[i] = 1;
+  // 3) leftover (main temps etc. still marked slot_used, not in a frame band)
+  {
+    uchar nleft = 0;
+    uchar left_from = layout_next;
+    for (i = 0; i < MAX_SLOTS; i++) {
+      if (slot_used[i] && !slot_mapped[i] && (i < constidx || constidx == 255)) {
+        slot_map[i] = layout_next++;
+        slot_mapped[i] = 1;
+        nleft++;
+      }
     }
+    if (nleft)
+      printf("layout: +%u leftover/temps @%u..%u (emit slots not in frame bands)\n",
+        (unsigned)nleft, (unsigned)left_from, (unsigned)(layout_next - 1));
   }
 
   // 4) constants last: pool[i] at base+i
@@ -2399,43 +2414,77 @@ void dump_blob(void) {
     printf("\n");
   }
 
-  printf("MEM SLOTS  (all used, memsz=%u)\n", h->memsz);
+  printf("MEM SLOTS  (every cell 0..memsz-1, memsz=%u)\n", h->memsz);
   {
-    int tmpn = 0;
     uchar *fb = blob + h->fp;
+    int n_glob = 0, n_frm = 0, n_tmp = 0, n_con = 0;
     for (i = 0; i < (int)h->memsz; i++) {
       int any = 0;
-      int role = 0; // 1=RETURN 2=RETVAL 3=FP
-      if (!slot_used[i])
-        continue;
       printf("  %3u ", i);
+      // globals / named vars (post-layout addresses already in symbols)
       for (j = 0; j < nsym; j++) {
-        if (syms[j].type == SYM_VAR && syms[j].address == i) {
+        if (syms[j].type == SYM_VAR && (uchar)syms[j].address == (uchar)i
+            && (uchar)syms[j].address < FRAME_BASE) {
           printf(" %s", syms[j].name);
           any = 1;
         }
       }
+      // every function that uses this cell (shared bands → several names)
       for (j = 0; j < nvector; j++) {
-        uchar base = fb[j];
-        if (i == base + FR_RET)
-          role = 1;
-        else if (i == base + FR_VAL)
-          role = 2;
-        else if (i == base + FR_PREV)
-          role = 3;
+        Symbol *fs = 0;
+        uchar base, k, slots;
+        int sj;
+        for (sj = 0; sj < nsym; sj++)
+          if (syms[sj].type == SYM_FUNC && syms[sj].address == j) {
+            fs = &syms[sj];
+            break;
+          }
+        base = fb[j];
+        slots = func_slots[j];
+        if (i < (int)base || i >= (int)base + (int)slots)
+          continue;
+        k = (uchar)(i - base);
+        if (fs)
+          printf(" %s.", fs->name);
+        else
+          printf(" V%02x.", j);
+        if (k == FR_RET) printf("RETURN");
+        else if (k == FR_VAL) printf("RETVAL");
+        else if (k == FR_PREV) printf("FP");
+        else if (k == FR_ACC) printf("pLast/ACC");
+        else {
+          int pi, done = 0;
+          if (fs) {
+            for (pi = 0; pi < fs->nparams; pi++)
+              if ((uchar)fs->param_slot[pi] == (uchar)i) {
+                printf("p%d", pi);
+                done = 1;
+                break;
+              }
+          }
+          if (!done) printf("loc/t%d", k);
+        }
+        any = 1;
       }
-      if (role == 1 && !any)
-        printf(" *RETURN*");
-      else if (role == 2 && !any)
-        printf(" *RETVAL*");
-      else if (role == 3)
-        printf(" *FP*");
-      else if (!any) {
-        tmpn++;
-        printf(" *TMP%d*", tmpn);
+      // constants
+      if (constidx != 255 && i >= (int)constidx) {
+        int ci = i - (int)constidx;
+        if (ci >= 0 && ci < nconst) {
+          printf(" CONST[%d]=%u", ci, (unsigned)const_pool[ci]);
+          any = 1;
+          n_con++;
+        }
       }
+      if (!any)
+        printf(" *TMP/hole*");
+      // region tallies (rough)
+      if (constidx != 255 && i >= (int)constidx)
+        ;
+      else if (any)
+        ;
       printf("\n");
     }
+    printf("  (expect ~ globals + max_band_frames + nconst; TMP/hole = main temps or layout leftovers)\n");
   }
 
   printf("CODE   @%5u  %5d bytes\n", h->code, bin_ptr);
