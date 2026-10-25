@@ -26,7 +26,7 @@ echo
 echo
 echo "=== Run from BLOB ==="
 echo
-sim65 -c tpi.sim $name.ivm
+sim65 -c tpi.sim $name.ivm | tee $name.log
 echo
 echo
 
@@ -34,6 +34,12 @@ echo
 echo "=== tpi.c: `./wcode tpi.c` LOC ===" 
 echo
 ls -ugGlf $name.p $name.pas $name.c $name.prg $name.sim $name.ivm
+
+echo
+if [ -f "$name.out" ]; then
+  echo "====================== DIFF ======================="
+  diff -U9999 $name.out $name.log && printf "\n\t\t  -- TESTS OK --\n\n"
+fi
 
 
 
