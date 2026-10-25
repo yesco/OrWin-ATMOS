@@ -125,9 +125,11 @@ typedef unsigned char uchar; // plain char is unsigned on cc65/oscar64/clang*-un
 typedef uint16_t word; // blob / vector cell width (6502)
 
 #ifndef IVMVARTYPE
-#define IVMVARTYPE uint16_t
+  #define IVMVARTYPE uint16_t
 #endif
 typedef IVMVARTYPE ivmvar;
+
+//#define USE_LABELS
 
 
 void note_load(uchar addr);
@@ -146,7 +148,6 @@ extern word slot_refs[]; // def near slot_used
 //#define MAX_SRC_LEN   32 // oscar - it runs out of memory during compile
 #define MAX_BIN_LEN   (MAX_SRC_LEN/3)
 
-#define MAX_PATCHES    128
 
 // TODO: this is used for strings too? do NOT!
 
@@ -311,19 +312,10 @@ char next(void) {
 }
 
 // ---------------------------------------------------------------------------
-// Bytecode buffer + patch list
+// Bytecode buffer
 // ---------------------------------------------------------------------------
 char bin[MAX_BIN_LEN];
 int bin_ptr = 0;
-
-typedef struct {
-  int offset; // location inside bin[] that needs a value
-  int kind; // 0 = const index, 1 = vector index, …
-  int value; // the value to write (or index)
-} Patch;
-
-Patch patches[MAX_PATCHES];
-int npatch = 0;
 
 // ACC mirror: which mem slot ACC currently holds (-1 = none/unknown)
 char acc_slot;
@@ -409,14 +401,6 @@ void emitreturn(char ret_slot) {
   } else
     // Normal return: ACC <- ret_val, then return
     emitop(';');
-}
-
-void add_patch(int offset, int kind, int value) {
-  if (npatch >= MAX_PATCHES) FAIL("too many patches");
-  patches[npatch].offset = offset;
-  patches[npatch].kind   = kind;
-  patches[npatch].value  = value;
-  npatch++;
 }
 
 // ---------------------------------------------------------------------------
@@ -1587,7 +1571,6 @@ int compile_pipeline(void) {
   memset(slot_loads, 0, sizeof(slot_loads));
   memset(slot_stores, 0, sizeof(slot_stores));
   nvector = 0;
-  npatch = 0;
   cur_vec = (char)0xff;
   memset(func_ncalls, 0, sizeof(func_ncalls));
   memset(func_high, 0, sizeof(func_high));
@@ -2067,42 +2050,21 @@ Process *Nevm(uchar *loaded) {
 #endif
 
 // Byte codes used:
-// ================ 
-// 0-31:                - fast var load (load typically 4x more common th store)
-// #$ ' , () : \ _ `    - FREE to use byte read/write/indexing?
-// 12345678             - local vars 1-7, 8 ist last var (AX)
-// ACD H R T VY         - FREE op vars
-//   possibly usage: cAr Cons cDr, Heap/Here, Recurse, Tail-call, Vector/index? Yndex?
-//
-// 23: a-w              - FREE OrwinOS API or system library strXX functions?
-// ? abcdefgh           - store local (need analyze code savings)
-// ? ijklmnop           - index stuff, built in loops iGG GG if zero/non-zero?
-// ? qrstuvw
-// ? xyz                - syscall function LN with 1,2,3 byte args indices+acc
-//
-// HIBIT
-//   64: 00-3f            - conditional relative jump forward
-//   64: (xx)             - vectored calls (max 64 funs)
 // 
-// Notes:
-//   ;  - load acc w return register (pascal) and do return
-//   X  - return with value in acc
-//   Q  - return with acc = 0
-// 
-// Missing: (q)
-//   memove  v
-//   memset  w
-//   strcpy  p
-//   strcat  t
-//   strchr  r
-//   strstr  s
-//   strdup  u
-//   ??????  q (atoi?) any others missing
-//
-//   strcmp  $
-//   strlen  `
-//   strN... ...
+
+// 1-31: fast var, TODO: 0 get it back!
+// #$ ' , () : \ _ `
+// 12345678 - actual numbers? lol
+// ACD H R T VY
+//  cAr Cons cDr  Heap/Here Recurse Tail-call Vector/index? Yndex?
+// 26: a-z  : OrwinOS API
+// 64: 00-3f: conditional relative jump forward
+// 64: (xx) : vector calls   
 ivmvar run_ivm(Process *p) {
+  // Classic single-switch + goto dispatch (ivm.c style).
+  // - opcode 'X' = return keep ACC; 'Q' = return 0; ';' = load ret then return
+  // - 0x00..0x1F = fused load mem[n]; '1'..'8' = load mem[fp+k]
+  // - opcode ';' = ACC ← ret_val at fp, then return
   // - parameter ops use PAR then goto pnext
   // - zero-arg ops goto xnext
   //
@@ -2111,10 +2073,11 @@ ivmvar run_ivm(Process *p) {
   // load process head → ZP global
   memcpy(&zp, &p->h, sizeof(zp));
   zp.mem = p->mem;
+
   #ifdef __CC65__
-  /* pool only used if needed elsewhere */
+    /* pool only used if needed elsewhere */
   #else
-  g_loaded = (uchar *)p->h.ipc - p->h.hdr.main;
+    g_loaded = (uchar *)p->h.ipc - p->h.hdr.main;
   #endif
 
   // Unified address space: consts were copied into mem[] by Nevm
@@ -2134,42 +2097,86 @@ ivmvar run_ivm(Process *p) {
 
   // TODO: oscar64 gives strange error if this is changed to next!
   //   maybe thinking it's c++? LOL: std::next() ???
+
+
  xnext:
   op = *zp.ipc++;
 
-  // fused load slots 0..31 (one byte)
+  // fused load 0..31 — before table (opcode itself is the slot)
+  // TODO: maybe faster, but slows everything else down!
+  // TODO: make it a label jump after test
   if (op < 32) {
     zp.acc = zp.mem[op];
     goto xnext;
   }
 
+  // Dispatch: USE_LABELS → goto *vt[oi] (oi is uchar, never an expression).
+  // Array is 128 entries (indices 0..127); hibit opcodes use op_hibit.
+  // Z(c) → "case c:" when switch path, empty when label path.
+
+#ifdef USE_LABELS
+  {
+    static void *vt[128];
+    static uchar inited;
+    if (!inited) {
+      // build once in a local table, then memcpy → static (no per-op ifdefs)
+      void *t[127];
+      uchar k;
+      for (k = 0; k < 128; k++) t[k] = &&op_unk;
+      t['q'] = &&op_q;   t['Q'] = &&op_Q;   t['X'] = &&op_X;
+      t[';'] = &&op_semi;
+      t['8'] = &&op_8;
+      t['1'] = &&op_17;  t['2'] = &&op_17;  t['3'] = &&op_17;
+      t['4'] = &&op_17;  t['5'] = &&op_17;  t['6'] = &&op_17; t['7'] = &&op_17;
+      t['+'] = &&op_add; t['-'] = &&op_sub; t['*'] = &&op_mul;
+      t['/'] = &&op_div; t['%'] = &&op_mod;
+      t['&'] = &&op_and; t['|'] = &&op_or;  t['^'] = &&op_xor;
+      t['['] = &&op_shl; t[']'] = &&op_shr;
+      t['{'] = &&op_shlm;t['}'] = &&op_shrm;
+      t['L'] = &&op_L;   t['S'] = &&op_S;   t['Z'] = &&op_Z;
+      t['M'] = &&op_M;   t['F'] = &&op_F;
+      t['@'] = &&op_at;
+      t['I'] = &&op_I;   t['J'] = &&op_J;   t['U'] = &&op_U;
+      t['<'] = &&op_lt;  t['='] = &&op_eq;  t['>'] = &&op_gt;
+      t[' '] = &&op_sp;
+      t['0'] = &&op_0;   t['9'] = &&op_9;
+      t['?'] = &&op_not; t['~'] = &&op_bnot;
+      t['K'] = &&op_K;   t['E'] = &&op_E;   t['N'] = &&op_N;
+      t['P'] = &&op_P;   t['O'] = &&op_O;   t['W'] = &&op_W;
+      t['.'] = &&op_dot; t['"'] = &&op_str;
+      t['G'] = &&op_G;   t['B'] = &&op_B;
+      memcpy(vt, t, sizeof(vt));
+      inited = 1;
+    }
+    if (op & 0x80) goto op_hibit;
+    goto *vt[op];
+  }
+
+  #define Z(c)
+  
+
+#else
+
+
   switch (op) {
 
-    // OS: quit program (C: exit)
-  case 'q':
-    goto done;
+  #define Z(c) case (c):
 
-  // 'Q' = return 0 (ACC=0 then return)
-  case 'Q':
-    zp.acc = 0;
-    // fall-through to X
+#endif
 
-  // 'X' = return, keep ACC (was opcode 0)
-  case 'X':
-    if (zp.fp == FP_MAIN) goto done;
-    #ifdef __CC65__
-      zp.ipc = (uchar *)zp.mem[zp.fp + FR_RET];
-    #else
-      zp.ipc = g_loaded + zp.mem[zp.fp + FR_RET];
-    #endif
-    zp.fp = (char)zp.mem[zp.fp + FR_PREV];
-    goto xnext;
 
-    // ';' = ACC <- ret_val, then return
-  case ';':
-    if (zp.fp == FP_MAIN) goto done;
+// Quit: TODO: replace by syscall!
+op_q:    Z('q')              goto done;
+
+// ReturnQ= return 0  X= return acc;  ';'=return RETURN;
+op_Q:    Z('Q')  zp.acc = 0; goto op_X;
+op_semi: Z(';')
     zp.acc = zp.mem[zp.fp + FR_VAL];
-    // fall-through was to 0; now jump like X
+    // fall through
+op_X:    Z('X')
+    // TODO: remove
+    if (zp.fp == FP_MAIN)    goto done;
+
     #ifdef __CC65__
       zp.ipc = (uchar *)zp.mem[zp.fp + FR_RET];
     #else
@@ -2178,140 +2185,119 @@ ivmvar run_ivm(Process *p) {
     zp.fp = (char)zp.mem[zp.fp + FR_PREV];
     goto xnext;
 
-  case '8':
-    zp.acc = zp.mem[zp.fp + FR_ACC];
-    goto xnext;
-  case '1': case '2': case '3': case '4':
-  case '5': case '6': case '7':
+// Local/parameters access 1..7, 8=last!
+op_8:    Z('8')  zp.acc = zp.mem[zp.fp + FR_ACC]; goto xnext;
+op_17:   Z('1') Z('2') Z('3') Z('4') Z('5') Z('6') Z('7')
     zp.acc = zp.mem[zp.fp + FR_ACC + (op - '0')];
     goto xnext;
 
-    // ---- parameter ops ----
+// Math ops
+op_add:  Z('+')  zp.acc += PAR; goto pnext;
+op_sub:  Z('-')  zp.acc -= PAR; goto pnext;
+op_mul:  Z('*')  zp.acc *= PAR; goto pnext;
+op_div:  Z('/')  if (PAR) zp.acc /= PAR; goto pnext;
+op_mod:  Z('%')  if (PAR) zp.acc %= PAR; goto pnext;
+op_and:  Z('&')  zp.acc &= PAR; goto pnext;
+op_or:   Z('|')  zp.acc |= PAR; goto pnext;
+op_xor:  Z('^')  zp.acc ^= PAR; goto pnext;
+op_shl:  Z('[')  zp.acc <<= PAR; goto pnext;
+op_shr:  Z(']')  zp.acc >>= PAR; goto pnext;
+op_shlm: Z('{')  zp.mem[*zp.ipc] <<= zp.acc; goto pnext;
+op_shrm: Z('}')  zp.mem[*zp.ipc] >>= zp.acc; goto pnext;
 
-    // TODO: cc65 '+' becomes 72 c include goto pnext
-    // ~150++ cycles per instruction 
-    // (/ 1000000 150) = 6666 ops/s (18K ok for asm 50c)
-  case '+': zp.acc += PAR; goto pnext;
-  case '-': zp.acc -= PAR; goto pnext;
-  case '*': zp.acc *= PAR; goto pnext;
-  case '/': if (PAR) zp.acc /= PAR; goto pnext;
-  case '%': if (PAR) zp.acc %= PAR; goto pnext;
+// Memory ops
+op_L:    Z('L')  zp.acc = PAR;             goto pnext;
+op_S:    Z('S')  zp.mem[*zp.ipc] = zp.acc; goto pnext;
+op_Z:    Z('Z')  zp.mem[*zp.ipc] = 0;      goto pnext;
 
-  case '&': zp.acc &= PAR; goto pnext;
-  case '|': zp.acc |= PAR; goto pnext;
-  case '^': zp.acc ^= PAR; goto pnext;
+op_M:    Z('M')
+    #ifdef __CC65__
+      zp.acc = zp.mem[PAR] = (int)calloc(zp.acc, 1);
+      // TODO: other platforms have wider pointers
+    #endif
+    goto pnext;
 
-  case '[': zp.acc <<= PAR; goto pnext;
-  case ']': zp.acc >>= PAR; goto pnext;
-  case '{': zp.mem[*zp.ipc] <<= zp.acc; goto pnext;
-  case '}': zp.mem[*zp.ipc] >>= zp.acc; goto pnext;
+op_F:    Z('F')
+    #ifdef __CC65__
+      free((void*)zp.mem[*zp.ipc]); zp.mem[*zp.ipc] = 0;
+      // TODO: other platforms have wider pointers
+    #endif
+    goto pnext;
 
-  case 'L': zp.acc = PAR;             goto pnext;
-  case 'S': zp.mem[*zp.ipc] = zp.acc; goto pnext;
-  case 'Z': zp.mem[*zp.ipc] = 0;      goto pnext;
-    // TODO: char? and then explicit for indexing : _ ???
+op_at:   Z('@')  zp.acc = zp.mem[PAR]; goto pnext;
+op_I:    Z('I')  zp.acc = ++zp.mem[*zp.ipc]; goto pnext;
+op_J:    Z('J')  zp.acc = --zp.mem[*zp.ipc]; goto pnext;
+op_U:    Z('U')
+    zp.acc = (zp.mem[zp.ipc[0]] += zp.mem[zp.ipc[1]]); zp.ipc += 2; goto xnext;
 
-  #ifdef __CC65__
-  case 'M': zp.acc = zp.mem[PAR] = (int)calloc(zp.acc, 1);    goto pnext;
-  case 'F': free((void*)zp.mem[*zp.ipc]); zp.mem[*zp.ipc]= 0; goto pnext;
-  #endif
-  case '@': zp.acc = zp.mem[PAR]; goto pnext; // read  pointer
-  case '!': zp.mem[PAR] = zp.acc; goto pnext; // write pointer
+op_lt:   Z('<')  zp.acc = zp.acc < PAR;  goto pnext;
+op_eq:   Z('=')  zp.acc = zp.acc == PAR; goto pnext;
+op_gt:   Z('>')  zp.acc = zp.acc > PAR;  goto pnext;
 
-  #ifdef OPTMOREPARAMS
-    // TODO: only useful for 3 or moe parameters...
-    //   in linux/kernel/big projects
-    //   7-10% take 3 parameters, and <5% take 4+ ...
-  // case 'S': PAR = zp.acc;  lastv= *zp.ipc; goto pnext;
-  //case 'V': zp.mem[++lastv]= PAR; goto pnext;
-  //case ',': zp.mem[++lastv]= zp.acc; goto xnext;
-  #endif
+op_sp:   Z(' ')                         goto xnext;
+op_0:    Z('0')  zp.acc = 0;            goto xnext;
+op_9:    Z('9')  zp.acc = 0xffff;       goto xnext;
+op_not:  Z('?')  zp.acc = !zp.acc;      goto xnext;
+op_bnot: Z('~')  zp.acc = ~zp.acc;      goto xnext;
 
-  case 'I': zp.acc= ++zp.mem[*zp.ipc]; goto pnext;
-  case 'J': zp.acc= --zp.mem[*zp.ipc]; goto pnext;
-//  case 'I': zp.acc= PAR++; goto pnext;
-//  case 'J': zp.acc= PAR--; goto pnext;
+op_K:    Z('K')  zp.acc = getchar();    goto xnext;
+op_E:    Z('E')  putchar(zp.acc);       goto xnext;
+op_N:    Z('N')  putchar('\n');         goto xnext;
+op_P:    Z('P')  printf("%u", (unsigned)zp.acc); goto xnext;
+op_O:    Z('O')  putchar(PAR);          goto pnext;
+op_W:    Z('W')  printf("%u", PAR);     goto pnext;
+op_dot:  Z('.')  printf("%u", zp.acc);  goto xnext;
+op_str:  Z('"')  while (*zp.ipc) putchar(*zp.ipc++);
+                                        goto pnext;
 
-  case 'U': zp.acc= (zp.mem[zp.ipc[0]]+= zp.mem[zp.ipc[1]]); zp.ipc+=2; goto xnext;
+op_G:    Z('G')  if ((int16_t)zp.acc > 0) zp.ipc += *zp.ipc; goto pnext;
+op_B:    Z('B')  zp.ipc -= *zp.ipc; goto pnext;
 
-  case '<': zp.acc= zp.acc < PAR; goto pnext;
-  case '=': zp.acc= zp.acc == PAR; goto pnext;
-  case '>': zp.acc= zp.acc > PAR; goto pnext;
-
-    // ---- no-arg ops ----
-  case ' ':                  goto xnext;
-  case '0': zp.acc = 0;      goto xnext;
-  case '9': zp.acc = 0xffff; goto xnext;
-
-// TODO: add keyword NOT !
-  case '?': zp.acc = !zp.acc; goto xnext;
-  case '~': zp.acc = ~zp.acc; goto xnext;
-
-    // printers
-  case 'K': zp.acc= getchar();    goto xnext; // key
-  case 'E': putchar(zp.acc);      goto xnext; // putchar
-  case 'N': putchar('\n');        goto xnext; // newline
-  case 'P': printf("%s", zp.acc); goto xnext; // print strptr
-  case 'O': putchar(PAR);         goto pnext; // out letter
-  case 'W': printf("%u", PAR);    goto pnext; // write var
-  case '.': printf("%u", zp.acc); goto xnext; // print num
-  case '"': // inline string ends at 0      // print "const"
-    while (*zp.ipc) putchar(*zp.ipc++);
-    goto pnext; // skip the terminating 0
-
-    // ---- relative jumps (uppercase, single opcode each) ----
-    // B  <delta>  2 byte: AGAIN= unconditional backward
-    // G  <delta>  2 byte: LOOP = conditional zp.acc>0 forward
-    // 00-63       1 byte: IF   = conditional zp.acc=0 forward
-    // relative jumps (byte code stats: jvm p-code etc)
-    //     0-15: 70-75%, 0-31: 85-90%, 32+: 10-15
-
-  case 'G': if ((int16_t)zp.acc > 0) zp.ipc += *zp.ipc; goto pnext;
-  case 'B':                        zp.ipc -= *zp.ipc;    goto pnext;
-    
+  #ifndef USE_LABELS
   default:
+  #endif
+
+op_unk:
+op_hibit:
     if (op >= 0x80) {
-      if (op < 0xc0) { // 0b10
+      if (op < 0xc0) {
+        if (!zp.acc)
+          zp.ipc += op & 0x3f;
+        goto xnext;
+      }
 
-        // relative jumps
-        if (!zp.acc)   zp.ipc += op & 0x3f;    goto xnext;
-
-      } else { // 0b11
-
-        // ---- vectorised call (one byte) ----
-        // push cur_func; cur_func=vec; zp.mem[vec_link[vec]]=zp.ipc; zp.ipc=vptr[vec]
-
-        // JSR: zp.fp chain in callee frame; fptab/call from loaded blob
-        {
-          char v = op & 0x3f;
-          char nfp;
-          word *callv;
-          #ifdef __CC65__
+      // vectorised JSR
+      {
+        char v = op & 0x3f;
+        char nfp;
+        word *callv;
+        #ifdef __CC65__
           nfp = ((uchar *)(unsigned)zp.hdr.fp)[v];
           callv = (word *)(unsigned)zp.hdr.call;
           zp.mem[nfp + FR_PREV] = zp.fp;
           zp.mem[nfp + FR_RET] = (unsigned int)zp.ipc;
-          zp.mem[nfp + FR_ACC] = zp.acc; // last param
+          zp.mem[nfp + FR_ACC] = zp.acc;
           zp.fp = nfp;
           zp.ipc = (uchar *)(unsigned)callv[v];
-          #else
+        #else
           nfp = g_loaded[zp.hdr.fp + v];
           callv = (word *)(g_loaded + zp.hdr.call);
           zp.mem[nfp + FR_PREV] = zp.fp;
           zp.mem[nfp + FR_RET] = (unsigned int)(zp.ipc - g_loaded);
-          zp.mem[nfp + FR_ACC] = zp.acc; // last param
+          zp.mem[nfp + FR_ACC] = zp.acc;
           zp.fp = nfp;
           zp.ipc = g_loaded + callv[v];
-          #endif
-        }
-        goto xnext;
+      #endif
       }
+      goto xnext;
     }
+    printf("\n[IVM] unknown opcode 0x%02X '%c'\n", op, isprint(op) ? op : 0);
 
-    // ZJMP [op] (forward)
-    // TODO: (op & 0xc0) == 0x80 for 0x80..0xbf
-    printf("\n[IVM] unknown opcode 0x%02X '%c'\n", op, isprint(op)?op:0);
-  }
+#undef Z
+
+#ifndef USE_LABELS
+  } // switch
+#endif
 
  done:
   // save ZP global → process head
