@@ -122,8 +122,18 @@
 #include <setjmp.h>
 #include <stdint.h>
 
+
+// Oscar doesn't have
+// TODO: maybe _zoropage ? but on parameter?
+#ifndef __CC65__
+  // This only works "inside" of a function in cc65
+  #define register
+#endif
+
+
 typedef unsigned char uchar; // plain char is unsigned on cc65/oscar64/clang*-unsigned
 typedef uint16_t word; // blob / vector cell width (6502)
+
 
 #ifndef IVMVARTYPE
   #define IVMVARTYPE uint16_t
@@ -2044,28 +2054,45 @@ Process *Nevm(uchar *loaded) {
   return p;
 }
 
-// Oscar doesn't have
-// TODO: maybe _zoropage ? but on parameter?
-#ifndef __CC65__
-#define register
-#endif
 
 // Byte codes used:
+// ================ 
+// 0-31:                - fast var load (load typically 4x more common th store)
+// #$ ' , () : \ _ `    - FREE to use byte read/write/indexing?
+// 12345678             - local vars 1-7, 8 ist last var (AX)
+// ACD H R T VY         - FREE op vars
+//   possibly usage: cAr Cons cDr, Heap/Here, Recurse, Tail-call, Vector/index? Yndex?
+//
+// 23: a-w              - FREE OrwinOS API or system library strXX functions?
+// ? abcdefgh           - store local (need analyze code savings)
+// ? ijklmnop           - index stuff, built in loops iGG GG if zero/non-zero?
+// ? qrstuvw
+// ? xyz                - syscall function LN with 1,2,3 byte args indices+acc
+//
+// HIBIT
+//   64: 00-3f            - conditional relative jump forward
+//   64: (xx)             - vectored calls (max 64 funs)
 // 
+// Notes:
+//   ;  - load acc w return register (pascal) and do return
+//   X  - return with value in acc
+//   Q  - return with acc = 0
+// 
+// Missing: (q)
+//   memove  v
+//   memset  w
+//   strcpy  p
+//   strcat  t
+//   strchr  r
+//   strstr  s
+//   strdup  u
+//   atoi    q
+//
+//   strcmp  $
+//   strlen  `
+//   strN... ...
 
-// 1-31: fast var, TODO: 0 get it back!
-// #$ ' , () : \ _ `
-// 12345678 - actual numbers? lol
-// ACD H R T VY
-//  cAr Cons cDr  Heap/Here Recurse Tail-call Vector/index? Yndex?
-// 26: a-z  : OrwinOS API
-// 64: 00-3f: conditional relative jump forward
-// 64: (xx) : vector calls   
 ivmvar run_ivm(Process *p) {
-  // Classic single-switch + goto dispatch (ivm.c style).
-  // - opcode 'X' = return keep ACC; 'Q' = return 0; ';' = load ret then return
-  // - 0x00..0x1F = fused load mem[n]; '1'..'8' = load mem[fp+k]
-  // - opcode ';' = ACC ← ret_val at fp, then return
   // - parameter ops use PAR then goto pnext
   // - zero-arg ops goto xnext
   //
