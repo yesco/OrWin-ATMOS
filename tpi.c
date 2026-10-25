@@ -143,6 +143,7 @@ extern word slot_refs[]; // def near slot_used
 
 // --- config
 #define MAX_SRC_LEN   (6*1024)
+//#define MAX_SRC_LEN   32 // oscar - it runs out of memory during compile
 #define MAX_BIN_LEN   (MAX_SRC_LEN/3)
 
 #define MAX_PATCHES    128
@@ -158,7 +159,7 @@ extern word slot_refs[]; // def near slot_used
 
 // --- limits
 #define MAX_SLOTS      255 // Last one not used, is error
-#define MAX_CONSTS      64
+#define MAX_CONSTS     128
 
 #define MAX_VECTORS     64 // func_calls is V*V
 
@@ -1324,7 +1325,6 @@ void parsevars(char local) {
 
 void compile_function(void) {
   char func_name[MAX_SYM_LEN + 1];
-  char param_name[MAX_SYM_LEN + 1];
   char ret_addr_slot, ret_val_slot, caller_slot;
   int entry_offset, vec_idx;
   int nparams, i;
