@@ -570,8 +570,8 @@ int  func_code_prev[MAX_VECTORS]; // previous pass size for -O delta
 char opt_base[MAX_VECTORS]; // 0 = sequential; else forced base
 char cur_vec; // function being compiled (0xff = none)
 char nvector = 0;
-int opt_level;
-int opt_pass; // 0 first, 1 second...
+int opt_level = 0;
+int opt_pass = 0; // 0 first, 1 second...
 
 int main_offset = 0;
 char *main_entry = 0;
@@ -2129,9 +2129,8 @@ static char outname[256];
 
 // ends_with(name, ".ivm") etc — C89 / cc65 friendly
 static int ends_with(const char *s, const char *suf) {
-  int n, m;
-  n = (int)strlen(s);
-  m = (int)strlen(suf);
+  int n = strlen(s), m = strlen(suf);
+
   if (n < m) return 0;
   return strcmp(s + n - m, suf) == 0;
 }
@@ -2139,7 +2138,8 @@ static int ends_with(const char *s, const char *suf) {
 // foo.p / foo.pas → foo.ivm
 static void ivm_name_from(char *out, const char *in) {
   int n, i;
-  n = (int)strlen(in);
+
+  n = strlen(in);
   strcpy(out, in);
   if (ends_with(in, ".pas")) {
     out[n - 3] = 'i';
@@ -2157,6 +2157,7 @@ static void ivm_name_from(char *out, const char *in) {
 static int load_file(const char *path, char *buf, int maxn) {
   FILE *f;
   int n;
+
   f = fopen(path, "rb");
   if (!f) {
     printf("cannot open %s\n", path);
@@ -2172,8 +2173,9 @@ static int load_file(const char *path, char *buf, int maxn) {
   return n;
 }
 
-static int save_blob(const char *path) {
+static char save_blob(const char *path) {
   FILE *f;
+
   f = fopen(path, "wb");
   if (!f) {
     printf("cannot write %s\n", path);
@@ -2189,16 +2191,19 @@ static int save_blob(const char *path) {
   return 1;
 }
 
-static int load_blob(const char *path) {
+static char load_blob(const char *path) {
   FILE *f;
   int n;
+
   f = fopen(path, "rb");
   if (!f) {
     printf("cannot open %s\n", path);
     return 0;
   }
+
   n = (int)fread(blob, 1, MAX_BLOB_LEN, f);
   fclose(f);
+
   if (n <= 0) {
     printf("failed to load %s\n", path);
     return 0;
@@ -2207,10 +2212,11 @@ static int load_blob(const char *path) {
   blob_len = n;
   printf("loaded %s (%d bytes)\n", path, blob_len);
   relocate(blob);
+
   return 1;
 }
 
-static int run_loaded_blob(void) {
+static char run_loaded_blob(void) {
   Process *proc;
   unsigned int ret;
 
@@ -2231,42 +2237,46 @@ int main(void) {
 int main(int argc, char **argv) {
 #endif
 
-  const char *filename;
+  const char *filename = NULL;
   int buf_idx;
+  uchar i;
 
-  opt_level = 0;
-  opt_pass = 0;
-  filename = NULL;
-  {
-    int ai;
-    for (ai = 1; ai < argc; ai++) {
-      if (argv[ai][0] == '-' && argv[ai][1] == 'O') {
-        opt_level = argv[ai][2] ? argv[ai][2] - '0' : 1;
-        if (opt_level < 1) opt_level = 1;
-      } else if (!filename)
-        filename = argv[ai];
-    }
+  // parse args
+  for (i = 1; i < argc; i++) {
+
+    if (argv[i][0] == '-' && argv[i][1] == 'O') {
+
+      // -O
+      opt_level = argv[i][2] ? argv[i][2] - '0' : 1;
+      if (opt_level < 1) opt_level = 1;
+
+    } else if (!filename)
+
+      // filename
+      filename = argv[i];
+
   }
+
   if (!filename) {
-    printf("usage: %s [-O] file.p|file.pas|file.ivm\n", argv[0]);
-    printf("  -O  second pass with packed frame bases\n");
+    printf("usage: %s [-O] file.[ p | pas ivm]\n", argv[0]);
+    printf("  -O  second pass; packed frame bases\n");
     return 1;
   }
 
-  // ----- run mode: pure .ivm -----
+  // IVM RUN ?
   if (ends_with(filename, ".ivm")) {
-    if (!load_blob(filename))
-      return 1;
+    if (!load_blob(filename)) return 1;
     run_loaded_blob();
     return 0;
   }
 
-  // ----- compile mode: .p / .pas -----
+  // CHECK .p OR .pas
   if (!ends_with(filename, ".p") && !ends_with(filename, ".pas")) {
     printf("need .p, .pas, or .ivm: %s\n", filename);
     return 1;
   }
 
+  // LOAD
   buf_idx = load_file(filename, src_buf, MAX_SRC_LEN);
   if (buf_idx < 0) return 1;
   if (!buf_idx) {
@@ -2274,62 +2284,84 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  // COMPILE — longjmp value is error message pointer (or 1 if bare)
+  // FAIL
+  // - longjmp value is error message pointer (or 1 if bare)
   {
     int err = setjmp(fail_jmp);
     if (err) {
+
       #ifdef __CC65__
-      fail_msg = (char*) err;
+        fail_msg = (char*) err;
       #endif
+
       buf_idx = (int)src_pos;
 
       printf("\n%%ERROR: %s\n%s:%d.%d: ", fail_msg, filename,
         lnum, buf_idx-cur_line);
+
       src_pos = cur_line;
       do {
-        if ((int)src_pos == buf_idx) printf(" >>> %s <<<ERROR<<< ", curr_tok.lexeme);
+        if (src_pos == buf_idx) printf(" >>> %s <<<ERROR<<< ", curr_tok.lexeme);
         putchar(NEXT);
       } while (C && C != '\n');
       printf("\n\n");
+
       return 1;
     }
   }
-  if (!opt_level)
-    memset(opt_base, 0, sizeof(opt_base));
+
+  // PREPARE OPT
+  if (!opt_level) memset(opt_base, 0, sizeof(opt_base));
   opt_pass = 0;
+
+  // COMPILE
   if (!compile_pipeline()) {
     printf("\n>> FAIL on line %d\n", lnum);
     return 1;
   }
+
+  // OPTIMIZATION OF FRAME BASES
   if (opt_level > 0) {
     int i;
+
     for (i = 0; i < nvector; i++)
       func_code_prev[i] = func_code_bytes[i];
+
     opt_pass = 1;
     printf("--- opt:%d applying packed bases ---\n", opt_pass);
+
+    // COMPILE AGAIN!
     if (!compile_pipeline()) {
       printf("\n>> FAIL on line %d\n", lnum);
       return 1;
     }
   }
 
+  // REMAP FOR BLOB
   layout_process_mem();
   remap_bytecode();
   printf("--- BYTECODE after layout/remap ---\n");
   dump_bytecode();
+
   finalise();
   dump_blob();
 
   ivm_name_from(outname, filename);
-  if (!save_blob(outname))
-    return 1;
+  if (!save_blob(outname)) return 1;
 
+  // LOAD & RUN
   // true round-trip: clear and reload from disk
+
+  // TODO: this shouldn't be global...
   memset(blob, 0, sizeof(blob));
+
   blob_len = 0;
-  if (!load_blob(outname))
-    return 1;
+  // - LAOD
+  if (!load_blob(outname)) return 1;
+  
+  // - RUN
   run_loaded_blob();
+
   return 0;
 }
 
