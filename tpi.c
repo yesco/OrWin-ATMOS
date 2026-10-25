@@ -135,12 +135,18 @@ typedef unsigned char uchar; // plain char is unsigned on cc65/oscar64/clang*-un
 typedef uint16_t word; // blob / vector cell width (6502)
 
 
-#ifndef IVMVARTYPE
-  #define IVMVARTYPE uint16_t
-#endif
-typedef IVMVARTYPE ivmvar;
+//////////////////////////////////////////////
+// Runtime (ivm.c)
+
 
 //#define USE_LABELS
+
+#include "ivm.c"
+
+
+//////////////////////////////////////////////
+// Compiler
+
 
 
 void note_load(uchar addr);
@@ -170,7 +176,6 @@ extern word slot_refs[]; // def near slot_used
 #define MAX_PARAMS       4 // max arguments per function
 
 // --- limits
-#define MAX_SLOTS      255 // Last one not used, is error
 #define MAX_CONSTS     128
 
 #define MAX_VECTORS     64 // func_calls is V*V
@@ -572,17 +577,6 @@ int main_offset = 0;
 char *main_entry = 0;
 char is_code_addr[MAX_CONSTS];
 
-// Frame layout at fp:
-//   fp+0  RETURN
-//   fp+1  VAL
-//   fp+2  PREV
-//   fp+3  ACC home / last param  — JSR always stores ACC here (no prologue S)
-//   fp+4… earlier params, then locals
-#define FR_RET  0
-#define FR_VAL  1
-#define FR_PREV 2
-#define FR_ACC  3
-#define FP_MAIN ((char)0xFF)
 char fp; // current frame pointer (index into mem), FP_MAIN = main
 
 int add_vector(int entry_offset) {
@@ -1663,79 +1657,14 @@ int compile_pipeline(void) {
   return 1;
 }
 
-// ===========================================================================
-// BLOB: sequential pack, header struct, memcpy sections, 0000 ends reloc.
-// ===========================================================================
-// PROGRAM BLOB / LOAD / PROCESS / RUN
-// ===========================================================================
-//
-// finalise() builds an *offset-only* blob (constants live in the blob, not
-// copied into a 0x80 band of mem as the permanent store).
-//
-// Layout (all multi-byte fields are offsets from blob base until loader
-// rewrites them; reloc walk stops at 0000):
-//
-//   <prefix / BlobHeader>  // main,code,call,fp,con,data = offsets; memsz = COUNT
-//   <call vectors>         // one word per FUNCTION (code entry offset)
-//   <0000>                 // end of relocatable vector region
-//   NOTE: loader +base must NOT treat memsz as an offset — it is a cell count.
-//   <const words>          // pooled constants (NOT relocated)
-//   <fp byte array>        // frame_base[v] — subr# → frame pointer slot
-//   <code array>           // bytecode
-//   <data array>           // future / strings if externalised
-//
-// loader(base):
-//   Relocate first vectors until 0000: while (*v) { *v += base; v++; }
-//   That covers BlobHeader prefix + call table. Const section follows 0000
-//   and is left as raw values.
-//
-// Nevm(loaded) → Process:
-//   loaded is already relocated (template). Allocates process state:
-//     hdr (copy of prefix), ipc, fp, mem, acc, then mem[memsz].
-//   Resolves ipc from main; mem → process mem[]; consts via hdr.con.
-//   One loaded blob can back many Process instances.
-//
-// run_ivm(Process *p):
-//   memcpy Process head → ZP globals (same layout), interpret, memcpy back.
-//   PAR: if operand & 0x80 → consts[n], else mem[slot]
-//   (0x80+n is still the bytecode encoding for const indices; can change later)
-// ===========================================================================
 
-typedef struct BlobHeader {
-  word main;
-  word code;
-  word call;
-  word fp;
-  word con;
-  word data;
-  word memsz;
-  word constidx;
-  word xslot; // inject X=42 here at Nevm, 0xffff=none
-} BlobHeader;
-
-// Process head — layout of ZP image (memcpy in/out of run_ivm)
-typedef struct ProcessHead {
-  BlobHeader hdr;
-  uchar *ipc;
-  char fp;
-  ivmvar *mem;
-  ivmvar acc;
-} ProcessHead;
-
-typedef struct Process {
-  ProcessHead h;
-  ivmvar mem[1];
-} Process;
+// TODO: packer (here) ... loader/Nevm()/run_ivm (ivm.c)
 
 #define MAX_BLOB_LEN 4096
 uchar blob[MAX_BLOB_LEN];
 int blob_len;
 uchar *g_loaded;
 
-// ZP global (same layout as ProcessHead)
-ProcessHead zp;
-word *consts; // unused if PAR is mem-only
-uchar op;
 
 // append n bytes of data at *pp; return offset from base
 static word memadd(uchar *base, uchar **pp, void *data, word n) {
@@ -1979,375 +1908,6 @@ void finalise(void) {
   main_entry = bin + main_offset;
 }
 
-// relocating first vectors till 0000
-// Intent: every word from blob start through the call table is a blob-relative
-// offset; add base so they become absolute pointers (6502 address space).
-// memsz sits in the header but is a *count*, not an offset — preserve it.
-void loader(uchar *base) {
-  word *v;
-  word save_memsz;
-  BlobHeader *h;
-
-  h = (BlobHeader *)base;
-  save_memsz = h->memsz; // NOT an offset
-  {
-    word save_ci = h->constidx;
-    word save_xs = h->xslot;
-
-  v = (word *)base;
-  while (*v) {
-    #ifdef __CC65__
-    *v = *v + (word)base;
-    #endif
-    v++;
-  }
-
-  h->memsz = save_memsz;
-  h->constidx = save_ci;
-  h->xslot = save_xs;
-  }
-}
-
-// loaded = output of loader; does not call loader
-Process *Nevm(uchar *loaded) {
-  Process *p;
-  unsigned int cells, bytes;
-  BlobHeader *bh;
-
-  bh = (BlobHeader *)loaded;
-  cells = bh->memsz;
-  if (!cells) cells = MAX_SLOTS;
-
-  bytes = (unsigned int)(sizeof(ProcessHead) + cells * sizeof(ivmvar));
-  p = (Process *)calloc(1, bytes);
-  if (!p) {
-    printf("calloc fail %u bytes (%u slots)\n", bytes, cells);
-    FAIL("Nevm calloc");
-  }
-
-  memcpy(&p->h.hdr, loaded, sizeof(BlobHeader));
-  #ifdef __CC65__
-  p->h.ipc = (uchar *)(unsigned)p->h.hdr.main;
-  #else
-  p->h.ipc = loaded + p->h.hdr.main;
-  #endif
-  p->h.fp = FP_MAIN;
-  p->h.mem = p->mem;
-  p->h.acc = 0;
-  { word xs = p->h.hdr.xslot;
-    if (xs != 0xffff && xs < p->h.hdr.memsz) p->mem[xs] = 42; }
-
-  // Install constants into process mem[] (PAR = mem[idx] only)
-  if (bh->constidx != 255 && bh->memsz > bh->constidx) {
-    word *pool;
-    word nc = bh->memsz - bh->constidx;
-    word i;
-    #ifdef __CC65__
-    pool = (word *)(unsigned)bh->con;
-    #else
-    pool = (word *)(loaded + bh->con);
-    #endif
-    // pool[i] lives at mem[constidx + i]
-    for (i = 0; i < nc; i++)
-      p->mem[bh->constidx + i] = pool[i];
-  }
-  return p;
-}
-
-
-// Byte codes used:
-// ================ 
-// 0-31:                - fast var load (load typically 4x more common th store)
-// #$ ' , () : \ _ `    - FREE to use byte read/write/indexing?
-// 12345678             - local vars 1-7, 8 ist last var (AX)
-// ACD H R T VY         - FREE op vars
-//   possibly usage: cAr Cons cDr, Heap/Here, Recurse, Tail-call, Vector/index? Yndex?
-//
-// 23: a-w              - FREE OrwinOS API or system library strXX functions?
-// ? abcdefgh           - store local (need analyze code savings)
-// ? ijklmnop           - index stuff, built in loops iGG GG if zero/non-zero?
-// ? qrstuvw
-// ? xyz                - syscall function LN with 1,2,3 byte args indices+acc
-//
-// HIBIT
-//   64: 00-3f            - conditional relative jump forward
-//   64: (xx)             - vectored calls (max 64 funs)
-// 
-// Notes:
-//   ;  - load acc w return register (pascal) and do return
-//   X  - return with value in acc
-//   Q  - return with acc = 0
-// 
-// Missing: (q)
-//   memove  v
-//   memset  w
-//   strcpy  p
-//   strcat  t
-//   strchr  r
-//   strstr  s
-//   strdup  u
-//   atoi    q
-//
-//   strcmp  $
-//   strlen  `
-//   strN... ...
-
-ivmvar run_ivm(Process *p) {
-  // - parameter ops use PAR then goto pnext
-  // - zero-arg ops goto xnext
-  //
-  // ZP: memcpy Process head ↔ globals (ivm_hdr, ipc, fp, mem, acc)
-
-  // load process head → ZP global
-  memcpy(&zp, &p->h, sizeof(zp));
-  zp.mem = p->mem;
-
-  #ifdef __CC65__
-    /* pool only used if needed elsewhere */
-  #else
-    g_loaded = (uchar *)p->h.ipc - p->h.hdr.main;
-  #endif
-
-  // Unified address space: consts were copied into mem[] by Nevm
-  #define PAR (zp.mem[*zp.ipc])
-
-  goto xnext;
-
-  // Eat up one byte parameter from last op
- pnext:
-  ++zp.ipc;
-
-  // Next when no parameters
-  // TODO: 26 x cmp beq ...
-  //         net ++pc lda  jmp cmp/beq
-  //   avg (+ 3  8    5    1   (* 13 4)) = 69c
-  //   69c dispatch-overhead AT LEAST!
-
-  // TODO: oscar64 gives strange error if this is changed to next!
-  //   maybe thinking it's c++? LOL: std::next() ???
-
-
- xnext:
-  op = *zp.ipc++;
-
-  // fused load 0..31 — before table (opcode itself is the slot)
-  // TODO: maybe faster, but slows everything else down!
-  // TODO: make it a label jump after test
-  if (op < 32) {
-    zp.acc = zp.mem[op];
-    goto xnext;
-  }
-
-  // Dispatch: USE_LABELS → goto *vt[oi] (oi is uchar, never an expression).
-  // Array is 128 entries (indices 0..127); hibit opcodes use op_hibit.
-  // Z(c) → "case c:" when switch path, empty when label path.
-
-#ifdef USE_LABELS
-  {
-    static void *vt[127];
-    static uchar inited;
-    if (!inited) {
-      // build once in a local table, then memcpy → static (no per-op ifdefs)
-      void *t[127];
-      uchar k;
-      for (k = 0; k < 128; k++) t[k] = &&op_unk;
-      t['q'] = &&op_q;   t['Q'] = &&op_Q;   t['X'] = &&op_X;
-      t[';'] = &&op_semi;
-      t['8'] = &&op_8;
-      t['1'] = &&op_17;  t['2'] = &&op_17;  t['3'] = &&op_17;
-      t['4'] = &&op_17;  t['5'] = &&op_17;  t['6'] = &&op_17; t['7'] = &&op_17;
-      t['+'] = &&op_add; t['-'] = &&op_sub; t['*'] = &&op_mul;
-      t['/'] = &&op_div; t['%'] = &&op_mod;
-      t['&'] = &&op_and; t['|'] = &&op_or;  t['^'] = &&op_xor;
-      t['['] = &&op_shl; t[']'] = &&op_shr;
-      t['{'] = &&op_shlm;t['}'] = &&op_shrm;
-      t['L'] = &&op_L;   t['S'] = &&op_S;   t['Z'] = &&op_Z;
-      t['M'] = &&op_M;   t['F'] = &&op_F;
-      t['@'] = &&op_at;  t['!'] = &&op_bang;
-      t['I'] = &&op_I;   t['J'] = &&op_J;   t['U'] = &&op_U;
-      t['<'] = &&op_lt;  t['='] = &&op_eq;  t['>'] = &&op_gt;
-      t[' '] = &&op_sp;
-      t['0'] = &&op_0;   t['9'] = &&op_9;
-      t['?'] = &&op_not; t['~'] = &&op_bnot;
-      t['K'] = &&op_K;   t['E'] = &&op_E;   t['N'] = &&op_N;
-      t['P'] = &&op_P;   t['O'] = &&op_O;   t['W'] = &&op_W;
-      t['.'] = &&op_dot; t['"'] = &&op_str;
-      t['G'] = &&op_G;   t['B'] = &&op_B;
-      memcpy(vt, t, sizeof(vt));
-      inited = 1;
-    }
-    if (op & 0x80) goto op_hibit;
-    goto *vt[op];
-  }
-
-  #define Z(c)
-  #define ZL(label, c) label:
-  #define L(label) label:
-  
-
-#else
-
-
-  switch (op) {
-
-  #define Z(c)         case (c):
-  #define ZL(label, c) case (c):
-  #define L(label)
-
-#endif
-
-
-// Quit: TODO: replace by syscall!
-ZL(op_q,   'q')              goto done;
-
-// ReturnQ= return 0  X= return acc;  ';'=return RETURN;
-ZL(op_Q,   'Q')  zp.acc = 0; goto op_X;
-ZL(op_semi,';')
-    zp.acc = zp.mem[zp.fp + FR_VAL];
-    // fall through
-op_X:    Z('X')
-    // TODO: remove
-    if (zp.fp == FP_MAIN)    goto done;
-
-    #ifdef __CC65__
-      zp.ipc = (uchar *)zp.mem[zp.fp + FR_RET];
-    #else
-      zp.ipc = g_loaded + zp.mem[zp.fp + FR_RET];
-    #endif
-
-    zp.fp = (char)zp.mem[zp.fp + FR_PREV];
-    goto xnext;
-
-// Local/parameters access 1..7, 8=last!
-L(op_8)  Z('8')  zp.acc = zp.mem[zp.fp + FR_ACC]; goto xnext;
-L(op_17) Z('1') Z('2') Z('3') Z('4') Z('5') Z('6') Z('7')
-    zp.acc = zp.mem[zp.fp + FR_ACC + (op - '0')];
-    goto xnext;
-
-// Math ops
-ZL(op_add, '+')  zp.acc += PAR; goto pnext;
-ZL(op_sub, '-')  zp.acc -= PAR; goto pnext;
-ZL(op_mul, '*')  zp.acc *= PAR; goto pnext;
-ZL(op_div, '/')  if (PAR) zp.acc /= PAR; goto pnext;
-ZL(op_mod, '%')  if (PAR) zp.acc %= PAR; goto pnext;
-ZL(op_and, '&')  zp.acc &= PAR; goto pnext;
-ZL(op_or,  '|')  zp.acc |= PAR; goto pnext;
-ZL(op_xor, '^')  zp.acc ^= PAR; goto pnext;
-ZL(op_shl, '[')  zp.acc <<= PAR; goto pnext;
-ZL(op_shr, ']')  zp.acc >>= PAR; goto pnext;
-ZL(op_shlm,'{')  zp.mem[*zp.ipc] <<= zp.acc; goto pnext;
-ZL(op_shrm,'}')  zp.mem[*zp.ipc] >>= zp.acc; goto pnext;
-
-// Memory ops
-ZL(op_L,   'L')  zp.acc = PAR;             goto pnext;
-ZL(op_S,   'S')  zp.mem[*zp.ipc] = zp.acc; goto pnext;
-ZL(op_Z,   'Z')  zp.mem[*zp.ipc] = 0;      goto pnext;
-
-ZL(op_M,   'M')
-    #ifdef __CC65__
-      zp.acc = zp.mem[PAR] = (int)calloc(zp.acc, 1);
-      // TODO: other platforms have wider pointers
-    #endif
-    goto pnext;
-
-ZL(op_F,   'F')
-    #ifdef __CC65__
-      free((void*)zp.mem[*zp.ipc]);
-      // TODO: other platforms have wider pointers
-    #endif
-    zp.mem[*zp.ipc] = 0;
-    goto pnext;
-
-ZL(op_at,  '@')  zp.acc = zp.mem[PAR];       goto pnext;
-ZL(op_bang,'!')  zp.mem[PAR]= zp.acc;        goto pnext;
-
-ZL(op_I,   'I')  zp.acc = ++zp.mem[*zp.ipc]; goto pnext;
-ZL(op_J,   'J')  zp.acc = --zp.mem[*zp.ipc]; goto pnext;
-ZL(op_U,   'U')  zp.acc = (zp.mem[zp.ipc[0]]
-                        += zp.mem[zp.ipc[1]]);
-                                zp.ipc += 2; goto xnext;
-
-ZL(op_lt,  '<')  zp.acc = zp.acc < PAR;  goto pnext;
-ZL(op_eq,  '=')  zp.acc = zp.acc == PAR; goto pnext;
-ZL(op_gt,  '>')  zp.acc = zp.acc > PAR;  goto pnext;
-
-ZL(op_sp,  ' ')                         goto xnext;
-ZL(op_0,   '0')  zp.acc = 0;            goto xnext;
-ZL(op_9,   '9')  zp.acc = 0xffff;       goto xnext;
-ZL(op_not, '?')  zp.acc = !zp.acc;      goto xnext;
-ZL(op_bnot,'~')  zp.acc = ~zp.acc;      goto xnext;
-
-ZL(op_K,   'K')  zp.acc = getchar();    goto xnext;
-ZL(op_E,   'E')  putchar(zp.acc);       goto xnext;
-ZL(op_N,   'N')  putchar('\n');         goto xnext;
-ZL(op_P,   'P')  printf("%u", (unsigned)zp.acc); goto xnext;
-ZL(op_O,   'O')  putchar(PAR);          goto pnext;
-ZL(op_W,   'W')  printf("%u", PAR);     goto pnext;
-ZL(op_dot, '.')  printf("%u", zp.acc);  goto xnext;
-ZL(op_str, '"')  while (*zp.ipc) putchar(*zp.ipc++);
-                                        goto pnext;
-
-ZL(op_G,   'G')  if ((int16_t)zp.acc > 0) zp.ipc += *zp.ipc; goto pnext;
-ZL(op_B,   'B')  zp.ipc -= *zp.ipc; goto pnext;
-
-  #ifndef USE_LABELS
-  default:
-  #endif
-
-L(op_unk)
-L(op_hibit)
-    if (op >= 0x80) {
-      if (op < 0xc0) {
-        if (!zp.acc)
-          zp.ipc += op & 0x3f;
-        goto xnext;
-      }
-
-      // vectorised JSR
-      {
-        char v = op & 0x3f;
-        char nfp;
-        word *callv;
-        #ifdef __CC65__
-          nfp = ((uchar *)(unsigned)zp.hdr.fp)[v];
-          callv = (word *)(unsigned)zp.hdr.call;
-          zp.mem[nfp + FR_PREV] = zp.fp;
-          zp.mem[nfp + FR_RET] = (unsigned int)zp.ipc;
-          zp.mem[nfp + FR_ACC] = zp.acc;
-          zp.fp = nfp;
-          zp.ipc = (uchar *)(unsigned)callv[v];
-        #else
-          nfp = g_loaded[zp.hdr.fp + v];
-          callv = (word *)(g_loaded + zp.hdr.call);
-          zp.mem[nfp + FR_PREV] = zp.fp;
-          zp.mem[nfp + FR_RET] = (unsigned int)(zp.ipc - g_loaded);
-          zp.mem[nfp + FR_ACC] = zp.acc;
-          zp.fp = nfp;
-          zp.ipc = g_loaded + callv[v];
-      #endif
-      }
-      goto xnext;
-    }
-    printf("\n[IVM] unknown opcode 0x%02X '%c'\n", op, isprint(op) ? op : 0);
-
-#undef Z
-
-#ifndef USE_LABELS
-  } // switch
-#endif
-
- done:
-
-  // TODO: crashes on linux ./tpi-test-unix when -DUSE_LABELS
-  //   ???
-
-  // save ZP global → process head
-  memcpy(&p->h, &zp, sizeof(zp));
-
-  return zp.acc;
-
-#undef PAR
-}
 
 #ifdef TPDUMP
 void dump_bytecode(void) {
