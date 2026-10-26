@@ -257,6 +257,17 @@ ProcessHead zp;
 //uchar op;
 
 
+// Just enable to see compilation size differnce
+#ifdef NOIVM
+
+// (- 9396 5047) == 4349 bytes for JUST the VM!
+
+ivmvar run_ivm(Process *p) {
+  return 0;
+}
+
+#else
+
 ivmvar run_ivm(Process *p) {
   // - parameter ops use PAR then goto pnext
   // - zero-arg ops goto xnext
@@ -537,6 +548,7 @@ L(op_hibit)
 
 #undef PAR
 }
+#endif IVMSIZE
 
 
 static char* load_blob(const char *path) {

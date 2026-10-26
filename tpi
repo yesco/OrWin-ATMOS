@@ -1,4 +1,4 @@
-rm -f tpi.asm tpi.s tpi.sim 2>/dev/null
+rm -f tpi.asm tpi.s tpi.sim ivm.sim ivm-noivm.sim 2>/dev/null
 
 cc65 -Oirs -T tpi.c -t sim6502
 ca65 -l tpi.asm tpi.s
@@ -33,6 +33,7 @@ echo
 
 
 cl65 -Oirs -t sim6502 -m ivm.map -o ivm.sim ivm.c || exit 1
+cl65 -DNOIVM -Oirs -t sim6502 -m ivm.map -o ivm-noivm.sim ivm.c || exit 1
 
 echo
 echo
@@ -46,7 +47,7 @@ echo
 echo "=== tpi.c: `./wcode tpi.c` LOC ===" 
 echo "=== ivm.c: `./wcode ivm.c` LOC ===" 
 echo
-ls -ugGlf $name.p $name.pas $name.c $name.prg $name.sim $name.ivm tpi.sim tpi.tap tpi.prg ivm.sim ivm.tap ivm.prg 2>/dev/null
+ls -ugGlf $name.p $name.pas $name.c $name.prg $name.sim $name.ivm tpi.sim tpi.tap tpi.prg ivm.sim ivm-noivm.sim ivm.tap ivm.prg 2>/dev/null
 
 echo
 #if [ -f "$name.out" ]; then
