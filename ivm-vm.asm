@@ -4,8 +4,8 @@
 ;;; process switch is memcpy of that ZP block — several processes share the
 ;;; same engine, different saved ZP images.
 ;;;
-;;;   .importzp  ivm_ipc, ivm_fp, ivm_acc, ivm_op, ivm_memlo, ivm_memhi
-;;;   (ivm_ipc, ivm_acc, ivm_memlo, ivm_memhi = 16-bit; ivm_fp, ivm_op = 8-bit)
+;;;   .importzp  _ivm_ipc, _ivm_fp, _ivm_acc, _ivm_op, _ivm_memlo, _ivm_memhi, _ivm_par
+;;;   (C names get _ prefix under cc65; 16-bit: ipc/acc/memlo/memhi/par; 8-bit: fp/op)
 ;;;
 ;;; Dispatch:
 ;;;   op = *ipc++
@@ -15,14 +15,16 @@
 ;;; HIBIT:
 ;;;   ASL A          ; N = old bit6
 ;;;   BPL zrel       ; 80-BF: if !acc  ipc += op & $3F
-;;;   BMI jsrvec     ; C0-FF: vector call  (op & $3F)  via C once-helper for now
+;;;   BMI jsrvec     ; C0-FF: vector call  (op & $3F)  TODO pure asm
 
 .export         _run_ivm_asm
 
-.importzp       ivm_ipc, ivm_fp, ivm_acc, ivm_op
-.importzp       ivm_memlo, ivm_memhi
+.importzp       _ivm_ipc, _ivm_fp, _ivm_acc, _ivm_op
+.importzp       _ivm_memlo, _ivm_memhi, _ivm_par
 
-.import         _run_ivm_once
+.import         _opmul, _opdiv, _opmod, _opputnum
+.import         _putchar
+.import         _ivm_jsrvec
 
 FR_RET  = 0
 FR_VAL  = 1
@@ -40,66 +42,73 @@ tmp_hi: .res 1
 .data
 ;;; static dispatch tables (256 bytes) — no runtime init_disp
 displo:
-	.byte	<op_fused, <op_fused, <op_fused, <op_fused, <op_fused, <op_fused, <op_fused, <op_fused
-	.byte	<op_fused, <op_fused, <op_fused, <op_fused, <op_fused, <op_fused, <op_fused, <op_fused
-	.byte	<op_fused, <op_fused, <op_fused, <op_fused, <op_fused, <op_fused, <op_fused, <op_fused
-	.byte	<op_fused, <op_fused, <op_fused, <op_fused, <op_fused, <op_fused, <op_fused, <op_fused
-	.byte	<op_sp, <op_c, <op_c, <op_c, <op_c, <op_c, <op_c, <op_c
-	.byte	<op_c, <op_c, <op_c, <op_add, <op_c, <op_sub, <op_c, <op_c
+	.byte	<op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31
+	.byte	<op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31
+	.byte	<op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31
+	.byte	<op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31
+	.byte	<op_sp, <op_c, <op_str, <op_c, <op_c, <op_mod, <op_and, <op_c
+	.byte	<op_c, <op_c, <op_mul, <op_add, <op_c, <op_sub, <op_dot, <op_div
 	.byte	<op_0, <op_17, <op_17, <op_17, <op_17, <op_17, <op_17, <op_17
 	.byte	<op_8, <op_9, <op_c, <op_semi, <op_c, <op_c, <op_c, <op_not
 	.byte	<op_c, <op_c, <op_B, <op_c, <op_c, <op_c, <op_c, <op_G
-	.byte	<op_c, <op_c, <op_c, <op_c, <op_L, <op_c, <op_c, <op_c
+	.byte	<op_c, <op_c, <op_c, <op_c, <op_L, <op_c, <op_N, <op_O
 	.byte	<op_c, <op_Q, <op_c, <op_S, <op_c, <op_c, <op_c, <op_c
-	.byte	<op_X, <op_c, <op_Z, <op_c, <op_c, <op_c, <op_c, <op_c
+	.byte	<op_X, <op_c, <op_Z, <op_c, <op_c, <op_c, <op_xor, <op_c
 	.byte	<op_c, <op_c, <op_c, <op_c, <op_c, <op_c, <op_c, <op_c
 	.byte	<op_c, <op_c, <op_c, <op_c, <op_c, <op_c, <op_c, <op_c
 	.byte	<op_c, <op_q, <op_c, <op_c, <op_c, <op_c, <op_c, <op_c
-	.byte	<op_c, <op_c, <op_c, <op_c, <op_c, <op_c, <op_c, <op_c
-
+	.byte	<op_c, <op_c, <op_c, <op_c, <op_or, <op_c, <op_c, <op_c
 disphi:
-	.byte	>op_fused, >op_fused, >op_fused, >op_fused, >op_fused, >op_fused, >op_fused, >op_fused
-	.byte	>op_fused, >op_fused, >op_fused, >op_fused, >op_fused, >op_fused, >op_fused, >op_fused
-	.byte	>op_fused, >op_fused, >op_fused, >op_fused, >op_fused, >op_fused, >op_fused, >op_fused
-	.byte	>op_fused, >op_fused, >op_fused, >op_fused, >op_fused, >op_fused, >op_fused, >op_fused
-	.byte	>op_sp, >op_c, >op_c, >op_c, >op_c, >op_c, >op_c, >op_c
-	.byte	>op_c, >op_c, >op_c, >op_add, >op_c, >op_sub, >op_c, >op_c
+	.byte	>op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31
+	.byte	>op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31
+	.byte	>op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31
+	.byte	>op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31
+	.byte	>op_sp, >op_c, >op_str, >op_c, >op_c, >op_mod, >op_and, >op_c
+	.byte	>op_c, >op_c, >op_mul, >op_add, >op_c, >op_sub, >op_dot, >op_div
 	.byte	>op_0, >op_17, >op_17, >op_17, >op_17, >op_17, >op_17, >op_17
 	.byte	>op_8, >op_9, >op_c, >op_semi, >op_c, >op_c, >op_c, >op_not
 	.byte	>op_c, >op_c, >op_B, >op_c, >op_c, >op_c, >op_c, >op_G
-	.byte	>op_c, >op_c, >op_c, >op_c, >op_L, >op_c, >op_c, >op_c
+	.byte	>op_c, >op_c, >op_c, >op_c, >op_L, >op_c, >op_N, >op_O
 	.byte	>op_c, >op_Q, >op_c, >op_S, >op_c, >op_c, >op_c, >op_c
-	.byte	>op_X, >op_c, >op_Z, >op_c, >op_c, >op_c, >op_c, >op_c
+	.byte	>op_X, >op_c, >op_Z, >op_c, >op_c, >op_c, >op_xor, >op_c
 	.byte	>op_c, >op_c, >op_c, >op_c, >op_c, >op_c, >op_c, >op_c
 	.byte	>op_c, >op_c, >op_c, >op_c, >op_c, >op_c, >op_c, >op_c
 	.byte	>op_c, >op_q, >op_c, >op_c, >op_c, >op_c, >op_c, >op_c
-	.byte	>op_c, >op_c, >op_c, >op_c, >op_c, >op_c, >op_c, >op_c
+	.byte	>op_c, >op_c, >op_c, >op_c, >op_or, >op_c, >op_c, >op_c
 
 .code
+
+;;  TODO: move the most common/expensive OP that tkaes a parameter here!
 
 ;;; ----- consume 1-byte operand -----
 pnext:
 ;;; 8c (12c)
 ;;; TODO: combine +2 of xnext if xnext as a jump in point
-	
-        inc     ivm_ipc
+        inc     _ivm_ipc
         bne     :+
-        inc     ivm_ipc+1
+        inc     _ivm_ipc+1
 :	
 	;; fall-through
 _run_ivm_asm:	
 
 ;;; ----- main loop -----
 xnext:
+;;; a) selfmodify can do -5c
+;;; b) use Y for lo ipc
+;;; c) if page aligned load - no need INC+BNE: 8c but can do 2c!!!
+;;;    using NEXT_PAGE opoerator at 0x??ff slots
+;;; d) consider keeping ACC in AX (extra cost one STA, if not use X for disp)
+;;;    but savingss could be big
+	
 	;; 10c
         ldy     #0
-        lda     (ivm_ipc),y
-        sta     ivm_op		; TODO: getrid if, keep in reg
+        lda     (_ivm_ipc),y
+        sta     _ivm_op		; TODO: getrid if, keep in reg
 
 	;; 8-12c
-        inc     ivm_ipc
+        inc     _ivm_ipc
         bne     :+
-        inc     ivm_ipc+1
+        inc     _ivm_ipc+1
 :
 
         ;; lobit - 0..127
@@ -126,60 +135,61 @@ rjmp:
 ;;; 21c - 28c
 	;; if !acc then rjmp
 	;; +8c
-        lda     ivm_acc
-        ora     ivm_acc+1
+        lda     _ivm_acc
+        ora     _ivm_acc+1
         bne     xnext
 	;; +12c
-        lda     ivm_op
+        lda     _ivm_op
         and     #$3F
 
         clc
-        adc     ivm_ipc
-        sta     ivm_ipc
+        adc     _ivm_ipc
+        sta     _ivm_ipc
 
 	;; lo byte overflow?
 	;; +3-10c
         bcc     xnext
-        inc     ivm_ipc+1
+        inc     _ivm_ipc+1
         jmp     xnext		; TODO: bcs
 
 subvec:
-        ;; vector index = op & $3F — for now C helper (needs call/fp tables)
-        jsr     _run_ivm_once
+        ;; vector index = op & $3F — C until call/fp tables live in ZP
+        jsr     _ivm_jsrvec
+
         jmp     xnext
 
 
 ;;; ============================================================
-;;; Handlers (0..31 loads installed in init_disp as op_fused)
+;;; Handlers (0..31 loads installed in init_disp as op_31)
 ;;; hi first → X, lo → A
 ;;; ============================================================
 
 ;;; load mem[Y] → acc (and AX)
 .macro  LOAD_SLOT_Y 
 	;; 18c 9 B
-        lda     (ivm_memhi),y
+        lda     (_ivm_memhi),y
         tax
-        lda     (ivm_memlo),y
+        lda     (_ivm_memlo),y
 
-        sta     ivm_acc
-        stx     ivm_acc+1
+        sta     _ivm_acc
+        stx     _ivm_acc+1
 .endmacro
 
 ;;; AX= *ipc is slot → AX A=lo X=hi
-.macro  PAR_TO_AX
+.macro  PARAX
 	;; 21c  10 B
         ldy     #0
-        lda     (ivm_ipc),y
+        lda     (_ivm_ipc),y
         tay
 
-        lda     (ivm_memhi),y
+        lda     (_ivm_memhi),y
         tax
-        lda     (ivm_memlo),y
+        lda     (_ivm_memlo),y
 .endmacro
 
 ;;; opcodes 0..31: slot = op itself
-op_fused:
-        ldy     ivm_op 		; TODO: isn't it in Y already?
+op_31:
+        ldy     _ivm_op 		; TODO: isn't it in Y already?
         LOAD_SLOT_Y
         jmp     xnext
 
@@ -189,11 +199,11 @@ op_q:   jmp     done
 
 
 op_Q:   lda     #0
-        sta     ivm_acc
-        sta     ivm_acc+1
+        sta     _ivm_acc
+        sta     _ivm_acc+1
 
 op_X:
-	lda     ivm_fp
+	lda     _ivm_fp
 	;; magic done, TODO: remove: use 0x7f as exit()
         cmp     #FP_MAIN
         beq     jmp_done
@@ -203,24 +213,24 @@ op_X:
         adc     #FR_RET
 
         tay
-        lda     (ivm_memlo),y
-        sta     ivm_ipc
-        lda     (ivm_memhi),y
-        sta     ivm_ipc+1
+        lda     (_ivm_memlo),y
+        sta     _ivm_ipc
+        lda     (_ivm_memhi),y
+        sta     _ivm_ipc+1
 
 	;; restore FP from FR_PREV
-        lda     ivm_fp 		; TODO: why again? should INY?"
+        lda     _ivm_fp 		; TODO: why again? should INY?"
         clc
         adc     #FR_PREV
         tay
-        lda     (ivm_memlo),y
-        sta     ivm_fp
+        lda     (_ivm_memlo),y
+        sta     _ivm_fp
 
         jmp     xnext
 
 ;;; return by keeping FUNNAME (value)
 op_semi:
-        lda     ivm_fp
+        lda     _ivm_fp
 	;; TODO: seems redundant, no harm doing the other stuff?
         cmp     #FP_MAIN
         beq     jmp_done
@@ -235,7 +245,7 @@ op_semi:
 
 
 ;;; arg 8 == last argument (ACC when called)
-op_8:   lda     ivm_fp
+op_8:   lda     _ivm_fp
         clc
         adc     #FR_ACC
         tay
@@ -244,93 +254,93 @@ op_8:   lda     ivm_fp
         jmp     xnext
 
 ;;; args 1..7 
-op_17:  lda     ivm_op
+op_17:  lda     _ivm_op
         sec
         sbc     #'0'
         clc
         adc     #FR_ACC
-        adc     ivm_fp
+        adc     _ivm_fp
         tay
 
         LOAD_SLOT_Y
         jmp     xnext
 
 
-op_sub: PAR_TO_AX
+op_sub: PARAX
 	;; alt: do xor on neg value before add!
 	;; then can just fall into op_add!!!
         sta     tmp_lo
         stx     tmp_hi
         sec
-        lda     ivm_acc
+        lda     _ivm_acc
         sbc     tmp_lo
-        sta     ivm_acc
-        lda     ivm_acc+1
+        sta     _ivm_acc
+        lda     _ivm_acc+1
         sbc     tmp_hi
-        sta     ivm_acc+1
+        sta     _ivm_acc+1
 
         jmp     pnext
 
-op_add: PAR_TO_AX
+op_add: PARAX
         clc
-        adc     ivm_acc
-        sta     ivm_acc
+        adc     _ivm_acc
+        sta     _ivm_acc
         txa
-        adc     ivm_acc+1
-        sta     ivm_acc+1
+        adc     _ivm_acc+1
+        sta     _ivm_acc+1
 
         jmp     pnext
 
 
-op_L:   PAR_TO_AX
-        sta     ivm_acc
-        stx     ivm_acc+1
+op_L:   PARAX
+        sta     _ivm_acc
+        stx     _ivm_acc+1
 
         jmp     pnext
 
 op_S:   ldy     #0
-        lda     (ivm_ipc),y
+        lda     (_ivm_ipc),y
         tay
-        lda     ivm_acc
-        sta     (ivm_memlo),y
-        lda     ivm_acc+1
-        sta     (ivm_memhi),y
+        lda     _ivm_acc
+        sta     (_ivm_memlo),y
+        lda     _ivm_acc+1
+        sta     (_ivm_memhi),y
 
         jmp     pnext
 
 op_Z:   ldy     #0
-        lda     (ivm_ipc),y
+        lda     (_ivm_ipc),y
         tay
         lda     #0
-        sta     (ivm_memlo),y
-        sta     (ivm_memhi),y
+        sta     (_ivm_memlo),y
+        sta     (_ivm_memhi),y
 
         jmp     pnext
 
 
 ;;; ACC = -1  or 0xFF or TRUE (forth/basic)
 op_9:   lda     #$FF
-        sta     ivm_acc
-        sta     ivm_acc+1
+        sta     _ivm_acc
+        sta     _ivm_acc+1
 
         jmp     xnext
 
-op_not: lda     ivm_acc
-        ora     ivm_acc+1
+op_not: lda     _ivm_acc
+        ora     _ivm_acc+1
         beq     ret1
 
 ;;; ACC = 0
 op_0:   lda     #0
-        sta     ivm_acc
-        sta     ivm_acc+1
+        sta     _ivm_acc
+        sta     _ivm_acc+1
 
         jmp     xnext
 
 ;;; ACC = 1
 ret1:   lda     #1
-        sta     ivm_acc
+        sta     _ivm_acc
         lda     #0
-        sta     ivm_acc+1
+        sta     _ivm_acc+1
 
         jmp     xnext
 
@@ -338,28 +348,28 @@ ret1:   lda     #1
 ;;; Conditional GOTO +1B iff acc > 
 ;;; TODO: replace usage by rjmp, or make it an FUSED LOOP:
 ;;; TODO: Giiuuee (ii=index var, uu=upper limit pascal, ee== rjmp end)
-op_G:   lda     ivm_acc+1
+op_G:   lda     _ivm_acc+1
         bmi     gsk
-        ora     ivm_acc
+        ora     _ivm_acc
         beq     gsk
         ldy     #0
-        lda     (ivm_ipc),y
+        lda     (_ivm_ipc),y
         clc
-        adc     ivm_ipc
-        sta     ivm_ipc
+        adc     _ivm_ipc
+        sta     _ivm_ipc
         bcc     gsk
-        inc     ivm_ipc+1
+        inc     _ivm_ipc+1
 
 gsk:    jmp     pnext
 
 
 op_B:   ldy     #0
-        lda     ivm_ipc
+        lda     _ivm_ipc
         sec
-        sbc     (ivm_ipc),y
-        sta     ivm_ipc
+        sbc     (_ivm_ipc),y
+        sta     _ivm_ipc
         bcs     :+
-        dec     ivm_ipc+1
+        dec     _ivm_ipc+1
 :
 	jmp     pnext
 
@@ -368,14 +378,81 @@ op_B:   ldy     #0
 op_sp:  jmp     xnext
 
 
-;;; NYI → C one-op
-op_c:   jsr     _run_ivm_once
+;;; PAR ops that need C (mul/div/mod) — PAR already in _ivm_par
+op_mul: PARAX
+        sta     _ivm_par
+        stx     _ivm_par+1
+        jsr     _opmul
+        jmp     pnext
 
+op_div: PARAX
+        sta     _ivm_par
+        stx     _ivm_par+1
+        jsr     _opdiv
+        jmp     pnext
+
+op_mod: PARAX
+        sta     _ivm_par
+        stx     _ivm_par+1
+        jsr     _opmod
+        jmp     pnext
+
+op_and: PARAX
+        and     _ivm_acc
+        sta     _ivm_acc
+        txa
+        and     _ivm_acc+1
+        sta     _ivm_acc+1
+        jmp     pnext
+
+op_or:  PARAX
+        ora     _ivm_acc
+        sta     _ivm_acc
+        txa
+        ora     _ivm_acc+1
+        sta     _ivm_acc+1
+        jmp     pnext
+
+op_xor: PARAX
+        eor     _ivm_acc
+        sta     _ivm_acc
+        txa
+        eor     _ivm_acc+1
+        sta     _ivm_acc+1
+        jmp     pnext
+
+;;; print ACC as unsigned decimal
+op_dot: jsr     _opputnum
         jmp     xnext
+
+;;; newline
+op_N:   lda     #10
+        jsr     _putchar
+        jmp     xnext
+
+;;; putchar ACC lo (or PAR?) — opcode 'O'
+op_O:   lda     _ivm_acc
+        jsr     _putchar
+        jmp     xnext
+
+;;; string at ipc until 0
+op_str:
+strlp:  ldy     #0
+        lda     (_ivm_ipc),y
+        beq     strdn
+        jsr     _putchar
+        inc     _ivm_ipc
+        bne     strlp
+        inc     _ivm_ipc+1
+        jmp     strlp
+strdn:  jmp     pnext
+
+;;; default unknown
+op_c:   jmp     xnext
 
 
 ;;; C style return ACC in AX
-done:   lda     ivm_acc
-        ldx     ivm_acc+1
+done:   lda     _ivm_acc
+        ldx     _ivm_acc+1
 
         rts

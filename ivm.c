@@ -258,19 +258,18 @@ ivmvar run_ivm(Process *p) {
 #ifdef IVMASM
 
 // -DIVMASM + link ivm-vm.s
-// Single ZP block for importzp; process switch = save/restore this block.
+// Single ZP block for importzp (_name in asm). Process switch = save/restore.
 
 #ifdef __CC65__
 #pragma bss-name (push, "ZEROPAGE")
 #endif
-
 uchar *ivm_ipc;
 char   ivm_fp;
 ivmvar ivm_acc;
 uchar  ivm_op;
 uchar *ivm_memlo;
 uchar *ivm_memhi;
-
+ivmvar ivm_par;   // ASM stores PAR here before opmul/opdiv/opmod
 #ifdef __CC65__
 #pragma bss-name (pop)
 #endif
@@ -302,44 +301,15 @@ static void unpivot(void) {
 
 extern ivmvar run_ivm_asm(void);
 
-// ASM fallback for one complex opcode
-void run_ivm_once(void) {
-  uchar op;
-  unpivot();
-  op = *ivm_ipc++;
-  switch (op) {
-  case '.':
-    printf("%u", (unsigned)ivm_acc);
-    break;
-  case 'N':
-    putchar('\n');
-    break;
-  case '"':
-    while (*ivm_ipc)
-      putchar(*ivm_ipc++);
-    ivm_ipc++;
-    break;
-  case '*':
-    ivm_acc *= live_mem[*ivm_ipc++];
-    break;
-  case '/':
-    if (live_mem[*ivm_ipc])
-      ivm_acc /= live_mem[*ivm_ipc];
-    ivm_ipc++;
-    break;
-  case '%':
-    if (live_mem[*ivm_ipc])
-      ivm_acc %= live_mem[*ivm_ipc];
-    ivm_ipc++;
-    break;
-  default:
-    if (op >= 0xC0)
-      printf("[IVMASM] JSR vec %u unhandled\n", op & 0x3F);
-    else
-      ivm_ipc++;
-    break;
-  }
-  pivot(live_mem, live_n);
+// C helpers — ASM jsr _opmul etc; ACC/PAR already in ZP
+void opmul(void)    {              ivm_acc *= ivm_par; }
+void opdiv(void)    { if (ivm_par) ivm_acc /= ivm_par; }
+void opmod(void)    { if (ivm_par) ivm_acc %= ivm_par; }
+void opputnum(void) { printf("%u", (unsigned)ivm_acc); }
+
+// Vector JSR (op still in ivm_op) — fill when call/fp tables are in ZP
+void ivm_jsrvec(void) {
+  printf("[IVMASM] JSR vec %u unhandled\n", (unsigned)(ivm_op & 0x3F));
 }
 
 ivmvar run_ivm(Process *p) {
