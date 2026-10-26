@@ -130,14 +130,23 @@
   #define register
 #endif
 
+#ifndef UCHAR
+  #define UCHAR
+  typedef unsigned char uchar; // plain char is unsigned on cc65/oscar64/clang*-unsigned
+  typedef uint16_t word; // blob / vector cell width (6502)
+#endif
 
-typedef unsigned char uchar; // plain char is unsigned on cc65/oscar64/clang*-unsigned
-typedef uint16_t word; // blob / vector cell width (6502)
+
+#define MAIN // this current file is main
+
 
 
 //////////////////////////////////////////////
 // Runtime (ivm.c)
 
+
+// - configuation
+// default is unint16_t as IVMVARTYPE
 
 //#define USE_LABELS
 
@@ -1658,14 +1667,6 @@ int compile_pipeline(void) {
 }
 
 
-// TODO: packer (here) ... loader/Nevm()/run_ivm (ivm.c)
-
-#define MAX_BLOB_LEN 4096
-uchar blob[MAX_BLOB_LEN];
-int blob_len;
-uchar *g_loaded;
-
-
 // append n bytes of data at *pp; return offset from base
 static word memadd(uchar *base, uchar **pp, void *data, word n) {
   word off = (word)(*pp - base);
@@ -2194,48 +2195,6 @@ static char save_blob(const char *path) {
   return 1;
 }
 
-static char load_blob(const char *path) {
-  FILE *f;
-  int n;
-
-  // TODO: not use global
-  blob_len = 0;
-
-  f = fopen(path, "rb");
-  if (!f) {
-    printf("cannot open %s\n", path);
-    return 0;
-  }
-
-  // TODO: shouldn't use MAX_BLOB_LEN
-  //   2 first bytes should be length of rest!
-  n = (int)fread(blob, 1, MAX_BLOB_LEN, f);
-  fclose(f);
-
-  if (n <= 0) {
-    printf("failed to load %s\n", path);
-    return 0;
-  }
-
-  blob_len = n;
-  printf("loaded %s (%d bytes)\n", path, blob_len);
-  relocate(blob);
-
-  return 1;
-}
-
-static char run_loaded_blob(void) {
-  Process *proc;
-  unsigned int ret;
-
-  proc = Nevm(blob);
-  printf("--- RUN IVM (blob %d) ---\n", blob_len);
-  ret = run_ivm(proc);
-  printf("\n--- END ---\n");
-  printf("acc = %u\n", ret);
-  return (int)ret;
-}
-
 #ifdef OSCAR64
 int main(void) {
   const char* argv[]= { "tpi", "-O", #ARG, 0 };
@@ -2245,7 +2204,7 @@ int main(void) {
 int main(int argc, char **argv) {
 #endif
 
-  const char *filename = NULL;
+  char *filename = NULL;
   int buf_idx;
   uchar i;
 
@@ -2272,11 +2231,12 @@ int main(int argc, char **argv) {
   }
 
   // IVM RUN ?
-  if (ends_with(filename, ".ivm")) {
-    if (!load_blob(filename)) return 1;
-    run_loaded_blob();
-    return 0;
-  }
+  if (ends_with(filename, ".ivm"))
+    return run_file(filename);
+
+
+
+  // COMPILE - OPTIMIZE - RUN
 
   // CHECK .p OR .pas
   if (!ends_with(filename, ".p") && !ends_with(filename, ".pas")) {
@@ -2354,8 +2314,10 @@ int main(int argc, char **argv) {
   finalise();
   dump_blob();
 
+  // SAVE filename.ivm
   ivm_name_from(outname, filename);
   if (!save_blob(outname)) return 1;
+
 
   // LOAD & RUN
   // true round-trip: clear and reload from disk
@@ -2363,13 +2325,7 @@ int main(int argc, char **argv) {
   // TODO: this shouldn't be global...
   memset(blob, 0, sizeof(blob));
 
-  // - LOAD
-  if (!load_blob(outname)) return 1;
-  
-  // - RUN
-  run_loaded_blob();
-
-  return 0;
+  return run_file(outname);
 }
 
 

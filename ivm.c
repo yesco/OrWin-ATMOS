@@ -1,11 +1,26 @@
-
+// IVM - Indirect Virtual Machine
+// (C) 2026 Jonas S Karlsson
 
 // Default type to 2 bytes for 6502,
 // however, on unix runtime int can be int/long!
+
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+#include <ctype.h>
+#include <stdio.h>
+
 #ifndef IVMVARTYPE
   #define IVMVARTYPE uint16_t
+  typedef IVMVARTYPE ivmvar;
 #endif
-typedef IVMVARTYPE ivmvar;
+
+
+#ifndef UCHAR
+  #define UCHAR
+  typedef unsigned char uchar;
+  typedef unsigned int  word;
+#endif
 
 // --- limits
 #define MAX_SLOTS      255 // Last one not used, is error
@@ -22,6 +37,13 @@ typedef IVMVARTYPE ivmvar;
 #define FR_ACC  3
 #define FP_MAIN ((char)0xFF)
 
+
+// TODO: replace by dynamic allocation
+#define MAX_BLOB_LEN 4096
+uchar  blob[MAX_BLOB_LEN];
+int    blob_len;
+// TODO: probably make space in ProcessHeader for it
+extern uchar* g_loaded;
 
 
 // ===========================================================================
@@ -471,3 +493,66 @@ L(op_hibit)
 
 #undef PAR
 }
+
+
+static char* load_blob(const char *path) {
+  FILE *f;
+  int n;
+
+  // TODO: not use global
+  blob_len = 0;
+
+  f = fopen(path, "rb");
+  if (!f) {
+    printf("cannot open %s\n", path);
+    return NULL;
+  }
+
+  // TODO: shouldn't use MAX_BLOB_LEN
+  //   2 first bytes should be length of rest!
+  n = (int)fread(blob, 1, MAX_BLOB_LEN, f);
+  fclose(f);
+
+  if (n <= 0) {
+    printf("failed to load %s\n", path);
+    return NULL;
+  }
+
+  blob_len = n;
+  printf("loaded %s (%d bytes)\n", path, blob_len);
+  relocate(blob);
+
+  return (char*)&blob;
+}
+
+static int run_loaded_blob(char* blob) {
+  unsigned int ret;
+  Process *proc= Nevm(blob);
+
+  if (!proc) return -1;
+
+  printf("--- RUN IVM (blob %d) ---\n", blob_len);
+  ret = run_ivm(proc);
+  printf("\n--- END ---\n");
+  printf("acc = %u\n", ret);
+  return ret;
+}
+
+int run_file(char* filename) {
+  char* blob= load_blob(filename);
+
+  if (!blob) return -1;
+  return run_loaded_blob(blob);
+}
+
+
+
+#ifndef MAIN
+int main(int argc, char** argv) {
+
+  if (argc==2)
+    return run_file(argv[1]);
+
+  return 1;
+}
+#endif // MAIN
