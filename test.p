@@ -176,7 +176,7 @@ begin
 
    { Test: looping funsum }
    fsum := 0;
-   for i := 1 to 0 do fsum := Two(fsum, i);
+   for i := 1 to 1000 do fsum := Two(fsum, i);
    writeln("--FunSum:");
    writeln(fsum);
 

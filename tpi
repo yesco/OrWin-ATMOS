@@ -12,10 +12,11 @@ echo "--------------- $name.p"
 echo
 
 # exit code is run code? lol
-cl65 -Oirs -t sim6502 -m tpi.map -o tpi.sim tpi.c ##|| exit 1
+cl65 -C sim6502.cfg -vm -Oirs -t sim6502 -m tpi.map -o tpi.sim tpi.c || exit 1
+
 echo
 
-sim65 -c tpi.sim -O $name.p || exit 1
+sim65 -c tpi.sim -O $name.p #|| exit 1
 #sim65 -c tpi.sim $name.p
 
 echo
@@ -32,14 +33,10 @@ echo
 echo
 
 
-cl65 -Oirs -t sim6502 -m ivm.map -o ivm.sim ivm.c || exit 1
-cl65 -DNOIVM -Oirs -t sim6502 -m ivm.map -o ivm-noivm.sim ivm.c || exit 1
-
 echo
 echo
 echo "=== IVM Run from BLOB ==="
-echo
-sim65 -c ivm.sim $name.ivm | tee $name.log
+./ivm $name.ivm
 echo
 echo
 

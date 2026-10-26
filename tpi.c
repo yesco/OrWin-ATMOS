@@ -466,8 +466,6 @@ void note_store(uchar addr) {
 
 char next_global = 0; // next candidate for globals
 char next_frame  = FRAME_BASE;
-uchar x_slot_compile;
-uchar x_slot_runtime;
 
 char alloc_global(void) {
   while (next_global < GLOBAL_LIMIT) {
@@ -1776,8 +1774,6 @@ int compile_pipeline(void) {
   main_offset = 0;
   next_global = 0;
   next_frame  = FRAME_BASE;
-  x_slot_compile = 0xff;
-  x_slot_runtime = 0xff;
   memset(slot_used, 0, sizeof(slot_used));
   memset(mem, 0, sizeof(mem));
   memset(is_code_addr, 0, sizeof(is_code_addr));
@@ -1785,12 +1781,6 @@ int compile_pipeline(void) {
   // Functions are emitted first; main_entry is set when we reach BEGIN.
   // finalise() resolves main_entry to a direct pointer — no absolute G opcode.
 
-  {
-    char xslot = alloc_global();
-    add_symbol("X", SYM_VAR, xslot);
-    x_slot_compile = (uchar)xslot;
-    x_slot_runtime = (uchar)xslot;
-  }
 
   next_token();
   EXPECT(TOK_PROGRAM);
@@ -1987,19 +1977,15 @@ void layout_process_mem(void) {
   }
 
   layout_memsz = layout_next;
-  if (x_slot_compile != 0xff && slot_mapped[x_slot_compile])
-    x_slot_runtime = slot_map[x_slot_compile];
-  else
-    x_slot_runtime = x_slot_compile;
   {
     uchar ng = 0, nf = 0, i2;
     for (i2 = 0; i2 < constidx && i2 < layout_memsz; i2++) {
       // rough: before constidx = globals+frames
     }
-    printf("layout: memsz=%u (globals+frames=%u + const=%d) frames=%d x@%u\n",
+    printf("layout: memsz=%u (globals+frames=%u + const=%d) frames=%d\n",
       (unsigned)layout_memsz,
       (unsigned)(constidx == 255 ? layout_memsz : constidx),
-      nconst, nvector, (unsigned)x_slot_runtime);
+      nconst, nvector);
   }
 }
 
@@ -2042,31 +2028,46 @@ void remap_bytecode(void) {
   }
 }
 
+uchar *compiled_blob;
+int compiled_blob_len;
+
 void finalise(void) {
   BlobHeader h;
-  uchar *p;
+  uchar *p, *body;
   word zero;
   int i;
+  unsigned need;
 
-  p = blob + sizeof(BlobHeader);
+  need = (unsigned)sizeof(BlobHeader)
+       + (unsigned)nvector * sizeof(word) + sizeof(word)
+       + (unsigned)nconst * sizeof(word)
+       + (unsigned)nvector
+       + (unsigned)bin_ptr + 64;
+
+  // TODO: what is 64???
+
+  body = (uchar *)malloc(need);
+  if (!body) FAIL("malloc blob");
+
+  p = body + sizeof(BlobHeader);
   zero = 0;
 
   // call vectors (blob-absolute entries filled after code offset known)
-  h.call = memadd(blob, &p, 0, (word)(nvector * sizeof(word)));
+  h.call = memadd(body, &p, 0, (word)(nvector * sizeof(word)));
   // 0000 ends relocatable vector region (loader stops here)
-  memadd(blob, &p, &zero, sizeof(zero));
+  memadd(body, &p, &zero, sizeof(zero));
 
   // constants — after 0000, not relocated
-  h.con = memadd(blob, &p, const_pool, (word)(nconst * sizeof(word)));
+  h.con = memadd(body, &p, const_pool, (word)(nconst * sizeof(word)));
 
   // frame bases
-  h.fp = memadd(blob, &p, frame_base, (word)nvector);
+  h.fp = memadd(body, &p, frame_base, (word)nvector);
 
   // code
-  h.code = memadd(blob, &p, bin, (word)bin_ptr);
+  h.code = memadd(body, &p, bin, (word)bin_ptr);
   h.main = h.code + main_offset;
 
-  h.data = (word)(p - blob);
+  h.data = (word)(p - body);
   if (layout_memsz)
     h.memsz = layout_memsz;
   else {
@@ -2077,15 +2078,18 @@ void finalise(void) {
     h.memsz = (word)(top + 1);
   }
   h.constidx = (word)constidx;
-  h.xslot = (x_slot_runtime == 0xff) ? (word)0xffff : (word)x_slot_runtime;
+
+  // TODO: make a #define IVM_MAGIC string in ivm.c
+  h.magic[0] = 'I'; h.magic[1] = 'V'; h.magic[2] = 'M'; h.magic[3] = 0;
+  h.len = (word)(p - body);
 
   // fill call table: code entry offsets (blob-absolute before loader +base)
   for (i = 0; i < nvector; i++)
-    ((word *)(blob + h.call))[i] = vectors[i] + h.code;
+    ((word *)(body + h.call))[i] = vectors[i] + h.code;
 
-  memcpy(blob, &h, sizeof(h));
-  blob_len = (int)(p - blob);
-  if (blob_len >= MAX_BLOB_LEN) FAIL("blob overflow");
+  memcpy(body, &h, sizeof(h));
+  compiled_blob = body;
+  compiled_blob_len = (int)h.len;
 
   // dump helpers only
   for (i = 0; i < nvector; i++)
@@ -2162,9 +2166,9 @@ void dump_blob(void) {
   int i, j, ncall, nbytes;
   Symbol *s;
 
-  h = (BlobHeader *)blob;
+  h = (BlobHeader *)compiled_blob;
   ncall = nvector;
-  nbytes = blob_len;
+  nbytes = compiled_blob_len;
 
   printf("\n--- BLOB (%d bytes) ---\n", nbytes);
   printf("HEADER  overview\n");
@@ -2179,7 +2183,7 @@ void dump_blob(void) {
   printf("  memsz       %5u  cells\n", h->memsz);
 
   printf("CALL VECTORS  (%d + 0000)\n", ncall);
-  w = (uint16_t *)(blob + h->call);
+  w = (uint16_t *)(compiled_blob + h->call);
   for (i = 0; ; i++) {
     if (w[i] == 0) {
       printf("  [%2d]  %5u  end reloc\n", i, 0);
@@ -2198,13 +2202,13 @@ void dump_blob(void) {
   }
 
   printf("CONSTANTS  (%d)\n", nconst);
-  w = (uint16_t *)(blob + h->con);
+  w = (uint16_t *)(compiled_blob + h->con);
   for (i = 0; i < nconst; i++)
     printf("  C%02x   %5u  ($%04x)\n",
       (constidx != 255) ? (constidx + i) : (0x80 + i), w[i], w[i]);
 
   printf("FRAME BASES  (%d)\n", nvector);
-  p = blob + h->fp;
+  p = compiled_blob + h->fp;
   for (i = 0; i < nvector; i++) {
     s = NULL;
     for (j = 0; j < nsym; j++)
@@ -2227,7 +2231,7 @@ void dump_blob(void) {
 
   printf("MEM SLOTS  (every cell 0..memsz-1, memsz=%u)\n", h->memsz);
   {
-    uchar *fb = blob + h->fp;
+    uchar *fb = compiled_blob + h->fp;
     int n_glob = 0, n_frm = 0, n_tmp = 0, n_con = 0;
     for (i = 0; i < (int)h->memsz; i++) {
       int any = 0;
@@ -2358,27 +2362,6 @@ static int load_file(const char *path, char *buf, int maxn) {
   return n;
 }
 
-static char save_blob(const char *path) {
-  FILE *f;
-
-  f = fopen(path, "wb");
-  if (!f) {
-    printf("cannot write %s\n", path);
-    return 0;
-  }
-  // TODO: write out 2 bytes of size
-  //   maybe also a byte-order marker
-  //   "IVM0" LOL
-  if ((int)fwrite(blob, 1, (unsigned)blob_len, f) != blob_len) {
-    printf("write failed %s\n", path);
-    fclose(f);
-    return 0;
-  }
-  fclose(f);
-  printf("wrote %s (%d bytes)\n", path, blob_len);
-  return 1;
-}
-
 #ifdef OSCAR64
 int main(void) {
   const char* argv[]= { "tpi", "-O", #ARG, 0 };
@@ -2500,14 +2483,14 @@ int main(int argc, char **argv) {
 
   // SAVE filename.ivm
   ivm_name_from(outname, filename);
-  if (!save_blob(outname)) return 1;
+  if (!save_blob(outname, compiled_blob, compiled_blob_len)) return 1;
+  free(compiled_blob); compiled_blob = 0;
 
 
   // LOAD & RUN
   // true round-trip: clear and reload from disk
 
   // TODO: this shouldn't be global...
-  memset(blob, 0, sizeof(blob));
 
   //return run_file(outname);
   (void)run_file(outname);

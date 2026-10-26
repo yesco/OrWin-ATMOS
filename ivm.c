@@ -51,11 +51,7 @@ static unsigned soft_top;
 #define FP_MAIN ((char)0xFF)
 
 
-// TODO: replace by dynamic allocation
-#define MAX_BLOB_LEN 4096
-uchar  blob[MAX_BLOB_LEN];
-int    blob_len;
-// TODO: probably make space in ProcessHeader for it
+// No fixed global image buffer — load_blob/finalise malloc.
 extern uchar* g_loaded;
 
 
@@ -98,16 +94,22 @@ extern uchar* g_loaded;
 // ===========================================================================
 
 typedef struct BlobHeader {
+  // file identity (not relocated)
+  char magic[4]; // "IVM\0"
+  word len;      // total image size in bytes
+
+  // counts (not relocated) — sit *before* reloc words so a single
+  // while(*v) from &main can walk header reloc fields + call table to 0000
+  word memsz;
+  word constidx;
+
+  // contiguous relocatable offsets → call table follows this struct in the image
   word main;
   word code;
   word call;
   word fp;
   word con;
   word data;
-  word memsz;
-  word constidx;
-// TODO: remove this legacy
-  word xslot; // inject X=42 here at Nevm, 0xffff=none
 } BlobHeader;
 
 // Process head — layout of ZP image (memcpy in/out of run_ivm)
@@ -134,35 +136,21 @@ typedef struct Process {
 void relocate(uchar *base) {
   BlobHeader *h;
   word *v;
-  word call_off;
 
   h = (BlobHeader *)base;
-  call_off = h->call;
-
+  // Reloc words are contiguous from main through call table until 0000.
+  // memsz/constidx/magic/len sit before main and are not touched.
+  v = &h->main;
 #ifdef __CC65__
-// TODO: this should be part of the loop xslot is destroying the ddesign
-
-  h->main = h->main + (word)base;
-  h->code = h->code + (word)base;
-  h->call = h->call + (word)base;
-  h->fp   = h->fp   + (word)base;
-  h->con  = h->con  + (word)base;
-  h->data = h->data + (word)base;
-
-  // call vectors: still at base+call_off before we use absolute h->call
-  v = (word *)(base + call_off);
   while (*v) {
     *v = *v + (word)base;
     v++;
   }
 #else
-  // Host keeps offsets; Nevm uses loaded+offset
-  (void)call_off;
   (void)v;
 #endif
 }
 
-// loaded = output of loader; does not call loader
 Process* Nevm(uchar *loaded) {
   Process *p;
   unsigned int cells, bytes;
@@ -190,8 +178,6 @@ Process* Nevm(uchar *loaded) {
   p->h.fp = FP_MAIN;
   p->h.mem = p->mem;
   p->h.acc = 0;
-  { word xs = p->h.hdr.xslot;
-    if (xs != 0xffff && xs < p->h.hdr.memsz) p->mem[xs] = 42; }
 
   // Install constants into process mem[] (PAR = mem[idx] only)
   if (bh->constidx != 255 && bh->memsz > bh->constidx) {
@@ -264,6 +250,7 @@ ProcessHead zp;
 
 ivmvar run_ivm(Process *p) {
   return 0;
+  (void)p;
 }
 
 #else
@@ -551,12 +538,15 @@ L(op_hibit)
 #endif IVMSIZE
 
 
-static char* load_blob(const char *path) {
-  FILE *f;
-  int n;
+// Load whole IVM image (malloc). Caller may free().
+// Image = BlobHeader (magic "IVM\0", len, …) + body; one buffer, no global required.
+uchar *load_blob(const char *path, int *out_len) {
+  FILE *f = NULL;
+  uchar *img = NULL;
+  int n, cap;
+  BlobHeader hdr;
 
-  // TODO: not use global
-  blob_len = 0;
+  if (out_len) *out_len = 0;
 
   f = fopen(path, "rb");
   if (!f) {
@@ -564,43 +554,93 @@ static char* load_blob(const char *path) {
     return NULL;
   }
 
-  // TODO: shouldn't use MAX_BLOB_LEN
-  //   2 first bytes should be length of rest!
-  n = (int)fread(blob, 1, MAX_BLOB_LEN, f);
-  fclose(f);
-
-  if (n <= 0) {
-    printf("failed to load %s\n", path);
-    return NULL;
+  // read size from header without trusting a fixed MAX
+  if ((int)fread(&hdr, 1, sizeof(hdr), f) != (int)sizeof(hdr)) {
+    printf("short header %s\n", path);
+    goto err;
   }
 
-  blob_len = n;
-  printf("loaded %s (%d bytes)\n", path, blob_len);
-  relocate(blob);
+  // magic check
+  if (hdr.magic[0] != 'I' || hdr.magic[1] != 'V'
+    || hdr.magic[2] != 'M' || hdr.magic[3] != 0) {
+    printf("not an IVM file: %s\n", path);
+    goto err;
+  }
 
-  return (char*)&blob;
+  // constisten? TODO: what is cap?
+  cap = (int)hdr.len;
+  if (cap < (int)sizeof(BlobHeader)) {
+    printf("bad IVM len %s\n", path);
+    goto err;
+  }
+
+  img = (uchar *)malloc((unsigned)cap);
+  if (!img) {
+    printf("malloc %d fail\n", cap);
+    goto err;
+  }
+  memcpy(img, &hdr, sizeof(hdr));
+
+  n = (int)fread(img + sizeof(hdr), 1, (unsigned)(cap - (int)sizeof(hdr)), f);
+  if (n != cap - (int)sizeof(hdr)) {
+    printf("short read %s\n", path);
+    goto err;
+  }
+
+  if (out_len) *out_len = cap;
+  printf("loaded %s (%d bytes)\n", path, cap);
+
+  relocate(img);
+
+err:
+  if (f) fclose(f);
+    
+  return img;
 }
 
-static int run_loaded_blob(char* blob) {
+char save_blob(const char *path, uchar *img, int len) {
+  FILE *f;
+
+  f = fopen(path, "wb");
+  if (!f) {
+    printf("cannot write %s\n", path);
+    return 0;
+  }
+  if ((int)fwrite(img, 1, (unsigned)len, f) != len) {
+    printf("write failed %s\n", path);
+    fclose(f);
+    return 0;
+  }
+  fclose(f);
+  printf("wrote %s (%d bytes)\n", path, len);
+  return 1;
+}
+
+static int run_loaded_blob(uchar *img, int len) {
   unsigned int ret;
-  Process *proc= Nevm(blob);
+  Process *proc= Nevm(img);
 
   if (!proc) return -1;
 
-  printf("--- RUN IVM (blob %d) ---\n", blob_len);
+  printf("--- RUN IVM (blob %d) ---\n", len);
   ret = run_ivm(proc);
   printf("\n--- END ---\n");
   printf("acc = %u\n", ret);
+  free(proc);
   return ret;
 }
 
 int run_file(char* filename) {
-  char* blob= load_blob(filename);
+  int len;
+  uchar *img= load_blob(filename, &len);
 
-  if (!blob) return -1;
-  return run_loaded_blob(blob);
+  if (!img) return -1;
+  {
+    int r= run_loaded_blob(img, len);
+    free(img);
+    return r;
+  }
 }
-
 
 
 #ifndef MAIN
