@@ -17,6 +17,9 @@
 ;;;   BPL zrel       ; 80-BF: if !acc  ipc += op & $3F
 ;;;   BMI subvec     ; C0-FF: vector call  (op & $3F)  inverse of X/;/Q
 
+;TRACE=1
+TRACE=0
+	
 .export         _run_ivm_asm
 
 .importzp       _ivm_ipc, _ivm_fp, _ivm_acc, _ivm_op
@@ -105,8 +108,9 @@ xnext:
         lda     (_ivm_ipc),y
         sta     _ivm_op		; TODO: getrid if, keep in reg
 
-;;; print
+	.if TRACE
 	jsr     _putchar
+	.endif ; TRACE
 
 	;; 8-12c
         inc     _ivm_ipc
@@ -157,9 +161,11 @@ rjmp:
 
 subvec:
 ;;; print trace nl
+	.if TRACE
 	lda     #10	
 	jsr     _putchar
-
+	.endif ; TRACE
+	
         ;; v = op & $3F
         ;; nfp = fptab[v]
         ;; mem[nfp+FR_PREV] = fp
@@ -469,10 +475,11 @@ op_U:   ldy     #0
 ;;; TODO: replace usage by rjmp, or make it an FUSED LOOP:
 ;;; TODO: Giiuuee (ii=index var, uu=upper limit pascal, ee== rjmp end)
 op_G:
-;;; print trace nl
+	.if TRACE
 	lda     #10	
 	jsr     _putchar
-
+	.endif ; TRACE
+	
 	lda     _ivm_acc+1
         bmi     gsk
         ora     _ivm_acc

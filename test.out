@@ -1,15 +1,15 @@
-loaded tp-test.ivm (1036 bytes)
---- RUN IVM (blob 1036) ---
+loaded test.ivm (1043 bytes)
+--- RUN IVM (blob 1043) ---
 Hello 6502 World at OrWIN-ATMOS TinyPascal VM!
 47
 --Two:
 54
 --Magical injected input parameter X=
-42
+7
 --Sum:
 41748
 --FunSum:
-0
+41748
 --Subtraction tests:
 17
 85
@@ -85,5 +85,5 @@ abc
 4
 
 --- END ---
-acc = 0
-2787504 cycles
+acc = 41748
+6806597 cycles
