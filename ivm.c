@@ -13,6 +13,19 @@
 #ifndef IVMVARTYPE
   #define IVMVARTYPE uint16_t
   typedef IVMVARTYPE ivmvar;
+
+// Host soft-heap: ivmvar is often 16-bit and cannot hold a real malloc pointer.
+// We store an offset into soft_heap as the "pointer" value on non-cc65.
+// On cc65/6502, M/F/@/!/(/) use real addresses.
+#ifndef __CC65__
+#define SOFT_HEAP_MAX 4096
+static unsigned char soft_heap[SOFT_HEAP_MAX];
+static unsigned soft_top;
+#define IVM_PTR(addr) ((ivmvar *)(soft_heap + (unsigned)(addr)))
+#else
+#define IVM_PTR(addr) ((ivmvar *)(unsigned)(addr))
+#endif
+
 #endif
 
 
@@ -93,16 +106,17 @@ typedef struct BlobHeader {
   word data;
   word memsz;
   word constidx;
+// TODO: remove this legacy
   word xslot; // inject X=42 here at Nevm, 0xffff=none
 } BlobHeader;
 
 // Process head — layout of ZP image (memcpy in/out of run_ivm)
 typedef struct ProcessHead {
   BlobHeader hdr;
-  uchar *ipc;
-  char fp;
-  ivmvar *mem;
-  ivmvar acc;
+  uchar     *ipc;
+  char       fp;
+  ivmvar    *mem;
+  ivmvar     acc;
 } ProcessHead;
 
 typedef struct Process {
@@ -111,33 +125,41 @@ typedef struct Process {
 } Process;
 
 
-// relocating first vectors till 0000
-// Intent: every word from blob start through the call table is a blob-relative
-// offset; add base so they become absolute pointers (6502 address space).
-// memsz sits in the header but is a *count*, not an offset — preserve it.
+// Relocate blob-relative offsets to absolute pointers (cc65/6502 only).
+// Header layout: main,code,call,fp,con,data are offsets;
+// memsz, constidx, xslot are NOT offsets (must not be walked as pointers).
+// Call table at offset `call` ends with 0000.
+// BUG FIX: old while(*v) from blob start stopped at xslot==0 and never
+// relocated the call vectors → JSR jumped to a tiny offset → IPC in junk.
 void relocate(uchar *base) {
-  word *v;
-  word save_memsz;
   BlobHeader *h;
+  word *v;
+  word call_off;
 
   h = (BlobHeader *)base;
-  save_memsz = h->memsz; // NOT an offset
-  {
-    word save_ci = h->constidx;
-    word save_xs = h->xslot;
+  call_off = h->call;
 
-  v = (word *)base;
+#ifdef __CC65__
+// TODO: this should be part of the loop xslot is destroying the ddesign
+
+  h->main = h->main + (word)base;
+  h->code = h->code + (word)base;
+  h->call = h->call + (word)base;
+  h->fp   = h->fp   + (word)base;
+  h->con  = h->con  + (word)base;
+  h->data = h->data + (word)base;
+
+  // call vectors: still at base+call_off before we use absolute h->call
+  v = (word *)(base + call_off);
   while (*v) {
-    #ifdef __CC65__
-      *v = *v + (word)base;
-    #endif
+    *v = *v + (word)base;
     v++;
   }
-
-  h->memsz = save_memsz;
-  h->constidx = save_ci;
-  h->xslot = save_xs;
-  }
+#else
+  // Host keeps offsets; Nevm uses loaded+offset
+  (void)call_off;
+  (void)v;
+#endif
 }
 
 // loaded = output of loader; does not call loader
@@ -289,35 +311,36 @@ ivmvar run_ivm(Process *p) {
 
 #ifdef USE_LABELS
   {
-    static void *vt[127];
+    static void *vt[128];
     static uchar inited;
     if (!inited) {
       // build once in a local table, then memcpy → static (no per-op ifdefs)
-      void *t[127];
+      void *t[128];
       uchar k;
       for (k = 0; k < 128; k++) t[k] = &&op_unk;
       t['q'] = &&op_q;   t['Q'] = &&op_Q;   t['X'] = &&op_X;
       t[';'] = &&op_semi;
       t['8'] = &&op_8;
-      t['1'] = &&op_17;  t['2'] = &&op_17;  t['3'] = &&op_17;
-      t['4'] = &&op_17;  t['5'] = &&op_17;  t['6'] = &&op_17; t['7'] = &&op_17;
-      t['+'] = &&op_add; t['-'] = &&op_sub; t['*'] = &&op_mul;
-      t['/'] = &&op_div; t['%'] = &&op_mod;
-      t['&'] = &&op_and; t['|'] = &&op_or;  t['^'] = &&op_xor;
-      t['['] = &&op_shl; t[']'] = &&op_shr;
-      t['{'] = &&op_shlm;t['}'] = &&op_shrm;
-      t['L'] = &&op_L;   t['S'] = &&op_S;   t['Z'] = &&op_Z;
-      t['M'] = &&op_M;   t['F'] = &&op_F;
-      t['@'] = &&op_at;  t['!'] = &&op_bang;
-      t['I'] = &&op_I;   t['J'] = &&op_J;   t['U'] = &&op_U;
-      t['<'] = &&op_lt;  t['='] = &&op_eq;  t['>'] = &&op_gt;
+      t['1'] = &&op_17;   t['2'] = &&op_17;  t['3'] = &&op_17;
+      t['4'] = &&op_17;   t['5'] = &&op_17;  t['6'] = &&op_17; t['7'] = &&op_17;
+      t['+'] = &&op_add;  t['-'] = &&op_sub; t['*'] = &&op_mul;
+      t['/'] = &&op_div;  t['%'] = &&op_mod;
+      t['&'] = &&op_and;  t['|'] = &&op_or;  t['^'] = &&op_xor;
+      t['['] = &&op_shl;  t[']'] = &&op_shr;
+      t['{'] = &&op_shlm; t['}'] = &&op_shrm;
+      t['L'] = &&op_L;    t['S'] = &&op_S;   t['Z'] = &&op_Z;
+      t['M'] = &&op_M;    t['F'] = &&op_F;
+      t['@'] = &&op_at;   t['!'] = &&op_bang;
+      t['('] = &&op_idxl; t[')'] = &&op_idxs;
+      t['I'] = &&op_I;    t['J'] = &&op_J;   t['U'] = &&op_U;
+      t['<'] = &&op_lt;   t['='] = &&op_eq;  t['>'] = &&op_gt;
       t[' '] = &&op_sp;
-      t['0'] = &&op_0;   t['9'] = &&op_9;
-      t['?'] = &&op_not; t['~'] = &&op_bnot;
-      t['K'] = &&op_K;   t['E'] = &&op_E;   t['N'] = &&op_N;
-      t['P'] = &&op_P;   t['O'] = &&op_O;   t['W'] = &&op_W;
-      t['.'] = &&op_dot; t['"'] = &&op_str;
-      t['G'] = &&op_G;   t['B'] = &&op_B;
+      t['0'] = &&op_0;    t['9'] = &&op_9;
+      t['?'] = &&op_not;  t['~'] = &&op_bnot;
+      t['K'] = &&op_K;    t['E'] = &&op_E;   t['N'] = &&op_N;
+      t['P'] = &&op_P;    t['O'] = &&op_O;   t['W'] = &&op_W;
+      t['.'] = &&op_dot;  t['"'] = &&op_str;
+      t['G'] = &&op_G;    t['B'] = &&op_B;
       memcpy(vt, t, sizeof(vt));
       inited = 1;
     }
@@ -389,22 +412,43 @@ ZL(op_S,   'S')  zp.mem[*zp.ipc] = zp.acc; goto pnext;
 ZL(op_Z,   'Z')  zp.mem[*zp.ipc] = 0;      goto pnext;
 
 ZL(op_M,   'M')
-    #ifdef __CC65__
-      zp.acc = zp.mem[PAR] = (int)calloc(zp.acc, 1);
-      // TODO: other platforms have wider pointers
-    #endif
+    // operand = slot of pointer var; ACC = size in bytes
+    {
+      unsigned n = (unsigned)zp.acc;
+      #ifdef __CC65__
+        zp.mem[*zp.ipc] = (ivmvar)(unsigned)calloc(n, 1);
+      #else
+        if (soft_top + n > SOFT_HEAP_MAX) n = 0;
+        zp.mem[*zp.ipc] = (ivmvar)soft_top;
+        if (n) { memset(soft_heap + soft_top, 0, n); soft_top += n; }
+      #endif
+      zp.acc = zp.mem[*zp.ipc];
+    }
     goto pnext;
 
+
 ZL(op_F,   'F')
+    // operand = slot of pointer var; free and clear
     #ifdef __CC65__
-      free((void*)zp.mem[*zp.ipc]);
-      // TODO: other platforms have wider pointers
+      free((void *)(unsigned)zp.mem[*zp.ipc]);
+    #else
+      // soft-heap is bump-only; just drop the reference
     #endif
     zp.mem[*zp.ipc] = 0;
     goto pnext;
 
-ZL(op_at,  '@')  zp.acc = zp.mem[PAR];       goto pnext;
-ZL(op_bang,'!')  zp.mem[PAR]= zp.acc;        goto pnext;
+
+// pointer in slot is a raw address (heap/static), not a mem[] index
+ZL(op_at,  '@')  zp.acc = *IVM_PTR(PAR); goto pnext;
+ZL(op_bang,'!')  *IVM_PTR(PAR) = zp.acc; goto pnext;
+
+// indexed: pointer in base slot, element index in idx slot
+ZL(op_idxl,'(')
+    zp.acc = IVM_PTR(zp.mem[zp.ipc[0]])[zp.mem[zp.ipc[1]]];
+    zp.ipc += 2; goto xnext;
+ZL(op_idxs,')')
+    IVM_PTR(zp.mem[zp.ipc[0]])[zp.mem[zp.ipc[1]]] = zp.acc;
+    zp.ipc += 2; goto xnext;
 
 ZL(op_I,   'I')  zp.acc = ++zp.mem[*zp.ipc]; goto pnext;
 ZL(op_J,   'J')  zp.acc = --zp.mem[*zp.ipc]; goto pnext;

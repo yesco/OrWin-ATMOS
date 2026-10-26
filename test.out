@@ -1,0 +1,89 @@
+loaded tp-test.ivm (1036 bytes)
+--- RUN IVM (blob 1036) ---
+Hello 6502 World at OrWIN-ATMOS TinyPascal VM!
+47
+--Two:
+54
+--Magical injected input parameter X=
+42
+--Sum:
+41748
+--FunSum:
+0
+--Subtraction tests:
+17
+85
+5
+11
+86
+14
+--Math checks:
+75
+9
+1386
+1
+10
+43
+1418
+--Math checks:
+272
+65298
+4335
+0
+1
+17
+4352
+--IF THEN ELSE checks:
+0
+1: optional
+2:FALSE
+2: both
+3: optional
+4:FALSE
+4: both
+5: both
+6: FALSE
+7:NOT:
+0
+--IF THEN ELSE checks:
+1
+1:TRUE
+1: optional
+2:TRUE
+2: both
+3:TRUE
+3: optional
+4:TRUE
+4: both
+5:TRUE
+5: both
+7:TRUE
+7:NOT:
+1
+cmp 5=5
+1
+cmp 3<9
+2
+cmp 9>3
+3
+not 0
+0
+not 7
+1
+1 shl 3
+8
+16 shr 2
+4
+3shl2+20shr2
+17
+25
+--TestWrrites
+abc
+123
+abc
+123
+4
+
+--- END ---
+acc = 0
+2787504 cycles

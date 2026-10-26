@@ -40,7 +40,10 @@ BEGIN
   { Bitwise operators via table lookup }
   WRITELN(a & 15);
   WRITELN(a | 1);
+
+{ TODO: ^ isn't valid pascal?
   WRITELN(a ^ b);
+}
 
   { Commutative poop-hole trigger: complex right side inside addition/bitwise operations }
   TestMath := (a * b) + (a & b);

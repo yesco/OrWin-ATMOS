@@ -130,17 +130,27 @@
   #define register
 #endif
 
+#ifndef UCHAR
+  #define UCHAR
+  typedef unsigned char uchar; // plain char is unsigned on cc65/oscar64/clang*-unsigned
+  typedef uint16_t word; // blob / vector cell width (6502)
+#endif
 
-typedef unsigned char uchar; // plain char is unsigned on cc65/oscar64/clang*-unsigned
-typedef uint16_t word; // blob / vector cell width (6502)
+
+#define MAIN // this current file is main
+
 
 
 //////////////////////////////////////////////
 // Runtime (ivm.c)
 
 
+// - configuation
+// default is unint16_t as IVMVARTYPE
+
 //#define USE_LABELS
 
+uchar *g_loaded;
 #include "ivm.c"
 
 
@@ -201,6 +211,14 @@ typedef char TokenType;
 #define TOK_NUM      ((TokenType)3)
 #define TOK_STRING   ((TokenType)4)
 #define TOK_ASSIGN   ((TokenType)5) // :=
+#define TOK_SHL      ((TokenType)6) // SHL keyword (not '[')
+#define TOK_SHR      ((TokenType)7) // SHR keyword (not ']')
+#define TOK_NEW      ((TokenType)8)
+#define TOK_DISPOSE  ((TokenType)9)
+#define TOK_GETMEM   ((TokenType)10)
+#define TOK_FREEMEM  ((TokenType)11)
+#define TOK_SETLENGTH ((TokenType)12)
+#define TOK_SIZEOF   ((TokenType)13)
 
 // keywords — letters, unique
 // free: A C H J M O QRS U XYZ
@@ -234,7 +252,7 @@ Keyword keywords[] = {
   {"BEGIN",    TOK_BEGIN},
   {"END",      TOK_END},
   {"INTEGER",  TOK_INTEGER},
-  {"WORD",     TOK_INTEGER}, // alias; ^WORD is pointer window-dressing
+  {"WORD",     TOK_INTEGER}, // alias; ^WORD pointer (still one cell)
   {"WRITE",    TOK_WRITE},
   {"WRITELN",  TOK_WRITELN},
   {"FUNCTION", TOK_FUNCTION},
@@ -247,9 +265,16 @@ Keyword keywords[] = {
   {"TO",       TOK_TO},
   {"DO",       TOK_DO},
 
+  {"NEW",      TOK_NEW},
+  {"DISPOSE",  TOK_DISPOSE},
+  {"GETMEM",   TOK_GETMEM},
+  {"FREEMEM",  TOK_FREEMEM},
+  {"SETLENGTH",TOK_SETLENGTH},
+  {"SIZEOF",   TOK_SIZEOF},
+
   {"NOT",      (TokenType)'?'},  // logical not → opcode '?'
-  {"SHL",      (TokenType)'['},  // acc << PAR
-  {"SHR",      (TokenType)']'},  // acc >> PAR
+  {"SHL",      TOK_SHL}, // acc << PAR (opcode '[')
+  {"SHR",      TOK_SHR}, // acc >> PAR (opcode ']')
 
   // TODO: insert a 0 entry to end matching during tokenization
   {"*EOF*",    TOK_EOF},
@@ -599,7 +624,7 @@ typedef struct {
   uchar param_slot[MAX_PARAMS];
   uchar ret_slot;
   uchar ret_addr_slot;
-  uchar is_ptr; // 1 if declared ^WORD / ^INTEGER (still one cell)
+  uchar is_ptr; // 1 if ^WORD / ^INTEGER (still one cell)
 } Symbol;
 
 Symbol syms[MAX_SYMBOLS];
@@ -649,6 +674,7 @@ Symbol* lookup_sym(const char* name) {
 void next_token(void);
 void expect(TokenType expected);
 void expression(void);
+static uchar parse_type(void);
 void expressionsave(char addr);
 int statement(void);
 #define EXPECT(expected) expect(expected)
@@ -753,7 +779,7 @@ void next_token(void) {
   // single-char: token type is the character itself
   curr_tok.lexeme[0] = C;
   curr_tok.lexeme[1] = 0;
-  if (strchr(";:.,()+-*'*/&|^<>=", C)) {
+  if (strchr(";:.,()+-*'*/&|^<>=[]", C)) {
     curr_tok.type = C;
     NEXT;
     return;
@@ -841,6 +867,24 @@ void primary(char *out_acc, char *out_addr) {
   char name[MAX_SYM_LEN + 1];
   Symbol *sym;
   int i, pi;
+
+  // SizeOf(type|var) → bytes (WORD/INTEGER/^WORD = 2 on this VM)
+  if (curr_tok.type == TOK_SIZEOF) {
+    next_token();
+    EXPECT('(');
+    if (curr_tok.type == TOK_INTEGER || curr_tok.type == '^') {
+      (void)parse_type();
+    } else if (curr_tok.type == TOK_IDENT) {
+      Symbol *s = lookup_sym(curr_tok.lexeme);
+      if (!s) FAIL("SizeOf undeclared");
+      next_token();
+    } else
+      FAIL("SizeOf expected type or variable");
+    EXPECT(')');
+    *out_acc = 0;
+    *out_addr = lit_addr(2); // sizeof WORD / pointer cell
+    return;
+  }
 
   // NOT expr  (opcode '?')
   if (curr_tok.type == (TokenType)'?') {
@@ -930,7 +974,7 @@ void primary(char *out_acc, char *out_addr) {
       return;
     }
 
-    // postfix: p^  → @p   (deref pointer cell)
+    // postfix: p^ → @p       == deref pointer cell
     if (curr_tok.type == '^') {
       next_token();
       emitop2('@', (uchar)sym->address);
@@ -938,7 +982,7 @@ void primary(char *out_acc, char *out_addr) {
       *out_addr = 0;
       return;
     }
-    // postfix: a[i] → ( a i   (indexed load)
+    // postfix: a[i] → ( a i  == indexed load
     if (curr_tok.type == '[') {
       char idx_acc, idx_addr;
       char islot;
@@ -992,9 +1036,13 @@ void expression(void) {
 
   primary(&left_acc, &left_addr);
 
-  while (strchr("+-*/&|^<>=[]", curr_tok.type)) {
+  while (strchr("+-*/&|^<>=[]", curr_tok.type)
+         || curr_tok.type == TOK_SHL || curr_tok.type == TOK_SHR) {
     op = curr_tok.type;
     next_token();
+    // SHL/SHR keywords → same opcodes as [ ]
+    if (op == TOK_SHL) op = '[';
+    if (op == TOK_SHR) op = ']';
     comm = strchr("-/<>[]", op) == NULL;
 
     // Only spill ACC-left when RHS will clobber ACC (not for x+1 / a-b with slots)
@@ -1109,7 +1157,7 @@ int statement(void) {
 
     EXPECT(TOK_IDENT);
 
-    // p^ := expr  →  expr; !p
+    // p^ := expr    ==   expr; !p
     if (curr_tok.type == '^') {
       next_token();
       EXPECT(TOK_ASSIGN);
@@ -1117,7 +1165,7 @@ int statement(void) {
       emitop2('!', (uchar)sym->address);
       EXPECT(';');
     }
-    // a[i] := expr  →  expr; ) a i
+    // a[i] := expr
     else if (curr_tok.type == '[') {
       char idx_acc, idx_addr;
       char islot;
@@ -1170,6 +1218,77 @@ int statement(void) {
         }
       }
     }
+  }
+
+// TODO: all these functions are so heavy, simplify!
+
+  // NEW(ptr)  — allocate SizeOf(ptr^), store address in ptr
+  else if (curr_tok.type == TOK_NEW) {
+    Symbol *ps;
+    next_token();
+    EXPECT('(');
+    if (curr_tok.type != TOK_IDENT) FAIL("New expects pointer variable");
+    ps = lookup_sym(curr_tok.lexeme);
+    if (!ps || ps->type != SYM_VAR) FAIL("New expects pointer variable");
+    next_token();
+    EXPECT(')');
+    EXPECT(';');
+    // ACC = size in bytes; M stores calloc into ptr slot
+    emitload(0, lit_addr(2));
+    emitop2('M', (uchar)ps->address);
+    acc_invalidate();
+  }
+
+  // DISPOSE(ptr) / FREEMEM(ptr) — free, ptr := 0
+  else if (curr_tok.type == TOK_DISPOSE || curr_tok.type == TOK_FREEMEM) {
+    Symbol *ps;
+    next_token();
+    EXPECT('(');
+    if (curr_tok.type != TOK_IDENT) FAIL("Dispose/FreeMem expects pointer");
+    ps = lookup_sym(curr_tok.lexeme);
+    if (!ps || ps->type != SYM_VAR) FAIL("Dispose/FreeMem expects pointer");
+    next_token();
+    EXPECT(')');
+    EXPECT(';');
+    emitop2('F', (uchar)ps->address);
+    acc_invalidate();
+  }
+
+  // GETMEM(ptr, n) — allocate n bytes
+  else if (curr_tok.type == TOK_GETMEM) {
+    Symbol *ps;
+    next_token();
+    EXPECT('(');
+    if (curr_tok.type != TOK_IDENT) FAIL("GetMem expects pointer");
+    ps = lookup_sym(curr_tok.lexeme);
+    if (!ps || ps->type != SYM_VAR) FAIL("GetMem expects pointer");
+    next_token();
+    EXPECT(',');
+    expression(); // n in ACC
+    EXPECT(')');
+    EXPECT(';');
+    emitop2('M', (uchar)ps->address);
+    acc_invalidate();
+  }
+
+  // SETLENGTH(ptr, n) — allocate n * SizeOf(ptr^) bytes
+  else if (curr_tok.type == TOK_SETLENGTH) {
+    Symbol *ps;
+
+    next_token();
+    EXPECT('(');
+    if (curr_tok.type != TOK_IDENT) FAIL("SetLength expects pointer");
+    ps = lookup_sym(curr_tok.lexeme);
+    if (!ps || ps->type != SYM_VAR) FAIL("SetLength expects pointer");
+    next_token();
+    EXPECT(',');
+    expression(); // n elements in ACC
+    // ACC := n * 2
+    emitop2('*', lit_addr(2));
+    EXPECT(')');
+    EXPECT(';');
+    emitop2('M', (uchar)ps->address);
+    acc_invalidate();
   }
 
   // WRITE / WRITELN ( 0..n args, comma-separated )
@@ -1421,7 +1540,6 @@ void compile_function(void) {
         nparams++;
         EXPECT(TOK_IDENT);
         EXPECT(':');
-        /* type checked; is_ptr set after add_symbol */
         (void)parse_type();
         if (curr_tok.type == ',' || curr_tok.type == ';') {
           next_token();
@@ -1434,7 +1552,7 @@ void compile_function(void) {
     }
     EXPECT(')');
     EXPECT(':');
-    (void)parse_type(); // return type INTEGER/WORD/^WORD
+    (void)parse_type(); // return type
     EXPECT(';');
 
     // always reserve fp+3 so JSR can store ACC without nparams test
@@ -1731,14 +1849,6 @@ int compile_pipeline(void) {
   }
   return 1;
 }
-
-
-// TODO: packer (here) ... loader/Nevm()/run_ivm (ivm.c)
-
-#define MAX_BLOB_LEN 4096
-uchar blob[MAX_BLOB_LEN];
-int blob_len;
-uchar *g_loaded;
 
 
 // append n bytes of data at *pp; return offset from base
@@ -2269,48 +2379,6 @@ static char save_blob(const char *path) {
   return 1;
 }
 
-static char load_blob(const char *path) {
-  FILE *f;
-  int n;
-
-  // TODO: not use global
-  blob_len = 0;
-
-  f = fopen(path, "rb");
-  if (!f) {
-    printf("cannot open %s\n", path);
-    return 0;
-  }
-
-  // TODO: shouldn't use MAX_BLOB_LEN
-  //   2 first bytes should be length of rest!
-  n = (int)fread(blob, 1, MAX_BLOB_LEN, f);
-  fclose(f);
-
-  if (n <= 0) {
-    printf("failed to load %s\n", path);
-    return 0;
-  }
-
-  blob_len = n;
-  printf("loaded %s (%d bytes)\n", path, blob_len);
-  relocate(blob);
-
-  return 1;
-}
-
-static char run_loaded_blob(void) {
-  Process *proc;
-  unsigned int ret;
-
-  proc = Nevm(blob);
-  printf("--- RUN IVM (blob %d) ---\n", blob_len);
-  ret = run_ivm(proc);
-  printf("\n--- END ---\n");
-  printf("acc = %u\n", ret);
-  return (int)ret;
-}
-
 #ifdef OSCAR64
 int main(void) {
   const char* argv[]= { "tpi", "-O", #ARG, 0 };
@@ -2320,7 +2388,7 @@ int main(void) {
 int main(int argc, char **argv) {
 #endif
 
-  const char *filename = NULL;
+  char *filename = NULL;
   int buf_idx;
   uchar i;
 
@@ -2347,11 +2415,12 @@ int main(int argc, char **argv) {
   }
 
   // IVM RUN ?
-  if (ends_with(filename, ".ivm")) {
-    if (!load_blob(filename)) return 1;
-    run_loaded_blob();
-    return 0;
-  }
+  if (ends_with(filename, ".ivm"))
+    return run_file(filename);
+
+
+
+  // COMPILE - OPTIMIZE - RUN
 
   // CHECK .p OR .pas
   if (!ends_with(filename, ".p") && !ends_with(filename, ".pas")) {
@@ -2429,8 +2498,10 @@ int main(int argc, char **argv) {
   finalise();
   dump_blob();
 
+  // SAVE filename.ivm
   ivm_name_from(outname, filename);
   if (!save_blob(outname)) return 1;
+
 
   // LOAD & RUN
   // true round-trip: clear and reload from disk
@@ -2438,11 +2509,8 @@ int main(int argc, char **argv) {
   // TODO: this shouldn't be global...
   memset(blob, 0, sizeof(blob));
 
-  // - LOAD
-  if (!load_blob(outname)) return 1;
-  
-  // - RUN
-  run_loaded_blob();
+  //return run_file(outname);
+  (void)run_file(outname);
 
   return 0;
 }

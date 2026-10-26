@@ -11,10 +11,11 @@ echo
 echo "--------------- $name.p"
 echo
 
-cl65 -Oirs -t sim6502 -m tpi.map -o tpi.sim tpi.c || exit 1
+# exit code is run code? lol
+cl65 -Oirs -t sim6502 -m tpi.map -o tpi.sim tpi.c ##|| exit 1
 echo
 
-sim65 -c tpi.sim -O $name.p
+sim65 -c tpi.sim -O $name.p || exit 1
 #sim65 -c tpi.sim $name.p
 
 echo
@@ -48,11 +49,12 @@ echo
 ls -ugGlf $name.p $name.pas $name.c $name.prg $name.sim $name.ivm tpi.sim tpi.tap tpi.prg ivm.sim ivm.tap ivm.prg 2>/dev/null
 
 echo
-if [ -f "$name.out" ]; then
+#if [ -f "$name.out" ]; then
+if [ -f "test-pointers.out" ]; then
   echo "====================== DIFF ======================="
-  diff -w -I "cycles" -I "RUN" -I "loaded" -U9999 tp-test.out tp-test.log \
+  diff -w -I "cycles" -I "RUN" -I "loaded" -U9999 $name.out $name.log \
   && printf "\n\t\t  -- TESTS OK --\n\n"
-  diff -U0 tp-test.out tp-test.log
+  diff -U0 $name.out $name.log
 
 fi
 

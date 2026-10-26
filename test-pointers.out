@@ -1,0 +1,15 @@
+loaded test-pointers.ivm (175 bytes)
+--- RUN IVM (blob 175) ---
+TestPointers=
+p[0]=100
+p[1]=200
+p[2]=300
+p^=
+55
+SizeOf(WORD)=
+2
+1
+
+--- END ---
+acc = 1
+169778 cycles
