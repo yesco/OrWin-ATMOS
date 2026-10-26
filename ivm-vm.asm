@@ -49,35 +49,35 @@ displo:
 	.byte	<op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31
 	.byte	<op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31
 	.byte	<op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31
-	.byte	<op_sp, <op_c, <op_str, <op_c, <op_c, <op_mod, <op_and, <op_c
-	.byte	<op_c, <op_c, <op_mul, <op_add, <op_c, <op_sub, <op_dot, <op_div
+	.byte	<op_sp, <op_bad, <op_str, <op_bad, <op_bad, <op_mod, <op_and, <op_bad
+	.byte	<op_bad, <op_bad, <op_mul, <op_add, <op_bad, <op_sub, <op_dot, <op_div
 	.byte	<op_0, <op_17, <op_17, <op_17, <op_17, <op_17, <op_17, <op_17
-	.byte	<op_8, <op_9, <op_c, <op_semi, <op_c, <op_c, <op_c, <op_not
-	.byte	<op_c, <op_c, <op_B, <op_c, <op_c, <op_c, <op_c, <op_G
-	.byte	<op_c, <op_I, <op_J, <op_c, <op_L, <op_c, <op_N, <op_O
-	.byte	<op_c, <op_Q, <op_c, <op_S, <op_c, <op_U, <op_c, <op_c
-	.byte	<op_X, <op_c, <op_Z, <op_c, <op_c, <op_c, <op_xor, <op_c
-	.byte	<op_c, <op_c, <op_c, <op_c, <op_c, <op_c, <op_c, <op_c
-	.byte	<op_c, <op_c, <op_c, <op_c, <op_c, <op_c, <op_c, <op_c
-	.byte	<op_c, <op_q, <op_c, <op_c, <op_c, <op_c, <op_c, <op_c
-	.byte	<op_c, <op_c, <op_c, <op_c, <op_or, <op_c, <op_c, <op_c
+	.byte	<op_8, <op_9, <op_bad, <op_semi, <op_lt, <op_eq, <op_gt, <op_not
+	.byte	<op_bad, <op_bad, <op_B, <op_bad, <op_bad, <op_bad, <op_bad, <op_G
+	.byte	<op_bad, <op_I, <op_J, <op_bad, <op_L, <op_bad, <op_N, <op_O
+	.byte	<op_bad, <op_Q, <op_bad, <op_S, <op_bad, <op_U, <op_bad, <op_bad
+	.byte	<op_X, <op_bad, <op_Z, <op_shl, <op_bad, <op_shr, <op_xor, <op_bad
+	.byte	<op_bad, <op_bad, <op_bad, <op_bad, <op_bad, <op_bad, <op_bad, <op_bad
+	.byte	<op_bad, <op_bad, <op_bad, <op_bad, <op_bad, <op_bad, <op_bad, <op_bad
+	.byte	<op_bad, <op_q, <op_bad, <op_bad, <op_bad, <op_bad, <op_bad, <op_bad
+	.byte	<op_bad, <op_bad, <op_bad, <op_shlm, <op_or, <op_shrm, <op_bnot, <op_bad
 disphi:
 	.byte	>op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31
 	.byte	>op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31
 	.byte	>op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31
 	.byte	>op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31
-	.byte	>op_sp, >op_c, >op_str, >op_c, >op_c, >op_mod, >op_and, >op_c
-	.byte	>op_c, >op_c, >op_mul, >op_add, >op_c, >op_sub, >op_dot, >op_div
+	.byte	>op_sp, >op_bad, >op_str, >op_bad, >op_bad, >op_mod, >op_and, >op_bad
+	.byte	>op_bad, >op_bad, >op_mul, >op_add, >op_bad, >op_sub, >op_dot, >op_div
 	.byte	>op_0, >op_17, >op_17, >op_17, >op_17, >op_17, >op_17, >op_17
-	.byte	>op_8, >op_9, >op_c, >op_semi, >op_c, >op_c, >op_c, >op_not
-	.byte	>op_c, >op_c, >op_B, >op_c, >op_c, >op_c, >op_c, >op_G
-	.byte	>op_c, >op_I, >op_J, >op_c, >op_L, >op_c, >op_N, >op_O
-	.byte	>op_c, >op_Q, >op_c, >op_S, >op_c, >op_U, >op_c, >op_c
-	.byte	>op_X, >op_c, >op_Z, >op_c, >op_c, >op_c, >op_xor, >op_c
-	.byte	>op_c, >op_c, >op_c, >op_c, >op_c, >op_c, >op_c, >op_c
-	.byte	>op_c, >op_c, >op_c, >op_c, >op_c, >op_c, >op_c, >op_c
-	.byte	>op_c, >op_q, >op_c, >op_c, >op_c, >op_c, >op_c, >op_c
-	.byte	>op_c, >op_c, >op_c, >op_c, >op_or, >op_c, >op_c, >op_c
+	.byte	>op_8, >op_9, >op_bad, >op_semi, >op_lt, >op_eq, >op_gt, >op_not
+	.byte	>op_bad, >op_bad, >op_B, >op_bad, >op_bad, >op_bad, >op_bad, >op_G
+	.byte	>op_bad, >op_I, >op_J, >op_bad, >op_L, >op_bad, >op_N, >op_O
+	.byte	>op_bad, >op_Q, >op_bad, >op_S, >op_bad, >op_U, >op_bad, >op_bad
+	.byte	>op_X, >op_bad, >op_Z, >op_shl, >op_bad, >op_shr, >op_xor, >op_bad
+	.byte	>op_bad, >op_bad, >op_bad, >op_bad, >op_bad, >op_bad, >op_bad, >op_bad
+	.byte	>op_bad, >op_bad, >op_bad, >op_bad, >op_bad, >op_bad, >op_bad, >op_bad
+	.byte	>op_bad, >op_q, >op_bad, >op_bad, >op_bad, >op_bad, >op_bad, >op_bad
+	.byte	>op_bad, >op_bad, >op_bad, >op_shlm, >op_or, >op_shrm, >op_bnot, >op_bad
 
 .code
 
@@ -362,6 +362,7 @@ op_add: PARAX
 
 
 op_L:   PARAX
+	;; TODO: axpnext to store?
         sta     _ivm_acc
         stx     _ivm_acc+1
 
@@ -396,8 +397,8 @@ op_9:   lda     #$FF
 
 op_not: lda     _ivm_acc
         ora     _ivm_acc+1
-        beq     ret1
-
+        beq     op_acc1
+	;; fall-through to 0
 ;;; ACC = 0
 op_0:   lda     #0
         sta     _ivm_acc
@@ -405,13 +406,54 @@ op_0:   lda     #0
 
         jmp     xnext
 
+;;; acc == vv
+op_eq:  PARAX
+        cmp     _ivm_acc
+        bne     :+
+        cpx     _ivm_acc+1
+;;; TODO: it's wrong as these don't call pnext!
+:	
+        bne     op_0
+	;; fall-through to op_acc1
 ;;; ACC = 1
-ret1:   lda     #1
+op_acc1:
+	lda     #1
         sta     _ivm_acc
         lda     #0
         sta     _ivm_acc+1
 
         jmp     xnext
+
+
+;;; < = >  unsigned compare → 0/1
+op_lt:  PARAX
+	;; TODO: just use them directly?
+        sta     tmp_lo
+        stx     tmp_hi
+
+        lda     _ivm_acc
+        cmp     tmp_lo
+        lda     _ivm_acc+1
+        sbc     tmp_hi
+
+;;; TODO: it's wrong as these don't call pnext!
+        bcc     op_acc1
+	bcs     op_0
+
+op_gt:  PARAX
+	;; TODO: just use them directly?
+        sta     tmp_lo
+        stx     tmp_hi
+
+        lda     tmp_lo
+        cmp     _ivm_acc
+        lda     tmp_hi
+        sbc     _ivm_acc+1
+
+;;; TODO: it's wrong as these don't call pnext!
+        bcc     op_acc1
+        bcs     op_0
+
 
 
 ;;; Ixx  acc = ++mem[xx]
@@ -579,8 +621,98 @@ strlp:  ldy     #0
         jmp     strlp
 strdn:  jmp     pnext
 
-;;; default unknown
-op_c:   jmp     xnext
+
+;;; ~ bitwise not
+op_bnot:
+        lda     _ivm_acc
+        eor     #$FF
+        sta     _ivm_acc
+        lda     _ivm_acc+1
+        eor     #$FF
+        sta     _ivm_acc+1
+        jmp     xnext
+
+;;; [  acc <<= PAR   (ASL/ROL on ZP ok)
+op_shl: PARAX
+        tax                     ; count = par_lo
+        beq     shl_dn
+shllp:  asl     _ivm_acc
+        rol     _ivm_acc+1
+        dex
+        bne     shllp
+shl_dn: jmp     pnext
+
+;;; ]  acc >>= PAR
+op_shr: PARAX
+        tax
+        beq     shr_dn
+shrlp:  lsr     _ivm_acc+1
+        ror     _ivm_acc
+        dex
+        bne     shrlp
+shr_dn: jmp     pnext
+
+;;; {xx  mem[xx] <<= acc
+;;; no ASL (zp),Y — load lo→tmp_lo, hi→A, count in X
+op_shlm:
+        ldy     #0
+        lda     (_ivm_ipc),y
+        sta     tmp_hi              ; slot
+        tay
+        lda     (_ivm_memlo),y
+        sta     tmp_lo              ; value lo
+        lda     (_ivm_memhi),y      ; value hi in A
+        ldx     _ivm_acc            ; count
+        beq     shlm_st
+shlm_lp:
+        asl     tmp_lo
+        rol     a
+        dex
+        bne     shlm_lp
+shlm_st:
+        ldy     tmp_hi
+        sta     (_ivm_memhi),y
+        lda     tmp_lo
+        sta     (_ivm_memlo),y
+        jmp     pnext
+
+;;; }xx  mem[xx] >>= acc
+op_shrm:
+        ldy     #0
+        lda     (_ivm_ipc),y
+        sta     tmp_hi
+        tay
+        lda     (_ivm_memlo),y
+        sta     tmp_lo
+        lda     (_ivm_memhi),y
+        ldx     _ivm_acc
+        beq     shrm_st
+shrm_lp:
+        lsr     a
+        ror     tmp_lo
+        dex
+        bne     shrm_lp
+shrm_st:
+        ldy     tmp_hi
+        sta     (_ivm_memhi),y
+        lda     tmp_lo
+        sta     (_ivm_memlo),y
+        jmp     pnext
+
+;;; unknown: print ? + op + NL, halt
+op_bad:
+        lda     #10
+        jsr     _putchar
+        lda     #'?'
+        jsr     _putchar
+        lda     _ivm_op
+        jsr     _putchar
+        lda     #10
+        jsr     _putchar
+        jmp     done
+
+
+op_c = op_bad
 
 
 ;;; C style return ACC in AX

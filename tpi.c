@@ -113,6 +113,11 @@
 // (/ (- 2570914 752081) 1000) 1818c/loop sum, was 1474 from 1373
 // (/ (- 4844460 752081) 1000) 4092c/loop fsum, was 2526 from 2506
 
+// - ivm-vm.asm: 6806597/2474399
+// - compile to file, loader/Nevm/run_ivm
+// (/ (- 1327210 687010) 1000)  640c sum
+// (/ (- 1835761 687010) 1000) 1148c fsum
+// - 2.75x faster than run_ivmn cc65 indirect
 
 #include <stdio.h>
 #include <stddef.h>
