@@ -2181,6 +2181,9 @@ static char save_blob(const char *path) {
     printf("cannot write %s\n", path);
     return 0;
   }
+  // TODO: write out 2 bytes of size
+  //   maybe also a byte-order marker
+  //   "IVM0" LOL
   if ((int)fwrite(blob, 1, (unsigned)blob_len, f) != blob_len) {
     printf("write failed %s\n", path);
     fclose(f);
@@ -2195,12 +2198,17 @@ static char load_blob(const char *path) {
   FILE *f;
   int n;
 
+  // TODO: not use global
+  blob_len = 0;
+
   f = fopen(path, "rb");
   if (!f) {
     printf("cannot open %s\n", path);
     return 0;
   }
 
+  // TODO: shouldn't use MAX_BLOB_LEN
+  //   2 first bytes should be length of rest!
   n = (int)fread(blob, 1, MAX_BLOB_LEN, f);
   fclose(f);
 
@@ -2355,8 +2363,7 @@ int main(int argc, char **argv) {
   // TODO: this shouldn't be global...
   memset(blob, 0, sizeof(blob));
 
-  blob_len = 0;
-  // - LAOD
+  // - LOAD
   if (!load_blob(outname)) return 1;
   
   // - RUN
