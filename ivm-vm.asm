@@ -51,8 +51,8 @@ displo:
 	.byte	<op_0, <op_17, <op_17, <op_17, <op_17, <op_17, <op_17, <op_17
 	.byte	<op_8, <op_9, <op_c, <op_semi, <op_c, <op_c, <op_c, <op_not
 	.byte	<op_c, <op_c, <op_B, <op_c, <op_c, <op_c, <op_c, <op_G
-	.byte	<op_c, <op_c, <op_c, <op_c, <op_L, <op_c, <op_N, <op_O
-	.byte	<op_c, <op_Q, <op_c, <op_S, <op_c, <op_c, <op_c, <op_c
+	.byte	<op_c, <op_I, <op_J, <op_c, <op_L, <op_c, <op_N, <op_O
+	.byte	<op_c, <op_Q, <op_c, <op_S, <op_c, <op_U, <op_c, <op_c
 	.byte	<op_X, <op_c, <op_Z, <op_c, <op_c, <op_c, <op_xor, <op_c
 	.byte	<op_c, <op_c, <op_c, <op_c, <op_c, <op_c, <op_c, <op_c
 	.byte	<op_c, <op_c, <op_c, <op_c, <op_c, <op_c, <op_c, <op_c
@@ -68,8 +68,8 @@ disphi:
 	.byte	>op_0, >op_17, >op_17, >op_17, >op_17, >op_17, >op_17, >op_17
 	.byte	>op_8, >op_9, >op_c, >op_semi, >op_c, >op_c, >op_c, >op_not
 	.byte	>op_c, >op_c, >op_B, >op_c, >op_c, >op_c, >op_c, >op_G
-	.byte	>op_c, >op_c, >op_c, >op_c, >op_L, >op_c, >op_N, >op_O
-	.byte	>op_c, >op_Q, >op_c, >op_S, >op_c, >op_c, >op_c, >op_c
+	.byte	>op_c, >op_I, >op_J, >op_c, >op_L, >op_c, >op_N, >op_O
+	.byte	>op_c, >op_Q, >op_c, >op_S, >op_c, >op_U, >op_c, >op_c
 	.byte	>op_X, >op_c, >op_Z, >op_c, >op_c, >op_c, >op_xor, >op_c
 	.byte	>op_c, >op_c, >op_c, >op_c, >op_c, >op_c, >op_c, >op_c
 	.byte	>op_c, >op_c, >op_c, >op_c, >op_c, >op_c, >op_c, >op_c
@@ -407,6 +407,63 @@ ret1:   lda     #1
 
         jmp     xnext
 
+
+;;; Ixx  acc = ++mem[xx]
+op_I:   ldy     #0
+        lda     (_ivm_ipc),y
+        tay
+        clc
+        lda     (_ivm_memlo),y
+        adc     #1
+        sta     (_ivm_memlo),y
+        sta     _ivm_acc
+        lda     (_ivm_memhi),y
+        adc     #0
+        sta     (_ivm_memhi),y
+        sta     _ivm_acc+1
+        jmp     pnext
+
+;;; Jxx  acc = --mem[xx]
+op_J:   ldy     #0
+        lda     (_ivm_ipc),y
+        tay
+        sec
+        lda     (_ivm_memlo),y
+        sbc     #1
+        sta     (_ivm_memlo),y
+        sta     _ivm_acc
+        lda     (_ivm_memhi),y
+        sbc     #0
+        sta     (_ivm_memhi),y
+        sta     _ivm_acc+1
+        jmp     pnext
+
+;;; Uab  mem[a] += mem[b]; acc = mem[a]
+op_U:   ldy     #0
+        lda     (_ivm_ipc),y
+        sta     tmp_lo              ; a
+        iny
+        lda     (_ivm_ipc),y
+        tay                         ; b
+        lda     (_ivm_memlo),y
+        sta     tmp_hi              ; b_lo
+        lda     (_ivm_memhi),y
+        tax                         ; b_hi
+        ldy     tmp_lo
+        clc
+        lda     (_ivm_memlo),y
+        adc     tmp_hi
+        sta     (_ivm_memlo),y
+        sta     _ivm_acc
+        txa
+        adc     (_ivm_memhi),y
+        sta     (_ivm_memhi),y
+        sta     _ivm_acc+1
+        ; consume 2 operand bytes
+        inc     _ivm_ipc
+        bne     :+
+        inc     _ivm_ipc+1
+:       jmp     pnext
 
 ;;; Conditional GOTO +1B iff acc > 
 ;;; TODO: replace usage by rjmp, or make it an FUSED LOOP:
