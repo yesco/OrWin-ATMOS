@@ -13,26 +13,26 @@
 #ifndef IVMVARTYPE
   #define IVMVARTYPE uint16_t
   typedef IVMVARTYPE ivmvar;
+#endif // IVMVARTYPE
 
 // Host soft-heap: ivmvar is often 16-bit and cannot hold a real malloc pointer.
 // We store an offset into soft_heap as the "pointer" value on non-cc65.
 // On cc65/6502, M/F/@/!/(/) use real addresses.
 #ifndef __CC65__
-#define SOFT_HEAP_MAX 4096
-static unsigned char soft_heap[SOFT_HEAP_MAX];
-static unsigned soft_top;
-#define IVM_PTR(addr) ((ivmvar *)(soft_heap + (unsigned)(addr)))
+  #define SOFT_HEAP_MAX 4096
+  static uchar soft_heap[SOFT_HEAP_MAX];
+  static word soft_top;
+  #define IVM_PTR(addr) ((ivmvar *)(soft_heap + (unsigned)(addr)))
 #else
-#define IVM_PTR(addr) ((ivmvar *)(unsigned)(addr))
+  #define IVM_PTR(addr) ((ivmvar *)(unsigned)(addr))
 #endif
 
-#endif
 
 
 #ifndef UCHAR
   #define UCHAR
-  typedef unsigned char uchar;
-  typedef unsigned int  word;
+  typedef unsigned char   uchar;
+  typedef uint16_t        word;
 #endif
 
 // --- limits
@@ -254,6 +254,179 @@ ivmvar run_ivm(Process *p) {
 }
 
 #else
+
+#ifdef IVMASM
+
+// Compile with -DIVMASM and link ivm-vm.s
+// Glue only — keeps C run_ivm as non-IVMASM reference path.
+
+// ZP mirrors (ca65 importzp)
+#ifdef __CC65__
+#pragma bss-name (push, "ZEROPAGE")
+#endif
+
+uchar ivm_ipc[2];
+char ivm_fp;
+uchar ivm_acc[2];
+uchar ivm_op;
+uchar *ivm_memlo;
+uchar *ivm_memhi;
+
+
+
+// TODO: from stupid duplicate ivm-asm.h
+
+// ZP / near-data shared with ivm-vm.asm (cc65 #pragma bss-name / zpspace)
+extern uchar ipc[2];
+extern char fp;
+extern uchar acc_lo, acc_hi;
+extern uchar op, tmp;
+extern uchar *memlo;  /* 256-byte low slice */
+extern uchar *memhi;  /* 256-byte high slice */
+
+/* Split process mem[i] into memlo[i]/memhi[i] for LDA (ptr),Y */
+void pivot(unsigned short *mem, unsigned nslots);
+
+/* ASM interpreter — returns ACC */
+unsigned run_ivm_asm(void);
+
+/* helpers called from asm */
+void ivm_print_u16(unsigned v);
+void ivm_putchar(unsigned char c);
+
+#endif
+
+
+
+#ifdef __CC65__
+#pragma bss-name (pop)
+#endif
+
+static uchar slice_lo[256];
+static uchar slice_hi[256];
+static word  *live_mem;
+static word  live_n;
+
+void pivot(word *mem, word n) {
+  word i;
+
+  live_mem = mem;
+  live_n = n > 256 ? 256 : n;
+  for (i = 0; i < live_n; i++) {
+    slice_lo[i] = (uchar)(mem[i] & 0xff);
+    slice_hi[i] = (uchar)(mem[i] >> 8);
+  }
+  for (; i < 256; i++)
+    slice_lo[i] = slice_hi[i] = 0;
+
+  ivm_memlo = slice_lo;
+  ivm_memhi = slice_hi;
+}
+
+void unpivot(void) {
+  uchar i;
+
+  // TODO: WHAT THE FUCK IS A SHORT? myabe we want 
+  
+  for (i = 0; i < live_n; i++)
+    live_mem[i] =  (ivmvar)slice_lo[i]
+                | ((ivmvar)slice_hi[i] << 8);
+}
+
+// ASM entry
+extern ivmvar run_ivm_asm(void);
+
+// Execute *one* bytecode using existing C interpreter state.
+// ASM jumps here for mul/div/print/JSR/… until those are ported.
+// Requires Process* or zp to be current — we use a static handoff.
+static Process *ivm_proc;
+
+void run_ivm_once(void) {
+  // Rebuild zp.ipc/acc/fp/mem from IVMASM ZP, run single-op via
+  // temporary poke: simplest path re-enter thin C for one op.
+  // Full fidelity: port remaining ops to asm later.
+  unsigned char *ipc;
+  unsigned char op;
+
+  unpivot();
+
+  zp.ipc = (uchar*)(ivm_ipc[0] | (ivm_ipc[1] << 8));
+  zp.fp  = (uchar)ivm_fp;
+  zp.acc = (ivmvar)(ivm_acc[0] | (ivm_acc[1] << 8));
+  zp.mem = live_mem;
+
+  op = *zp.ipc++;
+  // One-op dispatch: call into a stripped switch — for now use
+  // recursive mini-step by jumping to known C handlers via run_ivm
+  // is too heavy. Emit minimal: print and mul only as examples.
+  switch (op) {
+
+  case '.':
+    printf("%u", zp.acc);
+    break;
+
+  case 'N':
+    putchar('\n');
+    break;
+
+  case '"':
+    while (*zp.ipc)
+      putchar(*zp.ipc++);
+    zp.ipc++; // \0
+    break;
+
+  case '*':
+    zp.acc *= zp.mem[*zp.ipc++];
+    break;
+
+  case '/':
+    if (zp.mem[*zp.ipc])
+      zp.acc /= zp.mem[*zp.ipc];
+    zp.ipc++;
+    break;
+
+  default:
+    // unknown complex — skip 1 operand if printable letter op
+    if (op >= 0xC0) {
+      // vector JSR: fall back to full C for this call only — heavy
+      printf("[IVMASM] unhandled 0x%02X\n", op);
+    } else if (strchr("LS+-*/%&|^[]{}@!IMFWZ=<>", op)) {
+
+      // TODO: why are you skipping op codes?
+
+      zp.ipc++;
+    }
+
+    break;
+  }
+
+  // write back ZP for ASM
+  {
+    unsigned ip = (unsigned)(zp.ipc - (unsigned char *)0);
+    // on 6502 ipc is absolute pointer already 
+
+    #ifdef __CC65__
+      ivm_ipc[0] = (uchar)(unsigned)(zp.ipc);
+      ivm_ipc[1] = (uchar)(((unsigned)(zp.ipc)) >> 8);
+    #else
+      // TODO: What?
+      ivm_ipc[0] = (uchar)((uchar*)zp.ipc - (uchar*)0);
+    #endif
+  }
+  ivm_fp = (unsigned char)zp.fp;
+  ivm_acc[0] = (unsigned char)(zp.acc & 0xff);
+  ivm_acc[1] = (unsigned char)(zp.acc >> 8);
+
+  pivot(live_mem, live_n);
+}
+
+
+
+
+#else // !IVMASM
+
+
+
 
 ivmvar run_ivm(Process *p) {
   // - parameter ops use PAR then goto pnext
@@ -535,7 +708,10 @@ L(op_hibit)
 
 #undef PAR
 }
-#endif IVMSIZE
+#endif // !IVMASM
+
+#endif // !IVMSIZE
+
 
 
 // Load whole IVM image (malloc). Caller may free().

@@ -1,0 +1,8 @@
+
+name=$1
+name="${name%.ivm}"
+
+cl65 -DIVMASM -Oirs -vm -C sim6502.cfg -t sim6502 -m ivm-asm.map -o ivm-asm.sim ivm.c || exit 1
+#cl65 -DNOIVM -vm -C sim6502.cfg -Oirs -t sim6502 -m ivm.map -o ivm-noivm.sim ivm.c || exit 1
+
+sim65 -c ivm-asm.sim $name.ivm | tee $name.log
