@@ -21,6 +21,7 @@
 
 .importzp       ivm_ipc, ivm_fp, ivm_acc, ivm_op
 .importzp       ivm_memlo, ivm_memhi
+
 .import         _run_ivm_once
 
 FR_RET  = 0
@@ -29,72 +30,120 @@ FR_PREV = 2
 FR_ACC  = 3
 FP_MAIN = $FF
 
-.bss
+.zeropage
+jmpvec: .res 2
+
 tmp_lo: .res 1
 tmp_hi: .res 1
-jmpvec: .res 2
-disp_ok:.res 1
+
 
 .data
-displo: .res 128
-disphi: .res 128
+;;; static dispatch tables (256 bytes) — no runtime init_disp
+displo:
+	.byte	<op_fused, <op_fused, <op_fused, <op_fused, <op_fused, <op_fused, <op_fused, <op_fused
+	.byte	<op_fused, <op_fused, <op_fused, <op_fused, <op_fused, <op_fused, <op_fused, <op_fused
+	.byte	<op_fused, <op_fused, <op_fused, <op_fused, <op_fused, <op_fused, <op_fused, <op_fused
+	.byte	<op_fused, <op_fused, <op_fused, <op_fused, <op_fused, <op_fused, <op_fused, <op_fused
+	.byte	<op_sp, <op_c, <op_c, <op_c, <op_c, <op_c, <op_c, <op_c
+	.byte	<op_c, <op_c, <op_c, <op_add, <op_c, <op_sub, <op_c, <op_c
+	.byte	<op_0, <op_17, <op_17, <op_17, <op_17, <op_17, <op_17, <op_17
+	.byte	<op_8, <op_9, <op_c, <op_semi, <op_c, <op_c, <op_c, <op_not
+	.byte	<op_c, <op_c, <op_B, <op_c, <op_c, <op_c, <op_c, <op_G
+	.byte	<op_c, <op_c, <op_c, <op_c, <op_L, <op_c, <op_c, <op_c
+	.byte	<op_c, <op_Q, <op_c, <op_S, <op_c, <op_c, <op_c, <op_c
+	.byte	<op_X, <op_c, <op_Z, <op_c, <op_c, <op_c, <op_c, <op_c
+	.byte	<op_c, <op_c, <op_c, <op_c, <op_c, <op_c, <op_c, <op_c
+	.byte	<op_c, <op_c, <op_c, <op_c, <op_c, <op_c, <op_c, <op_c
+	.byte	<op_c, <op_q, <op_c, <op_c, <op_c, <op_c, <op_c, <op_c
+	.byte	<op_c, <op_c, <op_c, <op_c, <op_c, <op_c, <op_c, <op_c
+
+disphi:
+	.byte	>op_fused, >op_fused, >op_fused, >op_fused, >op_fused, >op_fused, >op_fused, >op_fused
+	.byte	>op_fused, >op_fused, >op_fused, >op_fused, >op_fused, >op_fused, >op_fused, >op_fused
+	.byte	>op_fused, >op_fused, >op_fused, >op_fused, >op_fused, >op_fused, >op_fused, >op_fused
+	.byte	>op_fused, >op_fused, >op_fused, >op_fused, >op_fused, >op_fused, >op_fused, >op_fused
+	.byte	>op_sp, >op_c, >op_c, >op_c, >op_c, >op_c, >op_c, >op_c
+	.byte	>op_c, >op_c, >op_c, >op_add, >op_c, >op_sub, >op_c, >op_c
+	.byte	>op_0, >op_17, >op_17, >op_17, >op_17, >op_17, >op_17, >op_17
+	.byte	>op_8, >op_9, >op_c, >op_semi, >op_c, >op_c, >op_c, >op_not
+	.byte	>op_c, >op_c, >op_B, >op_c, >op_c, >op_c, >op_c, >op_G
+	.byte	>op_c, >op_c, >op_c, >op_c, >op_L, >op_c, >op_c, >op_c
+	.byte	>op_c, >op_Q, >op_c, >op_S, >op_c, >op_c, >op_c, >op_c
+	.byte	>op_X, >op_c, >op_Z, >op_c, >op_c, >op_c, >op_c, >op_c
+	.byte	>op_c, >op_c, >op_c, >op_c, >op_c, >op_c, >op_c, >op_c
+	.byte	>op_c, >op_c, >op_c, >op_c, >op_c, >op_c, >op_c, >op_c
+	.byte	>op_c, >op_q, >op_c, >op_c, >op_c, >op_c, >op_c, >op_c
+	.byte	>op_c, >op_c, >op_c, >op_c, >op_c, >op_c, >op_c, >op_c
 
 .code
 
-.proc   _run_ivm_asm
-        lda     disp_ok
-        bne     xnext
-        jsr     init_disp
-        lda     #1
-        sta     disp_ok
-
-	jmp     xnext
-
 ;;; ----- consume 1-byte operand -----
 pnext:
+;;; 8c (12c)
+;;; TODO: combine +2 of xnext if xnext as a jump in point
+	
         inc     ivm_ipc
-        bne     xnext
+        bne     :+
         inc     ivm_ipc+1
+:	
+	;; fall-through
+_run_ivm_asm:	
 
 ;;; ----- main loop -----
 xnext:
+	;; 10c
         ldy     #0
         lda     (ivm_ipc),y
-        sta     ivm_op
+        sta     ivm_op		; TODO: getrid if, keep in reg
+
+	;; 8-12c
         inc     ivm_ipc
         bne     :+
         inc     ivm_ipc+1
 :
 
-        ;; hibit → HIBIT; else table[op] (includes 0..31)
-        lda     ivm_op
+        ;; lobit - 0..127
+	;; 6c
+        tax
         bmi     HIBIT
-
-        ldx     ivm_op          ; index 0..127, no shift
+	;; +18c
         lda     disphi,x
         sta     jmpvec+1
+
         lda     displo,x
         sta     jmpvec
+
         jmp     (jmpvec)
 
 ;;; ----- HIBIT: ASL → N = former bit6 -----
 HIBIT:
+	;; 5
         asl     a               ; N=1 if original 0xC0..0xFF
-        bmi     jsrvec          ; vector subroutine
+        bmi     subvec          ; vector subroutine
+
         ;; 0x80..0xBF: relative forward if ACC == 0
+rjmp:	
+;;; 21c - 28c
+	;; if !acc then rjmp
+	;; +8c
         lda     ivm_acc
         ora     ivm_acc+1
         bne     xnext
+	;; +12c
         lda     ivm_op
         and     #$3F
+
         clc
         adc     ivm_ipc
         sta     ivm_ipc
+
+	;; lo byte overflow?
+	;; +3-10c
         bcc     xnext
         inc     ivm_ipc+1
-        jmp     xnext
+        jmp     xnext		; TODO: bcs
 
-jsrvec:
+subvec:
         ;; vector index = op & $3F — for now C helper (needs call/fp tables)
         jsr     _run_ivm_once
         jmp     xnext
@@ -105,20 +154,24 @@ jsrvec:
 ;;; hi first → X, lo → A
 ;;; ============================================================
 
-;;; load mem[Y] → acc
-.macro  LOAD_SLOT_Y
+;;; load mem[Y] → acc (and AX)
+.macro  LOAD_SLOT_Y 
+	;; 18c 9 B
         lda     (ivm_memhi),y
         tax
         lda     (ivm_memlo),y
+
         sta     ivm_acc
         stx     ivm_acc+1
 .endmacro
 
-;;; *ipc is slot → A=lo X=hi
+;;; AX= *ipc is slot → AX A=lo X=hi
 .macro  PAR_TO_AX
+	;; 21c  10 B
         ldy     #0
         lda     (ivm_ipc),y
         tay
+
         lda     (ivm_memhi),y
         tax
         lda     (ivm_memlo),y
@@ -126,44 +179,62 @@ jsrvec:
 
 ;;; opcodes 0..31: slot = op itself
 op_fused:
-        ldy     ivm_op
+        ldy     ivm_op 		; TODO: isn't it in Y already?
         LOAD_SLOT_Y
         jmp     xnext
 
+;;; TODO: rename to 0x7f ??? or is that future nextpage?
+jmp_done:	
 op_q:   jmp     done
+
 
 op_Q:   lda     #0
         sta     ivm_acc
         sta     ivm_acc+1
-op_X:   lda     ivm_fp
+
+op_X:
+	lda     ivm_fp
+	;; magic done, TODO: remove: use 0x7f as exit()
         cmp     #FP_MAIN
-        beq     done
+        beq     jmp_done
+
+	;; restore IPC from FR_RET
         clc
         adc     #FR_RET
+
         tay
         lda     (ivm_memlo),y
         sta     ivm_ipc
         lda     (ivm_memhi),y
         sta     ivm_ipc+1
-        lda     ivm_fp
+
+	;; restore FP from FR_PREV
+        lda     ivm_fp 		; TODO: why again? should INY?"
         clc
         adc     #FR_PREV
         tay
         lda     (ivm_memlo),y
         sta     ivm_fp
+
         jmp     xnext
 
+;;; return by keeping FUNNAME (value)
 op_semi:
         lda     ivm_fp
+	;; TODO: seems redundant, no harm doing the other stuff?
         cmp     #FP_MAIN
-        beq     done
+        beq     jmp_done
+
+	;; Loads FR_VAL index
         clc
         adc     #FR_VAL
         tay
-
         LOAD_SLOT_Y
+
         jmp     op_X
 
+
+;;; arg 8 == last argument (ACC when called)
 op_8:   lda     ivm_fp
         clc
         adc     #FR_ACC
@@ -172,6 +243,7 @@ op_8:   lda     ivm_fp
         LOAD_SLOT_Y
         jmp     xnext
 
+;;; args 1..7 
 op_17:  lda     ivm_op
         sec
         sbc     #'0'
@@ -183,17 +255,10 @@ op_17:  lda     ivm_op
         LOAD_SLOT_Y
         jmp     xnext
 
-op_add: PAR_TO_AX
-        clc
-        adc     ivm_acc
-        sta     ivm_acc
-        txa
-        adc     ivm_acc+1
-        sta     ivm_acc+1
-
-        jmp     pnext
 
 op_sub: PAR_TO_AX
+	;; alt: do xor on neg value before add!
+	;; then can just fall into op_add!!!
         sta     tmp_lo
         stx     tmp_hi
         sec
@@ -205,6 +270,17 @@ op_sub: PAR_TO_AX
         sta     ivm_acc+1
 
         jmp     pnext
+
+op_add: PAR_TO_AX
+        clc
+        adc     ivm_acc
+        sta     ivm_acc
+        txa
+        adc     ivm_acc+1
+        sta     ivm_acc+1
+
+        jmp     pnext
+
 
 op_L:   PAR_TO_AX
         sta     ivm_acc
@@ -231,12 +307,8 @@ op_Z:   ldy     #0
 
         jmp     pnext
 
-op_0:   lda     #0
-        sta     ivm_acc
-        sta     ivm_acc+1
 
-        jmp     xnext
-
+;;; ACC = -1  or 0xFF or TRUE (forth/basic)
 op_9:   lda     #$FF
         sta     ivm_acc
         sta     ivm_acc+1
@@ -245,20 +317,27 @@ op_9:   lda     #$FF
 
 op_not: lda     ivm_acc
         ora     ivm_acc+1
-        beq     not0
-        lda     #0
+        beq     ret1
+
+;;; ACC = 0
+op_0:   lda     #0
         sta     ivm_acc
         sta     ivm_acc+1
 
         jmp     xnext
 
-not0:   lda     #1
+;;; ACC = 1
+ret1:   lda     #1
         sta     ivm_acc
         lda     #0
         sta     ivm_acc+1
 
         jmp     xnext
 
+
+;;; Conditional GOTO +1B iff acc > 
+;;; TODO: replace usage by rjmp, or make it an FUSED LOOP:
+;;; TODO: Giiuuee (ii=index var, uu=upper limit pascal, ee== rjmp end)
 op_G:   lda     ivm_acc+1
         bmi     gsk
         ora     ivm_acc
@@ -273,6 +352,7 @@ op_G:   lda     ivm_acc+1
 
 gsk:    jmp     pnext
 
+
 op_B:   ldy     #0
         lda     ivm_ipc
         sec
@@ -280,82 +360,22 @@ op_B:   ldy     #0
         sta     ivm_ipc
         bcs     :+
         dec     ivm_ipc+1
+:
+	jmp     pnext
 
-:       jmp     pnext
 
+;;; NOP - SPACE
 op_sp:  jmp     xnext
 
-; NYI → C one-op
+
+;;; NYI → C one-op
 op_c:   jsr     _run_ivm_once
 
         jmp     xnext
 
+
+;;; C style return ACC in AX
 done:   lda     ivm_acc
         ldx     ivm_acc+1
 
         rts
-
-; ----- fill displo/disphi once -----
-.proc   init_disp
-        ldx     #0
-
-        ; 0..31 → op_fused
-f31:    lda     #<op_fused
-        sta     displo,x
-        lda     #>op_fused
-        sta     disphi,x
-        inx
-        cpx     #32
-        bne     f31
-
-        ; 32..127 → op_c default
-dfl:    lda     #<op_c
-        sta     displo,x
-        lda     #>op_c
-        sta     disphi,x
-        inx
-        bpl     dfl             ; until x wraps past 127
-
-
-.macro  SET op, lab
-	;; 10 bytes for eaxch usage
-	;; 23 times => 230 bytes + 28 === 258 bytes
-	;; why not just create the table?
-	;; NOW WE HAVE THE CODE + TABLE == 512 bytes (258 bytes waste!)
-        lda     #<(lab)
-        sta     displo + (op)
-        lda     #>(lab)
-        sta     disphi + (op)
-.endmacro
-        SET     'q', op_q
-        SET     'Q', op_Q
-        SET     'X', op_X
-        SET     ';', op_semi
-        SET     '8', op_8
-
-        SET     '1', op_17
-        SET     '2', op_17
-        SET     '3', op_17
-        SET     '4', op_17
-        SET     '5', op_17
-
-        SET     '6', op_17
-        SET     '7', op_17
-        SET     '+', op_add
-        SET     '-', op_sub
-        SET     'L', op_L
-
-        SET     'S', op_S
-        SET     'Z', op_Z
-        SET     '0', op_0
-        SET     '9', op_9
-        SET     '?', op_not
-
-        SET     'G', op_G
-        SET     'B', op_B
-        SET     ' ', op_sp
-
-        rts
-.endproc
-
-.endproc

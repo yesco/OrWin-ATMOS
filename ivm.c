@@ -257,46 +257,19 @@ ivmvar run_ivm(Process *p) {
 
 #ifdef IVMASM
 
-// Compile with -DIVMASM and link ivm-vm.s
-// Glue only — keeps C run_ivm as non-IVMASM reference path.
+// -DIVMASM + link ivm-vm.s
+// Single ZP block for importzp; process switch = save/restore this block.
 
-// ZP mirrors (ca65 importzp)
 #ifdef __CC65__
 #pragma bss-name (push, "ZEROPAGE")
 #endif
 
-uchar ivm_ipc[2];
-char ivm_fp;
-uchar ivm_acc[2];
-uchar ivm_op;
+uchar *ivm_ipc;
+char   ivm_fp;
+ivmvar ivm_acc;
+uchar  ivm_op;
 uchar *ivm_memlo;
 uchar *ivm_memhi;
-
-
-
-// TODO: from stupid duplicate ivm-asm.h
-
-// ZP / near-data shared with ivm-vm.asm (cc65 #pragma bss-name / zpspace)
-extern uchar ipc[2];
-extern char fp;
-extern uchar acc_lo, acc_hi;
-extern uchar op, tmp;
-extern uchar *memlo;  /* 256-byte low slice */
-extern uchar *memhi;  /* 256-byte high slice */
-
-/* Split process mem[i] into memlo[i]/memhi[i] for LDA (ptr),Y */
-void pivot(unsigned short *mem, unsigned nslots);
-
-/* ASM interpreter — returns ACC */
-unsigned run_ivm_asm(void);
-
-/* helpers called from asm */
-void ivm_print_u16(unsigned v);
-void ivm_putchar(unsigned char c);
-
-#endif
-
-
 
 #ifdef __CC65__
 #pragma bss-name (pop)
@@ -304,12 +277,11 @@ void ivm_putchar(unsigned char c);
 
 static uchar slice_lo[256];
 static uchar slice_hi[256];
-static word  *live_mem;
-static word  live_n;
+static ivmvar *live_mem;
+static word live_n;
 
-void pivot(word *mem, word n) {
+static void pivot(ivmvar *mem, word n) {
   word i;
-
   live_mem = mem;
   live_n = n > 256 ? 256 : n;
   for (i = 0; i < live_n; i++) {
@@ -318,110 +290,76 @@ void pivot(word *mem, word n) {
   }
   for (; i < 256; i++)
     slice_lo[i] = slice_hi[i] = 0;
-
   ivm_memlo = slice_lo;
   ivm_memhi = slice_hi;
 }
 
-void unpivot(void) {
-  uchar i;
-
-  // TODO: WHAT THE FUCK IS A SHORT? myabe we want 
-  
+static void unpivot(void) {
+  word i;
   for (i = 0; i < live_n; i++)
-    live_mem[i] =  (ivmvar)slice_lo[i]
-                | ((ivmvar)slice_hi[i] << 8);
+    live_mem[i] = (ivmvar)slice_lo[i] | ((ivmvar)slice_hi[i] << 8);
 }
 
-// ASM entry
 extern ivmvar run_ivm_asm(void);
 
-// Execute *one* bytecode using existing C interpreter state.
-// ASM jumps here for mul/div/print/JSR/… until those are ported.
-// Requires Process* or zp to be current — we use a static handoff.
-static Process *ivm_proc;
-
+// ASM fallback for one complex opcode
 void run_ivm_once(void) {
-  // Rebuild zp.ipc/acc/fp/mem from IVMASM ZP, run single-op via
-  // temporary poke: simplest path re-enter thin C for one op.
-  // Full fidelity: port remaining ops to asm later.
-  unsigned char *ipc;
-  unsigned char op;
-
+  uchar op;
   unpivot();
-
-  zp.ipc = (uchar*)(ivm_ipc[0] | (ivm_ipc[1] << 8));
-  zp.fp  = (uchar)ivm_fp;
-  zp.acc = (ivmvar)(ivm_acc[0] | (ivm_acc[1] << 8));
-  zp.mem = live_mem;
-
-  op = *zp.ipc++;
-  // One-op dispatch: call into a stripped switch — for now use
-  // recursive mini-step by jumping to known C handlers via run_ivm
-  // is too heavy. Emit minimal: print and mul only as examples.
+  op = *ivm_ipc++;
   switch (op) {
-
   case '.':
-    printf("%u", zp.acc);
+    printf("%u", (unsigned)ivm_acc);
     break;
-
   case 'N':
     putchar('\n');
     break;
-
   case '"':
-    while (*zp.ipc)
-      putchar(*zp.ipc++);
-    zp.ipc++; // \0
+    while (*ivm_ipc)
+      putchar(*ivm_ipc++);
+    ivm_ipc++;
     break;
-
   case '*':
-    zp.acc *= zp.mem[*zp.ipc++];
+    ivm_acc *= live_mem[*ivm_ipc++];
     break;
-
   case '/':
-    if (zp.mem[*zp.ipc])
-      zp.acc /= zp.mem[*zp.ipc];
-    zp.ipc++;
+    if (live_mem[*ivm_ipc])
+      ivm_acc /= live_mem[*ivm_ipc];
+    ivm_ipc++;
     break;
-
+  case '%':
+    if (live_mem[*ivm_ipc])
+      ivm_acc %= live_mem[*ivm_ipc];
+    ivm_ipc++;
+    break;
   default:
-    // unknown complex — skip 1 operand if printable letter op
-    if (op >= 0xC0) {
-      // vector JSR: fall back to full C for this call only — heavy
-      printf("[IVMASM] unhandled 0x%02X\n", op);
-    } else if (strchr("LS+-*/%&|^[]{}@!IMFWZ=<>", op)) {
-
-      // TODO: why are you skipping op codes?
-
-      zp.ipc++;
-    }
-
+    if (op >= 0xC0)
+      printf("[IVMASM] JSR vec %u unhandled\n", op & 0x3F);
+    else
+      ivm_ipc++;
     break;
   }
-
-  // write back ZP for ASM
-  {
-    unsigned ip = (unsigned)(zp.ipc - (unsigned char *)0);
-    // on 6502 ipc is absolute pointer already 
-
-    #ifdef __CC65__
-      ivm_ipc[0] = (uchar)(unsigned)(zp.ipc);
-      ivm_ipc[1] = (uchar)(((unsigned)(zp.ipc)) >> 8);
-    #else
-      // TODO: What?
-      ivm_ipc[0] = (uchar)((uchar*)zp.ipc - (uchar*)0);
-    #endif
-  }
-  ivm_fp = (unsigned char)zp.fp;
-  ivm_acc[0] = (unsigned char)(zp.acc & 0xff);
-  ivm_acc[1] = (unsigned char)(zp.acc >> 8);
-
   pivot(live_mem, live_n);
 }
 
+ivmvar run_ivm(Process *p) {
+  word cells;
+  cells = p->h.hdr.memsz;
+  if (!cells) cells = MAX_SLOTS;
 
+  pivot(p->mem, cells);
+  ivm_ipc = p->h.ipc;
+  ivm_fp  = p->h.fp;
+  ivm_acc = p->h.acc;
 
+  ivm_acc = run_ivm_asm();
+
+  p->h.ipc = ivm_ipc;
+  p->h.fp  = ivm_fp;
+  p->h.acc = ivm_acc;
+  unpivot();
+  return ivm_acc;
+}
 
 #else // !IVMASM
 
