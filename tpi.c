@@ -27,6 +27,7 @@
 // ivm: 1000: (/ (- 9734015 3970047) 1000) = 5763c/loop
 // ivm/asm = (/ 5763 127) = 45x slower, lol            
 
+// my dispatch
 // ivm: 1000: (/ (- 6142119 3989127) 1000) = 2152 start
 // ivm/asm = (/ 2152 127.0) = 16.95x slower, but improved 3x!
 
@@ -115,9 +116,12 @@
 
 // - ivm-vm.asm: 6806597/2474399
 // - compile to file, loader/Nevm/run_ivm
-// (/ (- 1327210 687010) 1000)  640c sum
-// (/ (- 1835761 687010) 1000) 1148c fsum
-// - 2.75x faster than run_ivmn cc65 indirect
+// (/ (- 1327210 687010) 1000)  640c sum (/ 640 127.0) = 5.04x slower
+// (/ (- 1835761 687010) 1000) 1148c fsum (/ 1148 
+// - 2.75x faster ! than run_ivmn cc65 indirect
+// ivm    : 9675 - 5793 = 3882
+// ivm-asm: 7918 - 5793 = 2125 (/ 2125 3882.0) 0.55 =
+// - 55 % of the run_ivm size!
 
 #include <stdio.h>
 #include <stddef.h>

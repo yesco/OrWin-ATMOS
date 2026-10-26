@@ -32,7 +32,6 @@ sim65 -c tpi.sim $name.ivm | tee $name.log
 echo
 echo
 
-
 echo
 echo
 echo "=== IVM Run from BLOB ==="
@@ -41,10 +40,21 @@ echo
 echo
 
 echo
+echo
+echo "=== IVM Run from BLOB ==="
+./ivm-asm $name.ivm | tee $name.asm.log
+echo
+echo
+
+
+
+
+
+echo
 echo "=== tpi.c: `./wcode tpi.c` LOC ===" 
 echo "=== ivm.c: `./wcode ivm.c` LOC ===" 
 echo
-ls -ugGlf $name.p $name.pas $name.c $name.prg $name.sim $name.ivm tpi.sim tpi.tap tpi.prg ivm.sim ivm-noivm.sim ivm.tap ivm.prg 2>/dev/null
+ls -ugGlf $name.p $name.pas $name.c $name.prg $name.sim $name.ivm tpi.sim tpi.tap tpi.prg ivm.sim ivm-asm.sim ivm-noivm.sim ivm.tap ivm.prg 2>/dev/null
 
 echo
 #if [ -f "$name.out" ]; then
@@ -54,5 +64,11 @@ if [ -f "test-pointers.out" ]; then
   && printf "\n\t\t  -- TESTS OK --\n\n"
   diff -U0 $name.out $name.log
 
+  echo "========== ASM ======= DIFF ======= ADM ==========="
+  diff -w -I "cycles" -I "RUN" -I "loaded" -U9999 $name.out $name.asm.log \
+  && printf "\n\t\t  -- TESTS OK --\n\n"
+  diff -U0 $name.out $name.asm.log
+
 fi
+
 

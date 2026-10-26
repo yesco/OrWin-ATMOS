@@ -332,6 +332,7 @@ op_17:  lda     _ivm_op
         tay
 
         LOAD_SLOT_Y
+
         jmp     xnext
 
 
@@ -371,6 +372,7 @@ op_L:   PARAX
 op_S:   ldy     #0
         lda     (_ivm_ipc),y
         tay
+
         lda     _ivm_acc
         sta     (_ivm_memlo),y
         lda     _ivm_acc+1
@@ -381,6 +383,7 @@ op_S:   ldy     #0
 op_Z:   ldy     #0
         lda     (_ivm_ipc),y
         tay
+
         lda     #0
         sta     (_ivm_memlo),y
         sta     (_ivm_memhi),y
@@ -406,53 +409,72 @@ op_0:   lda     #0
 
         jmp     xnext
 
-;;; acc == vv
-op_eq:  PARAX
-        cmp     _ivm_acc
-        bne     :+
-        cpx     _ivm_acc+1
-;;; TODO: it's wrong as these don't call pnext!
-:	
-        bne     op_0
-	;; fall-through to op_acc1
-;;; ACC = 1
+;;; ACC = 1 (no operand)
 op_acc1:
 	lda     #1
         sta     _ivm_acc
         lda     #0
         sta     _ivm_acc+1
-
         jmp     xnext
 
+;;; set 0/1 then pnext (consume PAR)
+op_acc0p:
+	lda     #0
+        sta     _ivm_acc
+        sta     _ivm_acc+1
+        jmp     pnext
+
+op_acc1p:
+	lda     #1
+        sta     _ivm_acc
+        lda     #0
+        sta     _ivm_acc+1
+        jmp     pnext
 
 ;;; < = >  unsigned compare → 0/1
-op_lt:  PARAX
-	;; TODO: just use them directly?
-        sta     tmp_lo
-        stx     tmp_hi
+;;; TODO: just use them directly?
+;;; no need to store in tmp, as CMP ADC SBC can be done directly
+;;; using ADC (zp),Y so.... No need using PARAX....
+
+;;; acc == mem[xx]
+op_eq:
+        ldy     #0
+        lda     (_ivm_ipc),y
+        tay
+
+        lda     (_ivm_memlo),y
+        cmp     _ivm_acc
+        bne     op_acc0p
+        lda     (_ivm_memhi),y
+        cmp     _ivm_acc+1
+        bne     op_acc0p
+        beq     op_acc1p
+
+;;; acc < mem[xx]
+op_lt:
+        ldy     #0
+        lda     (_ivm_ipc),y
+        tay
 
         lda     _ivm_acc
-        cmp     tmp_lo
+        cmp     (_ivm_memlo),y
         lda     _ivm_acc+1
-        sbc     tmp_hi
+        sbc     (_ivm_memhi),y
+        bcc     op_acc1p
+        bcs     op_acc0p
 
-;;; TODO: it's wrong as these don't call pnext!
-        bcc     op_acc1
-	bcs     op_0
+;;; acc > mem[xx]
+op_gt:
+        ldy     #0
+        lda     (_ivm_ipc),y
+        tay
 
-op_gt:  PARAX
-	;; TODO: just use them directly?
-        sta     tmp_lo
-        stx     tmp_hi
-
-        lda     tmp_lo
+        lda     (_ivm_memlo),y
         cmp     _ivm_acc
-        lda     tmp_hi
+        lda     (_ivm_memhi),y
         sbc     _ivm_acc+1
-
-;;; TODO: it's wrong as these don't call pnext!
-        bcc     op_acc1
-        bcs     op_0
+        bcc     op_acc1p
+        bcs     op_acc0p
 
 
 
@@ -460,6 +482,7 @@ op_gt:  PARAX
 op_I:   ldy     #0
         lda     (_ivm_ipc),y
         tay
+
         clc
         lda     (_ivm_memlo),y
         adc     #1
@@ -475,6 +498,7 @@ op_I:   ldy     #0
 op_J:   ldy     #0
         lda     (_ivm_ipc),y
         tay
+
         sec
         lda     (_ivm_memlo),y
         sbc     #1
@@ -493,6 +517,7 @@ op_U:   ldy     #0
         iny
         lda     (_ivm_ipc),y
         tay                         ; b
+	
         lda     (_ivm_memlo),y
         sta     tmp_hi              ; b_lo
         lda     (_ivm_memhi),y
@@ -659,6 +684,7 @@ op_shlm:
         lda     (_ivm_ipc),y
         sta     tmp_hi              ; slot
         tay
+
         lda     (_ivm_memlo),y
         sta     tmp_lo              ; value lo
         lda     (_ivm_memhi),y      ; value hi in A
@@ -682,6 +708,7 @@ op_shrm:
         lda     (_ivm_ipc),y
         sta     tmp_hi
         tay
+
         lda     (_ivm_memlo),y
         sta     tmp_lo
         lda     (_ivm_memhi),y
