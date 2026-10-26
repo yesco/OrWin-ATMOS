@@ -15,16 +15,16 @@
 ;;; HIBIT:
 ;;;   ASL A          ; N = old bit6
 ;;;   BPL zrel       ; 80-BF: if !acc  ipc += op & $3F
-;;;   BMI jsrvec     ; C0-FF: vector call  (op & $3F)  TODO pure asm
+;;;   BMI subvec     ; C0-FF: vector call  (op & $3F)  inverse of X/;/Q
 
 .export         _run_ivm_asm
 
 .importzp       _ivm_ipc, _ivm_fp, _ivm_acc, _ivm_op
 .importzp       _ivm_memlo, _ivm_memhi, _ivm_par
+.importzp       _ivm_fptab, _ivm_callv
 
 .import         _opmul, _opdiv, _opmod, _opputnum
 .import         _putchar
-.import         _ivm_jsrvec
 
 FR_RET  = 0
 FR_VAL  = 1
@@ -105,6 +105,9 @@ xnext:
         lda     (_ivm_ipc),y
         sta     _ivm_op		; TODO: getrid if, keep in reg
 
+;;; print
+	jsr     _putchar
+
 	;; 8-12c
         inc     _ivm_ipc
         bne     :+
@@ -153,8 +156,68 @@ rjmp:
         jmp     xnext		; TODO: bcs
 
 subvec:
-        ;; vector index = op & $3F — C until call/fp tables live in ZP
-        jsr     _ivm_jsrvec
+;;; print trace nl
+	lda     #10	
+	jsr     _putchar
+
+        ;; v = op & $3F
+        ;; nfp = fptab[v]
+        ;; mem[nfp+FR_PREV] = fp
+        ;; mem[nfp+FR_RET]  = ipc
+        ;; mem[nfp+FR_ACC]  = acc   (last param)
+        ;; fp  = nfp
+        ;; ipc = callv[v]
+        ;; (inverse of op_X / op_semi)
+
+        lda     _ivm_op
+        and     #$3F
+        tay                     ; Y = v
+        lda     (_ivm_fptab),y
+        sta     tmp_lo          ; nfp
+
+        ;; FR_PREV = old fp
+        clc
+        adc     #FR_PREV
+        tay
+        lda     _ivm_fp
+        sta     (_ivm_memlo),y
+        lda     #0
+        sta     (_ivm_memhi),y
+
+        ;; FR_RET = ipc (return address)
+        lda     tmp_lo
+        clc
+        adc     #FR_RET
+        tay
+        lda     _ivm_ipc
+        sta     (_ivm_memlo),y
+        lda     _ivm_ipc+1
+        sta     (_ivm_memhi),y
+
+        ;; FR_ACC = acc (last parameter)
+        lda     tmp_lo
+        clc
+        adc     #FR_ACC
+        tay
+        lda     _ivm_acc
+        sta     (_ivm_memlo),y
+        lda     _ivm_acc+1
+        sta     (_ivm_memhi),y
+
+        ;; fp = nfp
+        lda     tmp_lo
+        sta     _ivm_fp
+
+        ;; ipc = callv[v]  (word table, index v*2)
+        lda     _ivm_op
+        and     #$3F
+        asl     a
+        tay
+        lda     (_ivm_callv),y
+        sta     _ivm_ipc
+        iny
+        lda     (_ivm_callv),y
+        sta     _ivm_ipc+1
 
         jmp     xnext
 
@@ -348,7 +411,12 @@ ret1:   lda     #1
 ;;; Conditional GOTO +1B iff acc > 
 ;;; TODO: replace usage by rjmp, or make it an FUSED LOOP:
 ;;; TODO: Giiuuee (ii=index var, uu=upper limit pascal, ee== rjmp end)
-op_G:   lda     _ivm_acc+1
+op_G:
+;;; print trace nl
+	lda     #10	
+	jsr     _putchar
+
+	lda     _ivm_acc+1
         bmi     gsk
         ora     _ivm_acc
         beq     gsk
