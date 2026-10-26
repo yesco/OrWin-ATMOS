@@ -130,23 +130,14 @@
   #define register
 #endif
 
-#ifndef UCHAR
-  #define UCHAR
-  typedef unsigned char uchar; // plain char is unsigned on cc65/oscar64/clang*-unsigned
-  typedef uint16_t word; // blob / vector cell width (6502)
-#endif
 
-
-#define MAIN // this current file is main
-
+typedef unsigned char uchar; // plain char is unsigned on cc65/oscar64/clang*-unsigned
+typedef uint16_t word; // blob / vector cell width (6502)
 
 
 //////////////////////////////////////////////
 // Runtime (ivm.c)
 
-
-// - configuation
-// default is unint16_t as IVMVARTYPE
 
 //#define USE_LABELS
 
@@ -243,6 +234,7 @@ Keyword keywords[] = {
   {"BEGIN",    TOK_BEGIN},
   {"END",      TOK_END},
   {"INTEGER",  TOK_INTEGER},
+  {"WORD",     TOK_INTEGER}, // alias; ^WORD is pointer window-dressing
   {"WRITE",    TOK_WRITE},
   {"WRITELN",  TOK_WRITELN},
   {"FUNCTION", TOK_FUNCTION},
@@ -607,6 +599,7 @@ typedef struct {
   uchar param_slot[MAX_PARAMS];
   uchar ret_slot;
   uchar ret_addr_slot;
+  uchar is_ptr; // 1 if declared ^WORD / ^INTEGER (still one cell)
 } Symbol;
 
 Symbol syms[MAX_SYMBOLS];
@@ -620,6 +613,7 @@ void add_symbol(const char* name, SymbolType type, char address) {
   syms[nsym].nparams = 0;
   syms[nsym].ret_slot = 0xff;
   syms[nsym].ret_addr_slot = 0xff;
+  syms[nsym].is_ptr = 0;
   nsym++;
 }
 
@@ -936,6 +930,35 @@ void primary(char *out_acc, char *out_addr) {
       return;
     }
 
+    // postfix: p^  → @p   (deref pointer cell)
+    if (curr_tok.type == '^') {
+      next_token();
+      emitop2('@', (uchar)sym->address);
+      *out_acc = 1;
+      *out_addr = 0;
+      return;
+    }
+    // postfix: a[i] → ( a i   (indexed load)
+    if (curr_tok.type == '[') {
+      char idx_acc, idx_addr;
+      char islot;
+      next_token();
+      primary(&idx_acc, &idx_addr);
+      if (idx_acc) {
+        islot = alloc_temp();
+        emitop2('S', islot);
+      } else
+        islot = idx_addr;
+      EXPECT(']');
+      emitop('(');
+      emit((char)sym->address);
+      emit(islot);
+      acc_invalidate();
+      *out_acc = 1;
+      *out_addr = 0;
+      return;
+    }
+
     *out_acc = 0;
     *out_addr = sym->address;
     return;
@@ -1074,7 +1097,7 @@ void beginend() {
 
 int statement(void) {
 
-  // ASSIGNMENT
+  // ASSIGNMENT  (x:=e | p^:=e | a[i]:=e)
   if (curr_tok.type == TOK_IDENT) {
     int jj= src_pos - 5;
     char target[MAX_SYM_LEN + 1];
@@ -1084,10 +1107,39 @@ int statement(void) {
       FAIL("Unknown variable");
     }
 
-    // "Poophole" optimization: sum:= sum+i; sum:= i+sum;
-    { int i= bin_ptr;
+    EXPECT(TOK_IDENT);
 
-      EXPECT(TOK_IDENT);
+    // p^ := expr  →  expr; !p
+    if (curr_tok.type == '^') {
+      next_token();
+      EXPECT(TOK_ASSIGN);
+      expression();
+      emitop2('!', (uchar)sym->address);
+      EXPECT(';');
+    }
+    // a[i] := expr  →  expr; ) a i
+    else if (curr_tok.type == '[') {
+      char idx_acc, idx_addr;
+      char islot;
+      next_token();
+      primary(&idx_acc, &idx_addr);
+      if (idx_acc) {
+        islot = alloc_temp();
+        emitop2('S', islot);
+      } else
+        islot = idx_addr;
+      EXPECT(']');
+      EXPECT(TOK_ASSIGN);
+      expression();
+      emitop(')');
+      emit((char)sym->address);
+      emit(islot);
+      EXPECT(';');
+    }
+    else {
+      // "Poophole" optimization: sum:= sum+i; sum:= i+sum;
+      int i= bin_ptr;
+
       EXPECT(TOK_ASSIGN);
       expressionsave(sym->address);
       EXPECT(';');
@@ -1305,10 +1357,22 @@ int statement(void) {
 // ---------------------------------------------------------------------------
 // VAR name : INTEGER; ...
 // local=0 globals; local=1 frame slots (same as params for now)
+// INTEGER | WORD | ^INTEGER | ^WORD  (pointer is still one word cell)
+static uchar parse_type(void) {
+  uchar is_ptr = 0;
+  if (curr_tok.type == '^') {
+    is_ptr = 1;
+    next_token();
+  }
+  EXPECT(TOK_INTEGER); // INTEGER or WORD
+  return is_ptr;
+}
+
 void parsevars(char local) {
   EXPECT(TOK_VAR);
   while (curr_tok.type == TOK_IDENT) {
     char slot;
+    uchar is_ptr;
     if (local)
       slot = alloc_frame_slot();
     else
@@ -1316,7 +1380,8 @@ void parsevars(char local) {
     add_symbol(curr_tok.lexeme, SYM_VAR, slot);
     EXPECT(TOK_IDENT);
     EXPECT(':');
-    EXPECT(TOK_INTEGER);
+    is_ptr = parse_type();
+    syms[nsym - 1].is_ptr = is_ptr;
     EXPECT(';');
   }
 }
@@ -1356,7 +1421,8 @@ void compile_function(void) {
         nparams++;
         EXPECT(TOK_IDENT);
         EXPECT(':');
-        EXPECT(TOK_INTEGER);
+        /* type checked; is_ptr set after add_symbol */
+        (void)parse_type();
         if (curr_tok.type == ',' || curr_tok.type == ';') {
           next_token();
           if (curr_tok.type != TOK_IDENT)
@@ -1368,7 +1434,7 @@ void compile_function(void) {
     }
     EXPECT(')');
     EXPECT(':');
-    EXPECT(TOK_INTEGER);
+    (void)parse_type(); // return type INTEGER/WORD/^WORD
     EXPECT(';');
 
     // always reserve fp+3 so JSR can store ACC without nparams test
@@ -1667,6 +1733,14 @@ int compile_pipeline(void) {
 }
 
 
+// TODO: packer (here) ... loader/Nevm()/run_ivm (ivm.c)
+
+#define MAX_BLOB_LEN 4096
+uchar blob[MAX_BLOB_LEN];
+int blob_len;
+uchar *g_loaded;
+
+
 // append n bytes of data at *pp; return offset from base
 static word memadd(uchar *base, uchar **pp, void *data, word n) {
   word off = (word)(*pp - base);
@@ -1839,7 +1913,7 @@ void remap_bytecode(void) {
       ;
     } else if (c == 'G' || c == 'B') {
       if (i < bin_ptr) i++;
-    } else if (c == 'U') {
+    } else if (c == 'U' || c == '(' || c == ')') {
       if (i + 1 < bin_ptr) {
         a = bin[i];
         if (slot_mapped[a]) bin[i] = slot_map[a];
@@ -1937,7 +2011,7 @@ void dump_bytecode(void) {
 
       // takes at least one arg
       else 
-        if (c == 'U') { // two args
+        if (c == 'U' || c == '(' || c == ')') { // two args
           printf("U%02x%02x   ", bin[i+1], bin[i+2]); i+= 2;
         } else
           printf("%c%02x ", c, bin[++i]);
@@ -2195,6 +2269,48 @@ static char save_blob(const char *path) {
   return 1;
 }
 
+static char load_blob(const char *path) {
+  FILE *f;
+  int n;
+
+  // TODO: not use global
+  blob_len = 0;
+
+  f = fopen(path, "rb");
+  if (!f) {
+    printf("cannot open %s\n", path);
+    return 0;
+  }
+
+  // TODO: shouldn't use MAX_BLOB_LEN
+  //   2 first bytes should be length of rest!
+  n = (int)fread(blob, 1, MAX_BLOB_LEN, f);
+  fclose(f);
+
+  if (n <= 0) {
+    printf("failed to load %s\n", path);
+    return 0;
+  }
+
+  blob_len = n;
+  printf("loaded %s (%d bytes)\n", path, blob_len);
+  relocate(blob);
+
+  return 1;
+}
+
+static char run_loaded_blob(void) {
+  Process *proc;
+  unsigned int ret;
+
+  proc = Nevm(blob);
+  printf("--- RUN IVM (blob %d) ---\n", blob_len);
+  ret = run_ivm(proc);
+  printf("\n--- END ---\n");
+  printf("acc = %u\n", ret);
+  return (int)ret;
+}
+
 #ifdef OSCAR64
 int main(void) {
   const char* argv[]= { "tpi", "-O", #ARG, 0 };
@@ -2204,7 +2320,7 @@ int main(void) {
 int main(int argc, char **argv) {
 #endif
 
-  char *filename = NULL;
+  const char *filename = NULL;
   int buf_idx;
   uchar i;
 
@@ -2231,12 +2347,11 @@ int main(int argc, char **argv) {
   }
 
   // IVM RUN ?
-  if (ends_with(filename, ".ivm"))
-    return run_file(filename);
-
-
-
-  // COMPILE - OPTIMIZE - RUN
+  if (ends_with(filename, ".ivm")) {
+    if (!load_blob(filename)) return 1;
+    run_loaded_blob();
+    return 0;
+  }
 
   // CHECK .p OR .pas
   if (!ends_with(filename, ".p") && !ends_with(filename, ".pas")) {
@@ -2314,10 +2429,8 @@ int main(int argc, char **argv) {
   finalise();
   dump_blob();
 
-  // SAVE filename.ivm
   ivm_name_from(outname, filename);
   if (!save_blob(outname)) return 1;
-
 
   // LOAD & RUN
   // true round-trip: clear and reload from disk
@@ -2325,7 +2438,13 @@ int main(int argc, char **argv) {
   // TODO: this shouldn't be global...
   memset(blob, 0, sizeof(blob));
 
-  return run_file(outname);
+  // - LOAD
+  if (!load_blob(outname)) return 1;
+  
+  // - RUN
+  run_loaded_blob();
+
+  return 0;
 }
 
 
