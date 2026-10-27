@@ -17,8 +17,8 @@
 ;;;   BPL zrel       ; 80-BF: if !acc  ipc += op & $3F
 ;;;   BMI subvec     ; C0-FF: vector call  (op & $3F)  inverse of X/;/Q
 
-;TRACE=1
-TRACE=0
+TRACE=1
+;TRACE=0
 	
 .export         _run_ivm_asm
 
@@ -154,26 +154,32 @@ _run_ivm_asm:
 pnext:
 	ldy     savey
 	iny
-	;; we catch halfway  and adjust Y so never overflow
-	;; we're assuming we eventually going to end up w pnext...
-	bmi     xnext
-	FIXIPC
-	beq     xnext
+	;; if Y>=128 fold into ipc (matches comment above); else keep Y offset
+	bpl     xnext
+	FIXIPC			; ipc += Y, Y := 0
+	jmp     xnext
 	
 ;;; ----- main loop -----
 ynext:	
 	ldy     savey
 xnext:
         lda     (_ivm_ipc),y
+
+	.if TRACE
+	sta     _ivm_op
+	sty     savey
+	jsr     _putchar
+	ldy     savey
+	lda     _ivm_op
+	.endif ; TRACE
+
 	iny
 
-;;;  TODO: remove
-;        sta     _ivm_op		; TODO: getrid if, keep in reg
+	; X contains op-code when op is called
+	tax
 
         ;; lobit - 0..127
         bmi     HIBIT
-
-	tax
 
         lda     disphi,x
         sta     jmpvec+1
@@ -181,7 +187,9 @@ xnext:
         lda     displo,x
         sta     jmpvec
 
-	sty     savey
+	;; not needed! that' the whole point!
+;	sty     savey
+	
         jmp     (jmpvec)
 
 
@@ -225,10 +233,11 @@ xnext:
 	;; 10c
         ldy     #0
         lda     (_ivm_ipc),y
-;        sta     _ivm_op		; TODO: getrid if, keep in reg
 
 	.if TRACE
+	sta     _ivm_op
 	jsr     _putchar
+	lda     _ivm_op
 	.endif ; TRACE
 
 	;; 8-12c
@@ -357,8 +366,7 @@ subvec:
 	;; new ipc
 	ldy     #0
 
-        beq     xnext 		; always
-
+	jmp     xnext
 
 ;;; ============================================================
 ;;; Handlers (0..31 loads installed in init_disp as op_31)
