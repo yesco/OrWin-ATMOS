@@ -662,34 +662,44 @@ op_J:   USEY
 
 ;;; Uab  mem[a] += mem[b]; acc = mem[a]
 op_U:   USEY
+	;; read first parameter
         lda     (_ivm_ipc),y
 
-        sta     tmp_lo              ; a
+        sta     tmp_hi              ; a
         iny
-        USEY
+	sty     savey
+
         lda     (_ivm_ipc),y
         tay                         ; b
         
         lda     (_ivm_memlo),y
-        sta     tmp_hi              ; b_lo
+        sta     tmp_lo              ; B.lo
+
         lda     (_ivm_memhi),y
-        tax                         ; b_hi
-        ldy     tmp_lo
+        tax                         ; B.hi
+
+        ldy     tmp_hi		; a
         clc
-        lda     (_ivm_memlo),y
-        adc     tmp_hi
-        sta     (_ivm_memlo),y
-        sta     _ivm_acc
-        txa
+        lda     (_ivm_memlo),y	; A
+        adc     tmp_lo		; +B.lo
+        sta     (_ivm_memlo),y	; A.lo   := A.lo + B.lo
+        sta     _ivm_acc	; ACC.lo := A.lo
+
+        txa			; B.hi
         adc     (_ivm_memhi),y
-        sta     (_ivm_memhi),y
-        sta     _ivm_acc+1
-        ; consume 2 operand bytes
+        sta     (_ivm_memhi),y	; A.hi   := B.hi + A.hi
+        sta     _ivm_acc+1	; ACC.hi := A.hi
+
+.if .not(ALTCODE)
+        ; consume 1 operand bytes
         inc     _ivm_ipc
         bne     :+
         inc     _ivm_ipc+1
 :
-        jmp     pnext
+.endif
+        jmp     pnext 		; this does the second
+
+
 
 ;;; conditional Goto: if (acc > 0) ipc += delta; ALWAYS pnext to skip delta
 ;;; (matches C: if (acc>0) ipc+=*ipc; goto pnext;)
