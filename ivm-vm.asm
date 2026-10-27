@@ -20,6 +20,10 @@
 ;TRACE=1
 TRACE=0
         
+;ALTCODE=0			
+ALTCODE=1
+	
+
 .export         _run_ivm_asm
 
 .importzp       _ivm_ipc, _ivm_fp, _ivm_acc, _ivm_op
@@ -88,7 +92,7 @@ disphi:
 ;;  TODO: move the most common/expensive OP that tkaes a parameter here!
 
 
-.if 1
+.if ALTCODE
 ;;; This optimization tries to avoid doing excessive
 ;;; ipc++ that is 8c (or 12c when wrap).
 ;;; 
@@ -693,6 +697,29 @@ op_U:   USEY
 ;;; 
 ;;; TODO: replace usage by rjmp, or make it an FUSED LOOP:
 ;;; TODO: Giiuuee (ii=index var, uu=upper limit pascal, ee== rjmp end)
+
+.if ALTCODE
+;.if 0
+
+op_G:
+        ;; test if acc > 0 (signed: not neg and not zero)
+        lda     _ivm_acc+1      ; hi
+        bmi     gskip
+        ;; pos: is it > 0 ?
+        ora     _ivm_acc
+        beq     gskip
+	
+gyes:	
+        ;; ok: acc > 0: ipc += delta (ipc still points at delta)
+	FIXIPC
+	PARY
+	jmp     xnext
+	
+gskip:	
+        jmp     pnext           ; both paths: consume delta
+
+.else
+	
 op_G:
         FIXIPC                  ; ipc at delta, Y=0
         sty     savey           ; savey=0
@@ -715,15 +742,14 @@ op_G:
         clc
         adc     _ivm_ipc
         sta     _ivm_ipc
-        bcc     :+
+        bcc     gskip
         inc     _ivm_ipc+1
-:	
-	;; OK, so this skips one further, but that
-	;; depends on the codegen, doezn't it?
-	jmp     pnext
-
 gskip:
         jmp     pnext           ; both paths: consume delta
+
+.endif
+	
+	
 
 
 op_B:
