@@ -860,7 +860,9 @@ strlp:
         bne     strlp
 :	
 	;; Y=0 standing at \0
-	jmp     pnext	
+	iny
+
+	jmp     xnext
 
 
 ;;; ~ bitwise not
