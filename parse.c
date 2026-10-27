@@ -20,6 +20,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <stdarg.h>
 
 #define MAX_RULE_LEN  512
 #define MAX_ALTS      32
@@ -27,6 +28,8 @@
 #define MAX_STACK     256
 #define MAX_SRC       65536
 #define MAX_BUF       65536
+
+static int   verbose;
 
 static char  alts[26][MAX_ALTS][MAX_ALT_LEN];
 static int   nalt[26];
@@ -47,6 +50,14 @@ typedef struct {
 
 static Frame stack[MAX_STACK];
 static int sp;
+
+static void vlog(const char *fmt, ...) {
+  va_list ap;
+  if (!verbose) return;
+  va_start(ap, fmt);
+  vfprintf(stderr, fmt, ap);
+  va_end(ap);
+}
 
 static void push(int rule, int state) {
   if (sp >= MAX_STACK) {
@@ -266,6 +277,7 @@ static int step(void) {
 
   if (fr->state == ST_TRY) {
     if (fr->alt >= nalt[fr->rule]) {
+      vlog("fail %c (no alt) @%d\n", 'A' + fr->rule, pos);
       sp--;
       if (sp <= 0) return -1;
       fr = &stack[sp - 1];
@@ -281,10 +293,13 @@ static int step(void) {
     outlen[sp - 1] = 0;
     fr->ip = 0;
     fr->state = ST_RUN;
+    vlog("try %c alt %d @%d \"%s\"\n",
+         'A' + fr->rule, fr->alt, pos, alts[fr->rule][fr->alt]);
     return 1;
   }
 
   if (fr->state == ST_OK) {
+    vlog("ok %c alt %d → @%d\n", 'A' + fr->rule, fr->alt, pos);
     commit_cap(sp - 1);
     sp--;
     if (sp <= 0) return 0;
@@ -326,6 +341,7 @@ static int step(void) {
       fr->state = ST_FAIL;
       return 1;
     }
+    vlog("  call %c from %c @%d\n", c, 'A' + fr->rule, pos);
     push(r, ST_TRY);
     return 1;
   }
@@ -341,18 +357,23 @@ static int step(void) {
       ok = match_lit(e);
     }
     if (!ok) {
+      vlog("  fail \\%c @%d\n", e, pos);
       fr->state = ST_FAIL;
       return 1;
     }
+    vlog("  ok \\%c @%d\n", e, pos);
     fr->ip += 2;
     return 1;
   }
 
   skip_ws();
   if (!match_lit(c)) {
+    vlog("  fail lit '%c' @%d got '%c'\n", c, pos,
+         pos < src_len ? src[pos] : '?');
     fr->state = ST_FAIL;
     return 1;
   }
+  vlog("  ok lit '%c' @%d\n", c, pos - 1);
   fr->ip++;
   return 1;
 }
@@ -372,12 +393,25 @@ static int run_machine(void) {
 
 int main(int argc, char **argv) {
   int i, ok;
-  if (argc < 3) {
-    fprintf(stderr, "usage: %s grammar.bnf source.p\n", argv[0]);
-    return 1;
+  {
+    int ai;
+    const char *bnf = NULL, *srcpath = NULL;
+    verbose = 0;
+    for (ai = 1; ai < argc; ai++) {
+      if (strcmp(argv[ai], "-v") == 0)
+        verbose = 1;
+      else if (!bnf)
+        bnf = argv[ai];
+      else if (!srcpath)
+        srcpath = argv[ai];
+    }
+    if (!bnf || !srcpath) {
+      fprintf(stderr, "usage: %s [-v] grammar.bnf source.p\n", argv[0]);
+      return 1;
+    }
+    if (!load_bnf(bnf)) return 1;
+    if (!load_src(srcpath)) return 1;
   }
-  if (!load_bnf(argv[1])) return 1;
-  if (!load_src(argv[2])) return 1;
 
   fprintf(stderr, "--- rules ---\n");
   for (i = 0; i < 26; i++)
