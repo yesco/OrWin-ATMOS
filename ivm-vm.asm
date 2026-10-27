@@ -19,7 +19,7 @@
 
 TRACE=1
 ;TRACE=0
-	
+        
 .export         _run_ivm_asm
 
 .importzp       _ivm_ipc, _ivm_fp, _ivm_acc, _ivm_op
@@ -41,47 +41,47 @@ jmpvec: .res 2
 tmp_lo: .res 1
 tmp_hi: .res 1
 
-savey:	.res 1
-	
+savey:  .res 1
+        
 
 
 
 .data
 ;;; static dispatch tables (256 bytes) — no runtime init_disp
 displo:
-	.byte	<op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31
-	.byte	<op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31
-	.byte	<op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31
-	.byte	<op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31
-	.byte	<op_sp, <op_bad, <op_str, <op_bad, <op_bad, <op_mod, <op_and, <op_bad
-	.byte	<op_bad, <op_bad, <op_mul, <op_add, <op_bad, <op_sub, <op_dot, <op_div
-	.byte	<op_0, <op_1to7, <op_1to7, <op_1to7, <op_1to7, <op_1to7, <op_1to7, <op_1to7
-	.byte	<op_8, <op_9, <op_bad, <op_semi, <op_lt, <op_eq, <op_gt, <op_not
-	.byte	<op_bad, <op_bad, <op_B, <op_bad, <op_bad, <op_bad, <op_bad, <op_G
-	.byte	<op_bad, <op_I, <op_J, <op_bad, <op_L, <op_bad, <op_N, <op_O
-	.byte	<op_bad, <op_Q, <op_bad, <op_S, <op_bad, <op_U, <op_bad, <op_bad
-	.byte	<op_X, <op_bad, <op_Z, <op_shl, <op_bad, <op_shr, <op_xor, <op_bad
-	.byte	<op_bad, <op_bad, <op_bad, <op_bad, <op_bad, <op_bad, <op_bad, <op_bad
-	.byte	<op_bad, <op_bad, <op_bad, <op_bad, <op_bad, <op_bad, <op_bad, <op_bad
-	.byte	<op_bad, <op_q, <op_bad, <op_bad, <op_bad, <op_bad, <op_bad, <op_bad
-	.byte	<op_bad, <op_bad, <op_bad, <op_shlm, <op_or, <op_shrm, <op_bnot, <op_bad
+        .byte   <op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31
+        .byte   <op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31
+        .byte   <op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31
+        .byte   <op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31
+        .byte   <op_sp, <op_bad, <op_str, <op_bad, <op_bad, <op_mod, <op_and, <op_bad
+        .byte   <op_bad, <op_bad, <op_mul, <op_add, <op_bad, <op_sub, <op_dot, <op_div
+        .byte   <op_0, <op_1to7, <op_1to7, <op_1to7, <op_1to7, <op_1to7, <op_1to7, <op_1to7
+        .byte   <op_8, <op_9, <op_bad, <op_semi, <op_lt, <op_eq, <op_gt, <op_not
+        .byte   <op_bad, <op_bad, <op_B, <op_bad, <op_bad, <op_bad, <op_bad, <op_G
+        .byte   <op_bad, <op_I, <op_J, <op_bad, <op_L, <op_bad, <op_N, <op_O
+        .byte   <op_bad, <op_Q, <op_bad, <op_S, <op_bad, <op_U, <op_bad, <op_bad
+        .byte   <op_X, <op_bad, <op_Z, <op_shl, <op_bad, <op_shr, <op_xor, <op_bad
+        .byte   <op_bad, <op_bad, <op_bad, <op_bad, <op_bad, <op_bad, <op_bad, <op_bad
+        .byte   <op_bad, <op_bad, <op_bad, <op_bad, <op_bad, <op_bad, <op_bad, <op_bad
+        .byte   <op_bad, <op_q, <op_bad, <op_bad, <op_bad, <op_bad, <op_bad, <op_bad
+        .byte   <op_bad, <op_bad, <op_bad, <op_shlm, <op_or, <op_shrm, <op_bnot, <op_bad
 disphi:
-	.byte	>op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31
-	.byte	>op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31
-	.byte	>op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31
-	.byte	>op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31
-	.byte	>op_sp, >op_bad, >op_str, >op_bad, >op_bad, >op_mod, >op_and, >op_bad
-	.byte	>op_bad, >op_bad, >op_mul, >op_add, >op_bad, >op_sub, >op_dot, >op_div
-	.byte	>op_0, >op_1to7, >op_1to7, >op_1to7, >op_1to7, >op_1to7, >op_1to7, >op_1to7
-	.byte	>op_8, >op_9, >op_bad, >op_semi, >op_lt, >op_eq, >op_gt, >op_not
-	.byte	>op_bad, >op_bad, >op_B, >op_bad, >op_bad, >op_bad, >op_bad, >op_G
-	.byte	>op_bad, >op_I, >op_J, >op_bad, >op_L, >op_bad, >op_N, >op_O
-	.byte	>op_bad, >op_Q, >op_bad, >op_S, >op_bad, >op_U, >op_bad, >op_bad
-	.byte	>op_X, >op_bad, >op_Z, >op_shl, >op_bad, >op_shr, >op_xor, >op_bad
-	.byte	>op_bad, >op_bad, >op_bad, >op_bad, >op_bad, >op_bad, >op_bad, >op_bad
-	.byte	>op_bad, >op_bad, >op_bad, >op_bad, >op_bad, >op_bad, >op_bad, >op_bad
-	.byte	>op_bad, >op_q, >op_bad, >op_bad, >op_bad, >op_bad, >op_bad, >op_bad
-	.byte	>op_bad, >op_bad, >op_bad, >op_shlm, >op_or, >op_shrm, >op_bnot, >op_bad
+        .byte   >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31
+        .byte   >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31
+        .byte   >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31
+        .byte   >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31
+        .byte   >op_sp, >op_bad, >op_str, >op_bad, >op_bad, >op_mod, >op_and, >op_bad
+        .byte   >op_bad, >op_bad, >op_mul, >op_add, >op_bad, >op_sub, >op_dot, >op_div
+        .byte   >op_0, >op_1to7, >op_1to7, >op_1to7, >op_1to7, >op_1to7, >op_1to7, >op_1to7
+        .byte   >op_8, >op_9, >op_bad, >op_semi, >op_lt, >op_eq, >op_gt, >op_not
+        .byte   >op_bad, >op_bad, >op_B, >op_bad, >op_bad, >op_bad, >op_bad, >op_G
+        .byte   >op_bad, >op_I, >op_J, >op_bad, >op_L, >op_bad, >op_N, >op_O
+        .byte   >op_bad, >op_Q, >op_bad, >op_S, >op_bad, >op_U, >op_bad, >op_bad
+        .byte   >op_X, >op_bad, >op_Z, >op_shl, >op_bad, >op_shr, >op_xor, >op_bad
+        .byte   >op_bad, >op_bad, >op_bad, >op_bad, >op_bad, >op_bad, >op_bad, >op_bad
+        .byte   >op_bad, >op_bad, >op_bad, >op_bad, >op_bad, >op_bad, >op_bad, >op_bad
+        .byte   >op_bad, >op_q, >op_bad, >op_bad, >op_bad, >op_bad, >op_bad, >op_bad
+        .byte   >op_bad, >op_bad, >op_bad, >op_shlm, >op_or, >op_shrm, >op_bnot, >op_bad
 
 .code
 
@@ -113,70 +113,70 @@ disphi:
 ;;; 
 ;;; All "flow-control" ops first need to FIXIPC, to include Y.
 ;;; 
-	
+        
 ;;; TODO: crashes with illegal OP!
-	
+        
 .macro USEY
-	sty     savey
+        sty     savey
 .endmacro
-	
+        
 .macro PARY
         lda     (_ivm_ipc),y
         tay
 .endmacro
-	
+        
 ;;; leaves Y=0
 .macro FIXIPC
-	jsr addy
-.endmacro	
+        jsr addy
+.endmacro       
 
-	;; time to wrap around - ONLY every 128 ops
-addy:	
-	tya
-	clc
-	adc     _ivm_ipc
-	sta     _ivm_ipc
-	bcc     :+
-	inc     _ivm_ipc+1
-:	
-	;; new ipc
-	ldy     #0
-	rts
-	
+        ;; time to wrap around - ONLY every 128 ops
+addy:   
+        tya
+        clc
+        adc     _ivm_ipc
+        sta     _ivm_ipc
+        bcc     :+
+        inc     _ivm_ipc+1
+:       
+        ;; new ipc
+        ldy     #0
+        rts
+        
 
-_run_ivm_asm:	
-	;; new ipc
-	ldy     #0
-	beq     xnext 		; always
+_run_ivm_asm:   
+        ;; new ipc
+        ldy     #0
+        beq     xnext           ; always
 
 ;;; ----- consume 1-byte operand -----
 ;;; if used parameter always need to savey
 pnext:
-	ldy     savey
-	iny
-	;; if Y>=128 fold into ipc (matches comment above); else keep Y offset
-	bpl     xnext
-	FIXIPC			; ipc += Y, Y := 0
-	jmp     xnext
-	
+        ldy     savey
+        iny
+        ;; if Y>=128 fold into ipc (matches comment above); else keep Y offset
+        bpl     xnext
+        FIXIPC                  ; ipc += Y, Y := 0
+        jmp     xnext
+        
 ;;; ----- main loop -----
-ynext:	
-	ldy     savey
+ynext:  
+        ldy     savey
 xnext:
         lda     (_ivm_ipc),y
 
-	.if TRACE
-	sta     _ivm_op
-	sty     savey
-	jsr     _putchar
-	ldy     savey
-	lda     _ivm_op
-	.endif ; TRACE
+        .if TRACE
+        sta     _ivm_op
+        sty     savey
+        jsr     _putchar
+        ldy     savey
+        lda     _ivm_op
+        .endif ; TRACE
 
-	iny
+        iny
 
-	; X contains op-code when op is called
-	tax
+        ; X contains op-code when op is called
+        tax
 
         ;; lobit - 0..127
         bmi     HIBIT
@@ -187,20 +187,20 @@ xnext:
         lda     displo,x
         sta     jmpvec
 
-	;; not needed! that' the whole point!
-;	sty     savey
-	
+        ;; not needed! that' the whole point!
+;       sty     savey
+        
         jmp     (jmpvec)
 
 
 .else
-	
+        
 .macro USEY
 .endmacro
 
 .macro PARY
 ;;; TODO: is already Y or correct, even here...
-	ldy     #0
+        ldy     #0
 
         lda     (_ivm_ipc),y
         tay
@@ -208,7 +208,7 @@ xnext:
 
 .macro FIXIPC
 .endmacro
-	
+        
 ;; ----- consume 1-byte operand -----
 pnext:
 ;;; 8c (12c)
@@ -216,12 +216,12 @@ pnext:
         inc     _ivm_ipc
         bne     :+
         inc     _ivm_ipc+1
-:	
-	;; fall-through
-_run_ivm_asm:	
+:       
+        ;; fall-through
+_run_ivm_asm:   
 
 ;;; ----- main loop -----
-ynext:				; dummy
+ynext:                          ; dummy
 xnext:
 ;;; a) selfmodify can do -5c
 ;;; b) use Y for lo ipc
@@ -229,28 +229,28 @@ xnext:
 ;;;    using NEXT_PAGE opoerator at 0x??ff slots
 ;;; d) consider keeping ACC in AX (extra cost one STA, if not use X for disp)
 ;;;    but savingss could be big
-	
-	;; 10c
+        
+        ;; 10c
         ldy     #0
         lda     (_ivm_ipc),y
 
-	.if TRACE
-	sta     _ivm_op
-	jsr     _putchar
-	lda     _ivm_op
-	.endif ; TRACE
+        .if TRACE
+        sta     _ivm_op
+        jsr     _putchar
+        lda     _ivm_op
+        .endif ; TRACE
 
-	;; 8-12c
+        ;; 8-12c
         inc     _ivm_ipc
         bne     :+
         inc     _ivm_ipc+1
 :
 
         ;; lobit - 0..127
-	;; 6c
+        ;; 6c
         tax
         bmi     HIBIT
-	;; +18c
+        ;; +18c
         lda     disphi,x
         sta     jmpvec+1
 
@@ -260,34 +260,34 @@ xnext:
         jmp     (jmpvec)
 
 .endif
-	
+        
 ;;; ----- HIBIT: ASL → N = former bit6 -----
 ;;; On entry: A=op, X=op (from dispatch tax). ASL only for N/C test — keep X!
 HIBIT:
-	;; 5
+        ;; 5
         asl     a               ; N=1 if original 0xC0..0xFF
         bmi     subvec          ; vector subroutine
 
 ;;; 0x80..0xBF: relative forward if ACC == 0
-rjp:	
+rjp:    
 ;;; 21c - 28c ?
-	;; X still = original op
-	FIXIPC			; doesn't modify X, Y=0
-	;; if !acc then rjmp
-	;; +8c
+        ;; X still = original op
+        FIXIPC                  ; doesn't modify X, Y=0
+        ;; if !acc then rjmp
+        ;; +8c
         lda     _ivm_acc
         ora     _ivm_acc+1
         bne     xnext
-	;; +12c
-	txa
-	and     #$3F		; delta
+        ;; +12c
+        txa
+        and     #$3F            ; delta
 
         clc
         adc     _ivm_ipc
         sta     _ivm_ipc
 
-	;; lo byte overflow?
-	;; +3-10c
+        ;; lo byte overflow?
+        ;; +3-10c
 
         bcc     xnext
         inc     _ivm_ipc+1
@@ -296,14 +296,14 @@ rjp:
 
 subvec:
 ;;; print trace nl
-	;; X = original op (NOT the ASL'd A — that was the vector-index bug)
-	FIXIPC
+        ;; X = original op (NOT the ASL'd A — that was the vector-index bug)
+        FIXIPC
 
-	.if TRACE
-	lda     #10	
-	jsr     _putchar
-	.endif ; TRACE
-	
+        .if TRACE
+        lda     #10     
+        jsr     _putchar
+        .endif ; TRACE
+        
         ;; v = op & $3F
         ;; nfp = fptab[v]
         ;; mem[nfp+FR_PREV] = fp
@@ -363,10 +363,10 @@ subvec:
         lda     (_ivm_callv),y
         sta     _ivm_ipc+1
 
-	;; new ipc
-	ldy     #0
+        ;; new ipc
+        ldy     #0
 
-	jmp     xnext
+        jmp     xnext
 
 ;;; ============================================================
 ;;; Handlers (0..31 loads installed in init_disp as op_31)
@@ -375,7 +375,7 @@ subvec:
 
 ;;; load mem[Y] → acc (and AX)
 .macro  LOAD_SLOT_Y 
-	;; 18c 9 B
+        ;; 18c 9 B
         lda     (_ivm_memhi),y
         tax
         lda     (_ivm_memlo),y
@@ -386,9 +386,9 @@ subvec:
 
 ;;; AX= *ipc is slot → AX A=lo X=hi
 .macro  PARAX
-	USEY
-	;; 21c  10 B
-	PARY
+        USEY
+        ;; 21c  10 B
+        PARY
 
         lda     (_ivm_memhi),y
         tax
@@ -404,7 +404,7 @@ op_31:  USEY
         jmp     ynext
 
 ;;; TODO: rename to 0x7f ??? or is that future nextpage?
-jmp_done:	
+jmp_done:       
 op_q:   jmp     done
 
 
@@ -414,13 +414,13 @@ op_Q:   lda     #0
         sta     _ivm_acc+1
 
 ;;; return acc
-op_X:	FIXIPC
-	lda     _ivm_fp
-	;; magic done, TODO: remove: use 0x7f as exit()
+op_X:   FIXIPC
+        lda     _ivm_fp
+        ;; magic done, TODO: remove: use 0x7f as exit()
         cmp     #FP_MAIN
         beq     jmp_done
 
-	;; restore IPC from FR_RET
+        ;; restore IPC from FR_RET
         clc
         adc     #FR_RET
 
@@ -430,38 +430,41 @@ op_X:	FIXIPC
         lda     (_ivm_memhi),y
         sta     _ivm_ipc+1
 
-	;; restore FP from FR_PREV
-        lda     _ivm_fp 		; TODO: why again? should INY?"
+        ;; restore FP from FR_PREV
+        lda     _ivm_fp                 ; TODO: why again? should INY?"
         clc
         adc     #FR_PREV
         tay
         lda     (_ivm_memlo),y
         sta     _ivm_fp
 
+        ;; new IPC, reset messed up Y
+        ldy     #0
+        
         jmp     xnext
 
 ;;; return FUNNAME
 op_semi:
-	USEY
+        USEY
         lda     _ivm_fp
-	;; TODO: seems redundant, no harm doing the other stuff?
+        ;; TODO: seems redundant, no harm doing the other stuff?
         cmp     #FP_MAIN
         beq     jmp_done
 
-	;; Loads FR_VAL index
+        ;; Loads FR_VAL index
         clc
         adc     #FR_VAL
         tay
         LOAD_SLOT_Y
 
-	ldy     savey 		; for Y pc
-	
+        ldy     savey           ; for Y pc
+        
         jmp     op_X
 
 
 ;;; arg 8 == last argument (ACC when called)
 op_8:   USEY
-	lda     _ivm_fp
+        lda     _ivm_fp
         clc
         adc     #FR_ACC
         tay
@@ -472,8 +475,8 @@ op_8:   USEY
 
 ;;; args 1..7, except last is 8!
 op_1to7:
-	USEY
-	txa                     ; op '1'..'7' in X from dispatch
+        USEY
+        txa                     ; op '1'..'7' in X from dispatch
         sec
         sbc     #'0'
         clc
@@ -487,8 +490,8 @@ op_1to7:
 
 
 op_sub: PARAX
-	;; alt: do xor on neg value before add!
-	;; then can just fall into op_add!!!
+        ;; alt: do xor on neg value before add!
+        ;; then can just fall into op_add!!!
         sta     tmp_lo
         stx     tmp_hi
         sec
@@ -513,14 +516,14 @@ op_add: PARAX
 
 
 op_L:   PARAX
-	;; TODO: axpnext to store?
+        ;; TODO: axpnext to store?
         sta     _ivm_acc
         stx     _ivm_acc+1
 
         jmp     pnext
 
 op_S:   USEY
-	PARY
+        PARY
 
         lda     _ivm_acc
         sta     (_ivm_memlo),y
@@ -530,7 +533,7 @@ op_S:   USEY
         jmp     pnext
 
 op_Z:   USEY
-	PARY
+        PARY
 
         lda     #0
         sta     (_ivm_memlo),y
@@ -549,7 +552,7 @@ op_9:   lda     #$FF
 op_not: lda     _ivm_acc
         ora     _ivm_acc+1
         beq     op_acc1
-	;; fall-through to 0
+        ;; fall-through to 0
 ;;; ACC = 0
 op_0:   lda     #0
         sta     _ivm_acc
@@ -559,7 +562,7 @@ op_0:   lda     #0
 
 ;;; ACC = 1 (no operand)
 op_acc1:
-	lda     #1
+        lda     #1
         sta     _ivm_acc
         lda     #0
         sta     _ivm_acc+1
@@ -568,14 +571,14 @@ op_acc1:
 
 ;;; set 0/1 then pnext (consume PAR)
 op_acc0p:
-	lda     #0
+        lda     #0
         sta     _ivm_acc
         sta     _ivm_acc+1
 
         jmp     pnext
 
 op_acc1p:
-	lda     #1
+        lda     #1
         sta     _ivm_acc
         lda     #0
         sta     _ivm_acc+1
@@ -589,7 +592,7 @@ op_acc1p:
 
 ;;; acc == mem[xx]
 op_eq:  USEY
-	PARY
+        PARY
 
         lda     (_ivm_memlo),y
         cmp     _ivm_acc
@@ -601,7 +604,7 @@ op_eq:  USEY
 
 ;;; acc < mem[xx]
 op_lt:  USEY
-	PARY
+        PARY
 
         lda     _ivm_acc
         cmp     (_ivm_memlo),y
@@ -612,7 +615,7 @@ op_lt:  USEY
 
 ;;; acc > mem[xx]
 op_gt:  USEY
-	PARY
+        PARY
 
         lda     (_ivm_memlo),y
         cmp     _ivm_acc
@@ -625,7 +628,7 @@ op_gt:  USEY
 
 ;;; Ixx  acc = ++mem[xx]
 op_I:   USEY
-	PARY
+        PARY
 
         clc
         lda     (_ivm_memlo),y
@@ -640,7 +643,7 @@ op_I:   USEY
 
 ;;; Jxx  acc = --mem[xx]
 op_J:   USEY
-	PARY
+        PARY
 
         sec
         lda     (_ivm_memlo),y
@@ -659,10 +662,10 @@ op_U:   USEY
 
         sta     tmp_lo              ; a
         iny
-	USEY
+        USEY
         lda     (_ivm_ipc),y
         tay                         ; b
-	
+        
         lda     (_ivm_memlo),y
         sta     tmp_hi              ; b_lo
         lda     (_ivm_memhi),y
@@ -682,35 +685,47 @@ op_U:   USEY
         bne     :+
         inc     _ivm_ipc+1
 :
-	jmp     pnext
+        jmp     pnext
 
 ;;; Conditional GOTO +1B iff acc > 
 ;;; TODO: replace usage by rjmp, or make it an FUSED LOOP:
 ;;; TODO: Giiuuee (ii=index var, uu=upper limit pascal, ee== rjmp end)
 op_G:
-	FIXIPC 			; Y=0
-	
-	.if TRACE
-	lda     #10	
-	jsr     _putchar
-	.endif ; TRACE
-	
-	lda     _ivm_acc+1
+        FIXIPC                  ; Y=0
+        sty     savey
+        
+        .if TRACE
+        lda     #10     
+        jsr     _putchar
+        ldy     savey
+        .endif ; TRACE
+        
+        ;; test if acc > 0 (i.e. not neg)
+        lda     _ivm_acc+1      ; hi
         bmi     gskip
+        ;; pos: is it > 0 ?
         ora     _ivm_acc
         beq     gskip
+
+        ;; ok, acc > 0 (signed!)
         lda     (_ivm_ipc),y
         clc
         adc     _ivm_ipc
         sta     _ivm_ipc
-        bcc     gskip
+
+        bcc     :+
         inc     _ivm_ipc+1
+:       
+        jmp     xnext
+        
 gskip:
-	jmp     pnext
+        jmp     pnext
 
 
 op_B:
-	FIXIPC			; Y=0
+        FIXIPC                  ; Y=0
+        sty     savey
+        
         lda     _ivm_ipc
         sec
         sbc     (_ivm_ipc),y
@@ -718,7 +733,7 @@ op_B:
         bcs     :+
         dec     _ivm_ipc+1
 :
-	jmp     pnext
+        jmp     pnext
 
 
 ;;; NOP - SPACE
@@ -801,12 +816,12 @@ op_O:   USEY
 
 ;;; " print string at ipc until 0
 op_str:
+	FIXIPC
 strlp:
+	ldy     #0		; each loop!
         lda     (_ivm_ipc),y
         beq     :+
-	sty     savey
         jsr     _putchar	; putchar trashes registers
-	ldy     savey
 
 	;; ipc++
         inc     _ivm_ipc
@@ -814,10 +829,8 @@ strlp:
         inc     _ivm_ipc+1
         bne     strlp
 :	
-	;; new ipc Y
-	ldy     #0
-
-	jmp     pnext
+	;; Y=0 standing at \0
+	jmp     pnext	
 
 
 ;;; ~ bitwise not
