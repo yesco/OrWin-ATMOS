@@ -228,6 +228,7 @@ xnext:
 .endif
 	
 ;;; ----- HIBIT: ASL → N = former bit6 -----
+;;; On entry: A=op, X=op (from dispatch tax). ASL only for N/C test — keep X!
 HIBIT:
 	;; 5
         asl     a               ; N=1 if original 0xC0..0xFF
@@ -236,7 +237,7 @@ HIBIT:
 ;;; 0x80..0xBF: relative forward if ACC == 0
 rjp:	
 ;;; 21c - 28c ?
-	tax
+	;; X still = original op
 	FIXIPC			; doesn't modify X, Y=0
 	;; if !acc then rjmp
 	;; +8c
@@ -244,8 +245,8 @@ rjp:
         ora     _ivm_acc+1
         bne     xnext
 	;; +12c
-	txa			; restore op
-	lsr     a               ; hibit removed! 0b00xxxxxx
+	txa
+	and     #$3F		; delta
 
         clc
         adc     _ivm_ipc
@@ -261,7 +262,7 @@ rjp:
 
 subvec:
 ;;; print trace nl
-	sta     _ivm_op
+	;; X = original op (NOT the ASL'd A — that was the vector-index bug)
 	FIXIPC
 
 	.if TRACE
@@ -278,7 +279,7 @@ subvec:
         ;; ipc = callv[v]
         ;; (inverse of op_X / op_semi)
 
-        lda     _ivm_op
+        txa                     ; original op (kept across ASL)
         and     #$3F
         tay                     ; Y = v
         lda     (_ivm_fptab),y
@@ -318,7 +319,7 @@ subvec:
         sta     _ivm_fp
 
         ;; ipc = callv[v]  (word table, index v*2)
-        lda     _ivm_op
+        txa
         and     #$3F
         asl     a
         tay
@@ -363,7 +364,8 @@ subvec:
 
 ;;; opcodes 0..31: slot = op itself
 op_31:  USEY
-        ldy     _ivm_op 		; TODO: isn't it in Y already?
+        txa                     ; op in X from dispatch (slot 0..31)
+        tay
         LOAD_SLOT_Y
 
         jmp     ynext
@@ -438,7 +440,7 @@ op_8:   USEY
 ;;; args 1..7, except last is 8!
 op_1to7:
 	USEY
-	lda     _ivm_op
+	txa                     ; op '1'..'7' in X from dispatch
         sec
         sbc     #'0'
         clc
@@ -766,15 +768,22 @@ op_O:   USEY
 
 ;;; " print string at ipc until 0
 op_str:
-strlp:  USEY
+strlp:
         lda     (_ivm_ipc),y
-        beq     strdn
-        jsr     _putchar
+        beq     :+
+	sty     savey
+        jsr     _putchar	; putchar trashes registers
+	ldy     savey
+
+	;; ipc++
         inc     _ivm_ipc
         bne     strlp
         inc     _ivm_ipc+1
         bne     strlp
-strdn:
+:	
+	;; new ipc Y
+	ldy     #0
+
 	jmp     pnext
 
 
@@ -865,7 +874,8 @@ shrm_st:
         jmp     pnext
 
 
-;;; unknown: print ? + op + NL, halt
+;;; unknown: print % + op + NL, halt
+;;; op is in X from dispatch (do not use _ivm_op)
 op_bad:	FIXIPC
 ;;; TODO: print address Y ? and byte code value
         lda     #10
@@ -874,7 +884,7 @@ op_bad:	FIXIPC
         lda     #'%'
         jsr     _putchar
 
-        lda     _ivm_op
+        txa                     ; opcode still in X
         jsr     _putchar
 
         lda     #10
