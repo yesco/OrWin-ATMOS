@@ -87,7 +87,32 @@ disphi:
 
 ;;  TODO: move the most common/expensive OP that tkaes a parameter here!
 
-.if 0
+
+.if 1
+;;; This optimization tries to avoid doing excessive
+;;; ipc++ that is 8c (or 12c when wrap).
+;;; 
+;;; Instead, it uses an offset in Y and simply INY.
+;;; Every op that takes a parameter will use Y by using PARAX,
+;;; and every other op that modifies Y will need to say USEY.
+;;; It saves Y. pnext and ynext restores Y.
+;;; 
+;;; To counter the wrap around, every time we have a parameter
+;;; we check if Y>=128 (Minus), if so, we do ipc+= Y; Y=0.
+;;; The *ASSUMPTION* is that we going to hit a parameter function
+;;; within 128 ops of linear execution... (yes can create counter-
+;;; example, but in practice?).
+;;; 
+;;; TODO: ? detect such during compilation.
+;;; 
+;;; So we save 8c-2c=6c every step,
+;;; and for parameter 8c-2c + 2c= 8c (LDY #0 not needed), however
+;;; we loose 2*3c=6c for saving and restoring Y.
+;;; 
+;;; So the win is modest for args, but higher (maybe for other ops?)
+;;; 
+;;; All "flow-control" ops first need to FIXIPC, to include Y.
+;;; 
 	
 ;;; TODO: crashes with illegal OP!
 	
