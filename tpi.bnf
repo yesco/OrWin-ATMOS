@@ -4,18 +4,18 @@ D=VD|FD|
 V=var M
 M=\i:T;M|
 F=function \i(A):T;HB
-A=\i:T,A|\i:T|
+A=\i:T,A|\i:T;A|\i:T|
 T=^I|I
 I=integer|word
 H=VB|
-B=begin C end
-C=S;C|S|
-S=\i:=E;|\i[E]:=E;|new(\i);|dispose(\i);|freemem(\i);|getmem(\i,E);|setlength(\i,E);|write(W);|writeln(W);|for \i:=E to E do S|if E then S else S|if E then S|K|;
+B=begin C end;|begin C end
+C=SC|S|
+S=\i:=E;|\i[E]:=E;|new(\i);|dispose(\i);|freemem(\i);|getmem(\i,E);|setlength(\i,E);|write(W);|writeln(W);|for \i:=E to E do S|if E then S else S|if E then S|B|;
 W=J,W|J|
 J=E|\s
 E=RYE|R
 Y=+|-|*|/|&|\|^|<|=|>|[|]|shl|shr
-R=\n|\i|\i(Z)|sizeof(T)|sizeof(\i)|not R|(E)
+R=\n|\i(Z)|\i|sizeof(T)|sizeof(\i)|not R|(E)
 Z=E,Z|E|
 .
 

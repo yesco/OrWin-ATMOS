@@ -2,16 +2,18 @@
  *
  *   ./parse tpi.bnf test.p
  *
- * Arg1: BNF file, one rule per line  X=body
- *   lowercase / punctuation = match that char (letters case-insensitive)
- *   space                    = skip whitespace in input
- *   A-Z                      = call rule
- *   \i \n \s                 = ident / number / string
- *   |                        = alternative (epsilon allowed)
- * Arg2: source to parse
+ * BNF (tpi.bnf):
+ *   X=body          rule X
+ *   a-z / punct     match char (letters case-insensitive)
+ *   space           skip whitespace + {comments}
+ *   A-Z             call rule
+ *   \i \n \s        ident / number / string
+ *   \|  \c          literal | or literal c (loader expands)
+ *   |               alternative (epsilon ok)
+ *   line starting . ends rule section
  *
- * Explicit stack only — no recursive match.
- * Characters printed when an alternative commits (no backtrack ghosts).
+ * Explicit stack — no recursive match.
+ * Capture commits only when an alternative succeeds.
  */
 
 #include <stdio.h>
@@ -26,7 +28,6 @@
 #define MAX_SRC       65536
 #define MAX_BUF       65536
 
-static char *rule_body[26];
 static char  alts[26][MAX_ALTS][MAX_ALT_LEN];
 static int   nalt[26];
 static int   has_rule[26];
@@ -35,18 +36,13 @@ static char  src[MAX_SRC];
 static int   src_len;
 static int   pos;
 
-/* per-frame capture buffer: only flushed on successful alt */
 static char  outbuf[MAX_STACK][MAX_BUF];
 static int   outlen[MAX_STACK];
 
 enum { ST_TRY, ST_RUN, ST_OK, ST_FAIL };
 
 typedef struct {
-  int rule;
-  int alt;
-  int ip;
-  int save;
-  int state;
+  int rule, alt, ip, save, state;
 } Frame;
 
 static Frame stack[MAX_STACK];
@@ -68,8 +64,7 @@ static void push(int rule, int state) {
 
 static void cap(char c) {
   int i = sp - 1;
-  if (i < 0) return;
-  if (outlen[i] < MAX_BUF - 1)
+  if (i >= 0 && outlen[i] < MAX_BUF - 1)
     outbuf[i][outlen[i]++] = c;
 }
 
@@ -81,18 +76,15 @@ static void flush_cap(int frame) {
   outlen[frame] = 0;
 }
 
-/* on success: append this frame's capture to parent */
 static void commit_cap(int frame) {
-  int p = frame - 1;
-  int i;
+  int p = frame - 1, i;
   if (p < 0) {
     flush_cap(frame);
     return;
   }
-  for (i = 0; i < outlen[frame]; i++) {
+  for (i = 0; i < outlen[frame]; i++)
     if (outlen[p] < MAX_BUF - 1)
       outbuf[p][outlen[p]++] = outbuf[frame][i];
-  }
   outlen[frame] = 0;
 }
 
@@ -100,10 +92,26 @@ static int is_ws(char c) {
   return c == ' ' || c == '\t' || c == '\n' || c == '\r';
 }
 
+/* whitespace and { pascal comments } */
 static void skip_ws(void) {
-  while (pos < src_len && is_ws(src[pos])) {
-    cap(src[pos]);
-    pos++;
+  for (;;) {
+    while (pos < src_len && is_ws(src[pos])) {
+      cap(src[pos]);
+      pos++;
+    }
+    if (pos < src_len && src[pos] == '{') {
+      cap(src[pos++]);
+      while (pos < src_len && src[pos] != '}') {
+        cap(src[pos]);
+        pos++;
+      }
+      if (pos < src_len && src[pos] == '}') {
+        cap(src[pos]);
+        pos++;
+      }
+      continue;
+    }
+    break;
   }
 }
 
@@ -114,9 +122,8 @@ static int match_lit(char want) {
   if (isalpha((unsigned char)want)) {
     if (tolower((unsigned char)g) != tolower((unsigned char)want))
       return 0;
-  } else {
-    if (g != want) return 0;
-  }
+  } else if (g != want)
+    return 0;
   cap(g);
   pos++;
   return 1;
@@ -150,25 +157,50 @@ static int match_str(void) {
     if (src[pos] == '\\' && pos + 1 < src_len) {
       cap(src[pos++]);
       cap(src[pos++]);
-    } else {
+    } else
       cap(src[pos++]);
-    }
   }
   if (pos >= src_len || src[pos] != '"') return 0;
   cap(src[pos++]);
   return 1;
 }
 
+/*
+ * Split RHS on | into alternatives.
+ * \| or \c (when c not i/n/s) → single literal char in alt text.
+ * \i \n \s stay as two-char escapes for the matcher.
+ */
 static void split_alts(int r, const char *rhs) {
   int a = 0, j = 0;
   const char *p = rhs;
   nalt[r] = 0;
   while (1) {
-    if (*p == '|' || *p == '\0') {
+    if (*p == '\0') {
+      alts[r][a][j] = '\0';
+      nalt[r] = a + 1;
+      break;
+    }
+    if (*p == '\\' && p[1] != '\0') {
+      char e = p[1];
+      if (e == 'i' || e == 'n' || e == 's') {
+        if (j < MAX_ALT_LEN - 2) {
+          alts[r][a][j++] = '\\';
+          alts[r][a][j++] = e;
+        }
+        p += 2;
+        continue;
+      }
+      /* \| or \c → literal c */
+      if (j < MAX_ALT_LEN - 1)
+        alts[r][a][j++] = e;
+      p += 2;
+      continue;
+    }
+    if (*p == '|') {
       alts[r][a][j] = '\0';
       a++;
       j = 0;
-      if (*p == '\0') break;
+      if (a >= MAX_ALTS) break;
       p++;
       continue;
     }
@@ -176,7 +208,6 @@ static void split_alts(int r, const char *rhs) {
       alts[r][a][j++] = *p;
     p++;
   }
-  nalt[r] = a;
 }
 
 static int load_bnf(const char *path) {
@@ -188,7 +219,6 @@ static int load_bnf(const char *path) {
     return 0;
   }
   for (i = 0; i < 26; i++) {
-    rule_body[i] = NULL;
     has_rule[i] = 0;
     nalt[i] = 0;
   }
@@ -197,15 +227,14 @@ static int load_bnf(const char *path) {
     char *eq;
     int r;
     if (nl) *nl = '\0';
+    if (line[0] == '.') break;
     if (line[0] == '\0' || line[0] == '#') continue;
     if (!isupper((unsigned char)line[0])) continue;
     eq = strchr(line, '=');
     if (!eq) continue;
     r = line[0] - 'A';
-    *eq = '\0';
-    rule_body[r] = strdup(eq + 1);
     has_rule[r] = 1;
-    split_alts(r, rule_body[r]);
+    split_alts(r, eq + 1);
   }
   fclose(f);
   return 1;
@@ -221,6 +250,9 @@ static int load_src(const char *path) {
   src[src_len] = '\0';
   fclose(f);
   pos = 0;
+  if (src_len >= 3 && (unsigned char)src[0] == 0xEF
+      && (unsigned char)src[1] == 0xBB && (unsigned char)src[2] == 0xBF)
+    pos = 3;
   return 1;
 }
 
@@ -230,7 +262,6 @@ static int step(void) {
   char c;
 
   if (sp <= 0) return 0;
-
   fr = &stack[sp - 1];
 
   if (fr->state == ST_TRY) {
@@ -239,12 +270,10 @@ static int step(void) {
       if (sp <= 0) return -1;
       fr = &stack[sp - 1];
       pos = fr->save;
-      outlen[sp] = 0;
+      outlen[sp - 1] = 0;
       fr->alt++;
       fr->ip = 0;
       fr->save = pos;
-      outlen[sp - 1] = 0; /* discard parent partial for this alt restart */
-      /* parent restart: need to restore parent's save and clear its buf from alt start */
       fr->state = ST_TRY;
       return 1;
     }
@@ -265,21 +294,16 @@ static int step(void) {
     return 1;
   }
 
+  /* current alternative failed — try next alt of SAME rule (do not pop) */
   if (fr->state == ST_FAIL) {
     outlen[sp - 1] = 0;
-    sp--;
-    if (sp <= 0) return -1;
-    fr = &stack[sp - 1];
-    pos = fr->save;
-    outlen[sp - 1] = 0;
+    pos = fr->save;          /* rule-entry input */
     fr->alt++;
     fr->ip = 0;
-    fr->save = pos;
-    fr->state = ST_TRY;
+    fr->state = ST_TRY;      /* ST_TRY exhausts alts → then pop to parent */
     return 1;
   }
 
-  /* ST_RUN */
   alt = alts[fr->rule][fr->alt];
 
   if (alt[fr->ip] == '\0') {
@@ -313,9 +337,8 @@ static int step(void) {
     else if (e == 'n') ok = match_num();
     else if (e == 's') ok = match_str();
     else {
-      fprintf(stderr, "\n[bad escape \\%c]\n", e);
-      fr->state = ST_FAIL;
-      return 1;
+      skip_ws();
+      ok = match_lit(e);
     }
     if (!ok) {
       fr->state = ST_FAIL;
@@ -337,7 +360,6 @@ static int step(void) {
 static int run_machine(void) {
   int rc;
   sp = 0;
-  pos = 0;
   if (!has_rule['P' - 'A']) {
     fprintf(stderr, "missing start rule P\n");
     return 0;
@@ -345,9 +367,6 @@ static int run_machine(void) {
   push('P' - 'A', ST_TRY);
   while ((rc = step()) == 1)
     ;
-  if (rc == 0 && sp == 0) {
-    /* top-level capture already flushed via commit to frame -1 → flush */
-  }
   return rc == 0;
 }
 
