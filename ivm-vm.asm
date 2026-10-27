@@ -634,15 +634,19 @@ op_gt:  USEY
 op_I:   USEY
         PARY
 
+        ;; lo += 1
         clc
         lda     (_ivm_memlo),y
         adc     #1
         sta     (_ivm_memlo),y
         sta     _ivm_acc
+
+        ;;  hi += Carry
         lda     (_ivm_memhi),y
         adc     #0
         sta     (_ivm_memhi),y
         sta     _ivm_acc+1
+
         jmp     pnext
 
 ;;; Jxx  acc = --mem[xx]
@@ -709,7 +713,6 @@ op_U:   USEY
 ;;; TODO: Giiuuee (ii=index var, uu=upper limit pascal, ee== rjmp end)
 
 .if ALTCODE
-;.if 0
 
 op_G:
         ;; test if acc > 0 (signed: not neg and not zero)
@@ -723,10 +726,11 @@ gyes:
         ;; ok: acc > 0: ipc += delta (ipc still points at delta)
 	FIXIPC
 	PARY
-	jmp     xnext
-	
+
 gskip:	
-        jmp     pnext           ; both paths: consume delta
+	;; skip parameter (or 0th jump byte)
+	iny
+        jmp     xnext           ; both paths: consume delta
 
 .else
 	
