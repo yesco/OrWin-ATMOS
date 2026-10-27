@@ -17,8 +17,8 @@
 ;;;   BPL zrel       ; 80-BF: if !acc  ipc += op & $3F
 ;;;   BMI subvec     ; C0-FF: vector call  (op & $3F)  inverse of X/;/Q
 
-TRACE=1
-;TRACE=0
+;TRACE=1
+TRACE=0
         
 .export         _run_ivm_asm
 
@@ -687,12 +687,15 @@ op_U:   USEY
 :
         jmp     pnext
 
-;;; Conditional GOTO +1B iff acc > 
+;;; conditional Goto: if (acc > 0) ipc += delta; ALWAYS pnext to skip delta
+;;; (matches C: if (acc>0) ipc+=*ipc; goto pnext;)
+;;; FIXIPC → ipc at delta, Y=0. sty savey so pnext's ldy savey/iny works.
+;;; 
 ;;; TODO: replace usage by rjmp, or make it an FUSED LOOP:
 ;;; TODO: Giiuuee (ii=index var, uu=upper limit pascal, ee== rjmp end)
 op_G:
-        FIXIPC                  ; Y=0
-        sty     savey
+        FIXIPC                  ; ipc at delta, Y=0
+        sty     savey           ; savey=0
         
         .if TRACE
         lda     #10     
@@ -700,26 +703,27 @@ op_G:
         ldy     savey
         .endif ; TRACE
         
-        ;; test if acc > 0 (i.e. not neg)
+        ;; test if acc > 0 (signed: not neg and not zero)
         lda     _ivm_acc+1      ; hi
         bmi     gskip
         ;; pos: is it > 0 ?
         ora     _ivm_acc
         beq     gskip
 
-        ;; ok, acc > 0 (signed!)
+        ;; ok: acc > 0: ipc += delta (ipc still points at delta)
         lda     (_ivm_ipc),y
         clc
         adc     _ivm_ipc
         sta     _ivm_ipc
-
         bcc     :+
         inc     _ivm_ipc+1
-:       
-        jmp     xnext
-        
+:	
+	;; OK, so this skips one further, but that
+	;; depends on the codegen, doezn't it?
+	jmp     pnext
+
 gskip:
-        jmp     pnext
+        jmp     pnext           ; both paths: consume delta
 
 
 op_B:
