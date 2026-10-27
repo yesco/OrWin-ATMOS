@@ -29,7 +29,9 @@
 #define MAX_SRC       65536
 #define MAX_BUF       65536
 
-static int   verbose;
+static int   verbose;   /* 0=off 1=compact 2+=detail */
+static int   ignore_case = 1; /* -I default on; -C case-sensitive */
+
 
 static char  alts[26][MAX_ALTS][MAX_ALT_LEN];
 static int   nalt[26];
@@ -51,12 +53,29 @@ typedef struct {
 static Frame stack[MAX_STACK];
 static int sp;
 
+/* detail log (verbose >= 2) */
 static void vlog(const char *fmt, ...) {
   va_list ap;
-  if (!verbose) return;
+  if (verbose < 2) return;
   va_start(ap, fmt);
   vfprintf(stderr, fmt, ap);
   va_end(ap);
+}
+
+/* compact understanding log (verbose >= 1) */
+static void v1(const char *fmt, ...) {
+  va_list ap;
+  if (verbose < 1) return;
+  va_start(ap, fmt);
+  vfprintf(stderr, fmt, ap);
+  va_end(ap);
+}
+
+static void v1_indent(void) {
+  int i;
+  if (verbose < 1) return;
+  for (i = 0; i < sp; i++)
+    fputc(' ', stderr);
 }
 
 static void push(int rule, int state) {
@@ -130,7 +149,7 @@ static int match_lit(char want) {
   char g;
   if (pos >= src_len) return 0;
   g = src[pos];
-  if (isalpha((unsigned char)want)) {
+  if (isalpha((unsigned char)want) && ignore_case) {
     if (tolower((unsigned char)g) != tolower((unsigned char)want))
       return 0;
   } else if (g != want)
@@ -141,28 +160,36 @@ static int match_lit(char want) {
 }
 
 static int match_ident(void) {
+  int start;
   skip_ws();
   if (pos >= src_len || !isalpha((unsigned char)src[pos])) return 0;
+  start = pos;
   while (pos < src_len && (isalnum((unsigned char)src[pos]) || src[pos] == '_')) {
     cap(src[pos]);
     pos++;
   }
+  (void)start;
   return 1;
 }
 
 static int match_num(void) {
+  int start;
   skip_ws();
   if (pos >= src_len || !isdigit((unsigned char)src[pos])) return 0;
+  start = pos;
   while (pos < src_len && isdigit((unsigned char)src[pos])) {
     cap(src[pos]);
     pos++;
   }
+  (void)start;
   return 1;
 }
 
 static int match_str(void) {
+  int start;
   skip_ws();
   if (pos >= src_len || src[pos] != '"') return 0;
+  start = pos;
   cap(src[pos++]);
   while (pos < src_len && src[pos] != '"') {
     if (src[pos] == '\\' && pos + 1 < src_len) {
@@ -173,6 +200,7 @@ static int match_str(void) {
   }
   if (pos >= src_len || src[pos] != '"') return 0;
   cap(src[pos++]);
+  (void)start;
   return 1;
 }
 
@@ -278,6 +306,11 @@ static int step(void) {
   if (fr->state == ST_TRY) {
     if (fr->alt >= nalt[fr->rule]) {
       vlog("fail %c (no alt) @%d\n", 'A' + fr->rule, pos);
+      if (verbose >= 2) {
+        v1("\n");
+        v1_indent();
+        v1("!%c\n", 'A' + fr->rule);
+      }
       sp--;
       if (sp <= 0) return -1;
       fr = &stack[sp - 1];
@@ -295,11 +328,31 @@ static int step(void) {
     fr->state = ST_RUN;
     vlog("try %c alt %d @%d \"%s\"\n",
          'A' + fr->rule, fr->alt, pos, alts[fr->rule][fr->alt]);
+    /* compact labels printed on successful match */
     return 1;
   }
 
   if (fr->state == ST_OK) {
     vlog("ok %c alt %d → @%d\n", 'A' + fr->rule, fr->alt, pos);
+    if (verbose >= 1 && outlen[sp - 1] > 0) {
+      int i;
+      v1("\n");
+      v1_indent();
+      if (nalt[fr->rule] > 1)
+        v1("%c%d:", 'A' + fr->rule, fr->alt);
+      else
+        v1("%c:", 'A' + fr->rule);
+      for (i = 0; i < outlen[sp - 1]; i++) {
+        char ch = outbuf[sp - 1][i];
+        if (ch == '\n')
+          v1("\n");
+        else
+          v1("%c", ch);
+      }
+      v1("\n");
+      v1_indent();
+      v1("<%c\n", 'A' + fr->rule);
+    }
     commit_cap(sp - 1);
     sp--;
     if (sp <= 0) return 0;
@@ -397,34 +450,46 @@ int main(int argc, char **argv) {
     int ai;
     const char *bnf = NULL, *srcpath = NULL;
     verbose = 0;
+    ignore_case = 1;
     for (ai = 1; ai < argc; ai++) {
       if (strcmp(argv[ai], "-v") == 0)
-        verbose = 1;
+        verbose++;
+      else if (strcmp(argv[ai], "-I") == 0)
+        ignore_case = 1;
+      else if (strcmp(argv[ai], "-C") == 0)
+        ignore_case = 0;
       else if (!bnf)
         bnf = argv[ai];
       else if (!srcpath)
         srcpath = argv[ai];
     }
     if (!bnf || !srcpath) {
-      fprintf(stderr, "usage: %s [-v] grammar.bnf source.p\n", argv[0]);
+      fprintf(stderr, "usage: %s [-v|-vv] [-I|-C] grammar.bnf source.p\n", argv[0]);
+      fprintf(stderr, "  -v   compact parse trace\n");
+      fprintf(stderr, "  -vv  detailed engine trace\n");
+      fprintf(stderr, "  -I   ignore case (default)\n");
+      fprintf(stderr, "  -C   case-sensitive\n");
       return 1;
     }
     if (!load_bnf(bnf)) return 1;
     if (!load_src(srcpath)) return 1;
   }
 
-  fprintf(stderr, "--- rules ---\n");
-  for (i = 0; i < 26; i++)
-    if (has_rule[i]) {
-      int a;
-      fprintf(stderr, "%c =", 'A' + i);
-      for (a = 0; a < nalt[i]; a++) {
-        if (a) fprintf(stderr, "|");
-        fprintf(stderr, "%s", alts[i][a]);
+  if (verbose >= 2) {
+    fprintf(stderr, "--- rules ---\n");
+    for (i = 0; i < 26; i++)
+      if (has_rule[i]) {
+        int a;
+        fprintf(stderr, "%c =", 'A' + i);
+        for (a = 0; a < nalt[i]; a++) {
+          if (a) fprintf(stderr, "|");
+          fprintf(stderr, "%s", alts[i][a]);
+        }
+        fprintf(stderr, "\n");
       }
-      fprintf(stderr, "\n");
-    }
-  fprintf(stderr, "--- parse ---\n");
+  }
+  if (verbose)
+    fprintf(stderr, "--- parse ---\n");
 
   ok = run_machine();
   putchar('\n');
