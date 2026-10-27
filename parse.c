@@ -40,6 +40,11 @@ static int   has_rule[26];
 static char  src[MAX_SRC];
 static int   src_len;
 static int   pos;
+static int   max_pos;
+static char  far_stack[64];
+static int   far_sp;
+static char  far_alt[64];
+static const char *src_name = "source";
 
 static char  outbuf[MAX_STACK][MAX_BUF];
 static int   outlen[MAX_STACK];
@@ -76,6 +81,17 @@ static void v1_indent(void) {
   if (verbose < 1) return;
   for (i = 0; i < sp; i++)
     fputc(' ', stderr);
+}
+
+static void note_progress(void) {
+  int i;
+  if (pos <= max_pos) return;
+  max_pos = pos;
+  far_sp = sp < 63 ? sp : 63;
+  for (i = 0; i < far_sp; i++) {
+    far_stack[i] = (char)('A' + stack[i].rule);
+    far_alt[i] = (char)stack[i].alt;
+  }
 }
 
 static void push(int rule, int state) {
@@ -156,6 +172,7 @@ static int match_lit(char want) {
     return 0;
   cap(g);
   pos++;
+  note_progress();
   return 1;
 }
 
@@ -169,6 +186,7 @@ static int match_ident(void) {
     pos++;
   }
   (void)start;
+  note_progress();
   return 1;
 }
 
@@ -182,6 +200,7 @@ static int match_num(void) {
     pos++;
   }
   (void)start;
+  note_progress();
   return 1;
 }
 
@@ -201,6 +220,7 @@ static int match_str(void) {
   if (pos >= src_len || src[pos] != '"') return 0;
   cap(src[pos++]);
   (void)start;
+  note_progress();
   return 1;
 }
 
@@ -431,9 +451,75 @@ static int step(void) {
   return 1;
 }
 
+
+static int line_at(int p) {
+  int i, line = 1;
+  for (i = 0; i < p && i < src_len; i++)
+    if (src[i] == '\n') line++;
+  return line;
+}
+
+static void report_reject(void) {
+  int i, col, line, nlines, start, end;
+  fprintf(stderr, "\n--- REJECT at %d (furthest %d) ---\n", pos, max_pos);
+  fprintf(stderr, "STACK:");
+  if (far_sp <= 0)
+    fprintf(stderr, " (empty)");
+  for (i = 0; i < far_sp; i++) {
+    fprintf(stderr, " %c", far_stack[i]);
+    if (far_alt[i] > 0 || 1)
+      fprintf(stderr, "%d", (int)far_alt[i]);
+  }
+  fprintf(stderr, "\n");
+  if (far_sp > 0) {
+    int r = far_stack[far_sp - 1] - 'A';
+    int a = (int)far_alt[far_sp - 1];
+    fprintf(stderr, "EXPECTED: rule %c", far_stack[far_sp - 1]);
+    if (has_rule[r] && a < nalt[r])
+      fprintf(stderr, " alt %d \"%s\"", a, alts[r][a]);
+    fprintf(stderr, "\n");
+  }
+  /* source context from max_pos */
+  start = max_pos;
+  while (start > 0 && src[start - 1] != '\n')
+    start--;
+  end = max_pos;
+  nlines = 0;
+  while (end < src_len && nlines < 5 && end - max_pos < 128) {
+    if (src[end] == '\n') nlines++;
+    end++;
+  }
+  line = line_at(max_pos);
+  col = max_pos - start;
+  fprintf(stderr, "REJECT:\n");
+  {
+    int lp = start, cur_line = line;
+    while (lp < end && lp < src_len) {
+      fprintf(stderr, "%s:%d: ", src_name, cur_line);
+      while (lp < end && lp < src_len && src[lp] != '\n') {
+        fputc(src[lp], stderr);
+        lp++;
+      }
+      fputc('\n', stderr);
+      if (lp < end && lp < src_len && src[lp] == '\n') {
+        lp++;
+        cur_line++;
+      } else
+        break;
+    }
+    /* caret under furthest column on first line */
+    fprintf(stderr, "%s:%d: ", src_name, line);
+    for (i = 0; i < col; i++)
+      fputc(' ', stderr);
+    fprintf(stderr, "^\n");
+  }
+}
+
 static int run_machine(void) {
   int rc;
   sp = 0;
+  max_pos = 0;
+  far_sp = 0;
   if (!has_rule['P' - 'A']) {
     fprintf(stderr, "missing start rule P\n");
     return 0;
@@ -471,6 +557,7 @@ int main(int argc, char **argv) {
       fprintf(stderr, "  -C   case-sensitive\n");
       return 1;
     }
+    src_name = srcpath;
     if (!load_bnf(bnf)) return 1;
     if (!load_src(srcpath)) return 1;
   }
@@ -502,6 +589,6 @@ int main(int argc, char **argv) {
     fprintf(stderr, "--- ACCEPT ---\n");
     return 0;
   }
-  fprintf(stderr, "--- REJECT at %d ---\n", pos);
+  report_reject();
   return 1;
 }
