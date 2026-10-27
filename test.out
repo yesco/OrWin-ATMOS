@@ -1,5 +1,5 @@
-loaded test.ivm (1043 bytes)
---- RUN IVM (blob 1043) ---
+loaded test.ivm (1098 bytes)
+--- RUN IVM (blob 1098) ---
 Hello 6502 World at OrWIN-ATMOS TinyPascal VM!
 47
 --Two:
@@ -17,7 +17,7 @@ Hello 6502 World at OrWIN-ATMOS TinyPascal VM!
 11
 86
 14
---Math checks:
+TestMath(42, 33): --Math checks: a: 42 b: 33
 75
 9
 1386
@@ -25,7 +25,7 @@ Hello 6502 World at OrWIN-ATMOS TinyPascal VM!
 10
 43
 1418
---Math checks:
+TestMath(17, 255): --Math checks: a: 17 b: 255
 272
 65298
 4335
@@ -86,4 +86,4 @@ abc
 
 --- END ---
 acc = 41748
-6806597 cycles
+6858735 cycles

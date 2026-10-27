@@ -61,12 +61,12 @@ if [ -f "$name.out" ]; then
   echo "====================== DIFF ======================="
   diff -a -w -I "cycles" -I "RUN" -I "loaded" -U9999 $name.out $name.log \
   && printf "\n\t\t  -- TESTS OK --\n\n"
-  diff -a -U9999 $name.out $name.log
+  diff -a -U0 $name.out $name.log
 
   echo "========== ASM ======= DIFF ======= ADM ==========="
   diff -a -w -I "cycles" -I "RUN" -I "loaded" -U9999 $name.out $name.asm.log \
   && printf "\n\t\t  -- TESTS OK --\n\n"
-  diff -a -U9999 $name.out $name.asm.log
+  diff -a -U0 $name.out $name.asm.log
 
 fi
 

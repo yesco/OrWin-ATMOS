@@ -20,8 +20,8 @@
 ;TRACE=1
 TRACE=0
         
-ALTCODE=0
-;ALTCODE=1
+;ALTCODE=0
+ALTCODE=1
 	
 
 .export         _run_ivm_asm
@@ -874,10 +874,13 @@ strlp:
         bne     strlp
 :	
 	;; Y=0 standing at \0
+.if ALTCODE
 	iny
 
 	jmp     xnext
-
+.else
+	jmp     pnext
+.endif	
 
 ;;; ~ bitwise not
 op_bnot:
