@@ -31,7 +31,7 @@ end;
 FUNCTION TestMath(a: INTEGER; b: INTEGER): INTEGER;
 BEGIN
   { Standard baseline tests }
-  WRITELN("--Math checks:");
+  WRITELN("--Math checks: a: ", a, " b: ", b);
   WRITELN(a + b);
   WRITELN(a - b);
   WRITELN(a * b);
@@ -197,8 +197,8 @@ begin
    { Test Case 10: Subtraction with a function on each side }
    writeln(Mul2(10) - Mul2(3)); { expected 14 }
 
-   writeln(TestMath(42,  33));
-   writeln(TestMath(17, 255));
+   writeln("TestMath(42, 33): ", TestMath(42,  33));
+   writeln("TestMath(17, 255): ", TestMath(17, 255));
 
    writeln(TestIf(0));
    writeln(TestIf(1));
