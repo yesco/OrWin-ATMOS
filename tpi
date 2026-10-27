@@ -28,20 +28,20 @@ echo
 echo
 echo "=== Run from BLOB ==="
 echo
-sim65 -c tpi.sim $name.ivm | tee $name.log
+sim65 -c tpi.sim $name.ivm
 echo
 echo
 
 echo
 echo
 echo "=== IVM Run from BLOB ==="
-./ivm $name.ivm
+./ivm $name.ivm | tee $name.log
 echo
 echo
 
 echo
 echo
-echo "=== IVM Run from BLOB ==="
+echo "=== IVM-ASM Run from BLOB ==="
 ./ivm-asm $name.ivm | tee $name.asm.log
 echo
 echo
@@ -57,8 +57,7 @@ echo
 ls -ugGlf $name.p $name.pas $name.c $name.prg $name.sim $name.ivm tpi.sim tpi.tap tpi.prg ivm.sim ivm-asm.sim ivm-noivm.sim ivm.tap ivm.prg 2>/dev/null
 
 echo
-#if [ -f "$name.out" ]; then
-if [ -f "test-pointers.out" ]; then
+if [ -f "$name.out" ]; then
   echo "====================== DIFF ======================="
   diff -w -I "cycles" -I "RUN" -I "loaded" -U9999 $name.out $name.log \
   && printf "\n\t\t  -- TESTS OK --\n\n"

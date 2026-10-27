@@ -5,4 +5,4 @@ name="${name%.ivm}"
 cl65 -Oirs -vm -C sim6502.cfg -t sim6502 -m ivm.map -o ivm.sim ivm.c || exit 1
 cl65 -DNOIVM -vm -C sim6502.cfg -Oirs -t sim6502 -m ivm.map -o ivm-noivm.sim ivm.c || exit 1
 
-sim65 -c ivm.sim $name.ivm | tee $name.log
+sim65 -c ivm.sim $name.ivm

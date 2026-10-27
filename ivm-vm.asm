@@ -41,6 +41,10 @@ jmpvec: .res 2
 tmp_lo: .res 1
 tmp_hi: .res 1
 
+savey:	.res 1
+	
+
+
 
 .data
 ;;; static dispatch tables (256 bytes) — no runtime init_disp
@@ -51,7 +55,7 @@ displo:
 	.byte	<op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31
 	.byte	<op_sp, <op_bad, <op_str, <op_bad, <op_bad, <op_mod, <op_and, <op_bad
 	.byte	<op_bad, <op_bad, <op_mul, <op_add, <op_bad, <op_sub, <op_dot, <op_div
-	.byte	<op_0, <op_17, <op_17, <op_17, <op_17, <op_17, <op_17, <op_17
+	.byte	<op_0, <op_1to7, <op_1to7, <op_1to7, <op_1to7, <op_1to7, <op_1to7, <op_1to7
 	.byte	<op_8, <op_9, <op_bad, <op_semi, <op_lt, <op_eq, <op_gt, <op_not
 	.byte	<op_bad, <op_bad, <op_B, <op_bad, <op_bad, <op_bad, <op_bad, <op_G
 	.byte	<op_bad, <op_I, <op_J, <op_bad, <op_L, <op_bad, <op_N, <op_O
@@ -68,7 +72,7 @@ disphi:
 	.byte	>op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31
 	.byte	>op_sp, >op_bad, >op_str, >op_bad, >op_bad, >op_mod, >op_and, >op_bad
 	.byte	>op_bad, >op_bad, >op_mul, >op_add, >op_bad, >op_sub, >op_dot, >op_div
-	.byte	>op_0, >op_17, >op_17, >op_17, >op_17, >op_17, >op_17, >op_17
+	.byte	>op_0, >op_1to7, >op_1to7, >op_1to7, >op_1to7, >op_1to7, >op_1to7, >op_1to7
 	.byte	>op_8, >op_9, >op_bad, >op_semi, >op_lt, >op_eq, >op_gt, >op_not
 	.byte	>op_bad, >op_bad, >op_B, >op_bad, >op_bad, >op_bad, >op_bad, >op_G
 	.byte	>op_bad, >op_I, >op_J, >op_bad, >op_L, >op_bad, >op_N, >op_O
@@ -83,7 +87,96 @@ disphi:
 
 ;;  TODO: move the most common/expensive OP that tkaes a parameter here!
 
+.if 0
+	
+;;; TODO: crashes with illegal OP!
+	
+.macro USEY
+	sty     savey
+.endmacro
+	
+.macro PARY
+        lda     (_ivm_ipc),y
+        tay
+.endmacro
+	
+;;; leaves Y=0
+.macro FIXIPC
+	jsr addy
+.endmacro	
+
+	;; time to wrap around - ONLY every 128 ops
+addy:	
+	tya
+	clc
+	adc     _ivm_ipc
+	sta     _ivm_ipc
+	bcc     :+
+	inc     _ivm_ipc+1
+:	
+	;; new ipc
+	ldy     #0
+	rts
+	
+
+_run_ivm_asm:	
+	;; new ipc
+	ldy     #0
+	beq     xnext 		; always
+
 ;;; ----- consume 1-byte operand -----
+;;; if used parameter always need to savey
+pnext:
+	ldy     savey
+	iny
+	;; we catch halfway  and adjust Y so never overflow
+	;; we're assuming we eventually going to end up w pnext...
+	bmi     xnext
+	FIXIPC
+	beq     xnext
+	
+;;; ----- main loop -----
+ynext:	
+	ldy     savey
+xnext:
+        lda     (_ivm_ipc),y
+	iny
+
+;;;  TODO: remove
+;        sta     _ivm_op		; TODO: getrid if, keep in reg
+
+        ;; lobit - 0..127
+        bmi     HIBIT
+
+	tax
+
+        lda     disphi,x
+        sta     jmpvec+1
+
+        lda     displo,x
+        sta     jmpvec
+
+	sty     savey
+        jmp     (jmpvec)
+
+
+.else
+	
+.macro USEY
+.endmacro
+
+.macro PARY
+;;; TODO: is already Y or correct, even here...
+	ldy     #0
+
+        lda     (_ivm_ipc),y
+        tay
+.endmacro
+
+.macro FIXIPC
+.endmacro
+	
+;; ----- consume 1-byte operand -----
 pnext:
 ;;; 8c (12c)
 ;;; TODO: combine +2 of xnext if xnext as a jump in point
@@ -95,6 +188,7 @@ pnext:
 _run_ivm_asm:	
 
 ;;; ----- main loop -----
+ynext:				; dummy
 xnext:
 ;;; a) selfmodify can do -5c
 ;;; b) use Y for lo ipc
@@ -106,7 +200,7 @@ xnext:
 	;; 10c
         ldy     #0
         lda     (_ivm_ipc),y
-        sta     _ivm_op		; TODO: getrid if, keep in reg
+;        sta     _ivm_op		; TODO: getrid if, keep in reg
 
 	.if TRACE
 	jsr     _putchar
@@ -131,23 +225,27 @@ xnext:
 
         jmp     (jmpvec)
 
+.endif
+	
 ;;; ----- HIBIT: ASL → N = former bit6 -----
 HIBIT:
 	;; 5
         asl     a               ; N=1 if original 0xC0..0xFF
         bmi     subvec          ; vector subroutine
 
-        ;; 0x80..0xBF: relative forward if ACC == 0
-rjmp:	
-;;; 21c - 28c
+;;; 0x80..0xBF: relative forward if ACC == 0
+rjp:	
+;;; 21c - 28c ?
+	tax
+	FIXIPC			; doesn't modify X, Y=0
 	;; if !acc then rjmp
 	;; +8c
         lda     _ivm_acc
         ora     _ivm_acc+1
         bne     xnext
 	;; +12c
-        lda     _ivm_op
-        and     #$3F
+	txa			; restore op
+	lsr     a               ; hibit removed! 0b00xxxxxx
 
         clc
         adc     _ivm_ipc
@@ -155,12 +253,17 @@ rjmp:
 
 	;; lo byte overflow?
 	;; +3-10c
+
         bcc     xnext
         inc     _ivm_ipc+1
-        jmp     xnext		; TODO: bcs
+
+        bcs     xnext
 
 subvec:
 ;;; print trace nl
+	sta     _ivm_op
+	FIXIPC
+
 	.if TRACE
 	lda     #10	
 	jsr     _putchar
@@ -225,7 +328,10 @@ subvec:
         lda     (_ivm_callv),y
         sta     _ivm_ipc+1
 
-        jmp     xnext
+	;; new ipc
+	ldy     #0
+
+        beq     xnext 		; always
 
 
 ;;; ============================================================
@@ -246,10 +352,9 @@ subvec:
 
 ;;; AX= *ipc is slot → AX A=lo X=hi
 .macro  PARAX
+	USEY
 	;; 21c  10 B
-        ldy     #0
-        lda     (_ivm_ipc),y
-        tay
+	PARY
 
         lda     (_ivm_memhi),y
         tax
@@ -257,21 +362,24 @@ subvec:
 .endmacro
 
 ;;; opcodes 0..31: slot = op itself
-op_31:
+op_31:  USEY
         ldy     _ivm_op 		; TODO: isn't it in Y already?
         LOAD_SLOT_Y
-        jmp     xnext
+
+        jmp     ynext
 
 ;;; TODO: rename to 0x7f ??? or is that future nextpage?
 jmp_done:	
 op_q:   jmp     done
 
 
+;;; return acc=0
 op_Q:   lda     #0
         sta     _ivm_acc
         sta     _ivm_acc+1
 
-op_X:
+;;; return acc
+op_X:	FIXIPC
 	lda     _ivm_fp
 	;; magic done, TODO: remove: use 0x7f as exit()
         cmp     #FP_MAIN
@@ -297,8 +405,9 @@ op_X:
 
         jmp     xnext
 
-;;; return by keeping FUNNAME (value)
+;;; return FUNNAME
 op_semi:
+	USEY
         lda     _ivm_fp
 	;; TODO: seems redundant, no harm doing the other stuff?
         cmp     #FP_MAIN
@@ -310,20 +419,26 @@ op_semi:
         tay
         LOAD_SLOT_Y
 
+	ldy     savey 		; for Y pc
+	
         jmp     op_X
 
 
 ;;; arg 8 == last argument (ACC when called)
-op_8:   lda     _ivm_fp
+op_8:   USEY
+	lda     _ivm_fp
         clc
         adc     #FR_ACC
         tay
 
         LOAD_SLOT_Y
-        jmp     xnext
 
-;;; args 1..7 
-op_17:  lda     _ivm_op
+        jmp     ynext
+
+;;; args 1..7, except last is 8!
+op_1to7:
+	USEY
+	lda     _ivm_op
         sec
         sbc     #'0'
         clc
@@ -333,7 +448,7 @@ op_17:  lda     _ivm_op
 
         LOAD_SLOT_Y
 
-        jmp     xnext
+        jmp     ynext
 
 
 op_sub: PARAX
@@ -369,9 +484,8 @@ op_L:   PARAX
 
         jmp     pnext
 
-op_S:   ldy     #0
-        lda     (_ivm_ipc),y
-        tay
+op_S:   USEY
+	PARY
 
         lda     _ivm_acc
         sta     (_ivm_memlo),y
@@ -380,9 +494,8 @@ op_S:   ldy     #0
 
         jmp     pnext
 
-op_Z:   ldy     #0
-        lda     (_ivm_ipc),y
-        tay
+op_Z:   USEY
+	PARY
 
         lda     #0
         sta     (_ivm_memlo),y
@@ -415,6 +528,7 @@ op_acc1:
         sta     _ivm_acc
         lda     #0
         sta     _ivm_acc+1
+
         jmp     xnext
 
 ;;; set 0/1 then pnext (consume PAR)
@@ -422,6 +536,7 @@ op_acc0p:
 	lda     #0
         sta     _ivm_acc
         sta     _ivm_acc+1
+
         jmp     pnext
 
 op_acc1p:
@@ -429,6 +544,7 @@ op_acc1p:
         sta     _ivm_acc
         lda     #0
         sta     _ivm_acc+1
+
         jmp     pnext
 
 ;;; < = >  unsigned compare → 0/1
@@ -437,10 +553,8 @@ op_acc1p:
 ;;; using ADC (zp),Y so.... No need using PARAX....
 
 ;;; acc == mem[xx]
-op_eq:
-        ldy     #0
-        lda     (_ivm_ipc),y
-        tay
+op_eq:  USEY
+	PARY
 
         lda     (_ivm_memlo),y
         cmp     _ivm_acc
@@ -451,10 +565,8 @@ op_eq:
         beq     op_acc1p
 
 ;;; acc < mem[xx]
-op_lt:
-        ldy     #0
-        lda     (_ivm_ipc),y
-        tay
+op_lt:  USEY
+	PARY
 
         lda     _ivm_acc
         cmp     (_ivm_memlo),y
@@ -464,10 +576,8 @@ op_lt:
         bcs     op_acc0p
 
 ;;; acc > mem[xx]
-op_gt:
-        ldy     #0
-        lda     (_ivm_ipc),y
-        tay
+op_gt:  USEY
+	PARY
 
         lda     (_ivm_memlo),y
         cmp     _ivm_acc
@@ -479,9 +589,8 @@ op_gt:
 
 
 ;;; Ixx  acc = ++mem[xx]
-op_I:   ldy     #0
-        lda     (_ivm_ipc),y
-        tay
+op_I:   USEY
+	PARY
 
         clc
         lda     (_ivm_memlo),y
@@ -495,9 +604,8 @@ op_I:   ldy     #0
         jmp     pnext
 
 ;;; Jxx  acc = --mem[xx]
-op_J:   ldy     #0
-        lda     (_ivm_ipc),y
-        tay
+op_J:   USEY
+	PARY
 
         sec
         lda     (_ivm_memlo),y
@@ -511,10 +619,12 @@ op_J:   ldy     #0
         jmp     pnext
 
 ;;; Uab  mem[a] += mem[b]; acc = mem[a]
-op_U:   ldy     #0
+op_U:   USEY
         lda     (_ivm_ipc),y
+
         sta     tmp_lo              ; a
         iny
+	USEY
         lda     (_ivm_ipc),y
         tay                         ; b
 	
@@ -536,33 +646,36 @@ op_U:   ldy     #0
         inc     _ivm_ipc
         bne     :+
         inc     _ivm_ipc+1
-:       jmp     pnext
+:
+	jmp     pnext
 
 ;;; Conditional GOTO +1B iff acc > 
 ;;; TODO: replace usage by rjmp, or make it an FUSED LOOP:
 ;;; TODO: Giiuuee (ii=index var, uu=upper limit pascal, ee== rjmp end)
 op_G:
+	FIXIPC 			; Y=0
+	
 	.if TRACE
 	lda     #10	
 	jsr     _putchar
 	.endif ; TRACE
 	
 	lda     _ivm_acc+1
-        bmi     gsk
+        bmi     gskip
         ora     _ivm_acc
-        beq     gsk
-        ldy     #0
+        beq     gskip
         lda     (_ivm_ipc),y
         clc
         adc     _ivm_ipc
         sta     _ivm_ipc
-        bcc     gsk
+        bcc     gskip
         inc     _ivm_ipc+1
+gskip:
+	jmp     pnext
 
-gsk:    jmp     pnext
 
-
-op_B:   ldy     #0
+op_B:
+	FIXIPC			; Y=0
         lda     _ivm_ipc
         sec
         sbc     (_ivm_ipc),y
@@ -582,19 +695,25 @@ op_mul: PARAX
         sta     _ivm_par
         stx     _ivm_par+1
         jsr     _opmul
+
         jmp     pnext
 
 op_div: PARAX
         sta     _ivm_par
         stx     _ivm_par+1
         jsr     _opdiv
+
         jmp     pnext
 
 op_mod: PARAX
         sta     _ivm_par
         stx     _ivm_par+1
         jsr     _opmod
+
         jmp     pnext
+
+
+;;;  ops implemented here
 
 op_and: PARAX
         and     _ivm_acc
@@ -602,6 +721,7 @@ op_and: PARAX
         txa
         and     _ivm_acc+1
         sta     _ivm_acc+1
+
         jmp     pnext
 
 op_or:  PARAX
@@ -610,6 +730,7 @@ op_or:  PARAX
         txa
         ora     _ivm_acc+1
         sta     _ivm_acc+1
+
         jmp     pnext
 
 op_xor: PARAX
@@ -618,33 +739,43 @@ op_xor: PARAX
         txa
         eor     _ivm_acc+1
         sta     _ivm_acc+1
+
         jmp     pnext
 
+
 ;;; print ACC as unsigned decimal
-op_dot: jsr     _opputnum
-        jmp     xnext
+op_dot: USEY
+	jsr     _opputnum
+
+        jmp     ynext
 
 ;;; newline
-op_N:   lda     #10
+op_N:   USEY
+	lda     #10
         jsr     _putchar
-        jmp     xnext
+	;; TODO: jsr _nl
+
+        jmp     ynext
 
 ;;; putchar ACC lo (or PAR?) — opcode 'O'
-op_O:   lda     _ivm_acc
+op_O:   USEY
+	lda     _ivm_acc
         jsr     _putchar
-        jmp     xnext
 
-;;; string at ipc until 0
+        jmp     ynext
+
+;;; " print string at ipc until 0
 op_str:
-strlp:  ldy     #0
+strlp:  USEY
         lda     (_ivm_ipc),y
         beq     strdn
         jsr     _putchar
         inc     _ivm_ipc
         bne     strlp
         inc     _ivm_ipc+1
-        jmp     strlp
-strdn:  jmp     pnext
+        bne     strlp
+strdn:
+	jmp     pnext
 
 
 ;;; ~ bitwise not
@@ -655,7 +786,9 @@ op_bnot:
         lda     _ivm_acc+1
         eor     #$FF
         sta     _ivm_acc+1
+
         jmp     xnext
+
 
 ;;; [  acc <<= PAR   (ASL/ROL on ZP ok)
 op_shl: PARAX
@@ -665,6 +798,7 @@ shllp:  asl     _ivm_acc
         rol     _ivm_acc+1
         dex
         bne     shllp
+
 shl_dn: jmp     pnext
 
 ;;; ]  acc >>= PAR
@@ -675,19 +809,20 @@ shrlp:  lsr     _ivm_acc+1
         ror     _ivm_acc
         dex
         bne     shrlp
+
 shr_dn: jmp     pnext
 
 ;;; {xx  mem[xx] <<= acc
 ;;; no ASL (zp),Y — load lo→tmp_lo, hi→A, count in X
 op_shlm:
-        ldy     #0
-        lda     (_ivm_ipc),y
-        sta     tmp_hi              ; slot
-        tay
+	USEY
+	PARY
+        sta     tmp_hi              ; store slot for reesult
 
         lda     (_ivm_memlo),y
         sta     tmp_lo              ; value lo
         lda     (_ivm_memhi),y      ; value hi in A
+
         ldx     _ivm_acc            ; count
         beq     shlm_st
 shlm_lp:
@@ -696,18 +831,19 @@ shlm_lp:
         dex
         bne     shlm_lp
 shlm_st:
+	;; TODO: should it really modify variable or leave in ACC?
         ldy     tmp_hi
         sta     (_ivm_memhi),y
         lda     tmp_lo
         sta     (_ivm_memlo),y
+
         jmp     pnext
 
 ;;; }xx  mem[xx] >>= acc
 op_shrm:
-        ldy     #0
-        lda     (_ivm_ipc),y
+	USEY
+	PARY
         sta     tmp_hi
-        tay
 
         lda     (_ivm_memlo),y
         sta     tmp_lo
@@ -720,27 +856,31 @@ shrm_lp:
         dex
         bne     shrm_lp
 shrm_st:
+	;; TODO: should it really modify variable or leave in ACC?
         ldy     tmp_hi
         sta     (_ivm_memhi),y
         lda     tmp_lo
         sta     (_ivm_memlo),y
+
         jmp     pnext
 
+
 ;;; unknown: print ? + op + NL, halt
-op_bad:
+op_bad:	FIXIPC
+;;; TODO: print address Y ? and byte code value
         lda     #10
         jsr     _putchar
-        lda     #'?'
+
+        lda     #'%'
         jsr     _putchar
+
         lda     _ivm_op
         jsr     _putchar
+
         lda     #10
         jsr     _putchar
-        jmp     done
 
-
-op_c = op_bad
-
+	;; fall-through
 
 ;;; C style return ACC in AX
 done:   lda     _ivm_acc

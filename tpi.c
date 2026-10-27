@@ -122,6 +122,11 @@
 // ivm    : 9675 - 5793 = 3882
 // ivm-asm: 7918 - 5793 = 2125 (/ 2125 3882.0) 0.55 =
 // - 55 % of the run_ivm size!
+// => (/ 640 8) = 80 us / op
+
+// +2503831
+
+// TODO: poophole optimization <0-31> <zjp> <Zvv> <Ussaa> etc...
 
 #include <stdio.h>
 #include <stddef.h>

@@ -257,7 +257,6 @@ ivmvar run_ivm(Process *p) {
 
 #ifdef IVMASM
 
-// -DIVMASM + link ivm-vm.s
 // Single ZP block for importzp (_name in asm). Process switch = save/restore.
 
 #ifdef __CC65__
@@ -276,6 +275,7 @@ word  *ivm_callv; // call vectors (abs on cc65 after relocate)
 #pragma bss-name (pop)
 #endif
 
+// TODO: pivot in-place during loading
 static uchar slice_lo[256];
 static uchar slice_hi[256];
 static ivmvar *live_mem;
@@ -283,6 +283,7 @@ static word live_n;
 
 static void pivot(ivmvar *mem, word n) {
   word i;
+
   live_mem = mem;
   live_n = n > 256 ? 256 : n;
   for (i = 0; i < live_n; i++) {
@@ -295,8 +296,10 @@ static void pivot(ivmvar *mem, word n) {
   ivm_memhi = slice_hi;
 }
 
+// TODO: maybe not needed
 static void unpivot(void) {
   word i;
+
   for (i = 0; i < live_n; i++)
     live_mem[i] = (ivmvar)slice_lo[i] | ((ivmvar)slice_hi[i] << 8);
 }
@@ -309,8 +312,11 @@ void opdiv(void)    { if (ivm_par) ivm_acc /= ivm_par; }
 void opmod(void)    { if (ivm_par) ivm_acc %= ivm_par; }
 void opputnum(void) { printf("%u", (unsigned)ivm_acc); }
 
+// TODO: add a run_ivm-for-a-while
+
 ivmvar run_ivm(Process *p) {
   word cells;
+
   cells = p->h.hdr.memsz;
   if (!cells) cells = MAX_SLOTS;
 
@@ -318,24 +324,25 @@ ivmvar run_ivm(Process *p) {
   ivm_ipc = p->h.ipc;
   ivm_fp  = p->h.fp;
   ivm_acc = p->h.acc;
-#ifdef __CC65__
-  // relocated absolute pointers
-  ivm_fptab = (uchar *)(unsigned)p->h.hdr.fp;
-  ivm_callv = (word *)(unsigned)p->h.hdr.call;
-#else
+  #ifdef __CC65__
+    // relocated absolute pointers
+    ivm_fptab = (uchar *)(unsigned)p->h.hdr.fp;
+    ivm_callv = (word *)(unsigned)p->h.hdr.call;
+  #else
   {
     uchar *base = (uchar *)p->h.ipc - p->h.hdr.main;
     ivm_fptab = base + p->h.hdr.fp;
     ivm_callv = (word *)(base + p->h.hdr.call);
     // host: callv[] still relative offsets (16-bit); asm is for 6502
   }
-#endif
+  #endif
 
   ivm_acc = run_ivm_asm();
 
   p->h.ipc = ivm_ipc;
   p->h.fp  = ivm_fp;
   p->h.acc = ivm_acc;
+  // no needed
   unpivot();
   return ivm_acc;
 }
