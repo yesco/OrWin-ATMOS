@@ -20,8 +20,8 @@
 ;TRACE=1
 TRACE=0
         
-;ALTCODE=0
-ALTCODE=1
+ALTCODE=0
+;ALTCODE=1
 	
 
 .export         _run_ivm_asm
