@@ -388,14 +388,17 @@ static int load_bnf(const char *path) {
   while (fgets(line, sizeof line, f)) {
     char *nl;
     char *eq;
+    char *p;
+    char *rhs;
     uchar *blob;
+    uchar **altp;
+    uchar e;
     word blob_len;
     word n_alts;
     word a;
-    word i;
-    uchar **altp;
-    char *p;
-    char *rhs;
+    word bi;
+    word na;
+    word alt_starts[64];
 
     nl = strchr(line, '\n');
     if (nl) *nl = 0;
@@ -414,7 +417,7 @@ static int load_bnf(const char *path) {
     n_alts = 1;
     for (p = rhs; *p; p++) {
       if (*p == '\\' && p[1]) {
-        uchar e = (uchar)p[1];
+        e = (uchar)p[1];
         if (e == 'i' || e == 'n' || e == 's' || e == 'C' || e == '<')
           blob_len = (word)(blob_len + 2);
         else
@@ -438,45 +441,42 @@ static int load_bnf(const char *path) {
     blobs[r] = blob;
 
     // write alts as C-strings back-to-back, count them
-    {
-      word bi = 0;
-      word alt_starts[64];
-      word na = 0;
-      alt_starts[na++] = 0;
-      for (p = rhs; *p; p++) {
-        if (*p == '\\' && p[1]) {
-          uchar e = (uchar)p[1];
-          if (e == 'i' || e == 'n' || e == 's' || e == 'C' || e == '<') {
-            blob[bi++] = '\\';
-            blob[bi++] = e;
-          } else {
-            blob[bi++] = e;
-          }
-          p++;
-          continue;
+    bi = 0;
+    na = 0;
+    alt_starts[na++] = 0;
+    for (p = rhs; *p; p++) {
+      if (*p == '\\' && p[1]) {
+        e = (uchar)p[1];
+        if (e == 'i' || e == 'n' || e == 's' || e == 'C' || e == '<') {
+          blob[bi++] = '\\';
+          blob[bi++] = e;
+        } else {
+          blob[bi++] = e;
         }
-        if (*p == '|') {
-          blob[bi++] = 0;
-          if (na < 64)
-            alt_starts[na++] = bi;
-          continue;
-        }
-        blob[bi++] = (uchar)*p;
+        p++;
+        continue;
       }
-      blob[bi++] = 0;
-
-      altp = (uchar **)malloc(sizeof(uchar *) * (na + 1));
-      if (!altp) {
-        free(blob);
-        blobs[r] = NULL;
-        fclose(f);
-        return 0;
+      if (*p == '|') {
+        blob[bi++] = 0;
+        if (na < 64)
+          alt_starts[na++] = bi;
+        continue;
       }
-      for (a = 0; a < na; a++)
-        altp[a] = blob + alt_starts[a];
-      altp[na] = NULL;
-      rule[r] = altp;
+      blob[bi++] = (uchar)*p;
     }
+    blob[bi++] = 0;
+
+    altp = (uchar **)malloc(sizeof(uchar *) * (na + 1));
+    if (!altp) {
+      free(blob);
+      blobs[r] = NULL;
+      fclose(f);
+      return 0;
+    }
+    for (a = 0; a < na; a++)
+      altp[a] = blob + alt_starts[a];
+    altp[na] = NULL;
+    rule[r] = altp;
   }
   fclose(f);
   return 1;
