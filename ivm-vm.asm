@@ -63,7 +63,7 @@ displo:
         .byte   <op_8, <op_9, <op_bad, <op_semi, <op_lt, <op_eq, <op_gt, <op_not
         .byte   <op_bad, <op_bad, <op_B, <op_bad, <op_bad, <op_bad, <op_bad, <op_G
         .byte   <op_bad, <op_I, <op_J, <op_bad, <op_L, <op_bad, <op_N, <op_O
-        .byte   <op_bad, <op_Q, <op_bad, <op_S, <op_bad, <op_U, <op_bad, <op_bad
+        .byte   <op_P, <op_Q, <op_bad, <op_S, <op_bad, <op_U, <op_bad, <op_bad
         .byte   <op_X, <op_bad, <op_Z, <op_shl, <op_bad, <op_shr, <op_xor, <op_bad
         .byte   <op_bad, <op_bad, <op_bad, <op_bad, <op_bad, <op_bad, <op_bad, <op_bad
         .byte   <op_bad, <op_bad, <op_bad, <op_bad, <op_bad, <op_bad, <op_bad, <op_bad
@@ -80,7 +80,7 @@ disphi:
         .byte   >op_8, >op_9, >op_bad, >op_semi, >op_lt, >op_eq, >op_gt, >op_not
         .byte   >op_bad, >op_bad, >op_B, >op_bad, >op_bad, >op_bad, >op_bad, >op_G
         .byte   >op_bad, >op_I, >op_J, >op_bad, >op_L, >op_bad, >op_N, >op_O
-        .byte   >op_bad, >op_Q, >op_bad, >op_S, >op_bad, >op_U, >op_bad, >op_bad
+        .byte   >op_P, >op_Q, >op_bad, >op_S, >op_bad, >op_U, >op_bad, >op_bad
         .byte   >op_X, >op_bad, >op_Z, >op_shl, >op_bad, >op_shr, >op_xor, >op_bad
         .byte   >op_bad, >op_bad, >op_bad, >op_bad, >op_bad, >op_bad, >op_bad, >op_bad
         .byte   >op_bad, >op_bad, >op_bad, >op_bad, >op_bad, >op_bad, >op_bad, >op_bad
@@ -857,6 +857,25 @@ op_O:   USEY
         jsr     _putchar
 
         jmp     ynext
+
+
+;;; TOOD: P print string from ACC
+op_P:
+	USEY
+:	
+	ldy     #0		; each loop!
+        lda     (_ivm_acc),y
+        beq     :+
+        jsr     _putchar	; putchar trashes registers
+
+	;; ipc++
+        inc     _ivm_acc
+        bne     strlp
+        inc     _ivm_acc+1
+        bne     :-
+:	
+	jmp 	ynext
+	
 
 ;;; " print string at ipc until 0
 op_str:

@@ -4,6 +4,146 @@
 // Default type to 2 bytes for 6502,
 // however, on unix runtime int can be int/long!
 
+// Indirect Virtual Machine
+// ========================
+//
+// Unified global/constan/parameter/local/stack
+// handling. All are in one address space.
+//
+// Features:
+// - alphabetical memomic byte codes ('L" - load...)
+// - register machine (OP ADDR)
+// - 64 indirect call vectors by single byte code call
+// - 32 most common vars, single byte load (more common than save)
+// - local var access single byte (max 8)
+// - max 256 registers: [0, N[ per process
+// - no constants! folded into higher registers...
+// - no stack - using FORTRAN-style STATIC STACK
+//
+// It's observed that even large programs most like have
+// less than 256 variables active at any point, this includes
+// variables active on the stack. An array is counted as one
+// variable. Of course this does not directly allow for
+// recursion. That could be done copying to and from the heap.
+//
+// Each function has a logical parameter block:
+//   0: return address
+//   1: return value
+//   2: frame pointer (1 byte free)
+//   3: last parameter (load by '8')
+// 3+n: parameter n
+// ...: local var/temp...
+//
+//
+// 
+
+// BYTE CODES OVERVIEW
+// ====================
+// 0-31:                - fast var load (load typically 4x more common th store)
+// #$ ' ,    : \ _ `    - FREE to use byte read/write/indexing?
+// 12345678             - local vars 1-7, 8 ist last var (AX)
+// ACD H R T VY         - FREE op vars
+//   possibly usage: cAr Cons cDr, Heap/Here, Recurse, Tail-call, Vector/index? Yndex?
+//
+// 23: a-w              - FREE OrwinOS API or system library strXX functions?
+// ? abcdefgh           - store local (need analyze code savings)
+// ? ijklmno(p)         - index stuff, built in loops iGG GG if zero/non-zero?
+// ? qrstuvw            - str funs
+// ? xyz                - syscall function LN with 1,2,3 byte args indices+acc
+//
+// HIBIT
+//   64: 00-3f            - conditional relative jump forward
+//   64: (xx)             - vectored calls (max 64 funs)
+// 
+// Notes:
+//   ;  - load acc w return register (pascal) and do return
+//   X  - return with value in acc
+//   Q  - return with acc = 0
+// 
+// Missing: (q)
+//   memove  v
+//   memset  w
+//   strcpy  p
+//   strcat  t
+//   strchr  r
+//   strstr  s
+//   strdup  u
+//   atoi    q
+//
+//   strcmp  $
+//   strlen  `
+//   strN... ...
+
+// BYTE CODE DETAILS
+// =================
+//
+//0-31: global memory read value
+// ' '- nop
+//  ! - store at global address ACC
+//  " - inline print string end with \0
+//  # - number?
+//  $ - string?
+//  % - mod
+//  & - and
+//? ' - FREE
+//  ( - load from indexed array "(aaii" to ACC
+//  ) - store to indexed array ACC to ")aaii"
+//  *+ - mul, add
+//? , - TODO: read char inc ptr ",vv"
+//  - - subtract
+//  . - print number
+//  / - div
+//  0 - acc = 0/null/nil
+//  1234576 - parameter/local var read
+//  8 - first parameter
+//  9 - acc= -1/TRUE/0xffff
+//? : - define?
+//? ; - return /enddef
+//  <=> - cmp - lt eq gt => 0 or 1
+//  ? - NOT acc (C: !)
+//  @ - read from global address ACC
+//? A - car acc= acc[0] == @
+//  B - back jump "B03" = back 3 bytes
+//? C - cons(acc, $) - a variant of alloc cell and , ???
+//? D - cdr acc= acc[1] == 2 + @, LOL
+//  E - emit char = putchar(acc)
+//  F - free var, set it 0 "Fvv"
+//  G - conditional acc > 0: goto 1-255
+//? H
+//  IJ - inc/dec var, leave val in ACC
+//  K - key = getchar (waits?)
+//  L - load var
+//  M - calloc to variable and acc "Mvv"
+//  N - print newline 
+//  O - output next byte "O:" putchar(':')
+//  P - print string from ACC global address, acc points to \0
+//  Q - "Quit" local function, return 0
+//? R - recurse (save current frame, malloc?)
+//  S - store ACC in variable "Svv"
+//? T - type acc chars from $ (?)
+//  U - Unified op: ACC= var2 += var2
+//? V - TODO: same using ACC as value?
+//  W - write var as number (unsigned) "Wvv"
+//  XY
+//  Z - zero # (fill)
+//
+//  [ - shift left variable steps "[vv]
+//  '\'
+//  ] - shift rigth varible steps "]vv"
+//  ^ - xor "^vv"
+//? _ - global name lookup(acc) => addr
+//" ` - 
+//  { - shift ACC left fixed steps "{nn}
+//  | - or w var "|vv"
+//  } - shift ACC right "}nn"
+//
+//  ~ - inverse ACC (oric: gray)
+//? - TODO: NEXTPAGE: DEL not visible (oric: full block)
+//
+// $80-$bf (64) conditional relative jump (forward) get rid of G
+// $bf-$ff (64) subroutine calls (vectorized)
+
+
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -196,43 +336,6 @@ Process* Nevm(uchar *loaded) {
   return p;
 }
 
-
-// Byte codes used:
-// ================ 
-// 0-31:                - fast var load (load typically 4x more common th store)
-// #$ ' ,    : \ _ `    - FREE to use byte read/write/indexing?
-// 12345678             - local vars 1-7, 8 ist last var (AX)
-// ACD H R T VY         - FREE op vars
-//   possibly usage: cAr Cons cDr, Heap/Here, Recurse, Tail-call, Vector/index? Yndex?
-//
-// 23: a-w              - FREE OrwinOS API or system library strXX functions?
-// ? abcdefgh           - store local (need analyze code savings)
-// ? ijklmno(p)         - index stuff, built in loops iGG GG if zero/non-zero?
-// ? qrstuvw            - str funs
-// ? xyz                - syscall function LN with 1,2,3 byte args indices+acc
-//
-// HIBIT
-//   64: 00-3f            - conditional relative jump forward
-//   64: (xx)             - vectored calls (max 64 funs)
-// 
-// Notes:
-//   ;  - load acc w return register (pascal) and do return
-//   X  - return with value in acc
-//   Q  - return with acc = 0
-// 
-// Missing: (q)
-//   memove  v
-//   memset  w
-//   strcpy  p
-//   strcat  t
-//   strchr  r
-//   strstr  s
-//   strdup  u
-//   atoi    q
-//
-//   strcmp  $
-//   strlen  `
-//   strN... ...
 
 
 // TODO: make them zeropage cc65/oscar64
@@ -564,9 +667,10 @@ ZL(op_bnot,'~')  zp.acc = ~zp.acc;      goto xnext;
 ZL(op_K,   'K')  zp.acc = getchar();    goto xnext;
 ZL(op_E,   'E')  putchar(zp.acc);       goto xnext;
 ZL(op_N,   'N')  putchar('\n');         goto xnext;
-ZL(op_P,   'P')  printf("%u", (unsigned)zp.acc); goto xnext;
+ZL(op_P,   'P')  printf("%s", zp.acc);  goto xnext; // TODO: other platform
 ZL(op_O,   'O')  putchar(PAR);          goto pnext;
 ZL(op_W,   'W')  printf("%u", PAR);     goto pnext;
+// TODO: T printn ? Type w length (from index)
 ZL(op_dot, '.')  printf("%u", zp.acc);  goto xnext;
 ZL(op_str, '"')  while (*zp.ipc) putchar(*zp.ipc++);
                                         goto pnext;
