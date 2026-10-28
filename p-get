@@ -1,1 +1,3 @@
 cp ~/storage/downloads/parse.c . ; cp ~/storage/downloads/tpi.bnf . ; rm ~/storage/downloads/parse.c ; rm ~/storage/downloads/tpi.bnf 
+git diff > diff
+git diff

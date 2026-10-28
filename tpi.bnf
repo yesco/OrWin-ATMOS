@@ -1,7 +1,4 @@
 # -- BNF grammar for tpi.c PASCAL implementation
-# \< tail-recurse   \C commit   \n >=1 newline   \d number
-# \{ enter scope   \} exit scope   \+ declare ident   \i use ident in scope
-# continuation lines start with |
 P=program \+;DB.
 D=V\<|F\<|
 V=var M
@@ -13,9 +10,10 @@ I=integer|word
 H=V|
 B=begin C end;|begin C end
 C=S\<|
-S=\i:=E;|\i[E]:=E;
+S=\i:=0;[Z\1]|\i:=E;[L\2S\1]
+|\i\[E\]:=E;[L\3 S\1]
 |new(\i);|dispose(\i);|freemem(\i);|getmem(\i,E);|setlength(\i,E);
-|write(W);|writeln(W);
+|write(W);|writeln(W);[N ]
 |for \i:=E to E do S
 |if E then S else S|if E then S
 |B|;
@@ -23,26 +21,34 @@ W=J,\<|J|
 J=E|\s
 E=RX
 X=YR\<|
-Y=+|-|*|/|&|\||^|<|=|>|[|]|shl|shr
-R=\d|\i(Z)|\i|sizeof(T)|sizeof(\i)|not R|(E)
+Y=+|-|*|/|&|\||^|<|=|>|shl|shr
+R=\d|\i(Z)|\i|sizeof(T)\#02|sizeof(\i)\#02|not R[?\1 ]|(E)
 Z=E,\<|E|
 .
 
-
 -- Legend
 .   first on a line ends rules
-|   at line start = continue previous rule alt list
+|   at line start = continue previous rule
 
 Tokens:
-  \c  literal c
   \i  ident (must be in scope)
   \+  ident declare (add to scope)
   \d  number
   \s  string
   \n  >=1 newline, eats surrounding horizontal space
+
+  \c  literal c (unless assigned above); example:
+  \[ \] match literal [ ]
+
+Control:
   \{  enter scope
   \}  leave scope (drop names added inside)
   \<  tail-recurse this rule
   \C  commit buffer prefix
+
+  \#xx  value of parse rule is integer hex xx
+  \=1   value of parse rule is value of expression 1
+
+Generate:
   [..] production emit tpi bytecode after match
   \1..\9 in production: nth value result (\i \+ \d subrule)

@@ -200,15 +200,15 @@ Process* Nevm(uchar *loaded) {
 // Byte codes used:
 // ================ 
 // 0-31:                - fast var load (load typically 4x more common th store)
-// #$ ' , () : \ _ `    - FREE to use byte read/write/indexing?
+// #$ ' ,    : \ _ `    - FREE to use byte read/write/indexing?
 // 12345678             - local vars 1-7, 8 ist last var (AX)
 // ACD H R T VY         - FREE op vars
 //   possibly usage: cAr Cons cDr, Heap/Here, Recurse, Tail-call, Vector/index? Yndex?
 //
 // 23: a-w              - FREE OrwinOS API or system library strXX functions?
 // ? abcdefgh           - store local (need analyze code savings)
-// ? ijklmnop           - index stuff, built in loops iGG GG if zero/non-zero?
-// ? qrstuvw
+// ? ijklmno(p)         - index stuff, built in loops iGG GG if zero/non-zero?
+// ? qrstuvw            - str funs
 // ? xyz                - syscall function LN with 1,2,3 byte args indices+acc
 //
 // HIBIT

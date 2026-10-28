@@ -160,6 +160,7 @@ static void vlog(const char *fmt, ...) {
   va_list ap;
 
   if (verbose < 2) return;
+
   va_start(ap, fmt);
   vfprintf(stderr, fmt, ap);
   va_end(ap);
@@ -169,6 +170,7 @@ static void v1(const char *fmt, ...) {
   va_list ap;
 
   if (verbose < 1) return;
+
   va_start(ap, fmt);
   vfprintf(stderr, fmt, ap);
   va_end(ap);
@@ -178,6 +180,7 @@ static void v1_indent(void) {
   uchar i;
 
   if (verbose < 1) return;
+
   for (i = 0; i < sp; i++)
     fputc(' ', stderr);
 }
@@ -377,32 +380,43 @@ static uchar *run_production(uchar *p) {
     v1("<[");
   }
   while (*p && *p != ']') {
+
     if (*p == '\\' && p[1] >= '1' && p[1] <= '9') {
+
+      // get value of match
       n = (uchar)(p[1] - '0');
       b = (n <= fr->prod_n) ? fr->prod_cap[n] : 0;
       code_emit(b);
+      p += 2;
+
       if (verbose >= 1) {
         if (b >= 0x80)
-          v1("C%x", b & 0x7f);
+          v1("C%02x ", b & 0x7f);
         else
-          v1("%02x", b);
+          v1("%02x ", b);
       }
-      p += 2;
+
     } else {
+
+      // output literarl
       b = *p++;
       code_emit(b);
+
       if (verbose >= 1) {
-        if (b >= 32 && b < 127)
-          v1("%c", b);
+        if (b == ' ')
+          v1("   ");
+        else if (b > ' ' && b < 127)
+          v1("%c ", b);
         else
           v1("\\x%02x", b);
       }
+
     }
   }
-  if (verbose >= 1)
-    v1(">\n");
-  if (*p == ']')
-    p++;
+
+  if (verbose >= 1) v1(">\n");
+  if (*p == ']') p++;
+
   // rule result defaults to \\1 if present
   if (fr->prod_n >= 1)
     fr->result = fr->prod_cap[1];
@@ -674,6 +688,7 @@ static void build_one_rule(uchar r, char *rhs) {
       e = (uchar)p[1];
       if (e == 'i' || e == 'n' || e == 's' || e == 'C' || e == '<' ||
           e == 'd' || e == '+' || e == '{' || e == '}' ||
+          e == '[' || e == ']' ||
           (e >= '1' && e <= '9'))
         blob_len = (word)(blob_len + 2);
       else
@@ -702,6 +717,7 @@ static void build_one_rule(uchar r, char *rhs) {
       e = (uchar)p[1];
       if (e == 'i' || e == 'n' || e == 's' || e == 'C' || e == '<' ||
           e == 'd' || e == '+' || e == '{' || e == '}' ||
+          e == '[' || e == ']' ||
           (e >= '1' && e <= '9')) {
         blob[bi++] = '\\';
         blob[bi++] = e;
@@ -712,6 +728,9 @@ static void build_one_rule(uchar r, char *rhs) {
       continue;
     }
     if (*p == '|') {
+      // skip empty alts from || or line-join artifacts
+      if (na > 0 && alt_starts[na - 1] == bi)
+        continue;
       blob[bi++] = 0;
       if (na < 64)
         alt_starts[na++] = bi;
@@ -960,7 +979,7 @@ static int step(void) {
     return 1;
   }
 
-  // [ ... ] production — emit bytecode after pattern matched so far
+  // bare [ ... ] = production (use \[ \] in BNF to match bracket chars)
   if (c == '[') {
     uchar *p = run_production(alt + fr->ip + 1);
     fr->ip = (word)(p - alt);
@@ -1031,7 +1050,12 @@ static int step(void) {
       return 1;
     }
 
-    if (e == 'i') ok = match_ident();
+    // \[ \] = literal brackets (not production)
+    if (e == '[' || e == ']') {
+      skip_ws();
+      ok = match_lit(e);
+    }
+    else if (e == 'i') ok = match_ident();
     else if (e == '+') ok = match_ident_decl();
     else if (e == 'd') ok = match_num();
     else if (e == 'n') ok = match_newline();
@@ -1297,21 +1321,32 @@ int main(int argc, char **argv) {
     fprintf(stderr, "--- ACCEPT ---\n");
     {
       word i;
+      uchar b;
+      
       fprintf(stderr, "--- BYTECODE (%u bytes) ---\n", (unsigned)code_len);
+
+      // print somewhat readable
       for (i = 0; i < code_len; i++) {
-        uchar b = code_buf[i];
-        if (b >= 32 && b < 127 && b != ' ')
-          fputc(b, stderr);
-        else
-          fprintf(stderr, "<%02x>", b);
+        b = code_buf[i];
+
+        if (b > 32 && b < 127) {
+          if (strchr("#$(),.0123456789;<=>?ADEKNPQR~X", b))
+            fprintf(stderr, "%c ", b);
+          else
+            fprintf(stderr, "%c%02x ", b, code_buf[++i]);
+        } else
+          fprintf(stderr, "<%02x> ", b);
       }
       fputc('\n', stderr);
+
+      // dump hex
       for (i = 0; i < code_len; i++) {
         fprintf(stderr, "%02x", code_buf[i]);
         if ((i & 15) == 15) fputc('\n', stderr);
         else fputc(' ', stderr);
       }
       if (code_len & 15) fputc('\n', stderr);
+
     }
     err = 0; goto doclean;
   }
