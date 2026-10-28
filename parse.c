@@ -16,6 +16,41 @@
  * Capture commits only when an alternative succeeds.
  */
 
+// EDING INSTRUCTION (keep)
+// 1. use // comments ONLY
+// 2. prefer dynamic allocations ONLY except for static data
+// 3. design to have an init(filename) method
+// 4. assume there is "unbounded input" read using fgetc()
+//    (buffer a programming line/statement, can reset beginnin of it)
+//  4a. since we're doing backtracking, we may insert explicit \C
+//      commit characters at the end of key rules. This resets the
+//      buffer to beginning. For example once a statement has been
+//      parsed there is no ambiguity; we're committed to accept it.
+// 5. I think we could just read the bnf input, until a line
+//    starts with a '.', there just stop reading rules.
+// 6. use typedef unsigned char uchar; and remove ALL typecasts by using uchar everywhere
+// 7. typedef uint16_t word; use "word" instead of int unless you need signed values,
+//    prefer uchar if variable fits in it.
+// 8. newline between defs and code
+// 9. No line constants like 63? what is 63?
+// 10. What does "cap" mean, maybe use better name or at least 
+//     one // cap == capture text to print once committing
+// 11. c <= 32 is whitespace
+// 12. we want a run(n) method that does a chunk of work, possible
+//     n steps. It should be bounded in time, assume a 6502 1MHz
+//     so add comment for estimated run time in us/ms for n=1
+//     to that method.
+
+// How rules are managed and stored:
+// a) Read a single rule to a continugous malloced space, including all it's alts.
+//    Note offsets/make an dynamic array of pointers, terminated by 0,
+//    that are pointed to from rule[letter].
+// b) the uchar* pointers for alt point into the read single rule.
+//    the existsence of rule['X'-'A'] value means A rule is defined
+
+
+
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -34,8 +69,8 @@ static int   ignore_case = 1; /* -I default on; -C case-sensitive */
 
 
 static char  alts[26][MAX_ALTS][MAX_ALT_LEN];
-static int   nalt[26];
-static int   has_rule[26];
+static char  nalt[26];
+static char  has_rule[26]; // TODO: goal to remove.
 
 static char  src[MAX_SRC];
 static int   src_len;
@@ -532,36 +567,38 @@ static int run_machine(void) {
 
 int main(int argc, char **argv) {
   int i, ok;
-  {
-    int ai;
-    const char *bnf = NULL, *srcpath = NULL;
-    verbose = 0;
-    ignore_case = 1;
-    for (ai = 1; ai < argc; ai++) {
-      if (strcmp(argv[ai], "-v") == 0)
-        verbose++;
-      else if (strcmp(argv[ai], "-I") == 0)
-        ignore_case = 1;
-      else if (strcmp(argv[ai], "-C") == 0)
-        ignore_case = 0;
-      else if (!bnf)
-        bnf = argv[ai];
-      else if (!srcpath)
-        srcpath = argv[ai];
-    }
-    if (!bnf || !srcpath) {
-      fprintf(stderr, "usage: %s [-v|-vv] [-I|-C] grammar.bnf source.p\n", argv[0]);
-      fprintf(stderr, "  -v   compact parse trace\n");
-      fprintf(stderr, "  -vv  detailed engine trace\n");
-      fprintf(stderr, "  -I   ignore case (default)\n");
-      fprintf(stderr, "  -C   case-sensitive\n");
-      return 1;
-    }
-    src_name = srcpath;
-    if (!load_bnf(bnf)) return 1;
-    if (!load_src(srcpath)) return 1;
-  }
+  int ai;
+  const char *bnf = NULL, *srcpath = NULL;
 
+  // parse args
+  verbose = 0;
+  ignore_case = 1;
+  for (ai = 1; ai < argc; ai++) {
+    if (strcmp(argv[ai], "-v") == 0)
+      verbose++;
+    else if (strcmp(argv[ai], "-I") == 0)
+      ignore_case = 1;
+    else if (strcmp(argv[ai], "-C") == 0)
+      ignore_case = 0;
+    else if (!bnf)
+      bnf = argv[ai];
+    else if (!srcpath)
+      srcpath = argv[ai];
+  }
+  if (!bnf || !srcpath) {
+    fprintf(stderr, "usage: %s [-v|-vv] [-I|-C] grammar.bnf source.p\n", argv[0]);
+    fprintf(stderr, "  -v   compact parse trace\n");
+    fprintf(stderr, "  -vv  detailed engine trace\n");
+    fprintf(stderr, "  -I   ignore case (default)\n");
+    fprintf(stderr, "  -C   case-sensitive\n");
+    return 1;
+  }
+  src_name = srcpath;
+  if (!load_bnf(bnf)) return 1;
+  if (!load_src(srcpath)) return 1;
+
+
+  // print rules
   if (verbose >= 2) {
     fprintf(stderr, "--- rules ---\n");
     for (i = 0; i < 26; i++)
@@ -575,10 +612,14 @@ int main(int argc, char **argv) {
         fprintf(stderr, "\n");
       }
   }
-  if (verbose)
-    fprintf(stderr, "--- parse ---\n");
+  if (verbose) fprintf(stderr, "--- parse ---\n");
 
+
+  // do the parsing
   ok = run_machine();
+
+
+  // report status
   putchar('\n');
   if (ok) {
     skip_ws();
@@ -589,6 +630,9 @@ int main(int argc, char **argv) {
     fprintf(stderr, "--- ACCEPT ---\n");
     return 0;
   }
+
+  // ERROR?
   report_reject();
+
   return 1;
 }
