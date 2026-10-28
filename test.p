@@ -201,8 +201,11 @@ begin
 
    writeln();
    
+   { again... }
+   alpha := 7;
+   
    { Test: Complex math addition using our functional JSR routine }
-   beta := AddTen(Mul2(alpha)+1) + Mul2(11) + x + 3;
+   beta := AddTen(Mul2(alpha)+1) + Mul2(11);
 
    { Test: Printing numeric 47 value from memory }
    writeln(beta);
@@ -210,9 +213,6 @@ begin
    { Test: 54 = Two parameter function calling }
    writeln("--Two:");
    writeln(Two(alpha, beta));
-
-   writeln("--Magical injected input parameter X=");
-   writeln(X); { is 42 }
 
    { Test: looping sum }
    sum := 0;

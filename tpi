@@ -16,7 +16,7 @@ cl65 -C sim6502.cfg -vm -Oirs -t sim6502 -m tpi.map -o tpi.sim tpi.c || exit 1
 
 echo
 
-sim65 -c tpi.sim -O $name.p #|| exit 1
+sim65 -c tpi.sim -O $name.p || exit 1
 #sim65 -c tpi.sim $name.p
 
 echo
@@ -26,7 +26,7 @@ wc tpi.c
 
 echo
 echo
-echo "=== Run from BLOB ==="
+echo "===================== Run from BLOB ===================="
 echo
 sim65 -c tpi.sim $name.ivm
 echo
@@ -34,14 +34,14 @@ echo
 
 echo
 echo
-echo "=== IVM Run from BLOB ==="
+echo "==================== IVM Run from BLOB ================="
 ./ivm $name.ivm | tee $name.log
 echo
 echo
 
 echo
 echo
-echo "=== IVM-ASM Run from BLOB ==="
+echo "======= ASM ===== IVM-ASM Run from BLOB ================"
 ./ivm-asm $name.ivm | tee $name.asm.log
 echo
 echo

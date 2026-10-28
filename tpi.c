@@ -754,14 +754,18 @@ void next_token(void) {
       NEXT;
     }
     curr_tok.lexeme[len] = 0;
-    for (i = 0; i < len; i++)
-      curr_tok.lexeme[i] = toupper(curr_tok.lexeme[i]);
-
+    // identifiers are case-sensitive; only keyword match folds case
     curr_tok.type = TOK_IDENT;
-    for (i = 0; i < NKEYWORDS; i++) {
-      if (strcmp(curr_tok.lexeme, keywords[i].name) == 0) {
-        curr_tok.type = keywords[i].type;
-        break;
+    {
+      char up[MAX_SYM_LEN + 1];
+      for (i = 0; i < len; i++)
+        up[i] = (char)toupper((unsigned char)curr_tok.lexeme[i]);
+      up[len] = 0;
+      for (i = 0; i < NKEYWORDS; i++) {
+        if (strcmp(up, keywords[i].name) == 0) {
+          curr_tok.type = keywords[i].type;
+          break;
+        }
       }
     }
     return;

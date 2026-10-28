@@ -122,10 +122,13 @@ static word cap_max[MAX_STACK];
 // scopes: \+ adds name at scope_depth; \} drops names with name_scope >= depth
 #define MAX_NAMES  256
 #define NAME_LEN   48
+
 static char  names[MAX_NAMES][NAME_LEN];
 static uchar name_scope[MAX_NAMES];
 static word  nnames;
 static uchar scope_depth;
+static char  last_undef[NAME_LEN]; // last \i that failed scope check
+static uchar had_undef;
 
 // ---- logging ----
 
@@ -215,6 +218,7 @@ static void capture_add(uchar c) {
   uchar *nbuf;
 
   if (sp == 0) return;
+
   i = (word)(sp - 1);
   if (cap_len[i] + 1 >= cap_max[i]) {
     nm = cap_max[i] ? (word)(cap_max[i] * 2) : 256;
@@ -237,6 +241,7 @@ static void capture_commit(uchar frame) {
     cap_len[0] = 0;
     return;
   }
+
   p = (word)(frame - 1);
   for (i = 0; i < cap_len[frame]; i++) {
     if (cap_len[p] + 1 >= cap_max[p]) {
@@ -267,11 +272,30 @@ static void note_progress(void) {
 
 // ---- scopes ----
 
+static int name_eq(const char *a, const char *b) {
+  word ca, cb;
+
+  if (ignore_case) {
+    // TODO: use stricmp on cc65 or strcasecmp on unix?
+    while (*a && *b) {
+      ca = *a; cb = *b;
+
+      if (ca >= 'A' && ca <= 'Z') ca = (char)(ca - 'A' + 'a');
+      if (cb >= 'A' && cb <= 'Z') cb = (char)(cb - 'A' + 'a');
+      if (ca != cb) return 0;
+      a++;
+      b++;
+    }
+    return *a == 0 && *b == 0;
+  }
+  return strcmp(a, b) == 0;
+}
+
 static int name_in_scope(const char *id) {
   word i;
 
   for (i = 0; i < nnames; i++) {
-    if (strcmp(names[i], id) == 0)
+    if (name_eq(names[i], id))
       return 1;
   }
   return 0;
@@ -282,7 +306,7 @@ static int name_add(const char *id) {
 
   if (nnames >= MAX_NAMES) return 0;
   for (i = 0; i < nnames; i++) {
-    if (strcmp(names[i], id) == 0)
+    if (name_eq(names[i], id))
       return 1;
   }
   strncpy(names[nnames], id, NAME_LEN - 1);
@@ -332,19 +356,24 @@ static void skip_hspace(void) {
 
 static void skip_ws(void) {
   for (;;) {
+
     while (line_need() && is_ws(line_buf[line_pos])) {
       capture_add(line_buf[line_pos]);
       line_pos++;
       note_progress();
     }
     if (!line_need()) return;
+
+    // skip { comments }
     if (line_buf[line_pos] != '{') return;
     capture_add(line_buf[line_pos]);
+
     line_pos++;
     while (line_need() && line_buf[line_pos] != '}') {
       capture_add(line_buf[line_pos]);
       line_pos++;
     }
+
     if (line_need() && line_buf[line_pos] == '}') {
       capture_add(line_buf[line_pos]);
       line_pos++;
@@ -397,12 +426,15 @@ static int match_ident_raw(char *idbuf, word idmax) {
 
   skip_ws();
   if (!line_need()) return 0;
+
   c = line_buf[line_pos];
   if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')))
     return 0;
+
   n = 0;
   while (line_need()) {
     c = line_buf[line_pos];
+    // isalpha num || _
     if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
         (c >= '0' && c <= '9') || c == '_') {
       if (n + 1 < idmax)
@@ -423,6 +455,10 @@ static int match_ident(void) {
 
   if (!match_ident_raw(id, NAME_LEN)) return 0;
   if (!name_in_scope(id)) {
+    // remember for humane REJECT message
+    strncpy(last_undef, id, NAME_LEN - 1);
+    last_undef[NAME_LEN - 1] = 0;
+    had_undef = 1;
     vlog("  ident '%s' not in scope\n", id);
     return 0;
   }
@@ -652,6 +688,7 @@ static int rule_defined(uchar r) {
 
 static word rule_nalt(uchar r) {
   word n = 0;
+
   if (!rule[r]) return 0;
   while (rule[r][n]) n++;
   return n;
@@ -724,14 +761,18 @@ static int step(void) {
     vlog("ok %c alt %u -> @%u\n", 'A' + fr->rule, fr->alt, abs_pos());
     if (verbose >= 1 && cap_len[sp - 1] > 0) {
       word i;
+
       v1("\n");
       v1_indent();
       if (nalt > 1)
         v1("%c%u:", 'A' + fr->rule, fr->alt);
       else
         v1("%c:", 'A' + fr->rule);
+
+      // TODO: memmove?
       for (i = 0; i < cap_len[sp - 1]; i++) {
         uchar ch = capture[sp - 1][i];
+
         if (ch == '\n') v1("\n");
         else v1("%c", ch);
       }
@@ -739,12 +780,15 @@ static int step(void) {
       v1_indent();
       v1("<%c\n", 'A' + fr->rule);
     }
+
     capture_commit((uchar)(sp - 1));
     sp--;
     if (sp == 0) return 0;
+
     fr = &stack[sp - 1];
     fr->ip++;
     fr->state = ST_RUN;
+
     return 1;
   }
 
@@ -768,6 +812,7 @@ static int step(void) {
 
   c = alt[fr->ip];
 
+  // TODO: just call it? before, why special here: WRITE COMMENT OF LOGIC
   if (c == ' ') {
     skip_ws();
     fr->ip++;
@@ -894,11 +939,13 @@ static void report_reject(void) {
 
   fprintf(stderr, "\n--- REJECT at %u (furthest %u) ---\n",
           abs_pos(), max_pos_abs);
+
   fprintf(stderr, "STACK:");
-  if (far_sp == 0)
-    fprintf(stderr, " (empty)");
+  if (far_sp == 0) fprintf(stderr, " (empty)");
+
   for (i = 0; i < far_sp; i++)
     fprintf(stderr, " %c%u", far_stack[i], (unsigned)far_alt[i]);
+
   fprintf(stderr, "\n");
 
   if (far_sp > 0) {
@@ -909,16 +956,21 @@ static void report_reject(void) {
     if (rule_defined(r) && a < rule_nalt(r))
       fprintf(stderr, " alt %u \"%s\"", (unsigned)a,
               rule[r][a] ? (char *)rule[r][a] : "");
+
     fprintf(stderr, "\n");
   }
+
+  if (had_undef)
+    fprintf(stderr, "ERROR: identifier \"%s\" not defined here\n", last_undef);
 
   // re-read source around furthest absolute offset
   fprintf(stderr, "REJECT:\n");
   if (src_name) {
     FILE *rf = fopen(src_name, "r");
+
     if (rf) {
       long want = (long)max_pos_abs;
-      long base = want;
+      long base = 0;
       int ch, col = 0, nlines = 0, line = 1;
       long i;
 
@@ -930,21 +982,26 @@ static void report_reject(void) {
         if (ch == '\n') { line++; base = i + 1; col = 0; }
         else col++;
       }
+      // print error line, then caret under it, then a few following lines
       fseek(rf, base, SEEK_SET);
-      while (nlines < 5) {
-        long line_start = ftell(rf);
-
-        fprintf(stderr, "%s:%d: ", src_name, line + nlines);
+      fprintf(stderr, "%s:%d: ", src_name, line);
+      while ((ch = fgetc(rf)) != EOF && ch != '\n')
+        fputc(ch, stderr);
+      fputc('\n', stderr);
+      fprintf(stderr, "%s:%d: ", src_name, line);
+      for (i = 0; i < col; i++)
+        fputc(' ', stderr);
+      fprintf(stderr, "^\n");
+      // up to 4 more lines of context
+      nlines = 0;
+      while (nlines < 4 && ch != EOF) {
+        fprintf(stderr, "%s:%d: ", src_name, line + 1 + nlines);
         while ((ch = fgetc(rf)) != EOF && ch != '\n')
           fputc(ch, stderr);
         fputc('\n', stderr);
         nlines++;
         if (ch == EOF) break;
       }
-      fprintf(stderr, "%s:%d: ", src_name, line);
-      for (i = 0; i < col; i++)
-        fputc(' ', stderr);
-      fprintf(stderr, "^\n");
       fclose(rf);
     }
   }
@@ -975,7 +1032,9 @@ static int init(const char *bnf_path, const char *src_path) {
   sp = 0;
   nnames = 0;
   scope_depth = 0;
-  name_add("X"); // magical injected input parameter
+  had_undef = 0;
+  last_undef[0] = 0;
+  // no pre-seeded names — X must be declared in source if used
   {
     uchar i;
     for (i = 0; i < MAX_STACK; i++) {
@@ -994,7 +1053,7 @@ static int init(const char *bnf_path, const char *src_path) {
 }
 
 static void shutdown(void) {
-  uchar r;
+  uchar i;
 
   if (src_fp) {
     fclose(src_fp);
@@ -1002,43 +1061,42 @@ static void shutdown(void) {
   }
   free(line_buf);
   line_buf = NULL;
-  {
-    uchar i;
-    for (i = 0; i < MAX_STACK; i++) {
-      free(capture[i]);
-      capture[i] = NULL;
-    }
+
+  for (i = 0; i < MAX_STACK; i++) {
+    free(capture[i]);
+    capture[i] = NULL;
   }
-  for (r = 0; r < NRULES; r++) {
-    free(rule[r]);
-    rule[r] = NULL;
-    free(blobs[r]);
-    blobs[r] = NULL;
+
+  for (i = 0; i < NRULES; i++) {
+    free(rule[i]);
+    rule[i] = NULL;
+    free(blobs[i]);
+    blobs[i] = NULL;
   }
 }
 
 int main(int argc, char **argv) {
   const char *bnf = NULL;
   const char *srcpath = NULL;
-  word i;
+  word i, a;
   int rc;
-  int ai;
+  int err= 0;
 
   verbose = 0;
   ignore_case = 1;
 
   // parse arguments
-  for (ai = 1; ai < argc; ai++) {
-    if (strcmp(argv[ai], "-v") == 0)
+  for (i = 1; i < argc; i++) {
+    if (strcmp(argv[i], "-v") == 0)
       verbose++;
-    else if (strcmp(argv[ai], "-I") == 0)
+    else if (strcmp(argv[i], "-I") == 0)
       ignore_case = 1;
-    else if (strcmp(argv[ai], "-C") == 0)
+    else if (strcmp(argv[i], "-C") == 0)
       ignore_case = 0;
     else if (!bnf)
-      bnf = argv[ai];
+      bnf = argv[i];
     else if (!srcpath)
-      srcpath = argv[ai];
+      srcpath = argv[i];
   }
 
   if (!bnf || !srcpath) {
@@ -1051,10 +1109,11 @@ int main(int argc, char **argv) {
 
   // print rules
   if (verbose >= 2) {
+
     fprintf(stderr, "--- rules ---\n");
     for (i = 0; i < NRULES; i++)
+
       if (rule_defined((uchar)i)) {
-        word a;
         fprintf(stderr, "%c =", 'A' + (int)i);
         for (a = 0; rule[i][a]; a++) {
           if (a) fprintf(stderr, "|");
@@ -1071,23 +1130,26 @@ int main(int argc, char **argv) {
     rc = run(10000);
   } while (rc == 1);
 
-  // status report
+  // consistency check
   putchar('\n');
   if (rc == 0) {
+    // OK
+    
     skip_ws();
     if (line_need()) {
       fprintf(stderr, "--- OK but trailing input ---\n");
-      shutdown();
-      return 2;
+      err = 2; goto doclean;
     }
+
     fprintf(stderr, "--- ACCEPT ---\n");
-    shutdown();
-    return 0;
+    err = 0; goto doclean;
   }
 
   // error
-  
   report_reject();
+  err = 1;
+  
+doclean:
   shutdown();
-  return 1;
+  return err;
 }
