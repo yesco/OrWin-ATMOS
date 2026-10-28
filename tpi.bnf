@@ -21,7 +21,8 @@ S=\i:=E;|\i[E]:=E;
 |B|;
 W=J,\<|J|
 J=E|\s
-E=RY\<|R
+E=RX
+X=YR\<|
 Y=+|-|*|/|&|\||^|<|=|>|[|]|shl|shr
 R=\d|\i(Z)|\i|sizeof(T)|sizeof(\i)|not R|(E)
 Z=E,\<|E|
@@ -43,3 +44,5 @@ Tokens:
   \}  leave scope (drop names added inside)
   \<  tail-recurse this rule
   \C  commit buffer prefix
+  [..] production emit tpi bytecode after match
+  \1..\9 in production: nth value result (\i \+ \d subrule)

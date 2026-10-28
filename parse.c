@@ -19,6 +19,9 @@
 //   |          alternative (epsilon allowed)
 //   line '|'   continue previous rule (long alts)
 //   line '.'   end of rules section
+//   [ ... ]   production: after match, emit bytecode (tpi-style)
+//   \1..\9    in production: insert result byte from nth value match
+//              value matches: \i \+ \d and successful subrule calls
 //
 // Explicit stack — no recursive match.
 // capture == text held until alternative commits (then printed / flushed).
@@ -111,6 +114,11 @@ typedef struct {
   word nnames_save;   // scope name count at alt entry
   uchar scope_save;   // scope_depth at alt entry
   uchar state;
+  // production value captures \1..\9 (0 unused); result = rule output byte
+  uchar prod_cap[10];
+  uchar prod_n;
+  uchar result;
+  word code_save; // code_len at alt entry (backtrack)
 } Frame;
 
 static Frame stack[MAX_STACK];
@@ -131,6 +139,20 @@ static word  nnames;
 static uchar scope_depth;
 static char  last_undef[NAME_LEN]; // last \i that failed scope check
 static uchar had_undef;
+
+// name -> slot index (same order as names[])
+static uchar name_slot[MAX_NAMES];
+static uchar next_slot; // next free slot index for \+ decls / temps
+
+// constant pool: value -> slot with high bit (0x80|idx) like tpi consts
+#define MAX_CONSTS 64
+static word  const_val[MAX_CONSTS];
+static uchar nconsts;
+
+// emitted bytecode (tpi-compatible ops)
+#define MAX_CODE 4096
+static uchar code_buf[MAX_CODE];
+static word  code_len;
 
 // ---- logging ----
 
@@ -273,6 +295,7 @@ static void note_progress(void) {
   }
 }
 
+
 // ---- scopes ----
 
 static int name_eq(const char *a, const char *b) {
@@ -290,6 +313,103 @@ static int name_in_scope(const char *id) {
   return 0;
 }
 
+// ---- bytecode emission (tpi-style) ----
+
+static void code_emit(uchar b) {
+  if (code_len < MAX_CODE)
+    code_buf[code_len++] = b;
+}
+
+// record a value-producing match into \\1..\\9 of current frame
+static void record_capture(uchar val) {
+  Frame *fr;
+
+  if (sp == 0) return;
+  fr = &stack[sp - 1];
+  if (fr->prod_n < 9) {
+    fr->prod_n++;
+    fr->prod_cap[fr->prod_n] = val;
+  }
+  fr->result = val;
+}
+
+static uchar lookup_slot(const char *id) {
+  word i;
+
+  for (i = 0; i < nnames; i++) {
+    if (name_eq(names[i], id))
+      return name_slot[i];
+  }
+  return 0xff;
+}
+
+static uchar alloc_slot(void) {
+  uchar s;
+
+  s = next_slot;
+  if (next_slot < 0xff)
+    next_slot++;
+  return s;
+}
+
+static uchar intern_const(word v) {
+  uchar i;
+
+  for (i = 0; i < nconsts; i++) {
+    if (const_val[i] == v)
+      return (uchar)(0x80 | i);
+  }
+  if (nconsts >= MAX_CONSTS)
+    return 0x80;
+  const_val[nconsts] = v;
+  i = nconsts++;
+  return (uchar)(0x80 | i);
+}
+
+// run production string at p (points at first char after '['); returns ptr after ']'
+static uchar *run_production(uchar *p) {
+  Frame *fr;
+  uchar n, b;
+
+  fr = &stack[sp - 1];
+  if (verbose >= 1) {
+    v1_indent();
+    v1("<[");
+  }
+  while (*p && *p != ']') {
+    if (*p == '\\' && p[1] >= '1' && p[1] <= '9') {
+      n = (uchar)(p[1] - '0');
+      b = (n <= fr->prod_n) ? fr->prod_cap[n] : 0;
+      code_emit(b);
+      if (verbose >= 1) {
+        if (b >= 0x80)
+          v1("C%x", b & 0x7f);
+        else
+          v1("%02x", b);
+      }
+      p += 2;
+    } else {
+      b = *p++;
+      code_emit(b);
+      if (verbose >= 1) {
+        if (b >= 32 && b < 127)
+          v1("%c", b);
+        else
+          v1("\\x%02x", b);
+      }
+    }
+  }
+  if (verbose >= 1)
+    v1(">\n");
+  if (*p == ']')
+    p++;
+  // rule result defaults to \\1 if present
+  if (fr->prod_n >= 1)
+    fr->result = fr->prod_cap[1];
+  return p;
+}
+
+
 static int name_add(const char *id) {
   word i;
 
@@ -301,6 +421,7 @@ static int name_add(const char *id) {
   strncpy(names[nnames], id, NAME_LEN - 1);
   names[nnames][NAME_LEN - 1] = 0;
   name_scope[nnames] = scope_depth;
+  name_slot[nnames] = alloc_slot();
   nnames++;
   return 1;
 }
@@ -320,6 +441,7 @@ static void scope_leave(void) {
       if (w != i) {
         memcpy(names[w], names[i], NAME_LEN);
         name_scope[w] = name_scope[i];
+        name_slot[w] = name_slot[i];
       }
       w++;
     }
@@ -436,45 +558,56 @@ static int match_ident_raw(char *idbuf, word idmax) {
   return 1;
 }
 
-// \i — ident must already be in scope
+// \i — ident must already be in scope; result = its slot
 static int match_ident(void) {
   char id[NAME_LEN];
+  uchar slot;
 
   if (!match_ident_raw(id, NAME_LEN)) return 0;
   if (!name_in_scope(id)) {
-    // remember for humane REJECT message
     strncpy(last_undef, id, NAME_LEN - 1);
     last_undef[NAME_LEN - 1] = 0;
     had_undef = 1;
-    vlog("  ident '%s' not in scope\n", id);
+    vlog("  ident '%s' not in scope (nnames=%u depth=%u)\n",
+         id, (unsigned)nnames, (unsigned)scope_depth);
     return 0;
   }
+  slot = lookup_slot(id);
+  record_capture(slot);
   return 1;
 }
 
 // \+ — declare ident into current scope
+// \+ — declare ident into current scope; result = new slot
 static int match_ident_decl(void) {
   char id[NAME_LEN];
+  uchar slot;
 
   if (!match_ident_raw(id, NAME_LEN)) return 0;
   if (!name_add(id)) return 0;
-  vlog("  decl '%s' scope %u\n", id, (unsigned)scope_depth);
+  slot = lookup_slot(id);
+  record_capture(slot);
+  vlog("  decl '%s' scope %u slot %u\n", id, (unsigned)scope_depth, (unsigned)slot);
   return 1;
 }
 
 static int match_num(void) {
+  word v;
+  uchar slot;
+
   skip_ws();
   if (!line_need()) return 0;
-
   if (!isdigit(line_buf[line_pos])) return 0;
 
+  v = 0;
   while (line_need() && isdigit(line_buf[line_pos])) {
+    v = (word)(v * 10 + (line_buf[line_pos] - '0'));
     capture_add(line_buf[line_pos]);
     line_pos++;
   }
-
   note_progress();
-
+  slot = intern_const(v);
+  record_capture(slot);
   return 1;
 }
 
@@ -540,7 +673,8 @@ static void build_one_rule(uchar r, char *rhs) {
     if (*p == '\\' && p[1]) {
       e = (uchar)p[1];
       if (e == 'i' || e == 'n' || e == 's' || e == 'C' || e == '<' ||
-          e == 'd' || e == '+' || e == '{' || e == '}')
+          e == 'd' || e == '+' || e == '{' || e == '}' ||
+          (e >= '1' && e <= '9'))
         blob_len = (word)(blob_len + 2);
       else
         blob_len++;
@@ -567,7 +701,8 @@ static void build_one_rule(uchar r, char *rhs) {
     if (*p == '\\' && p[1]) {
       e = (uchar)p[1];
       if (e == 'i' || e == 'n' || e == 's' || e == 'C' || e == '<' ||
-          e == 'd' || e == '+' || e == '{' || e == '}') {
+          e == 'd' || e == '+' || e == '{' || e == '}' ||
+          (e >= '1' && e <= '9')) {
         blob[bi++] = '\\';
         blob[bi++] = e;
       } else {
@@ -701,6 +836,14 @@ static void push(uchar r, uchar state) {
   stack[sp].nnames_save = nnames;
   stack[sp].scope_save = scope_depth;
   stack[sp].state = state;
+  stack[sp].prod_n = 0;
+  stack[sp].result = 0;
+  stack[sp].code_save = code_len;
+  {
+    uchar zi;
+    for (zi = 0; zi < 10; zi++)
+      stack[sp].prod_cap[zi] = 0;
+  }
   cap_len[sp] = 0;
   sp++;
 }
@@ -740,6 +883,8 @@ static int step(void) {
     }
     line_pos = fr->save;
     cap_len[sp - 1] = fr->cap_save;
+    code_len = fr->code_save;
+    fr->prod_n = 0;
     fr->ip = 0;
     fr->state = ST_RUN;
     vlog("try %c alt %u @%u \"%s\"\n",
@@ -773,13 +918,16 @@ static int step(void) {
     }
 
     capture_commit((uchar)(sp - 1));
-    sp--;
-    if (sp == 0) return 0;
-
-    fr = &stack[sp - 1];
-    fr->ip++;
-    fr->state = ST_RUN;
-
+    {
+      uchar child_res = stack[sp - 1].result;
+      sp--;
+      if (sp == 0) return 0;
+      // parent records subrule result as next \n capture
+      record_capture(child_res);
+      fr = &stack[sp - 1];
+      fr->ip++;
+      fr->state = ST_RUN;
+    }
     return 1;
   }
 
@@ -787,6 +935,8 @@ static int step(void) {
   if (fr->state == ST_FAIL) {
     line_pos = fr->save;
     cap_len[sp - 1] = fr->cap_save;
+    code_len = fr->code_save;
+    fr->prod_n = 0;
     restore_scope(fr);
     fr->alt++;
     fr->ip = 0;
@@ -807,6 +957,13 @@ static int step(void) {
   if (c == ' ') {
     skip_ws();
     fr->ip++;
+    return 1;
+  }
+
+  // [ ... ] production — emit bytecode after pattern matched so far
+  if (c == '[') {
+    uchar *p = run_production(alt + fr->ip + 1);
+    fr->ip = (word)(p - alt);
     return 1;
   }
 
@@ -836,6 +993,8 @@ static int step(void) {
       fr->cap_save = cap_len[sp - 1];
       fr->nnames_save = nnames;
       fr->scope_save = scope_depth;
+      fr->code_save = code_len;
+      fr->prod_n = 0;
       fr->state = ST_TRY;
       vlog("  tail %c @%u\n", 'A' + fr->rule, abs_pos());
       return 1;
@@ -1025,6 +1184,9 @@ static int init(const char *bnf_path, const char *src_path) {
   scope_depth = 0;
   had_undef = 0;
   last_undef[0] = 0;
+  next_slot = 0;
+  nconsts = 0;
+  code_len = 0;
   // no pre-seeded names — X must be declared in source if used
   {
     uchar i;
@@ -1133,6 +1295,24 @@ int main(int argc, char **argv) {
     }
 
     fprintf(stderr, "--- ACCEPT ---\n");
+    {
+      word i;
+      fprintf(stderr, "--- BYTECODE (%u bytes) ---\n", (unsigned)code_len);
+      for (i = 0; i < code_len; i++) {
+        uchar b = code_buf[i];
+        if (b >= 32 && b < 127 && b != ' ')
+          fputc(b, stderr);
+        else
+          fprintf(stderr, "<%02x>", b);
+      }
+      fputc('\n', stderr);
+      for (i = 0; i < code_len; i++) {
+        fprintf(stderr, "%02x", code_buf[i]);
+        if ((i & 15) == 15) fputc('\n', stderr);
+        else fputc(' ', stderr);
+      }
+      if (code_len & 15) fputc('\n', stderr);
+    }
     err = 0; goto doclean;
   }
 
