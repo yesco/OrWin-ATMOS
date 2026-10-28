@@ -9,9 +9,15 @@
 //   A-Z        call rule
 //   \<         tail-recurse current rule (reset ip/alt, keep frame)
 //   \C         commit: drop line buffer up to current point
-//   \i \n \s   ident / number / string
+//   \i         ident in scope (must be declared by \+)
+//   \+         ident declare (match + add to current scope)
+//   \d         number
+//   \s         string
+//   \n         >=1 newline; eats surrounding horizontal space
+//   \{ \}      enter / leave scope (\} drops names added in scope)
 //   \| \c      literal | or other escaped char
 //   |          alternative (epsilon allowed)
+//   line '|'   continue previous rule (long alts)
 //   line '.'   end of rules section
 //
 // Explicit stack — no recursive match.
@@ -68,7 +74,6 @@ typedef uint16_t word;
 #define NRULES      26
 #define MAX_STACK   128
 #define LINE_CAP    4096
-#define CAP_MAX     4096
 
 // rule['X'-'A'] = NULL-terminated array of uchar* into one malloc blob
 static uchar **rule[NRULES];
@@ -101,15 +106,26 @@ typedef struct {
   word save;          // line_pos at start of this alt
   word save_abs;      // absolute for furthest
   word cap_save;      // capture length at alt entry (for backtrack)
+  word nnames_save;   // scope name count at alt entry
+  uchar scope_save;   // scope_depth at alt entry
   uchar state;
 } Frame;
 
 static Frame stack[MAX_STACK];
 static uchar sp;
 
-// capture: hold matched text until alt commits
-static uchar capture[MAX_STACK][CAP_MAX];
+// capture: hold matched text until alt commits (grows)
+static uchar *capture[MAX_STACK];
 static word cap_len[MAX_STACK];
+static word cap_max[MAX_STACK];
+
+// scopes: \+ adds name at scope_depth; \} drops names with name_scope >= depth
+#define MAX_NAMES  256
+#define NAME_LEN   48
+static char  names[MAX_NAMES][NAME_LEN];
+static uchar name_scope[MAX_NAMES];
+static word  nnames;
+static uchar scope_depth;
 
 // ---- logging ----
 
@@ -195,13 +211,24 @@ static void line_commit(void) {
 }
 
 static void capture_add(uchar c) {
+  word i, nm;
+  uchar *nbuf;
+
   if (sp == 0) return;
-  if (cap_len[sp - 1] + 1 < CAP_MAX)
-    capture[sp - 1][cap_len[sp - 1]++] = c;
+  i = (word)(sp - 1);
+  if (cap_len[i] + 1 >= cap_max[i]) {
+    nm = cap_max[i] ? (word)(cap_max[i] * 2) : 256;
+    nbuf = (uchar *)realloc(capture[i], nm);
+    if (!nbuf) return;
+    capture[i] = nbuf;
+    cap_max[i] = nm;
+  }
+  capture[i][cap_len[i]++] = c;
 }
 
 static void capture_commit(uchar frame) {
-  word p, i;
+  word p, i, nm;
+  uchar *nbuf;
 
   if (frame == 0) {
     for (i = 0; i < cap_len[0]; i++)
@@ -212,8 +239,14 @@ static void capture_commit(uchar frame) {
   }
   p = (word)(frame - 1);
   for (i = 0; i < cap_len[frame]; i++) {
-    if (cap_len[p] + 1 < CAP_MAX)
-      capture[p][cap_len[p]++] = capture[frame][i];
+    if (cap_len[p] + 1 >= cap_max[p]) {
+      nm = cap_max[p] ? (word)(cap_max[p] * 2) : 256;
+      nbuf = (uchar *)realloc(capture[p], nm);
+      if (!nbuf) break;
+      capture[p] = nbuf;
+      cap_max[p] = nm;
+    }
+    capture[p][cap_len[p]++] = capture[frame][i];
   }
   cap_len[frame] = 0;
 }
@@ -229,6 +262,69 @@ static void note_progress(void) {
   for (i = 0; i < far_sp; i++) {
     far_stack[i] = (uchar)('A' + stack[i].rule);
     far_alt[i] = stack[i].alt;
+  }
+}
+
+// ---- scopes ----
+
+static int name_in_scope(const char *id) {
+  word i;
+
+  for (i = 0; i < nnames; i++) {
+    if (strcmp(names[i], id) == 0)
+      return 1;
+  }
+  return 0;
+}
+
+static int name_add(const char *id) {
+  word i;
+
+  if (nnames >= MAX_NAMES) return 0;
+  for (i = 0; i < nnames; i++) {
+    if (strcmp(names[i], id) == 0)
+      return 1;
+  }
+  strncpy(names[nnames], id, NAME_LEN - 1);
+  names[nnames][NAME_LEN - 1] = 0;
+  name_scope[nnames] = scope_depth;
+  nnames++;
+  return 1;
+}
+
+static void scope_enter(void) {
+  if (scope_depth < 255)
+    scope_depth++;
+}
+
+static void scope_leave(void) {
+  word i, w;
+
+  if (scope_depth == 0) return;
+  w = 0;
+  for (i = 0; i < nnames; i++) {
+    if (name_scope[i] < scope_depth) {
+      if (w != i) {
+        memcpy(names[w], names[i], NAME_LEN);
+        name_scope[w] = name_scope[i];
+      }
+      w++;
+    }
+  }
+  nnames = w;
+  scope_depth--;
+}
+
+static void skip_hspace(void) {
+  uchar c;
+
+  while (line_need()) {
+    c = line_buf[line_pos];
+    if (c == ' ' || c == '\t' || c == '\r') {
+      capture_add(c);
+      line_pos++;
+    } else
+      break;
   }
 }
 
@@ -257,6 +353,25 @@ static void skip_ws(void) {
   }
 }
 
+// \n in BNF: hspace, >=1 newline, hspace; then comments via skip_ws
+static int match_newline(void) {
+  word nnl;
+
+  skip_hspace();
+  nnl = 0;
+  while (line_need() && line_buf[line_pos] == '\n') {
+    capture_add('\n');
+    line_pos++;
+    nnl++;
+    note_progress();
+    skip_hspace();
+  }
+  if (nnl == 0) return 0;
+  skip_ws();
+  return 1;
+}
+
+
 static int match_lit(uchar want) {
   uchar g;
 
@@ -276,29 +391,51 @@ static int match_lit(uchar want) {
   return 1;
 }
 
-static int match_ident(void) {
+static int match_ident_raw(char *idbuf, word idmax) {
   uchar c;
+  word n;
 
   skip_ws();
   if (!line_need()) return 0;
-
   c = line_buf[line_pos];
   if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')))
     return 0;
-
+  n = 0;
   while (line_need()) {
     c = line_buf[line_pos];
-
     if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
         (c >= '0' && c <= '9') || c == '_') {
+      if (n + 1 < idmax)
+        idbuf[n++] = (char)c;
       capture_add(c);
       line_pos++;
     } else
       break;
   }
-
+  idbuf[n] = 0;
   note_progress();
+  return 1;
+}
 
+// \i — ident must already be in scope
+static int match_ident(void) {
+  char id[NAME_LEN];
+
+  if (!match_ident_raw(id, NAME_LEN)) return 0;
+  if (!name_in_scope(id)) {
+    vlog("  ident '%s' not in scope\n", id);
+    return 0;
+  }
+  return 1;
+}
+
+// \+ — declare ident into current scope
+static int match_ident_decl(void) {
+  char id[NAME_LEN];
+
+  if (!match_ident_raw(id, NAME_LEN)) return 0;
+  if (!name_add(id)) return 0;
+  vlog("  decl '%s' scope %u\n", id, (unsigned)scope_depth);
   return 1;
 }
 
@@ -356,7 +493,7 @@ static void free_rules(void) {
 
   for (r = 0; r < NRULES; r++) {
     if (rule[r]) {
-      // alts point into blob; blob is rule[r][0]'s base — store blob at [-1]? 
+      // alts point into blob; blob is rule[r][0]'s base — store blob at [-1]?
       // we keep blob pointer as rule[r][0] only if first alt non-null.
       // simpler: first entry is special — actually free blob via separate table
       free(rule[r]);
@@ -368,10 +505,83 @@ static void free_rules(void) {
 // blobs[r] holds the contiguous text for rule r
 static uchar *blobs[NRULES];
 
+static void build_one_rule(uchar r, char *rhs) {
+  char *p;
+  uchar *blob, **altp, e;
+  word blob_len, a, bi, na, alt_starts[64];
+
+  // expand \| and \c (not specials) into blob; keep \i \n \s \C \< \d \+ \{ \}
+  // count alts and build contiguous string with 0 separators between alts
+  blob_len = 0;
+  for (p = rhs; *p; p++) {
+    if (*p == '\\' && p[1]) {
+      e = (uchar)p[1];
+      if (e == 'i' || e == 'n' || e == 's' || e == 'C' || e == '<' ||
+          e == 'd' || e == '+' || e == '{' || e == '}')
+        blob_len = (word)(blob_len + 2);
+      else
+        blob_len++;
+      p++;
+      continue;
+    }
+    if (*p == '|') {
+      blob_len++;
+      continue;
+    }
+    blob_len++;
+  }
+
+  blob = (uchar *)malloc(blob_len + 64);
+  if (!blob) return;
+  free(blobs[r]);
+  free(rule[r]);
+  blobs[r] = blob;
+
+  bi = 0;
+  na = 0;
+  alt_starts[na++] = 0;
+  for (p = rhs; *p; p++) {
+    if (*p == '\\' && p[1]) {
+      e = (uchar)p[1];
+      if (e == 'i' || e == 'n' || e == 's' || e == 'C' || e == '<' ||
+          e == 'd' || e == '+' || e == '{' || e == '}') {
+        blob[bi++] = '\\';
+        blob[bi++] = e;
+      } else {
+        blob[bi++] = e;
+      }
+      p++;
+      continue;
+    }
+    if (*p == '|') {
+      blob[bi++] = 0;
+      if (na < 64)
+        alt_starts[na++] = bi;
+      continue;
+    }
+    blob[bi++] = (uchar)*p;
+  }
+  blob[bi++] = 0;
+
+  altp = (uchar **)malloc(sizeof(uchar *) * (na + 1));
+  if (!altp) {
+    free(blob);
+    blobs[r] = NULL;
+    return;
+  }
+  for (a = 0; a < na; a++)
+    altp[a] = blob + alt_starts[a];
+  altp[na] = NULL;
+  rule[r] = altp;
+}
+
 static int load_bnf(const char *path) {
   FILE *f;
   char line[1024];
-  uchar r;
+  char acc[4096];
+  uchar r, cur;
+  char *nl, *eq, *p;
+  word acc_len, have_cur;
 
   free_rules();
   for (r = 0; r < NRULES; r++) {
@@ -385,99 +595,53 @@ static int load_bnf(const char *path) {
     return 0;
   }
 
-  while (fgets(line, sizeof line, f)) {
-    char *nl;
-    char *eq;
-    char *p;
-    char *rhs;
-    uchar *blob;
-    uchar **altp;
-    uchar e;
-    word blob_len;
-    word n_alts;
-    word a;
-    word bi;
-    word na;
-    word alt_starts[64];
+  have_cur = 0;
+  cur = 0;
+  acc_len = 0;
+  acc[0] = 0;
 
+  while (fgets(line, sizeof line, f)) {
     nl = strchr(line, '\n');
     if (nl) *nl = 0;
     if (line[0] == '.') break;
     if (line[0] == 0 || line[0] == '#') continue;
-    if (!(line[0] >= 'A' && line[0] <= 'Z')) continue;
+
+    p = line;
+    while (*p == ' ' || *p == '\t') p++;
+
+    // continuation: line starts with |
+    if (*p == '|' && have_cur) {
+      while (*p && acc_len + 1 < sizeof acc)
+        acc[acc_len++] = *p++;
+      acc[acc_len] = 0;
+      continue;
+    }
+
+    // new rule: flush previous
+    if (have_cur)
+      build_one_rule(cur, acc);
+
+    if (!(line[0] >= 'A' && line[0] <= 'Z')) {
+      have_cur = 0;
+      continue;
+    }
     eq = strchr(line, '=');
-    if (!eq) continue;
-
-    r = (uchar)(line[0] - 'A');
-    rhs = eq + 1;
-
-    // expand \| and \c (not i/n/s/C/<) into blob; keep \i \n \s \C \<
-    // count alts and build contiguous string with 0 separators between alts
-    blob_len = 0;
-    n_alts = 1;
-    for (p = rhs; *p; p++) {
-      if (*p == '\\' && p[1]) {
-        e = (uchar)p[1];
-        if (e == 'i' || e == 'n' || e == 's' || e == 'C' || e == '<')
-          blob_len = (word)(blob_len + 2);
-        else
-          blob_len++;
-        p++;
-        continue;
-      }
-      if (*p == '|') {
-        n_alts++;
-        blob_len++; // 0 separator stored as 0 in blob between alts
-        continue;
-      }
-      blob_len++;
+    if (!eq) {
+      have_cur = 0;
+      continue;
     }
-
-    blob = (uchar *)malloc(blob_len + n_alts + 4);
-    if (!blob) {
-      fclose(f);
-      return 0;
-    }
-    blobs[r] = blob;
-
-    // write alts as C-strings back-to-back, count them
-    bi = 0;
-    na = 0;
-    alt_starts[na++] = 0;
-    for (p = rhs; *p; p++) {
-      if (*p == '\\' && p[1]) {
-        e = (uchar)p[1];
-        if (e == 'i' || e == 'n' || e == 's' || e == 'C' || e == '<') {
-          blob[bi++] = '\\';
-          blob[bi++] = e;
-        } else {
-          blob[bi++] = e;
-        }
-        p++;
-        continue;
-      }
-      if (*p == '|') {
-        blob[bi++] = 0;
-        if (na < 64)
-          alt_starts[na++] = bi;
-        continue;
-      }
-      blob[bi++] = (uchar)*p;
-    }
-    blob[bi++] = 0;
-
-    altp = (uchar **)malloc(sizeof(uchar *) * (na + 1));
-    if (!altp) {
-      free(blob);
-      blobs[r] = NULL;
-      fclose(f);
-      return 0;
-    }
-    for (a = 0; a < na; a++)
-      altp[a] = blob + alt_starts[a];
-    altp[na] = NULL;
-    rule[r] = altp;
+    cur = (uchar)(line[0] - 'A');
+    have_cur = 1;
+    p = eq + 1;
+    acc_len = 0;
+    while (*p && acc_len + 1 < sizeof acc)
+      acc[acc_len++] = *p++;
+    acc[acc_len] = 0;
   }
+
+  if (have_cur)
+    build_one_rule(cur, acc);
+
   fclose(f);
   return 1;
 }
@@ -506,9 +670,16 @@ static void push(uchar r, uchar state) {
   stack[sp].save = line_pos;
   stack[sp].save_abs = abs_pos();
   stack[sp].cap_save = 0;
+  stack[sp].nnames_save = nnames;
+  stack[sp].scope_save = scope_depth;
   stack[sp].state = state;
   cap_len[sp] = 0;
   sp++;
+}
+
+static void restore_scope(Frame *fr) {
+  nnames = fr->nnames_save;
+  scope_depth = fr->scope_save;
 }
 
 // ---- one step ----
@@ -581,6 +752,7 @@ static int step(void) {
   if (fr->state == ST_FAIL) {
     line_pos = fr->save;
     cap_len[sp - 1] = fr->cap_save;
+    restore_scope(fr);
     fr->alt++;
     fr->ip = 0;
     fr->state = ST_TRY;
@@ -626,6 +798,8 @@ static int step(void) {
       fr->save = line_pos;
       fr->save_abs = abs_pos();
       fr->cap_save = cap_len[sp - 1];
+      fr->nnames_save = nnames;
+      fr->scope_save = scope_depth;
       fr->state = ST_TRY;
       vlog("  tail %c @%u\n", 'A' + fr->rule, abs_pos());
       return 1;
@@ -648,8 +822,24 @@ static int step(void) {
       return 1;
     }
 
+    if (e == '{') {
+      scope_enter();
+      fr->ip = (word)(fr->ip + 2);
+      vlog("  scope enter %u\n", (unsigned)scope_depth);
+      return 1;
+    }
+
+    if (e == '}') {
+      scope_leave();
+      fr->ip = (word)(fr->ip + 2);
+      vlog("  scope leave %u\n", (unsigned)scope_depth);
+      return 1;
+    }
+
     if (e == 'i') ok = match_ident();
-    else if (e == 'n') ok = match_num();
+    else if (e == '+') ok = match_ident_decl();
+    else if (e == 'd') ok = match_num();
+    else if (e == 'n') ok = match_newline();
     else if (e == 's') ok = match_str();
     else {
       skip_ws();
@@ -783,6 +973,17 @@ static int init(const char *bnf_path, const char *src_path) {
   max_pos_abs = 0;
   far_sp = 0;
   sp = 0;
+  nnames = 0;
+  scope_depth = 0;
+  name_add("X"); // magical injected input parameter
+  {
+    uchar i;
+    for (i = 0; i < MAX_STACK; i++) {
+      capture[i] = NULL;
+      cap_len[i] = 0;
+      cap_max[i] = 0;
+    }
+  }
 
   if (!rule_defined((uchar)('P' - 'A'))) {
     fprintf(stderr, "missing start rule P\n");
@@ -801,6 +1002,13 @@ static void shutdown(void) {
   }
   free(line_buf);
   line_buf = NULL;
+  {
+    uchar i;
+    for (i = 0; i < MAX_STACK; i++) {
+      free(capture[i]);
+      capture[i] = NULL;
+    }
+  }
   for (r = 0; r < NRULES; r++) {
     free(rule[r]);
     rule[r] = NULL;

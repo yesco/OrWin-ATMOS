@@ -1,34 +1,45 @@
 # -- BNF grammar for tpi.c PASCAL implementation
-# \< = tail-recurse current rule (replaces right-recursion)
-# \C = commit matched prefix (drop line buffer head)
-P=program \i;DB.
+# \< tail-recurse   \C commit   \n >=1 newline   \d number
+# \{ enter scope   \} exit scope   \+ declare ident   \i use ident in scope
+# continuation lines start with |
+P=program \+;DB.
 D=V\<|F\<|
 V=var M
-M=\i:T;\<|
-F=function \i(A):T;HB
-A=\i:T,\<|\i:T;\<|\i:T|
+M=\+:T;\<|
+F=function \+\{(A):T;HB\}
+A=\+:T,\<|\+:T;\<|\+:T|
 T=^I|I
 I=integer|word
 H=V|
 B=begin C end;|begin C end
 C=S\<|
-S=\i:=E;|\i[E]:=E;|new(\i);|dispose(\i);|freemem(\i);|getmem(\i,E);|setlength(\i,E);|write(W);|writeln(W);|for \i:=E to E do S|if E then S else S|if E then S|B|;
+S=\i:=E;|\i[E]:=E;
+|new(\i);|dispose(\i);|freemem(\i);|getmem(\i,E);|setlength(\i,E);
+|write(W);|writeln(W);
+|for \i:=E to E do S
+|if E then S else S|if E then S
+|B|;
 W=J,\<|J|
 J=E|\s
 E=RY\<|R
 Y=+|-|*|/|&|\||^|<|=|>|[|]|shl|shr
-R=\n|\i(Z)|\i|sizeof(T)|sizeof(\i)|not R|(E)
+R=\d|\i(Z)|\i|sizeof(T)|sizeof(\i)|not R|(E)
 Z=E,\<|E|
 .
 
 
 -- Legend
-.   first on a line ends rules, parsing stops
+.   first on a line ends rules
+|   at line start = continue previous rule alt list
 
 Tokens:
-  \c  quotes c
-  \i ident
-  \n number
-  \s string
-  \< tail-recurse this rule
-  \C commit (drop buffer prefix)
+  \c  literal c
+  \i  ident (must be in scope)
+  \+  ident declare (add to scope)
+  \d  number
+  \s  string
+  \n  >=1 newline, eats surrounding horizontal space
+  \{  enter scope
+  \}  leave scope (drop names added inside)
+  \<  tail-recurse this rule
+  \C  commit buffer prefix

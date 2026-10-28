@@ -202,7 +202,7 @@ begin
    writeln();
    
    { Test: Complex math addition using our functional JSR routine }
-   beta := AddTen(Mul2(alpha)+1) + Mul2(11);
+   beta := AddTen(Mul2(alpha)+1) + Mul2(11) + x + 3;
 
    { Test: Printing numeric 47 value from memory }
    writeln(beta);
