@@ -1,22 +1,24 @@
 # -- BNF grammar for tpi.c PASCAL implementation
+# \< = tail-recurse current rule (replaces right-recursion)
+# \C = commit matched prefix (drop line buffer head)
 P=program \i;DB.
-D=VD|FD|
+D=V\<|F\<|
 V=var M
-M=\i:T;M|
+M=\i:T;\<|
 F=function \i(A):T;HB
-A=\i:T,A|\i:T;A|\i:T|
+A=\i:T,\<|\i:T;\<|\i:T|
 T=^I|I
 I=integer|word
 H=VB|
 B=begin C end;|begin C end
-C=SC|S|
+C=S\<|
 S=\i:=E;|\i[E]:=E;|new(\i);|dispose(\i);|freemem(\i);|getmem(\i,E);|setlength(\i,E);|write(W);|writeln(W);|for \i:=E to E do S|if E then S else S|if E then S|B|;
-W=J,W|J|
+W=J,\<|J|
 J=E|\s
-E=RYE|R
-Y=+|-|*|/|&|\|^|<|=|>|[|]|shl|shr
+E=RY\<|R
+Y=+|-|*|/|&|\||^|<|=|>|[|]|shl|shr
 R=\n|\i(Z)|\i|sizeof(T)|sizeof(\i)|not R|(E)
-Z=E,Z|E|
+Z=E,\<|E|
 .
 
 
@@ -24,26 +26,9 @@ Z=E,Z|E|
 .   first on a line ends rules, parsing stops
 
 Tokens:
-  \c  quotes c 
+  \c  quotes c
   \i ident
   \n number
   \s string
-
-Letters:
-  Program
-  Decls
-  V/M var list
-  Function
-  Args
-  Type
-  Integer-ish
-  H optional
-  locals
-  B block
-  Compound stmts
-  Stmt
-  W/J write args
-  Expr
-  Y infix op
-  R primary
-  Z call args
+  \< tail-recurse this rule
+  \C commit (drop buffer prefix)

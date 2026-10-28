@@ -1,22 +1,28 @@
-/* parse.c — iterative BNF bytecode interpreter
- *
- *   ./parse tpi.bnf test.p
- *
- * BNF (tpi.bnf):
- *   X=body          rule X
- *   a-z / punct     match char (letters case-insensitive)
- *   space           skip whitespace + {comments}
- *   A-Z             call rule
- *   \i \n \s        ident / number / string
- *   \|  \c          literal | or literal c (loader expands)
- *   |               alternative (epsilon ok)
- *   line starting . ends rule section
- *
- * Explicit stack — no recursive match.
- * Capture commits only when an alternative succeeds.
- */
+// parse.c — iterative BNF bytecode interpreter
+//
+//   ./parse [-v|-vv] [-I|-C] grammar.bnf source.p
+//
+// BNF:
+//   X=body     rule X (A-Z)
+//   a-z/punct  match char (-I case-insensitive, default)
+//   space      skip whitespace (c<=32) and { comments }
+//   A-Z        call rule
+//   \<         tail-recurse current rule (reset ip/alt, keep frame)
+//   \C         commit: drop line buffer up to current point
+//   \i \n \s   ident / number / string
+//   \| \c      literal | or other escaped char
+//   |          alternative (epsilon allowed)
+//   line '.'   end of rules section
+//
+// Explicit stack — no recursive match.
+// capture == text held until alternative commits (then printed / flushed).
 
-// EDING INSTRUCTION (keep)
+// EDING INSTRUCTION (don't remove!)
+// =================================
+//-2. do NOT remove my comments that describe sections!
+//
+//-1. DO NOT change lines/comments unless it is needed for functionality
+// 0. Keep formatting as it is even if non-standard, adjust as neeed.
 // 1. use // comments ONLY
 // 2. prefer dynamic allocations ONLY except for static data
 // 3. design to have an init(filename) method
@@ -32,22 +38,20 @@
 // 7. typedef uint16_t word; use "word" instead of int unless you need signed values,
 //    prefer uchar if variable fits in it.
 // 8. newline between defs and code
-// 9. No line constants like 63? what is 63?
-// 10. What does "cap" mean, maybe use better name or at least 
-//     one // cap == capture text to print once committing
-// 11. c <= 32 is whitespace
-// 12. we want a run(n) method that does a chunk of work, possible
-//     n steps. It should be bounded in time, assume a 6502 1MHz
-//     so add comment for estimated run time in us/ms for n=1
-//     to that method.
 
-// How rules are managed and stored:
-// a) Read a single rule to a continugous malloced space, including all it's alts.
-//    Note offsets/make an dynamic array of pointers, terminated by 0,
-//    that are pointed to from rule[letter].
-// b) the uchar* pointers for alt point into the read single rule.
-//    the existsence of rule['X'-'A'] value means A rule is defined
 
+// ARCHITECUTURE OVERVIEW
+// ======================
+
+// This is a step by step parser that using a simplified BNF
+// description file parses a file of the specified langauge.
+//
+// rule[26] is one rule for every upper case letter.
+// It stores a pointer to an allocated NULL terminated block
+// of alt pointers into a string as follows:
+//
+// A single rule is stored as a continugous malloced space,
+// including all alt variants.
 
 
 
@@ -56,55 +60,71 @@
 #include <string.h>
 #include <ctype.h>
 #include <stdarg.h>
+#include <stdint.h>
 
-#define MAX_RULE_LEN  512
-#define MAX_ALTS      32
-#define MAX_ALT_LEN   256
-#define MAX_STACK     256
-#define MAX_SRC       65536
-#define MAX_BUF       65536
+typedef unsigned char uchar;
+typedef uint16_t word;
 
-static int   verbose;   /* 0=off 1=compact 2+=detail */
-static int   ignore_case = 1; /* -I default on; -C case-sensitive */
+#define NRULES      26
+#define MAX_STACK   128
+#define LINE_CAP    4096
+#define CAP_MAX     4096
 
+// rule['X'-'A'] = NULL-terminated array of uchar* into one malloc blob
+static uchar **rule[NRULES];
 
-static char  alts[26][MAX_ALTS][MAX_ALT_LEN];
-static char  nalt[26];
-static char  has_rule[26]; // TODO: goal to remove.
+static FILE *src_fp;
+static const char *src_name;
 
-static char  src[MAX_SRC];
-static int   src_len;
-static int   pos;
-static int   max_pos;
-static char  far_stack[64];
-static int   far_sp;
-static char  far_alt[64];
-static const char *src_name = "source";
+// input line buffer (unbounded source via fgetc; buffer one statement)
+static uchar *line_buf;
+static word line_len;
+static word line_cap;
+static word line_pos;       // cursor in line_buf
+static word line_abs;       // absolute file offset of line_buf[0]
+static long file_pos;       // ftell-style count of bytes read from file
 
-static char  outbuf[MAX_STACK][MAX_BUF];
-static int   outlen[MAX_STACK];
+static word max_pos_abs;    // furthest absolute position
+static uchar far_stack[MAX_STACK];
+static uchar far_alt[MAX_STACK];
+static uchar far_sp;
+
+static uchar verbose;       // 0 off, 1 compact, 2+ detail
+static uchar ignore_case;   // default 1
 
 enum { ST_TRY, ST_RUN, ST_OK, ST_FAIL };
 
 typedef struct {
-  int rule, alt, ip, save, state;
+  uchar rule;
+  uchar alt;
+  word ip;
+  word save;          // line_pos at start of this alt
+  word save_abs;      // absolute for furthest
+  word cap_save;      // capture length at alt entry (for backtrack)
+  uchar state;
 } Frame;
 
 static Frame stack[MAX_STACK];
-static int sp;
+static uchar sp;
 
-/* detail log (verbose >= 2) */
+// capture: hold matched text until alt commits
+static uchar capture[MAX_STACK][CAP_MAX];
+static word cap_len[MAX_STACK];
+
+// ---- logging ----
+
 static void vlog(const char *fmt, ...) {
   va_list ap;
+
   if (verbose < 2) return;
   va_start(ap, fmt);
   vfprintf(stderr, fmt, ap);
   va_end(ap);
 }
 
-/* compact understanding log (verbose >= 1) */
 static void v1(const char *fmt, ...) {
   va_list ap;
+
   if (verbose < 1) return;
   va_start(ap, fmt);
   vfprintf(stderr, fmt, ap);
@@ -112,324 +132,464 @@ static void v1(const char *fmt, ...) {
 }
 
 static void v1_indent(void) {
-  int i;
+  uchar i;
+
   if (verbose < 1) return;
   for (i = 0; i < sp; i++)
     fputc(' ', stderr);
 }
 
-static void note_progress(void) {
-  int i;
-  if (pos <= max_pos) return;
-  max_pos = pos;
-  far_sp = sp < 63 ? sp : 63;
-  for (i = 0; i < far_sp; i++) {
-    far_stack[i] = (char)('A' + stack[i].rule);
-    far_alt[i] = (char)stack[i].alt;
+// ---- line buffer ----
+
+static int is_ws(uchar c) {
+  return c <= 32;
+}
+
+static void line_reset(void) {
+  line_len = 0;
+  line_pos = 0;
+}
+
+// append one char from file into line_buf
+static int line_grow(uchar c) {
+  if (line_len + 1 >= line_cap) {
+    word ncap = line_cap ? (word)(line_cap * 2) : 256;
+    uchar *n = (uchar *)realloc(line_buf, ncap);
+
+    if (!n) return 0;
+    line_buf = n;
+    line_cap = ncap;
   }
+  line_buf[line_len++] = c;
+  return 1;
 }
 
-static void push(int rule, int state) {
-  if (sp >= MAX_STACK) {
-    fprintf(stderr, "stack overflow\n");
-    exit(1);
-  }
-  stack[sp].rule  = rule;
-  stack[sp].alt   = 0;
-  stack[sp].ip    = 0;
-  stack[sp].save  = pos;
-  stack[sp].state = state;
-  outlen[sp] = 0;
-  sp++;
+// ensure at least one more char available at line_pos (read from file)
+static int line_need(void) {
+  int ch;
+
+  if (line_pos < line_len) return 1;
+  if (!src_fp) return 0;
+  ch = fgetc(src_fp);
+  if (ch == EOF) return 0;
+  file_pos++;
+  if (!line_grow((uchar)ch)) return 0;
+  return 1;
 }
 
-static void cap(char c) {
-  int i = sp - 1;
-  if (i >= 0 && outlen[i] < MAX_BUF - 1)
-    outbuf[i][outlen[i]++] = c;
+static word abs_pos(void) {
+  return (word)(line_abs + line_pos);
 }
 
-static void flush_cap(int frame) {
-  int i;
-  for (i = 0; i < outlen[frame]; i++)
-    putchar(outbuf[frame][i]);
-  fflush(stdout);
-  outlen[frame] = 0;
+// \C commit: discard buffer before line_pos
+static void line_commit(void) {
+  word i, rest;
+
+  if (line_pos == 0) return;
+  rest = line_len - line_pos;
+  for (i = 0; i < rest; i++)
+    line_buf[i] = line_buf[line_pos + i];
+  line_abs = (word)(line_abs + line_pos);
+  line_len = rest;
+  line_pos = 0;
 }
 
-static void commit_cap(int frame) {
-  int p = frame - 1, i;
-  if (p < 0) {
-    flush_cap(frame);
+static void capture_add(uchar c) {
+  if (sp == 0) return;
+  if (cap_len[sp - 1] + 1 < CAP_MAX)
+    capture[sp - 1][cap_len[sp - 1]++] = c;
+}
+
+static void capture_commit(uchar frame) {
+  word p, i;
+
+  if (frame == 0) {
+    for (i = 0; i < cap_len[0]; i++)
+      putchar(capture[0][i]);
+    fflush(stdout);
+    cap_len[0] = 0;
     return;
   }
-  for (i = 0; i < outlen[frame]; i++)
-    if (outlen[p] < MAX_BUF - 1)
-      outbuf[p][outlen[p]++] = outbuf[frame][i];
-  outlen[frame] = 0;
+  p = (word)(frame - 1);
+  for (i = 0; i < cap_len[frame]; i++) {
+    if (cap_len[p] + 1 < CAP_MAX)
+      capture[p][cap_len[p]++] = capture[frame][i];
+  }
+  cap_len[frame] = 0;
 }
 
-static int is_ws(char c) {
-  return c == ' ' || c == '\t' || c == '\n' || c == '\r';
-}
+static void note_progress(void) {
+  uchar i;
+  word a = abs_pos();
 
-/* whitespace and { pascal comments } */
-static void skip_ws(void) {
-  for (;;) {
-    while (pos < src_len && is_ws(src[pos])) {
-      cap(src[pos]);
-      pos++;
-    }
-    if (pos < src_len && src[pos] == '{') {
-      cap(src[pos++]);
-      while (pos < src_len && src[pos] != '}') {
-        cap(src[pos]);
-        pos++;
-      }
-      if (pos < src_len && src[pos] == '}') {
-        cap(src[pos]);
-        pos++;
-      }
-      continue;
-    }
-    break;
+  if (a <= max_pos_abs) return;
+  max_pos_abs = a;
+  far_sp = sp;
+  if (far_sp > MAX_STACK) far_sp = MAX_STACK;
+  for (i = 0; i < far_sp; i++) {
+    far_stack[i] = (uchar)('A' + stack[i].rule);
+    far_alt[i] = stack[i].alt;
   }
 }
 
-static int match_lit(char want) {
-  char g;
-  if (pos >= src_len) return 0;
-  g = src[pos];
-  if (isalpha((unsigned char)want) && ignore_case) {
-    if (tolower((unsigned char)g) != tolower((unsigned char)want))
-      return 0;
-  } else if (g != want)
+// ---- skip whitespace and { comments } ----
+
+static void skip_ws(void) {
+  for (;;) {
+    while (line_need() && is_ws(line_buf[line_pos])) {
+      capture_add(line_buf[line_pos]);
+      line_pos++;
+      note_progress();
+    }
+    if (!line_need()) return;
+    if (line_buf[line_pos] != '{') return;
+    capture_add(line_buf[line_pos]);
+    line_pos++;
+    while (line_need() && line_buf[line_pos] != '}') {
+      capture_add(line_buf[line_pos]);
+      line_pos++;
+    }
+    if (line_need() && line_buf[line_pos] == '}') {
+      capture_add(line_buf[line_pos]);
+      line_pos++;
+      note_progress();
+    }
+  }
+}
+
+static int match_lit(uchar want) {
+  uchar g;
+
+  skip_ws();
+  if (!line_need()) return 0;
+  g = line_buf[line_pos];
+  if (ignore_case && want >= 'a' && want <= 'z') {
+    uchar gl = g;
+    if (gl >= 'A' && gl <= 'Z') gl = (uchar)(gl - 'A' + 'a');
+    if (gl != want) return 0;
+  } else if (g != want) {
     return 0;
-  cap(g);
-  pos++;
+  }
+  capture_add(g);
+  line_pos++;
   note_progress();
   return 1;
 }
 
 static int match_ident(void) {
-  int start;
+  uchar c;
+
   skip_ws();
-  if (pos >= src_len || !isalpha((unsigned char)src[pos])) return 0;
-  start = pos;
-  while (pos < src_len && (isalnum((unsigned char)src[pos]) || src[pos] == '_')) {
-    cap(src[pos]);
-    pos++;
+  if (!line_need()) return 0;
+
+  c = line_buf[line_pos];
+  if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')))
+    return 0;
+
+  while (line_need()) {
+    c = line_buf[line_pos];
+
+    if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+        (c >= '0' && c <= '9') || c == '_') {
+      capture_add(c);
+      line_pos++;
+    } else
+      break;
   }
-  (void)start;
+
   note_progress();
+
   return 1;
 }
 
 static int match_num(void) {
-  int start;
   skip_ws();
-  if (pos >= src_len || !isdigit((unsigned char)src[pos])) return 0;
-  start = pos;
-  while (pos < src_len && isdigit((unsigned char)src[pos])) {
-    cap(src[pos]);
-    pos++;
+  if (!line_need()) return 0;
+
+  if (line_buf[line_pos] < '0' || line_buf[line_pos] > '9') return 0;
+
+  while (line_need() && line_buf[line_pos] >= '0' && line_buf[line_pos] <= '9') {
+    capture_add(line_buf[line_pos]);
+    line_pos++;
   }
-  (void)start;
+
   note_progress();
+
   return 1;
 }
 
 static int match_str(void) {
-  int start;
   skip_ws();
-  if (pos >= src_len || src[pos] != '"') return 0;
-  start = pos;
-  cap(src[pos++]);
-  while (pos < src_len && src[pos] != '"') {
-    if (src[pos] == '\\' && pos + 1 < src_len) {
-      cap(src[pos++]);
-      cap(src[pos++]);
-    } else
-      cap(src[pos++]);
+  if (!line_need() || line_buf[line_pos] != '"') return 0;
+
+  capture_add(line_buf[line_pos]);
+  line_pos++;
+
+  while (line_need() && line_buf[line_pos] != '"') {
+
+    // \c quoted char
+    if (line_buf[line_pos] == '\\') {
+      capture_add(line_buf[line_pos]);
+      line_pos++;
+      if (!line_need()) return 0;
+      capture_add(line_buf[line_pos]);
+      line_pos++;
+    } else {
+      capture_add(line_buf[line_pos]);
+      line_pos++;
+    }
   }
-  if (pos >= src_len || src[pos] != '"') return 0;
-  cap(src[pos++]);
-  (void)start;
+
+  if (!line_need() || line_buf[line_pos] != '"') return 0;
+  capture_add(line_buf[line_pos]);
+  line_pos++;
+
   note_progress();
+
   return 1;
 }
 
-/*
- * Split RHS on | into alternatives.
- * \| or \c (when c not i/n/s) → single literal char in alt text.
- * \i \n \s stay as two-char escapes for the matcher.
- */
-static void split_alts(int r, const char *rhs) {
-  int a = 0, j = 0;
-  const char *p = rhs;
-  nalt[r] = 0;
-  while (1) {
-    if (*p == '\0') {
-      alts[r][a][j] = '\0';
-      nalt[r] = a + 1;
-      break;
+// ---- BNF load: one malloc blob per rule, alts[] NULL-terminated ----
+
+static void free_rules(void) {
+  uchar r;
+
+  for (r = 0; r < NRULES; r++) {
+    if (rule[r]) {
+      // alts point into blob; blob is rule[r][0]'s base — store blob at [-1]? 
+      // we keep blob pointer as rule[r][0] only if first alt non-null.
+      // simpler: first entry is special — actually free blob via separate table
+      free(rule[r]);
+      rule[r] = NULL;
     }
-    if (*p == '\\' && p[1] != '\0') {
-      char e = p[1];
-      if (e == 'i' || e == 'n' || e == 's') {
-        if (j < MAX_ALT_LEN - 2) {
-          alts[r][a][j++] = '\\';
-          alts[r][a][j++] = e;
-        }
-        p += 2;
-        continue;
-      }
-      /* \| or \c → literal c */
-      if (j < MAX_ALT_LEN - 1)
-        alts[r][a][j++] = e;
-      p += 2;
-      continue;
-    }
-    if (*p == '|') {
-      alts[r][a][j] = '\0';
-      a++;
-      j = 0;
-      if (a >= MAX_ALTS) break;
-      p++;
-      continue;
-    }
-    if (j < MAX_ALT_LEN - 1)
-      alts[r][a][j++] = *p;
-    p++;
   }
 }
+
+// blobs[r] holds the contiguous text for rule r
+static uchar *blobs[NRULES];
 
 static int load_bnf(const char *path) {
-  FILE *f = fopen(path, "r");
-  char line[MAX_RULE_LEN];
-  int i;
+  FILE *f;
+  char line[1024];
+  uchar r;
+
+  free_rules();
+  for (r = 0; r < NRULES; r++) {
+    blobs[r] = NULL;
+    rule[r] = NULL;
+  }
+
+  f = fopen(path, "r");
   if (!f) {
     perror(path);
     return 0;
   }
-  for (i = 0; i < 26; i++) {
-    has_rule[i] = 0;
-    nalt[i] = 0;
-  }
+
   while (fgets(line, sizeof line, f)) {
-    char *nl = strchr(line, '\n');
+    char *nl;
     char *eq;
-    int r;
-    if (nl) *nl = '\0';
+    uchar *blob;
+    word blob_len;
+    word n_alts;
+    word a;
+    word i;
+    uchar **altp;
+    char *p;
+    char *rhs;
+
+    nl = strchr(line, '\n');
+    if (nl) *nl = 0;
     if (line[0] == '.') break;
-    if (line[0] == '\0' || line[0] == '#') continue;
-    if (!isupper((unsigned char)line[0])) continue;
+    if (line[0] == 0 || line[0] == '#') continue;
+    if (!(line[0] >= 'A' && line[0] <= 'Z')) continue;
     eq = strchr(line, '=');
     if (!eq) continue;
-    r = line[0] - 'A';
-    has_rule[r] = 1;
-    split_alts(r, eq + 1);
+
+    r = (uchar)(line[0] - 'A');
+    rhs = eq + 1;
+
+    // expand \| and \c (not i/n/s/C/<) into blob; keep \i \n \s \C \<
+    // count alts and build contiguous string with 0 separators between alts
+    blob_len = 0;
+    n_alts = 1;
+    for (p = rhs; *p; p++) {
+      if (*p == '\\' && p[1]) {
+        uchar e = (uchar)p[1];
+        if (e == 'i' || e == 'n' || e == 's' || e == 'C' || e == '<')
+          blob_len = (word)(blob_len + 2);
+        else
+          blob_len++;
+        p++;
+        continue;
+      }
+      if (*p == '|') {
+        n_alts++;
+        blob_len++; // 0 separator stored as 0 in blob between alts
+        continue;
+      }
+      blob_len++;
+    }
+
+    blob = (uchar *)malloc(blob_len + n_alts + 4);
+    if (!blob) {
+      fclose(f);
+      return 0;
+    }
+    blobs[r] = blob;
+
+    // write alts as C-strings back-to-back, count them
+    {
+      word bi = 0;
+      word alt_starts[64];
+      word na = 0;
+      alt_starts[na++] = 0;
+      for (p = rhs; *p; p++) {
+        if (*p == '\\' && p[1]) {
+          uchar e = (uchar)p[1];
+          if (e == 'i' || e == 'n' || e == 's' || e == 'C' || e == '<') {
+            blob[bi++] = '\\';
+            blob[bi++] = e;
+          } else {
+            blob[bi++] = e;
+          }
+          p++;
+          continue;
+        }
+        if (*p == '|') {
+          blob[bi++] = 0;
+          if (na < 64)
+            alt_starts[na++] = bi;
+          continue;
+        }
+        blob[bi++] = (uchar)*p;
+      }
+      blob[bi++] = 0;
+
+      altp = (uchar **)malloc(sizeof(uchar *) * (na + 1));
+      if (!altp) {
+        free(blob);
+        blobs[r] = NULL;
+        fclose(f);
+        return 0;
+      }
+      for (a = 0; a < na; a++)
+        altp[a] = blob + alt_starts[a];
+      altp[na] = NULL;
+      rule[r] = altp;
+    }
   }
   fclose(f);
   return 1;
 }
 
-static int load_src(const char *path) {
-  FILE *f = fopen(path, "r");
-  if (!f) {
-    perror(path);
-    return 0;
-  }
-  src_len = (int)fread(src, 1, MAX_SRC - 1, f);
-  src[src_len] = '\0';
-  fclose(f);
-  pos = 0;
-  if (src_len >= 3 && (unsigned char)src[0] == 0xEF
-      && (unsigned char)src[1] == 0xBB && (unsigned char)src[2] == 0xBF)
-    pos = 3;
-  return 1;
+static int rule_defined(uchar r) {
+  return rule[r] != NULL;
 }
+
+static word rule_nalt(uchar r) {
+  word n = 0;
+  if (!rule[r]) return 0;
+  while (rule[r][n]) n++;
+  return n;
+}
+
+// ---- stack ----
+
+static void push(uchar r, uchar state) {
+  if (sp >= MAX_STACK) {
+    fprintf(stderr, "stack overflow\n");
+    exit(1);
+  }
+  stack[sp].rule = r;
+  stack[sp].alt = 0;
+  stack[sp].ip = 0;
+  stack[sp].save = line_pos;
+  stack[sp].save_abs = abs_pos();
+  stack[sp].cap_save = 0;
+  stack[sp].state = state;
+  cap_len[sp] = 0;
+  sp++;
+}
+
+// ---- one step ----
+// estimated ~50-200us per step on 6502 @ 1MHz (dispatch + match)
 
 static int step(void) {
   Frame *fr;
-  char *alt;
-  char c;
+  uchar *alt;
+  uchar c;
+  word nalt;
 
-  if (sp <= 0) return 0;
+  if (sp == 0) return 0;
   fr = &stack[sp - 1];
+  nalt = rule_nalt(fr->rule);
 
   if (fr->state == ST_TRY) {
-    if (fr->alt >= nalt[fr->rule]) {
-      vlog("fail %c (no alt) @%d\n", 'A' + fr->rule, pos);
-      if (verbose >= 2) {
-        v1("\n");
-        v1_indent();
-        v1("!%c\n", 'A' + fr->rule);
-      }
+    if (fr->alt >= nalt) {
+      vlog("fail %c (no alt) @%u\n", 'A' + fr->rule, abs_pos());
       sp--;
-      if (sp <= 0) return -1;
+      if (sp == 0) return -1;
       fr = &stack[sp - 1];
-      pos = fr->save;
-      outlen[sp - 1] = 0;
+      line_pos = fr->save;
+      cap_len[sp - 1] = 0;
       fr->alt++;
       fr->ip = 0;
-      fr->save = pos;
+      fr->save = line_pos;
+      fr->save_abs = abs_pos();
       fr->state = ST_TRY;
       return 1;
     }
-    pos = fr->save;
-    outlen[sp - 1] = 0;
+    line_pos = fr->save;
+    cap_len[sp - 1] = fr->cap_save;
     fr->ip = 0;
     fr->state = ST_RUN;
-    vlog("try %c alt %d @%d \"%s\"\n",
-         'A' + fr->rule, fr->alt, pos, alts[fr->rule][fr->alt]);
-    /* compact labels printed on successful match */
+    vlog("try %c alt %u @%u \"%s\"\n",
+         'A' + fr->rule, fr->alt, abs_pos(),
+         rule[fr->rule][fr->alt] ? (char *)rule[fr->rule][fr->alt] : "");
     return 1;
   }
 
   if (fr->state == ST_OK) {
-    vlog("ok %c alt %d → @%d\n", 'A' + fr->rule, fr->alt, pos);
-    if (verbose >= 1 && outlen[sp - 1] > 0) {
-      int i;
+    vlog("ok %c alt %u -> @%u\n", 'A' + fr->rule, fr->alt, abs_pos());
+    if (verbose >= 1 && cap_len[sp - 1] > 0) {
+      word i;
       v1("\n");
       v1_indent();
-      if (nalt[fr->rule] > 1)
-        v1("%c%d:", 'A' + fr->rule, fr->alt);
+      if (nalt > 1)
+        v1("%c%u:", 'A' + fr->rule, fr->alt);
       else
         v1("%c:", 'A' + fr->rule);
-      for (i = 0; i < outlen[sp - 1]; i++) {
-        char ch = outbuf[sp - 1][i];
-        if (ch == '\n')
-          v1("\n");
-        else
-          v1("%c", ch);
+      for (i = 0; i < cap_len[sp - 1]; i++) {
+        uchar ch = capture[sp - 1][i];
+        if (ch == '\n') v1("\n");
+        else v1("%c", ch);
       }
       v1("\n");
       v1_indent();
       v1("<%c\n", 'A' + fr->rule);
     }
-    commit_cap(sp - 1);
+    capture_commit((uchar)(sp - 1));
     sp--;
-    if (sp <= 0) return 0;
+    if (sp == 0) return 0;
     fr = &stack[sp - 1];
     fr->ip++;
     fr->state = ST_RUN;
     return 1;
   }
 
-  /* current alternative failed — try next alt of SAME rule (do not pop) */
+  // current alt failed — next alt of same rule
   if (fr->state == ST_FAIL) {
-    outlen[sp - 1] = 0;
-    pos = fr->save;          /* rule-entry input */
+    line_pos = fr->save;
+    cap_len[sp - 1] = fr->cap_save;
     fr->alt++;
     fr->ip = 0;
-    fr->state = ST_TRY;      /* ST_TRY exhausts alts → then pop to parent */
+    fr->state = ST_TRY;
     return 1;
   }
 
-  alt = alts[fr->rule][fr->alt];
-
-  if (alt[fr->ip] == '\0') {
+  // ST_RUN
+  alt = rule[fr->rule][fr->alt];
+  if (!alt || alt[fr->ip] == 0) {
     fr->state = ST_OK;
     return 1;
   }
@@ -443,20 +603,51 @@ static int step(void) {
   }
 
   if (c >= 'A' && c <= 'Z') {
-    int r = c - 'A';
-    if (!has_rule[r]) {
+    uchar r = (uchar)(c - 'A');
+
+    if (!rule_defined(r)) {
       fprintf(stderr, "\n[no rule %c]\n", c);
       fr->state = ST_FAIL;
       return 1;
     }
-    vlog("  call %c from %c @%d\n", c, 'A' + fr->rule, pos);
+    vlog("  call %c from %c @%u\n", c, 'A' + fr->rule, abs_pos());
     push(r, ST_TRY);
     return 1;
   }
 
   if (c == '\\') {
-    char e = alt[fr->ip + 1];
+    uchar e = alt[fr->ip + 1];
     int ok = 0;
+
+    if (e == '<') {
+      // tail-recurse: restart alts at current input, keep capture
+      fr->alt = 0;
+      fr->ip = 0;
+      fr->save = line_pos;
+      fr->save_abs = abs_pos();
+      fr->cap_save = cap_len[sp - 1];
+      fr->state = ST_TRY;
+      vlog("  tail %c @%u\n", 'A' + fr->rule, abs_pos());
+      return 1;
+    }
+
+    if (e == 'C') {
+      // commit: drop buffer prefix; keep matching
+      line_commit();
+      // fix save positions relative to new buffer
+      {
+        uchar i;
+
+        for (i = 0; i < sp; i++) {
+          if (stack[i].save > 0)
+            stack[i].save = 0;
+        }
+      }
+      fr->ip = (word)(fr->ip + 2);
+      vlog("  commit @%u\n", abs_pos());
+      return 1;
+    }
+
     if (e == 'i') ok = match_ident();
     else if (e == 'n') ok = match_num();
     else if (e == 's') ok = match_str();
@@ -465,114 +656,170 @@ static int step(void) {
       ok = match_lit(e);
     }
     if (!ok) {
-      vlog("  fail \\%c @%d\n", e, pos);
+      vlog("  fail \\%c @%u\n", e, abs_pos());
       fr->state = ST_FAIL;
       return 1;
     }
-    vlog("  ok \\%c @%d\n", e, pos);
-    fr->ip += 2;
+    vlog("  ok \\%c @%u\n", e, abs_pos());
+    fr->ip = (word)(fr->ip + 2);
     return 1;
   }
 
   skip_ws();
   if (!match_lit(c)) {
-    vlog("  fail lit '%c' @%d got '%c'\n", c, pos,
-         pos < src_len ? src[pos] : '?');
+    vlog("  fail lit '%c' @%u got '%c'\n", c, abs_pos(),
+         line_need() ? line_buf[line_pos] : '?');
     fr->state = ST_FAIL;
     return 1;
   }
-  vlog("  ok lit '%c' @%d\n", c, pos - 1);
+  vlog("  ok lit '%c' @%u\n", c, abs_pos());
   fr->ip++;
   return 1;
 }
 
+// run up to n steps
+// ~50-200 us/step on 6502 @ 1MHz → n=1000 ≈ 50-200 ms
+static int run(word n) {
+  word i;
+  int rc = 1;
 
-static int line_at(int p) {
-  int i, line = 1;
-  for (i = 0; i < p && i < src_len; i++)
-    if (src[i] == '\n') line++;
+  for (i = 0; i < n && rc == 1; i++)
+    rc = step();
+  return rc;
+}
+
+static word line_at_abs(word ap) {
+  word i, line = 1;
+
+  // only know lines in current buffer + estimate from abs
+  // scan from start of file is not available; approximate via buffer
+  (void)ap;
+  for (i = 0; i < line_pos && i < line_len; i++)
+    if (line_buf[i] == '\n') line++;
   return line;
 }
 
 static void report_reject(void) {
-  int i, col, line, nlines, start, end;
-  fprintf(stderr, "\n--- REJECT at %d (furthest %d) ---\n", pos, max_pos);
+  word i, col, start, end, nlines, lp, cur_line;
+
+  fprintf(stderr, "\n--- REJECT at %u (furthest %u) ---\n",
+          abs_pos(), max_pos_abs);
   fprintf(stderr, "STACK:");
-  if (far_sp <= 0)
+  if (far_sp == 0)
     fprintf(stderr, " (empty)");
-  for (i = 0; i < far_sp; i++) {
-    fprintf(stderr, " %c", far_stack[i]);
-    if (far_alt[i] > 0 || 1)
-      fprintf(stderr, "%d", (int)far_alt[i]);
-  }
+  for (i = 0; i < far_sp; i++)
+    fprintf(stderr, " %c%u", far_stack[i], (unsigned)far_alt[i]);
   fprintf(stderr, "\n");
+
   if (far_sp > 0) {
-    int r = far_stack[far_sp - 1] - 'A';
-    int a = (int)far_alt[far_sp - 1];
+    uchar r = (uchar)(far_stack[far_sp - 1] - 'A');
+    uchar a = far_alt[far_sp - 1];
+
     fprintf(stderr, "EXPECTED: rule %c", far_stack[far_sp - 1]);
-    if (has_rule[r] && a < nalt[r])
-      fprintf(stderr, " alt %d \"%s\"", a, alts[r][a]);
+    if (rule_defined(r) && a < rule_nalt(r))
+      fprintf(stderr, " alt %u \"%s\"", (unsigned)a,
+              rule[r][a] ? (char *)rule[r][a] : "");
     fprintf(stderr, "\n");
   }
-  /* source context from max_pos */
-  start = max_pos;
-  while (start > 0 && src[start - 1] != '\n')
-    start--;
-  end = max_pos;
-  nlines = 0;
-  while (end < src_len && nlines < 5 && end - max_pos < 128) {
-    if (src[end] == '\n') nlines++;
-    end++;
-  }
-  line = line_at(max_pos);
-  col = max_pos - start;
+
+  // re-read source around furthest absolute offset
   fprintf(stderr, "REJECT:\n");
-  {
-    int lp = start, cur_line = line;
-    while (lp < end && lp < src_len) {
-      fprintf(stderr, "%s:%d: ", src_name, cur_line);
-      while (lp < end && lp < src_len && src[lp] != '\n') {
-        fputc(src[lp], stderr);
-        lp++;
+  if (src_name) {
+    FILE *rf = fopen(src_name, "r");
+    if (rf) {
+      long want = (long)max_pos_abs;
+      long base = want;
+      int ch, col = 0, nlines = 0, line = 1;
+      long i;
+
+      // count line number and find line start
+      rewind(rf);
+      for (i = 0; i < want; i++) {
+        ch = fgetc(rf);
+        if (ch == EOF) break;
+        if (ch == '\n') { line++; base = i + 1; col = 0; }
+        else col++;
       }
-      fputc('\n', stderr);
-      if (lp < end && lp < src_len && src[lp] == '\n') {
-        lp++;
-        cur_line++;
-      } else
-        break;
+      fseek(rf, base, SEEK_SET);
+      while (nlines < 5) {
+        long line_start = ftell(rf);
+
+        fprintf(stderr, "%s:%d: ", src_name, line + nlines);
+        while ((ch = fgetc(rf)) != EOF && ch != '\n')
+          fputc(ch, stderr);
+        fputc('\n', stderr);
+        nlines++;
+        if (ch == EOF) break;
+      }
+      fprintf(stderr, "%s:%d: ", src_name, line);
+      for (i = 0; i < col; i++)
+        fputc(' ', stderr);
+      fprintf(stderr, "^\n");
+      fclose(rf);
     }
-    /* caret under furthest column on first line */
-    fprintf(stderr, "%s:%d: ", src_name, line);
-    for (i = 0; i < col; i++)
-      fputc(' ', stderr);
-    fprintf(stderr, "^\n");
   }
 }
 
-static int run_machine(void) {
-  int rc;
-  sp = 0;
-  max_pos = 0;
+// init: load grammar + open source
+static int init(const char *bnf_path, const char *src_path) {
+  uchar r;
+
+  src_name = src_path;
+  if (!load_bnf(bnf_path)) return 0;
+
+  if (src_fp) fclose(src_fp);
+  src_fp = fopen(src_path, "r");
+  if (!src_fp) {
+    perror(src_path);
+    return 0;
+  }
+
+  line_buf = NULL;
+  line_cap = 0;
+  line_len = 0;
+  line_pos = 0;
+  line_abs = 0;
+  file_pos = 0;
+  max_pos_abs = 0;
   far_sp = 0;
-  if (!has_rule['P' - 'A']) {
+  sp = 0;
+
+  if (!rule_defined((uchar)('P' - 'A'))) {
     fprintf(stderr, "missing start rule P\n");
     return 0;
   }
-  push('P' - 'A', ST_TRY);
-  while ((rc = step()) == 1)
-    ;
-  return rc == 0;
+  push((uchar)('P' - 'A'), ST_TRY);
+  return 1;
+}
+
+static void shutdown(void) {
+  uchar r;
+
+  if (src_fp) {
+    fclose(src_fp);
+    src_fp = NULL;
+  }
+  free(line_buf);
+  line_buf = NULL;
+  for (r = 0; r < NRULES; r++) {
+    free(rule[r]);
+    rule[r] = NULL;
+    free(blobs[r]);
+    blobs[r] = NULL;
+  }
 }
 
 int main(int argc, char **argv) {
-  int i, ok;
+  const char *bnf = NULL;
+  const char *srcpath = NULL;
+  word i;
+  int rc;
   int ai;
-  const char *bnf = NULL, *srcpath = NULL;
 
-  // parse args
   verbose = 0;
   ignore_case = 1;
+
+  // parse arguments
   for (ai = 1; ai < argc; ai++) {
     if (strcmp(argv[ai], "-v") == 0)
       verbose++;
@@ -585,54 +832,54 @@ int main(int argc, char **argv) {
     else if (!srcpath)
       srcpath = argv[ai];
   }
+
   if (!bnf || !srcpath) {
     fprintf(stderr, "usage: %s [-v|-vv] [-I|-C] grammar.bnf source.p\n", argv[0]);
-    fprintf(stderr, "  -v   compact parse trace\n");
-    fprintf(stderr, "  -vv  detailed engine trace\n");
-    fprintf(stderr, "  -I   ignore case (default)\n");
-    fprintf(stderr, "  -C   case-sensitive\n");
     return 1;
   }
-  src_name = srcpath;
-  if (!load_bnf(bnf)) return 1;
-  if (!load_src(srcpath)) return 1;
 
+  // setup
+  if (!init(bnf, srcpath)) return 1;
 
   // print rules
   if (verbose >= 2) {
     fprintf(stderr, "--- rules ---\n");
-    for (i = 0; i < 26; i++)
-      if (has_rule[i]) {
-        int a;
-        fprintf(stderr, "%c =", 'A' + i);
-        for (a = 0; a < nalt[i]; a++) {
+    for (i = 0; i < NRULES; i++)
+      if (rule_defined((uchar)i)) {
+        word a;
+        fprintf(stderr, "%c =", 'A' + (int)i);
+        for (a = 0; rule[i][a]; a++) {
           if (a) fprintf(stderr, "|");
-          fprintf(stderr, "%s", alts[i][a]);
+          fprintf(stderr, "%s", (char *)rule[i][a]);
         }
         fprintf(stderr, "\n");
       }
   }
-  if (verbose) fprintf(stderr, "--- parse ---\n");
+  if (verbose)
+    fprintf(stderr, "--- parse ---\n");
 
+  // run in chunks of 10000 steps until done
+  do {
+    rc = run(10000);
+  } while (rc == 1);
 
-  // do the parsing
-  ok = run_machine();
-
-
-  // report status
+  // status report
   putchar('\n');
-  if (ok) {
+  if (rc == 0) {
     skip_ws();
-    if (pos < src_len) {
-      fprintf(stderr, "--- OK but trailing input at %d ---\n", pos);
+    if (line_need()) {
+      fprintf(stderr, "--- OK but trailing input ---\n");
+      shutdown();
       return 2;
     }
     fprintf(stderr, "--- ACCEPT ---\n");
+    shutdown();
     return 0;
   }
 
-  // ERROR?
+  // error
+  
   report_reject();
-
+  shutdown();
   return 1;
 }
