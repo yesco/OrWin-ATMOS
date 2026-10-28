@@ -44,6 +44,8 @@
 // 7. typedef uint16_t word; use "word" instead of int unless you need signed values,
 //    prefer uchar if variable fits in it.
 // 8. newline between defs and code
+// 9. sizeof(xx) - parens a must on oscar64
+
 
 
 // ARCHITECUTURE OVERVIEW
@@ -161,7 +163,8 @@ static void v1_indent(void) {
 // ---- line buffer ----
 
 static int is_ws(uchar c) {
-  return c <= 32;
+  // c <= 32 was the old rule; isspace is clearer and smaller on cc65
+  return isspace(c);
 }
 
 static void line_reset(void) {
@@ -273,21 +276,7 @@ static void note_progress(void) {
 // ---- scopes ----
 
 static int name_eq(const char *a, const char *b) {
-  word ca, cb;
-
-  if (ignore_case) {
-    // TODO: use stricmp on cc65 or strcasecmp on unix?
-    while (*a && *b) {
-      ca = *a; cb = *b;
-
-      if (ca >= 'A' && ca <= 'Z') ca = (char)(ca - 'A' + 'a');
-      if (cb >= 'A' && cb <= 'Z') cb = (char)(cb - 'A' + 'a');
-      if (ca != cb) return 0;
-      a++;
-      b++;
-    }
-    return *a == 0 && *b == 0;
-  }
+  // identifiers are always case-sensitive
   return strcmp(a, b) == 0;
 }
 
@@ -407,10 +396,9 @@ static int match_lit(uchar want) {
   skip_ws();
   if (!line_need()) return 0;
   g = line_buf[line_pos];
-  if (ignore_case && want >= 'a' && want <= 'z') {
-    uchar gl = g;
-    if (gl >= 'A' && gl <= 'Z') gl = (uchar)(gl - 'A' + 'a');
-    if (gl != want) return 0;
+  // -I: fold case for keyword/literal letters only (idents use name_eq)
+  if (ignore_case && isalpha(want)) {
+    if (tolower(g) != tolower(want)) return 0;
   } else if (g != want) {
     return 0;
   }
@@ -428,15 +416,14 @@ static int match_ident_raw(char *idbuf, word idmax) {
   if (!line_need()) return 0;
 
   c = line_buf[line_pos];
-  if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')))
+  if (!isalpha(c))
     return 0;
 
   n = 0;
   while (line_need()) {
     c = line_buf[line_pos];
-    // isalpha num || _
-    if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
-        (c >= '0' && c <= '9') || c == '_') {
+    // letter, digit, or underscore
+    if (isalnum(c) || c == '_') {
       if (n + 1 < idmax)
         idbuf[n++] = (char)c;
       capture_add(c);
@@ -479,9 +466,9 @@ static int match_num(void) {
   skip_ws();
   if (!line_need()) return 0;
 
-  if (line_buf[line_pos] < '0' || line_buf[line_pos] > '9') return 0;
+  if (!isdigit(line_buf[line_pos])) return 0;
 
-  while (line_need() && line_buf[line_pos] >= '0' && line_buf[line_pos] <= '9') {
+  while (line_need() && isdigit(line_buf[line_pos])) {
     capture_add(line_buf[line_pos]);
     line_pos++;
   }
@@ -636,9 +623,11 @@ static int load_bnf(const char *path) {
   acc_len = 0;
   acc[0] = 0;
 
-  while (fgets(line, sizeof line, f)) {
+  while (fgets(line, sizeof(line), f)) {
+
     nl = strchr(line, '\n');
     if (nl) *nl = 0;
+
     if (line[0] == '.') break;
     if (line[0] == 0 || line[0] == '#') continue;
 
@@ -647,7 +636,7 @@ static int load_bnf(const char *path) {
 
     // continuation: line starts with |
     if (*p == '|' && have_cur) {
-      while (*p && acc_len + 1 < sizeof acc)
+      while (*p && acc_len + 1 < sizeof(acc))
         acc[acc_len++] = *p++;
       acc[acc_len] = 0;
       continue;
@@ -657,15 +646,17 @@ static int load_bnf(const char *path) {
     if (have_cur)
       build_one_rule(cur, acc);
 
-    if (!(line[0] >= 'A' && line[0] <= 'Z')) {
+    if (!isupper(line[0])) {
       have_cur = 0;
       continue;
     }
+
     eq = strchr(line, '=');
     if (!eq) {
       have_cur = 0;
       continue;
     }
+
     cur = (uchar)(line[0] - 'A');
     have_cur = 1;
     p = eq + 1;
@@ -812,14 +803,14 @@ static int step(void) {
 
   c = alt[fr->ip];
 
-  // TODO: just call it? before, why special here: WRITE COMMENT OF LOGIC
+  // space in BNF = required ws gap: skip comments/whitespace, no input char consumed as literal
   if (c == ' ') {
     skip_ws();
     fr->ip++;
     return 1;
   }
 
-  if (c >= 'A' && c <= 'Z') {
+  if (isupper(c)) {
     uchar r = (uchar)(c - 'A');
 
     if (!rule_defined(r)) {
