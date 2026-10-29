@@ -7,24 +7,33 @@
 // Indirect Virtual Machine
 // ========================
 //
-// Unified global/constan/parameter/local/stack
-// handling. All are in one address space.
+// A byte-coded register virtual machine, where
+// op-code are mostly alphabetcially readable.
+//
 //
 // Features:
+// - ACCumulator based arch. OPs morestly modify ACC.
+// - Unified global/const/stack/parameter/locals!
 // - alphabetical memomic byte codes ('L" - load...)
-// - register machine (OP ADDR)
+// - register machine (most: OP iADDR or just OP)
 // - 64 indirect call vectors by single byte code call
+// - optimized call by last parameter in ACCumulator
 // - 32 most common vars, single byte load (more common than save)
 // - local var access single byte (max 8)
 // - max 256 registers: [0, N[ per process
 // - no constants! folded into higher registers...
 // - no stack - using FORTRAN-style STATIC STACK
+// - Pure C implementation (2.75x 6502 asm VM, 10x compiled asm)
 //
-// It's observed that even large programs most like have
+//
+// STATIC STACK
+// ------------
+// It's observed that even large programs most have
 // less than 256 variables active at any point, this includes
-// variables active on the stack. An array is counted as one
-// variable. Of course this does not directly allow for
-// recursion. That could be done copying to and from the heap.
+// all global variables, and parameters and local variables
+// active on the stack. An array is counted as one variable.
+// Recursion isn't directly available. It can be implemented
+// using copying to heap allocated objects.
 //
 // Each function has a logical parameter block:
 //   0: return address
@@ -34,8 +43,41 @@
 // 3+n: parameter n
 // ...: local var/temp...
 //
-//
+// Using a simple call-graphc analysis, functions that
+// do not call each other overlap in storage can be packed
+// into a single static stack stack.
+//   For example, 80 slots comes down to 14 slots! This is
+// the job of a compiler/optimizer. This job has been
+// done when this engine ivm.c or ivm-vm.asm is run.
 // 
+//
+// MEMORY
+// ------
+// During optimization, the optimizer should just relocate
+// the variable map, and when "compiling" a second time,
+// can eactly relocate to using those slots, and more
+// efficient instructions, like one-byte loads/saves.
+//
+// Memory is packed as follows:
+//    0-... : registers ++ static stack ++ variables ++ consts
+//
+// A simple load count analysis, with adoption to recognize
+// if an op is inside a loop and thus boost it usage +100 (?),
+// should promote the variable to a "register". There are
+// single byte load instructions for 0-31 (currently not svae
+// pending real usage), where one can estimate byte savings,
+// as well as speed saving.
+//
+// During (second) compilation. A simple emitop('L', index)
+// can generate the cheaper single-byte code instruction.
+//
+// A separate counter, can not if "inside" loop. At least
+// directly for the code in that function.
+//
+// TODO: you could boost a function (set a bit) if it's
+// called inside a function and thereby boost it's global
+// access (load) count, too.
+
 
 // BYTE CODES OVERVIEW
 // ====================
@@ -66,7 +108,7 @@
 //   strcpy  p
 //   strcat  t
 //   strchr  r
-//   strstr  s
+//   strstr  s - test... 
 //   strdup  u
 //   atoi    q
 //
@@ -149,6 +191,7 @@
 #include <string.h>
 #include <ctype.h>
 #include <stdio.h>
+#include <assert.h>
 
 #ifndef IVMVARTYPE
   #define IVMVARTYPE uint16_t
@@ -343,8 +386,205 @@ Process* Nevm(uchar *loaded) {
 // ZP global (same layout as ProcessHead)
 ProcessHead zp;
 
-//uchar op;
 
+
+// Missing: (q)
+//   memove  v
+//   memset  w
+//   strcpy  p
+//   strcat  t
+//   strchr  r
+//   strstr  s - test... 
+//   strdup  u
+//   atoi    q
+//
+//   strcmp  $
+//   strlen  `
+//   strN... ...
+
+// 5 args  - bsearch(key, base, num, size, compare)
+// cc65 UI - draw_window(x, y, width, height, title)
+//         - draw_sprite(x, y, sprite_id, palette, flip_flags)
+//
+// - strtoimax_l(nptr, endptr, base, loc) / Complex String Parsers: Some extended localized string parsing functions in POSIX or C23 use 5 to 7 arguments to pass locales and error states.
+// - mmap(addr, length, prot, flags, fd, offset) (6 Arguments): A foundational POSIX system call used to map files or devices into memory.
+// - sendto(sockfd, buf, len, flags, dest_addr, addrlen) (6 Arguments): The standard network socket function used to send UDP packets.
+//
+// Just pass a struct... lol
+
+// TODO: rename to 2,3,4? lol
+typedef word (*libfun_2)(word acc, word a);
+typedef word (*libfun_3)(word acc, word a, word b);
+typedef word (*libfun_4)(word acc, word a, word b, word c);
+
+
+void* osfuns_N[]= {
+  0,0,0,0,
+  0,0,0,0,
+  0,0,0,0,
+  0,0,0,0,
+};
+// Just 0-15, no duplications
+void** osfuns[]= { osfuns_N, osfuns_N, osfuns_N };
+
+
+void* fsfuns_N[]= {
+  0,0,0,0,
+  0,0,0,0,
+  0,0,0,0,
+  0,0,0,0,
+};
+// Just 0-15, no duplications
+void** fsfuns[]= { fsfuns_N, fsfuns_N, fsfuns_N };
+
+void* winfuns_N[]= {
+  0,0,0,0,
+  0,0,0,0,
+  0,0,0,0,
+  0,0,0,0,
+};
+// Just 0-15, no duplications
+void** windowfuns[]= { winfuns_N, winfuns_N, winfuns_N };
+
+
+// "X<str><14><what>" (3 byte sequence)
+// n: isalnum, a: isalpha, c: iscntrl,  d: isidigit
+// g: isgraph, l: islower, p: isprint,  .: ispunct
+// s: isspace, u: isupper, x: isxdigit, A: isascii
+// b: isblank, h: hibit,   ...
+int isWHAT(int c, int w) {
+  switch(w) {
+  // (+ 4 4 3 2) = 13
+  case 'n': return isalnum(c);
+  case 'a': return isalpha(c);
+  case 'c': return iscntrl(c);
+  case 'd': return isdigit(c);
+
+  case 'g': return isgraph(c);
+  case 'l': return islower(c);
+  case 'p': return isprint(c);
+  case '.': return ispunct(c);
+
+  case 's': return isspace(c);
+  case 'u': return isupper(c);
+  case 'x': return isxdigit(c);
+  case 'A': return isascii(c);
+
+  case 'b': return isblank(c);
+  case 'h': return c & 0x80? 1: 0; // hibit
+
+  default:  return 0;
+  }
+};
+
+#ifndef STRNDUP
+  #define STRNDUP
+
+  void* memdup(void* p, word n) {
+    char* r= NULL;
+
+    if (!p || !n) return NULL;
+
+    r= calloc(n, 1);
+    if (r) memmove(r, p, n);
+    return r;
+  }
+
+  char* strndup(char* s, word n) {
+    word l = s? strlen(s): 0;
+    word z = (n<l? n: l) + 1;
+
+    return memdup(s, z==1? 0: z);
+  }
+#endif // STRNDUP
+
+word strprefix(char* a, char* b) {
+  word n= 0;
+
+  if (!a || !b) return 0;
+  
+  while(*a==*b && *a++ && *b++) ++n;
+  
+  return n;
+}
+  
+char* memmem(char* a, char* b) {
+  assert(!"TODO");
+  return NULL;
+  (void)a; (void)b;
+}
+
+void* strfuns_2[]= {
+  bzero,       0,        strcpy,     strlen,
+  strchr,      strrchr,  strstr,     strcmp,
+  strcasecmp,  strcpy,   strcat,     strndup,
+  strprefix,   isWHAT,   atoi,       0,
+};
+  
+void* strfuns_3[]= {
+  memset,      memmove,  strncpy,    0,
+  0,           0,        memmem,     strncmp,
+  strncasecmp, strncpy,  strncat,    memdup,
+  atoi,        strspn,   strcspn,    strpbrk,
+};
+  
+// we dispatch on the NUBMER of ARGUMENTS! (max 32 funs!)
+void** strfuns[]= { strfuns_2, strfuns_3, NULL };
+
+
+
+void*** library[16]= {
+  osfuns,      fsfuns,   windowfuns, strfuns,
+  0,           0,        0,          0,
+  0,           0,        0,          0,
+  0,           0,        0,          0,
+};
+
+
+#if 1
+
+word sys(char n, word acc, char* ipc) {
+  word id = ipc[0];
+  char fidx = id & 0x0f;
+  char lib_idx = id >> 4;
+  void **liblib, **libbase;
+  
+  if (n > 3) return (word)-1;
+  
+  liblib = (void*)(library[lib_idx]);
+  if (!liblib) return (word)-1;
+  
+  libbase = (void**)(liblib[n-1]);
+  if (!libbase || !libbase[fidx]) return (word)-1;
+
+  switch(n) {
+  case 1:  return ((libfun_2)libbase[fidx])(acc, ipc[1]);
+  case 2:  return ((libfun_3)libbase[fidx])(acc, ipc[1], ipc[2]);
+  case 3:  return ((libfun_4)libbase[fidx])(acc, ipc[1], ipc[2], ipc[3]);
+  default: return (word)-1;
+  }
+}
+
+#else
+  
+// n is number of args in addition to ACC
+word sys(char n, word acc, char* ipc) {
+  word id= ipc[0], a= ipc[1], b= ipc[2], c= ipc[3];
+  libfun_2* libbase= library[id >> 4][n-1];
+  char fidx= id & 0x0f;
+  
+  // error
+  if (!libbase) n= -1;
+     
+  switch(n) {
+  case 1:  return (*(libfun_2)(libbase[fidx])) (acc, a);
+  case 2:  return (*(libfun_3)(libbase[fidx])) (acc, a, b);
+  case 3:  return (*(libfun_4)(libbase[fidx])) (acc, a, b, c);
+  default: return (word)-1;
+  }
+}
+
+#endif
 
 // Just enable to see compilation size differnce
 #ifdef NOIVM
@@ -539,6 +779,7 @@ ivmvar run_ivm(Process *p) {
       t['P'] = &&op_P;    t['O'] = &&op_O;   t['W'] = &&op_W;
       t['.'] = &&op_dot;  t['"'] = &&op_str;
       t['G'] = &&op_G;    t['B'] = &&op_B;
+      t['x'] = &&op_x;    t['y'] = &&op_y;   t['z'] = &&op_z;
       memcpy(vt, t, sizeof(vt));
       inited = 1;
     }
@@ -616,6 +857,7 @@ ZL(op_M,   'M')
       #ifdef __CC65__
         zp.mem[*zp.ipc] = (ivmvar)(unsigned)calloc(n, 1);
       #else
+        // TODO: "halloc" - make a function
         if (soft_top + n > SOFT_HEAP_MAX) n = 0;
         zp.mem[*zp.ipc] = (ivmvar)soft_top;
         if (n) { memset(soft_heap + soft_top, 0, n); soft_top += n; }
@@ -675,8 +917,13 @@ ZL(op_dot, '.')  printf("%u", zp.acc);  goto xnext;
 ZL(op_str, '"')  while (*zp.ipc) putchar(*zp.ipc++);
                                         goto pnext;
 
-ZL(op_G,   'G')  if ((int16_t)zp.acc > 0) zp.ipc += *zp.ipc; goto pnext;
-ZL(op_B,   'B')  zp.ipc -= *zp.ipc; goto pnext;
+ZL(op_G,   'G')  if ((int16_t)zp.acc > 0)
+                   zp.ipc += *zp.ipc;   goto pnext;
+ZL(op_B,   'B')  zp.ipc -= *zp.ipc;     goto pnext;
+
+ZL(op_x,   'x')  zp.acc= sys(1, zp.acc, zp.ipc); zp.ipc+= 1; goto xnext;
+ZL(op_y,   'y')  zp.acc= sys(2, zp.acc, zp.ipc); zp.ipc+= 2; goto xnext;
+ZL(op_z,   'z')  zp.acc= sys(3, zp.acc, zp.ipc); zp.ipc+= 3; goto xnext;
 
   #ifndef USE_LABELS
   default:
