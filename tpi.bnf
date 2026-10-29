@@ -14,7 +14,7 @@ C=K\<|
 # keyword statements FIRST so IF/FOR/WRITE are not tried as \i
 K=if E then K else K|if E then K
 |for \i:=E to E do K
-|write(W);|writeln(W);[N]
+|write(JW);|writeln(JW);[N]
 |new(\i);|dispose(\i);|freemem(\i);|getmem(\i,E);|setlength(\i,E);
 |B|;
 |\i:=0;[Z\1]
@@ -23,8 +23,10 @@ K=if E then K else K|if E then K
 |\i:=S;[L\2S\1]
 |\i:=E;[S\1]
 |\i\[E\]:=E;[S\1]
-W=J,\<|J|
-J=E|\s
+# J rule to print every expressions
+#TODO: W snouldn't be needed if we have ?,
+W=,J\<|
+J=E[.]|"["]\S
 # E = primary + optional left-assoc op chain (no precedence)
 E=SO
 # S = primary -> mem/const address (never ACC)
@@ -56,6 +58,7 @@ Tokens:
   \+  declare ident -> slot
   \d  number -> const 0x80|idx
   \s  string
+  \S  copy bytes including last \0 (use: "\S )
   \[ \] literal brackets
 
 Control:
