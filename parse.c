@@ -73,6 +73,8 @@
 #include <stdarg.h>
 #include <stdint.h>
 
+#include "ivm-print.c"
+
 typedef unsigned char uchar;
 typedef uint16_t word;
 
@@ -974,14 +976,9 @@ static int step(void) {
     // -v: one GEN per statement (K), after alt commits
     if (verbose >= 1 && code_len > fr->code_save &&
         (uchar)('A' + fr->rule) == 'K') {
-      word gi;
       fprintf(stderr, NORMAL "GEN:          [ ");
-      for (gi = fr->code_save; gi < code_len; gi++) {
-        uchar gb = code_buf[gi];
-        if (gb > ' ' && gb < 127) fprintf(stderr, "%c", gb);
-        else fprintf(stderr, "%02x ", gb);
-      }
-      fprintf(stderr, " ]\n");
+      ivm_print_code_range(stderr, code_buf, fr->code_save, code_len, 0);
+      fprintf(stderr, "]\n");
       fflush(stderr);
     }
     if (verbose >= 1 && cap_len[sp - 1] > 0) {
@@ -994,7 +991,7 @@ static int step(void) {
           if (nalt > 1) fprintf(stderr, "%u", fr->alt);
           fprintf(stderr, ":\n");
         }
-        fprintf(stderr, GREEN "SRC: ");
+        fprintf(stderr, "SRC: " GREEN);
         for (i = 0; i < cap_len[sp - 1]; i++) {
           uchar ch = capture[sp - 1][i];
           if (ch == '\n') fprintf(stderr, NORMAL "\n" "SRC:" GREEN);
@@ -1402,18 +1399,7 @@ int main(int argc, char **argv) {
       
       fprintf(stderr, "--- BYTECODE (%u bytes) ---\n", (unsigned)code_len);
 
-      // print somewhat readable
-      for (i = 0; i < code_len; i++) {
-        b = code_buf[i];
-
-        if (b > 32 && b < 127) {
-          if (strchr("#$(),.0123456789;<=>?ADEKNPQR~X", b))
-            fprintf(stderr, "%c ", b);
-          else
-            fprintf(stderr, "%c%02x ", b, code_buf[++i]);
-        } else
-          fprintf(stderr, "<%02x> ", b);
-      }
+      ivm_print_code(stderr, code_buf, code_len);
       fputc('\n', stderr);
 
       // dump hex

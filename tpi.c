@@ -167,6 +167,9 @@
 uchar *g_loaded;
 #include "ivm.c"
 
+// shared bytecode pretty-printer
+#include "ivm-print.c"
+
 
 //////////////////////////////////////////////
 // Compiler
@@ -2120,37 +2123,8 @@ void finalise(void) {
 void dump_bytecode(void) {
   int i= 0, n= 0, wrap= 10;
   printf("\n--- BYTECODE (%d bytes) ---\n", bin_ptr);
-  for (; i < bin_ptr; i++) {
-    char c = bin[i];
-    if (c < 32) {
-      printf("#%02x ", c);
-    }
-    else if (c >= 0xC0) printf("(%02x)", c - 0xC0);
-    else if (c <  32)    printf("<%02x>", c);
-
-    else if (c == ' ')  printf("_   ");
-    else if (c == '"') {
-      putchar('\n'); do putchar(c); while((c=bin[++i]));
-      printf("\\0\n"); n= 0; }
-    else if (isprint(c) && c > ' ') {
-
-      // single byte ops (incl. X Q return; 1-8 frame loads)
-      if (strchr("#$(),.0123456789;<=>?ADEKNPQR~X", c)
-        || islower(c)) {
-        printf("%c   ", c);
-        if (c == ';' || c == 'X' || c == 'Q') { n= 0; putchar('\n'); }
-      }
-
-      // takes at least one arg
-      else 
-        if (c == 'U' || c == '(' || c == ')') { // two args
-          printf("U%02x%02x   ", bin[i+1], bin[i+2]); i+= 2;
-        } else
-          printf("%c%02x ", c, bin[++i]);
-    }
-    else printf("$%02x ", c);
-    if (c == 'N' || ++n == wrap) { printf("\n"); n= 0; }
-  }
+  ivm_print_code(stdout, (const uchar *)bin, (unsigned)bin_ptr);
+  printf("\n");
 
   if (nvector) {
     printf("\n\n--- Vectors:\n");

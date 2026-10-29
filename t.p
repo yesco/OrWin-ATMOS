@@ -1,5 +1,21 @@
 Program Test;
 
+function Mul2(val : integer) : integer;
+begin
+   Mul2 := val+val;
+end;
+
+{ TODO: extend for several args }
+function AddTen(val : integer) : integer;
+begin
+   AddTen := val + Mul2(5);
+end;
+
+function Two(a : integer; b: integer) : integer;
+begin
+   Two := a + b;
+end;
+
 var
    a   : integer;
    b   : integer;
@@ -15,7 +31,6 @@ begin
    writeln(42);
    writeln(c);
    
-{
    writeln("Hello 6502 World at OrWIN-ATMOS TinyPascal VM!");
    writeln("12345: ", 12345);
 
@@ -23,7 +38,6 @@ begin
    writeln("alpha: ", a);
    writeln("3+4: ", 3+4);
 
-{
    writeln("Mul2(33): ", Mul2(33));
    writeln("AddTen(7): ", AddTen(7));
 
@@ -54,5 +68,4 @@ begin
    for i:=1 to 10 do
       sum := sum + i;
    writeln(sum);
-}
 end.
