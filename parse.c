@@ -997,7 +997,7 @@ static int step(void) {
         fprintf(stderr, GREEN "SRC: ");
         for (i = 0; i < cap_len[sp - 1]; i++) {
           uchar ch = capture[sp - 1][i];
-          if (ch == '\n') fprintf(stderr, NORMAL "\nSRC:" GREEN);
+          if (ch == '\n') fprintf(stderr, NORMAL "\n" "SRC:" GREEN);
           else fputc(ch, stderr);
         }
         fprintf(stderr, NORMAL "\n");
