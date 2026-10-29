@@ -24,7 +24,7 @@ K=if E then K else K|if E then K
 |\i:=E;[S\1]
 |\i\[E\]:=E;[S\1]
 # J rule to print every expressions
-#TODO: W snouldn't be needed if we have ?,
+# TODO: W snouldn't be needed if we have ?,
 W=,J\<|
 J=E[.]|"["]\S
 # E = primary + optional left-assoc op chain (no precedence)

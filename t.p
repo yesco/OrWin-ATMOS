@@ -8,6 +8,14 @@ var
    sum : integer;
    
 begin
+   a := 7;
+   b := 10;
+   c := a + b;
+   
+   writeln(42);
+   writeln(c);
+   
+{
    writeln("Hello 6502 World at OrWIN-ATMOS TinyPascal VM!");
    writeln("12345: ", 12345);
 

@@ -409,40 +409,59 @@ static uchar *run_production(uchar *p) {
     fflush(stderr);
   }
   while (*p && *p != ']') {
-    if (*p == '\\' && p[1] == 'a' && p[2] >= '1' && p[2] <= '9') {
-      n = (uchar)(p[2] - '0');
-      w = force_addr(n);
-      b = (uchar)(w & 0xff);
-      if (code_len < MAX_CODE) code_buf[code_len++] = b;
-      p += 3;
-      if (verbose >= 1) { fprintf(stderr, "%02x ", b); fflush(stderr); }
-      continue;
-    }
-    if (*p == '\\' && p[1] >= '1' && p[1] <= '9') {
-      n = (uchar)(p[1] - '0');
-      w = (n <= fr->prod_n) ? fr->prod_cap[n] : 0;
-      if (w == VAL_ACC) w = force_addr(n);
-      b = (uchar)(w & 0xff);
-      if (code_len < MAX_CODE) code_buf[code_len++] = b;
-      p += 2;
-      if (verbose >= 1) {
-        if (b >= 0x80) fprintf(stderr, "C%02x ", b & 0x7f);
-        else fprintf(stderr, "%02x ", b);
-        fflush(stderr);
+
+    if (*p == '\\') {
+
+      // TODO: describe purpose
+      if (p[1] == 'a' && isdigit(p[2])) {
+        n = (uchar)(p[2] - '0');
+        w = force_addr(n);
+        b = (uchar)(w & 0xff);
+        if (code_len < MAX_CODE) code_buf[code_len++] = b;
+        p += 3;
+        if (verbose >= 1) { fprintf(stderr, "%02x ", b); fflush(stderr); }
+        continue;
       }
-      continue;
+
+      // \3 parameter address generate
+      if (isdigit(p[1])) {
+        n = (uchar)(p[1] - '0');
+        w = (n <= fr->prod_n) ? fr->prod_cap[n] : 0;
+        if (w == VAL_ACC) w = force_addr(n);
+        b = (uchar)(w & 0xff);
+        if (code_len < MAX_CODE) code_buf[code_len++] = b;
+        p += 2;
+
+        if (verbose >= 1) {
+          // TDOO: same as prev...
+          fprintf(stderr, "%02x ", b);
+          fflush(stderr);
+        }
+        continue;
+      }
     }
+
+    // TODO: describe purpose
     b = *p++;
     if (code_len < MAX_CODE) code_buf[code_len++] = b;
     if (verbose >= 1) {
-      if (b > ' ' && b < 127) fprintf(stderr, "%c ", b);
-      else fprintf(stderr, "<%02x>", b);
+      if (b > ' ' && b < 127) fprintf(stderr, "%c", b);
+      else if (b >= 0xC0) fprintf(stderr, "(%02x)", b & 0x7f);
+      else if (b >= 0x80) fprintf(stderr, "[%02x]", b & 0x3f);
+      else if (b <  32)    printf("<%02x>", b);
+      else if (b == ' ')  printf("_   ");
+      else fprintf(stderr, "%02x ", b);
       fflush(stderr);
     }
+
   }
+
+  // ] - end of codegen
   if (verbose >= 1) { fprintf(stderr, "]>\n"); fflush(stderr); }
   if (*p == ']') p++;
+
   fr->result = VAL_ACC; // production leaves value in ACC
+
   return p;
 }
 
@@ -451,10 +470,11 @@ static int name_add(const char *id) {
   word i;
 
   if (nnames >= MAX_NAMES) return 0;
-  for (i = 0; i < nnames; i++) {
-    if (name_eq(names[i], id))
-      return 1;
-  }
+
+  for (i = 0; i < nnames; i++)
+    if (name_eq(names[i], id)) return 1;
+
+  // not found
   strncpy(names[nnames], id, NAME_LEN - 1);
   names[nnames][NAME_LEN - 1] = 0;
   name_scope[nnames] = scope_depth;
@@ -464,14 +484,15 @@ static int name_add(const char *id) {
 }
 
 static void scope_enter(void) {
-  if (scope_depth < 255)
-    scope_depth++;
+  if (scope_depth < 255) scope_depth++;
 }
 
 static void scope_leave(void) {
   word i, w;
 
   if (scope_depth == 0) return;
+
+  // remove last scope names
   w = 0;
   for (i = 0; i < nnames; i++) {
     if (name_scope[i] < scope_depth) {
@@ -483,6 +504,7 @@ static void scope_leave(void) {
       w++;
     }
   }
+
   nnames = w;
   scope_depth--;
 }
