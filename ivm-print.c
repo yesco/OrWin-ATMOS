@@ -1,25 +1,29 @@
-// Shared IVM bytecode pretty-printer
-// Single place for L80 vs L <80> — used by tpi dump and parse GEN/ACCEPT.
+// Shared IVM bytecode pretty-printer — #include "ivm-print.c"
 
-#include "ivm-print.h"
+#include <stdio.h>
 #include <ctype.h>
 #include <string.h>
 
-// Single-byte ops (no following operand byte)
-static int is_solo(uchar c) {
+#ifndef UCHAR
+#define UCHAR
+typedef unsigned char uchar;
+#endif
+
+#ifndef IVM_PRINT_C
+#define IVM_PRINT_C
+
+static int ivm_is_solo(uchar c) {
   if (islower((int)c)) return 1;
   return strchr("#$(),.0123456789;<=>?ADEKNPQR~X", (int)c) != 0;
 }
 
-// Print one instruction at *pi; advances *pi.
-static void print_one(FILE *fp, const uchar *code, unsigned len, unsigned *pi) {
+static void ivm_print_one(FILE *fp, const uchar *code, unsigned len, unsigned *pi) {
   uchar c;
   unsigned i = *pi;
 
   if (i >= len) return;
   c = code[i];
 
-  // embedded string: "....\0
   if (c == '"') {
     fputc('\n', fp);
     do {
@@ -36,7 +40,6 @@ static void print_one(FILE *fp, const uchar *code, unsigned len, unsigned *pi) {
     return;
   }
 
-  // high bit: const ref 0x80+n or vector 0xC0+n
   if (c >= 0xC0) {
     fprintf(fp, "(%02x) ", (unsigned)(c - 0xC0));
     *pi = i + 1;
@@ -48,7 +51,6 @@ static void print_one(FILE *fp, const uchar *code, unsigned len, unsigned *pi) {
     return;
   }
 
-  // control / non-print
   if (c < 32) {
     fprintf(fp, "<%02x> ", (unsigned)c);
     *pi = i + 1;
@@ -66,7 +68,7 @@ static void print_one(FILE *fp, const uchar *code, unsigned len, unsigned *pi) {
       *pi = i + 3;
       return;
     }
-    if (is_solo(c)) {
+    if (ivm_is_solo(c)) {
       fprintf(fp, "%c ", c);
       *pi = i + 1;
       return;
@@ -95,7 +97,7 @@ unsigned ivm_print_code_range(FILE *fp, const uchar *code, unsigned start,
   while (i < end) {
     unsigned before = i;
     uchar ch = code[i];
-    print_one(fp, code, end, &i);
+    ivm_print_one(fp, code, end, &i);
     if (i <= before) i = before + 1;
     if (wrap && (ch == 'N' || ch == ';' || ch == 'X' || ch == 'Q' || ++n >= wrap)) {
       fputc('\n', fp);
@@ -108,3 +110,5 @@ unsigned ivm_print_code_range(FILE *fp, const uchar *code, unsigned start,
 unsigned ivm_print_code(FILE *fp, const uchar *code, unsigned len) {
   return ivm_print_code_range(fp, code, 0, len, 10);
 }
+
+#endif

@@ -370,49 +370,11 @@ char next(void) {
   return cur_c;
 }
 
-// ---------------------------------------------------------------------------
-// Bytecode buffer
-// ---------------------------------------------------------------------------
-char bin[MAX_BIN_LEN];
-int bin_ptr = 0;
+// shared emit + const pool
+#define IVM_GEN_FAIL(msg) FAIL(msg)
+#include "ivm-gen.c"
 
-// ACC mirror: which mem slot ACC currently holds (-1 = none/unknown)
-char acc_slot;
-char acc_valid;
-
-void acc_invalidate(void) {
-  acc_valid = 0;
-  acc_slot = (char)-1;
-}
-
-void acc_set_slot(char slot) {
-  acc_slot = slot;
-  acc_valid = 1;
-}
-
-void emit(char c) {
-  if (bin_ptr >= MAX_BIN_LEN - 1) FAIL("bytecode buffer overflow");
-  bin[bin_ptr++] = c;
-}
-
-void emitop(char op) {
-  emit(op);
-  // control-flow / ACC-clobbering ops — mirror is invalid after these
-  if (op == '0' || op == '9' || op == '~' || op == '?' || op == 'G' || op == 'B')
-    acc_invalidate();
-}
-
-void emitop2(char op, char arg) {
-  emitop(op);
-  emit(arg);
-  if (op == 'S' || op == 'L' || op == 'U') {
-    acc_set_slot(arg);
-    if (op == 'L') note_load(arg);
-    if (op == 'S') note_store(arg);
-  }
-  else if (strchr("+-*/%&|^IJ[]{}MF@", op))
-    acc_invalidate();
-}
+// emit/bin/acc from ivm-gen.c
 
 // Generate function return (pascal: exit)
 
@@ -514,84 +476,7 @@ char alloc_temp(void) {
   return alloc_frame_slot();
 }
 
-// ---------------------------------------------------------------------------
-// Constants (separate array, referenced as 0x80+n)
-// ---------------------------------------------------------------------------
-
-uint16_t const_pool[MAX_CONSTS];
-
-// NO NO NO NO NO ! ! !
-
-// TODO: the const pool separate array is just temporary during
-//   compilation, the finlize() should add it at the end of the
-//   runtime vars block!
-//
-//   The whole point was to store constants in memory so 
-//   that we wouldn't have a separate code path for it,
-//   now everything is duplicated! LOL
-//
-//   I guess this makes another one of those to "relocate", lol
-//   
-//   finalising(): before executing, we relocate all references
-//   to constants in the code, by moving them to a base at end
-//   of final, that is, if we're copying the constants...
-// 
-//   Then during execution there would be one code path.
-//
-//   ALT: hi-bit set (== too limited), or idx >= startconstidx:
-//     load using different base pointer. (complicated)
-
-
-char nconst = 0;
-uchar constidx = 255; // lowest const slot; 255 = no constants
-
-// Constants grow downward from CONST_TOP.
-// const_pool[0] @ CONST_TOP, [1] @ CONST_TOP-1, ...
-uchar add_const(unsigned int v) {
-  uchar i, addr;
-  for (i = 0; i < nconst; i++)
-    if (const_pool[i] == v)
-      return CONST_TOP - i;
-  if (nconst >= MAX_CONSTS) FAIL("constant pool full");
-  if (CONST_TOP - nconst < FRAME_BASE) FAIL("constants collided with frames");
-  const_pool[nconst] = v;
-  addr = CONST_TOP - nconst;
-  nconst++;
-  constidx = addr;
-  return addr;
-}
-
-#define isconst(a) ((uchar)(a) >= constidx && (uchar)(a) <= CONST_TOP)
-#define const_val(a) (const_pool[CONST_TOP - (uchar)(a)])
-
-// Literals 0 / -1: not pooled until needed as an op address (RHS of + etc.)
-// outside const band (CONST_TOP=253); never emitted as L/S operands
-#define IMM0 ((uchar)0xfe)
-#define IMM1 ((uchar)0xff)
-
-int is_lit(uchar a) {
-  return a == IMM0 || a == IMM1 || isconst(a);
-}
-
-unsigned int lit_val(char a) {
-  if ((uchar)a == IMM0) return 0;
-  if ((uchar)a == IMM1) return (unsigned int)-1;
-  return const_val(a);
-}
-
-// Address usable as emitop2 arg (intern IMM0/IMM1 if needed)
-char as_addr(uchar a) {
-  if (a == IMM0) return (char)add_const(0);
-  if (a == IMM1) return (char)add_const((unsigned int)-1);
-  return (char)a;
-}
-
-// Map a numeric value to IMM0 / IMM1 / pooled const address
-char lit_addr(unsigned int v) {
-  if (v == 0) return IMM0;
-  if (v == (unsigned int)-1) return IMM1;
-  return add_const(v);
-}
+// const pool from ivm-gen.c
 
 // ---------------------------------------------------------------------------
 // Vectors (function entry points)

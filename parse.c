@@ -73,10 +73,22 @@
 #include <stdarg.h>
 #include <stdint.h>
 
-#include "ivm-print.c"
-
+#ifndef UCHAR
+#define UCHAR
 typedef unsigned char uchar;
 typedef uint16_t word;
+#endif
+
+#include "ivm-print.c"
+
+// shared emit + real const addresses
+static void note_load(uchar addr) { (void)addr; }
+static void note_store(uchar addr) { (void)addr; }
+#define IVM_GEN_FAIL(msg) do { fprintf(stderr, "%s\n", (msg)); abort(); } while (0)
+#define MAX_BIN_LEN 4096
+#include "ivm-gen.c"
+#define code_buf ((uchar *)bin)
+#define code_len bin_ptr
 
 #define NRULES      26
 #define MAX_STACK   128
@@ -149,16 +161,8 @@ static word  undef_pos_abs;
 static uchar name_slot[MAX_NAMES];
 static uchar next_slot; // next free slot index for \+ decls / temps
 
-// constant pool: value -> slot with high bit (0x80|idx) like tpi consts
-#define MAX_CONSTS 64
-static word  const_val[MAX_CONSTS];
-static uchar nconsts;
-
-// emitted bytecode (tpi-compatible ops)
-#define MAX_CODE 4096
+// const + bin from ivm-gen.c (code_buf/code_len macros)
 #define VAL_ACC  0xffff
-static uchar code_buf[MAX_CODE];
-static word  code_len;
 static uchar next_tmp;
 
 // ---- logging ----
@@ -330,11 +334,6 @@ static int name_in_scope(const char *id) {
 
 // ---- bytecode emission (tpi-style) ----
 
-static void code_emit(uchar b) {
-  if (code_len < MAX_CODE)
-    code_buf[code_len++] = b;
-}
-
 // record a value-producing match into \\1..\\9 of current frame
 static void record_capture(word val) {
   Frame *fr;
@@ -361,10 +360,7 @@ static word force_addr(uchar n) {
   if (v != VAL_ACC) return v;
   tmp = next_tmp;
   if (next_tmp < 0xfe) next_tmp++;
-  if (code_len + 2 <= MAX_CODE) {
-    code_buf[code_len++] = 'S';
-    code_buf[code_len++] = tmp;
-  }
+  emitop2('S', (char)tmp);
   fr->prod_cap[n] = tmp;
   if (verbose >= 1) {
     fprintf(stderr, "  spill->%02x\n", tmp);
@@ -392,19 +388,6 @@ static uchar alloc_slot(void) {
   return s;
 }
 
-static uchar intern_const(word v) {
-  uchar i;
-
-  for (i = 0; i < nconsts; i++) {
-    if (const_val[i] == v)
-      return (uchar)(0x80 | i);
-  }
-  if (nconsts >= MAX_CONSTS)
-    return 0x80;
-  const_val[nconsts] = v;
-  i = nconsts++;
-  return (uchar)(0x80 | i);
-}
 
 // run production at p (first char after '['); returns after ']'
 // quiet: GEN is printed only when the owning alt commits (ST_OK)
@@ -420,7 +403,7 @@ static uchar *run_production(uchar *p) {
         n = (uchar)(p[2] - '0');
         w = force_addr(n);
         b = (uchar)(w & 0xff);
-        if (code_len < MAX_CODE) code_buf[code_len++] = b;
+        emit((char)b);
         p += 3;
         continue;
       }
@@ -428,14 +411,14 @@ static uchar *run_production(uchar *p) {
         n = (uchar)(p[1] - '0');
         w = (n <= fr->prod_n) ? fr->prod_cap[n] : 0;
         if (w == VAL_ACC) w = force_addr(n);
-        b = (uchar)(w & 0xff);
-        if (code_len < MAX_CODE) code_buf[code_len++] = b;
+        b = (uchar)as_addr((uchar)(w & 0xff));
+        emit((char)b);
         p += 2;
         continue;
       }
     }
     b = *p++;
-    if (code_len < MAX_CODE) code_buf[code_len++] = b;
+    emit((char)b);
   }
   if (*p == ']') p++;
   fr->result = VAL_ACC;
@@ -658,7 +641,7 @@ static int match_num(void) {
     line_pos++;
   }
   note_progress();
-  slot = intern_const(v);
+  slot = (uchar)as_addr((uchar)lit_addr((unsigned int)v));
   record_capture(slot);
   return 1;
 }
@@ -672,13 +655,13 @@ static int match_str_emit(void) {
       if (!line_need()) return 0;
       c = line_buf[line_pos];
     }
-    if (code_len < MAX_CODE) code_buf[code_len++] = c;
+    emit((char)c);
     capture_add(c);
     line_pos++;
   }
   if (!line_need() || line_buf[line_pos] != '"') return 0;
   line_pos++;
-  if (code_len < MAX_CODE) code_buf[code_len++] = 0;
+  emit(0);
   note_progress();
   return 1;
 }
@@ -1283,8 +1266,7 @@ static int init(const char *bnf_path, const char *src_path) {
   last_undef[0] = 0;
   next_slot = 0;
   next_tmp = 200;
-  nconsts = 0;
-  code_len = 0;
+  gen_reset();
   // no pre-seeded names — X must be declared in source if used
   {
     uchar i;
