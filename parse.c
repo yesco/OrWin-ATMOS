@@ -114,10 +114,11 @@ typedef struct {
   word nnames_save;   // scope name count at alt entry
   uchar scope_save;   // scope_depth at alt entry
   uchar state;
-  // production value captures \1..\9 (0 unused); result = rule output byte
-  uchar prod_cap[10];
+  // production value captures \1..\9; result = rule value (word)
+  // 0..254 slot, 0x80|idx const, 0xFFFF = ACC
+  word prod_cap[10];
   uchar prod_n;
-  uchar result;
+  word result;
   word code_save; // code_len at alt entry (backtrack)
 } Frame;
 
@@ -151,8 +152,10 @@ static uchar nconsts;
 
 // emitted bytecode (tpi-compatible ops)
 #define MAX_CODE 4096
+#define VAL_ACC  0xffff
 static uchar code_buf[MAX_CODE];
 static word  code_len;
+static uchar next_tmp;
 
 // ---- logging ----
 
@@ -324,7 +327,7 @@ static void code_emit(uchar b) {
 }
 
 // record a value-producing match into \\1..\\9 of current frame
-static void record_capture(uchar val) {
+static void record_capture(word val) {
   Frame *fr;
 
   if (sp == 0) return;
@@ -334,6 +337,31 @@ static void record_capture(uchar val) {
     fr->prod_cap[fr->prod_n] = val;
   }
   fr->result = val;
+}
+
+// spill ACC to temp slot; return mem address for capture n
+static word force_addr(uchar n) {
+  Frame *fr;
+  word v;
+  uchar tmp;
+
+  if (sp == 0) return 0;
+  fr = &stack[sp - 1];
+  if (n < 1 || n > fr->prod_n) return 0;
+  v = fr->prod_cap[n];
+  if (v != VAL_ACC) return v;
+  tmp = next_tmp;
+  if (next_tmp < 0xfe) next_tmp++;
+  if (code_len + 2 <= MAX_CODE) {
+    code_buf[code_len++] = 'S';
+    code_buf[code_len++] = tmp;
+  }
+  fr->prod_cap[n] = tmp;
+  if (verbose >= 1) {
+    fprintf(stderr, "  spill->%02x\n", tmp);
+    fflush(stderr);
+  }
+  return tmp;
 }
 
 static uchar lookup_slot(const char *id) {
@@ -369,57 +397,52 @@ static uchar intern_const(word v) {
   return (uchar)(0x80 | i);
 }
 
-// run production string at p (points at first char after '['); returns ptr after ']'
+// run production at p (first char after '['); returns after ']'
 static uchar *run_production(uchar *p) {
   Frame *fr;
   uchar n, b;
+  word w;
 
   fr = &stack[sp - 1];
   if (verbose >= 1) {
-    v1_indent();
-    v1("<[");
+    fprintf(stderr, "%*s%c<[", (int)sp, "", 'A' + fr->rule);
+    fflush(stderr);
   }
   while (*p && *p != ']') {
-
+    if (*p == '\\' && p[1] == 'a' && p[2] >= '1' && p[2] <= '9') {
+      n = (uchar)(p[2] - '0');
+      w = force_addr(n);
+      b = (uchar)(w & 0xff);
+      if (code_len < MAX_CODE) code_buf[code_len++] = b;
+      p += 3;
+      if (verbose >= 1) { fprintf(stderr, "%02x ", b); fflush(stderr); }
+      continue;
+    }
     if (*p == '\\' && p[1] >= '1' && p[1] <= '9') {
-
-      // get value of match
       n = (uchar)(p[1] - '0');
-      b = (n <= fr->prod_n) ? fr->prod_cap[n] : 0;
-      code_emit(b);
+      w = (n <= fr->prod_n) ? fr->prod_cap[n] : 0;
+      if (w == VAL_ACC) w = force_addr(n);
+      b = (uchar)(w & 0xff);
+      if (code_len < MAX_CODE) code_buf[code_len++] = b;
       p += 2;
-
       if (verbose >= 1) {
-        if (b >= 0x80)
-          v1("C%02x ", b & 0x7f);
-        else
-          v1("%02x ", b);
+        if (b >= 0x80) fprintf(stderr, "C%02x ", b & 0x7f);
+        else fprintf(stderr, "%02x ", b);
+        fflush(stderr);
       }
-
-    } else {
-
-      // output literarl
-      b = *p++;
-      code_emit(b);
-
-      if (verbose >= 1) {
-        if (b == ' ')
-          v1("   ");
-        else if (b > ' ' && b < 127)
-          v1("%c ", b);
-        else
-          v1("\\x%02x", b);
-      }
-
+      continue;
+    }
+    b = *p++;
+    if (code_len < MAX_CODE) code_buf[code_len++] = b;
+    if (verbose >= 1) {
+      if (b > ' ' && b < 127) fprintf(stderr, "%c ", b);
+      else fprintf(stderr, "<%02x>", b);
+      fflush(stderr);
     }
   }
-
-  if (verbose >= 1) v1(">\n");
+  if (verbose >= 1) { fprintf(stderr, "]>\n"); fflush(stderr); }
   if (*p == ']') p++;
-
-  // rule result defaults to \\1 if present
-  if (fr->prod_n >= 1)
-    fr->result = fr->prod_cap[1];
+  fr->result = VAL_ACC; // production leaves value in ACC
   return p;
 }
 
@@ -688,7 +711,7 @@ static void build_one_rule(uchar r, char *rhs) {
       e = (uchar)p[1];
       if (e == 'i' || e == 'n' || e == 's' || e == 'C' || e == '<' ||
           e == 'd' || e == '+' || e == '{' || e == '}' ||
-          e == '[' || e == ']' ||
+          e == '[' || e == ']' || e == '#' || e == '=' || e == 'a' ||
           (e >= '1' && e <= '9'))
         blob_len = (word)(blob_len + 2);
       else
@@ -717,7 +740,7 @@ static void build_one_rule(uchar r, char *rhs) {
       e = (uchar)p[1];
       if (e == 'i' || e == 'n' || e == 's' || e == 'C' || e == '<' ||
           e == 'd' || e == '+' || e == '{' || e == '}' ||
-          e == '[' || e == ']' ||
+          e == '[' || e == ']' || e == '#' || e == '=' || e == 'a' ||
           (e >= '1' && e <= '9')) {
         blob[bi++] = '\\';
         blob[bi++] = e;
@@ -904,6 +927,7 @@ static int step(void) {
     cap_len[sp - 1] = fr->cap_save;
     code_len = fr->code_save;
     fr->prod_n = 0;
+    had_undef = 0;
     fr->ip = 0;
     fr->state = ST_RUN;
     vlog("try %c alt %u @%u \"%s\"\n",
@@ -938,7 +962,7 @@ static int step(void) {
 
     capture_commit((uchar)(sp - 1));
     {
-      uchar child_res = stack[sp - 1].result;
+      word child_res = stack[sp - 1].result;
       sp--;
       if (sp == 0) return 0;
       // parent records subrule result as next \n capture
@@ -1209,6 +1233,7 @@ static int init(const char *bnf_path, const char *src_path) {
   had_undef = 0;
   last_undef[0] = 0;
   next_slot = 0;
+  next_tmp = 200;
   nconsts = 0;
   code_len = 0;
   // no pre-seeded names — X must be declared in source if used

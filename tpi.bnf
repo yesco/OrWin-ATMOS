@@ -1,4 +1,5 @@
 # -- BNF grammar for tpi.c PASCAL implementation
+# K = statement, S = simple primary (address), O = op chain, E = expression
 P=program \+;DB.
 D=V\<|F\<|
 V=var M
@@ -9,46 +10,66 @@ T=^I|I
 I=integer|word
 H=V|
 B=begin C end;|begin C end
-C=S\<|
-S=\i:=0;[Z\1]|\i:=E;[L\2S\1]
-|\i\[E\]:=E;[L\3 S\1]
+C=K\<|
+# keyword statements FIRST so IF/FOR/WRITE are not tried as \i
+K=if E then K else K|if E then K
+|for \i:=E to E do K
+|write(W);|writeln(W);[N]
 |new(\i);|dispose(\i);|freemem(\i);|getmem(\i,E);|setlength(\i,E);
-|write(W);|writeln(W);[N ]
-|for \i:=E to E do S
-|if E then S else S|if E then S
 |B|;
+|\i:=0;[Z\1]
+|\i:=S+S;[L\2+\3S\1]
+|\i:=S-S;[L\2-\3S\1]
+|\i:=S;[L\2S\1]
+|\i:=E;[S\1]
+|\i\[E\]:=E;[S\1]
 W=J,\<|J|
 J=E|\s
-E=RX
-X=YR\<|
-Y=+|-|*|/|&|\||^|<|=|>|shl|shr
-R=\d|\i(Z)|\i|sizeof(T)\#02|sizeof(\i)\#02|not R[?\1 ]|(E)
+# E = primary + optional left-assoc op chain (no precedence)
+E=SO
+# S = primary -> mem/const address (never ACC)
+S=\d|\i(Z)|\i|sizeof(T)\#02|sizeof(\i)\#02|(E)|not S[?\2]
+# O = op + primary; left in ACC, right is address from S (no \a needed)
+O=+S[+\2]\<
+|-S[-\2]\<
+|*S[*\2]\<
+|/S[/\2]\<
+|&S[&\2]\<
+|\|S[|\2]\<
+|^S[^\2]\<
+|=S[=\2]\<
+|<S[<\2]\<
+|>S[>\2]\<
+|shl S[{\2]\<
+|shr S[}\2]\<
+|
 Z=E,\<|E|
 .
 
+
 -- Legend
-.   first on a line ends rules
+.   end of rules
 |   at line start = continue previous rule
 
 Tokens:
-  \i  ident (must be in scope)
-  \+  ident declare (add to scope)
-  \d  number
+  \i  ident in scope -> slot
+  \+  declare ident -> slot
+  \d  number -> const 0x80|idx
   \s  string
-  \n  >=1 newline, eats surrounding horizontal space
-
-  \c  literal c (unless assigned above); example:
-  \[ \] match literal [ ]
+  \[ \] literal brackets
 
 Control:
-  \{  enter scope
-  \}  leave scope (drop names added inside)
-  \<  tail-recurse this rule
-  \C  commit buffer prefix
-
-  \#xx  value of parse rule is integer hex xx
-  \=1   value of parse rule is value of expression 1
+  \{ \} scope  \< tail  \C commit
+  \#xx  result := hex xx
+  \=n   result := capture n
 
 Generate:
-  [..] production emit tpi bytecode after match
-  \1..\9 in production: nth value result (\i \+ \d subrule)
+  [..]  production (-v: Rule<[...]> on stderr)
+  \1..\9  insert capture (auto-spill if ACC)
+  \aN     force capture N to mem address
+
+Expr:
+  S primary = address only
+  O ops: ACC := ACC op mem[S]
+  E=SO  after first S, assignment must L\1 before O, or use K specials
+  K specials S+S generate L a; + b; S dst in one go (clearer than general E)
