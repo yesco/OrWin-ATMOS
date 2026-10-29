@@ -140,6 +140,8 @@ static word  nnames;
 static uchar scope_depth;
 static char  last_undef[NAME_LEN]; // last \i that failed scope check
 static uchar had_undef;
+static uchar had_undef_func;
+static word  undef_pos_abs;
 
 // name -> slot index (same order as names[])
 static uchar name_slot[MAX_NAMES];
@@ -405,7 +407,7 @@ static uchar *run_production(uchar *p) {
 
   fr = &stack[sp - 1];
   if (verbose >= 1) {
-    fprintf(stderr, "%*s%c<[", (int)sp, "", 'A' + fr->rule);
+    fprintf(stderr, "    GEN:%c<[", 'A' + fr->rule);
     fflush(stderr);
   }
   while (*p && *p != ']') {
@@ -620,15 +622,31 @@ static int match_ident_raw(char *idbuf, word idmax) {
 // \i — ident must already be in scope; result = its slot
 static int match_ident(void) {
   char id[NAME_LEN];
-  uchar slot;
+  uchar slot, c;
+  word start_abs, save_pos;
 
+  start_abs = abs_pos();
   if (!match_ident_raw(id, NAME_LEN)) return 0;
   if (!name_in_scope(id)) {
-    strncpy(last_undef, id, NAME_LEN - 1);
-    last_undef[NAME_LEN - 1] = 0;
-    had_undef = 1;
-    vlog("  ident '%s' not in scope (nnames=%u depth=%u)\n",
-         id, (unsigned)nnames, (unsigned)scope_depth);
+    save_pos = line_pos;
+    skip_ws();
+    c = line_need() ? line_buf[line_pos] : 0;
+    line_pos = save_pos;
+    if (c == '(') {
+      if (!had_undef_func || start_abs >= undef_pos_abs) {
+        strncpy(last_undef, id, NAME_LEN - 1);
+        last_undef[NAME_LEN - 1] = 0;
+        had_undef = 1;
+        had_undef_func = 1;
+        undef_pos_abs = start_abs;
+      }
+    } else if (!had_undef_func) {
+      strncpy(last_undef, id, NAME_LEN - 1);
+      last_undef[NAME_LEN - 1] = 0;
+      had_undef = 1;
+      undef_pos_abs = start_abs;
+    }
+    vlog("  ident '%s' not in scope\n", id);
     return 0;
   }
   slot = lookup_slot(id);
@@ -667,6 +685,26 @@ static int match_num(void) {
   note_progress();
   slot = intern_const(v);
   record_capture(slot);
+  return 1;
+}
+
+static int match_str_emit(void) {
+  if (!line_need()) return 0;
+  while (line_need() && line_buf[line_pos] != '"') {
+    uchar c = line_buf[line_pos];
+    if (c == '\\') {
+      line_pos++;
+      if (!line_need()) return 0;
+      c = line_buf[line_pos];
+    }
+    if (code_len < MAX_CODE) code_buf[code_len++] = c;
+    capture_add(c);
+    line_pos++;
+  }
+  if (!line_need() || line_buf[line_pos] != '"') return 0;
+  line_pos++;
+  if (code_len < MAX_CODE) code_buf[code_len++] = 0;
+  note_progress();
   return 1;
 }
 
@@ -731,7 +769,7 @@ static void build_one_rule(uchar r, char *rhs) {
   for (p = rhs; *p; p++) {
     if (*p == '\\' && p[1]) {
       e = (uchar)p[1];
-      if (e == 'i' || e == 'n' || e == 's' || e == 'C' || e == '<' ||
+      if (e == 'i' || e == 'n' || e == 's' || e == 'S' || e == 'C' || e == '<' ||
           e == 'd' || e == '+' || e == '{' || e == '}' ||
           e == '[' || e == ']' || e == '#' || e == '=' || e == 'a' ||
           (e >= '1' && e <= '9'))
@@ -760,7 +798,7 @@ static void build_one_rule(uchar r, char *rhs) {
   for (p = rhs; *p; p++) {
     if (*p == '\\' && p[1]) {
       e = (uchar)p[1];
-      if (e == 'i' || e == 'n' || e == 's' || e == 'C' || e == '<' ||
+      if (e == 'i' || e == 'n' || e == 's' || e == 'S' || e == 'C' || e == '<' ||
           e == 'd' || e == '+' || e == '{' || e == '}' ||
           e == '[' || e == ']' || e == '#' || e == '=' || e == 'a' ||
           (e >= '1' && e <= '9')) {
@@ -962,24 +1000,25 @@ static int step(void) {
     vlog("ok %c alt %u -> @%u\n", 'A' + fr->rule, fr->alt, abs_pos());
     if (verbose >= 1 && cap_len[sp - 1] > 0) {
       word i;
-
-      v1("\n");
-      v1_indent();
-      if (nalt > 1)
-        v1("%c%u:", 'A' + fr->rule, fr->alt);
-      else
-        v1("%c:", 'A' + fr->rule);
-
-      // TODO: memmove?
-      for (i = 0; i < cap_len[sp - 1]; i++) {
-        uchar ch = capture[sp - 1][i];
-
-        if (ch == '\n') v1("\n");
-        else v1("%c", ch);
+      uchar rch = (uchar)('A' + fr->rule);
+      // -v: SRC for K/B/P only; -vv: all rules + tags
+      if (verbose >= 2 || rch == 'K' || rch == 'B' || rch == 'P') {
+        if (verbose >= 2) {
+          fprintf(stderr, "    %c", rch);
+          if (nalt > 1) fprintf(stderr, "%u", fr->alt);
+          fprintf(stderr, ":\n");
+        }
+        fprintf(stderr, "    SRC:");
+        for (i = 0; i < cap_len[sp - 1]; i++) {
+          uchar ch = capture[sp - 1][i];
+          if (ch == '\n') fprintf(stderr, "\n    SRC:");
+          else fputc(ch, stderr);
+        }
+        fprintf(stderr, "\n");
+        if (verbose >= 2)
+          fprintf(stderr, "    <%c\n", rch);
+        fflush(stderr);
       }
-      v1("\n");
-      v1_indent();
-      v1("<%c\n", 'A' + fr->rule);
     }
 
     capture_commit((uchar)(sp - 1));
@@ -1106,6 +1145,7 @@ static int step(void) {
     else if (e == 'd') ok = match_num();
     else if (e == 'n') ok = match_newline();
     else if (e == 's') ok = match_str();
+    else if (e == 'S') ok = match_str_emit();
     else {
       skip_ws();
       ok = match_lit(e);
@@ -1180,7 +1220,9 @@ static void report_reject(void) {
     fprintf(stderr, "\n");
   }
 
-  if (had_undef)
+  if (had_undef && had_undef_func)
+    fprintf(stderr, "ERROR: undefined function: %s\n", last_undef);
+  else if (had_undef)
     fprintf(stderr, "ERROR: identifier \"%s\" not defined here\n", last_undef);
 
   // re-read source around furthest absolute offset
@@ -1189,7 +1231,7 @@ static void report_reject(void) {
     FILE *rf = fopen(src_name, "r");
 
     if (rf) {
-      long want = (long)max_pos_abs;
+      long want = (long)((had_undef && undef_pos_abs) ? undef_pos_abs : max_pos_abs);
       long base = 0;
       int ch, col = 0, nlines = 0, line = 1;
       long i;
@@ -1253,6 +1295,8 @@ static int init(const char *bnf_path, const char *src_path) {
   nnames = 0;
   scope_depth = 0;
   had_undef = 0;
+  had_undef_func = 0;
+  undef_pos_abs = 0;
   last_undef[0] = 0;
   next_slot = 0;
   next_tmp = 200;
