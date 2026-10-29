@@ -10,3 +10,5 @@ rm ~/storage/downloads/*.p
 
 git diff > diff
 git diff
+
+./gs

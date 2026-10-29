@@ -4,7 +4,8 @@ P=program \+;DB.
 D=V\<|F\<|
 V=var M
 M=\+:T;\<|
-F=function \+\{(A):T;HB\}
+# \f = declare function name (+ vector); [;] = return opcode after body
+F=function \f\{(A):T;HB[;]\}
 A=\+:T,\<|\+:T;\<|\+:T|
 T=^I|I
 I=integer|word
@@ -27,23 +28,27 @@ K=if E then K else K|if E then K
 |\i\[E\]:=E;[S\1]
 # JW: one or more J, comma-separated (W = optional ,J tail)
 W=,J\<|
-J=E[.]|"["]\S
-# E = load primary into ACC, then optional ops
-E=S[L\1]O
-S=\d|\i(Z)|\i|sizeof(T)\#02|sizeof(\i)\#02|(E)|not S[?\1]
-O=+S[+\1]\<
-|-S[-\1]\<
-|*S[*\1]\<
-|/S[/\1]\<
-|&S[&\1]\<
-|\|S[|\1]\<
-|^S[^\1]\<
-|=S[=\1]\<
-|<S[<\1]\<
-|>S[>\1]\<
-|shl S[{\1]\<
-|shr S[}\1]\<
+J=E[.]|"\S
+# E = primary then ops. Call primary uses [\v] (ACC); others [L\1] load
+E=\i(Z)[\v]O|S[L\1]O
+# S = non-call primary -> address
+S=\d|\i|sizeof(T)\#02|sizeof(\i)\#02|(E)|not S[?\1]
+# O = op + RHS; RHS may be call (ACC) or address — use \a1 to force addr if ACC
+O=+R[+\a1]\<
+|-R[-\a1]\<
+|*R[*\a1]\<
+|/R[/\a1]\<
+|&R[&\a1]\<
+|\|R[|\a1]\<
+|^R[^\a1]\<
+|=R[=\a1]\<
+|<R[<\a1]\<
+|>R[>\a1]\<
+|shl R[{\a1]\<
+|shr R[}\a1]\<
 |
+# R = RHS of binary op: call or simple primary
+R=\i(Z)[\v]|S
 Z=E,\<|E|
 .
 
@@ -55,7 +60,9 @@ Z=E,\<|E|
 Tokens:
   \i  ident in scope -> slot
   \+  declare ident -> slot
-  \d  number -> const 0x80|idx
+  \f  declare function ident -> slot + vector index
+
+  \d  number -> const address (CONST_TOP down, via lit_addr)
   \s  string (match only)
   \S  emit string bytes + \0 (opening " already matched)
 
@@ -65,11 +72,18 @@ Control:
   \=n   result := capture n
 
 Generate:
-  [..]  production  (-v prints GEN only when alt commits)
-  \1..\9  capture byte
-  \aN     force address
+  [..]     production  (-v prints GEN only when alt commits)
+  \1 - \9  capture byte
+  \aN      force address (spill ACC to temp if needed)
+  \v       emit 0xC0|vec for last matched function \i (in production)
+
+  [;]      function return opcode (after body)
+
 
 Expr:
-  S = address, E = S[L\1]O leaves ACC
+  S = address
+  E = call[\v]O | S[L\1]O leaves ACC
+  R = call or S (RHS of binary ops)
   J = E[.] print ACC, or "\S string
-  write(JW) / writeln(JW): J then optional W=,J tail
+  write(JW) / writeln(JW):
+  J then optional W=,J tail

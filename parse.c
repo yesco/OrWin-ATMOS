@@ -159,6 +159,9 @@ static word  undef_pos_abs;
 
 // name -> slot index (same order as names[])
 static uchar name_slot[MAX_NAMES];
+static uchar name_vec[MAX_NAMES]; // 0xff = not a function; else vector index
+static uchar nvector;
+static uchar last_func_vec; // last \i that was a function (for \v)
 static uchar next_slot; // next free slot index for \+ decls / temps
 
 // const + bin from ivm-gen.c (code_buf/code_len macros)
@@ -399,6 +402,12 @@ static uchar *run_production(uchar *p) {
   fr = &stack[sp - 1];
   while (*p && *p != ']') {
     if (*p == '\\') {
+      if (p[1] == 'v') {
+        uchar op = (uchar)(0xC0 | (last_func_vec & 0x3f));
+        emit((char)op);
+        p += 2;
+        continue;
+      }
       if (p[1] == 'a' && p[2] >= '1' && p[2] <= '9') {
         n = (uchar)(p[2] - '0');
         w = force_addr(n);
@@ -439,6 +448,7 @@ static int name_add(const char *id) {
   names[nnames][NAME_LEN - 1] = 0;
   name_scope[nnames] = scope_depth;
   name_slot[nnames] = alloc_slot();
+  name_vec[nnames] = 0xff;
   nnames++;
   return 1;
 }
@@ -608,11 +618,20 @@ static int match_ident(void) {
     return 0;
   }
   slot = lookup_slot(id);
+  {
+    word i;
+    last_func_vec = 0xff;
+    for (i = 0; i < nnames; i++) {
+      if (name_eq(names[i], id) && name_vec[i] != 0xff) {
+        last_func_vec = name_vec[i];
+        break;
+      }
+    }
+  }
   record_capture(slot);
   return 1;
 }
 
-// \+ — declare ident into current scope
 // \+ — declare ident into current scope; result = new slot
 static int match_ident_decl(void) {
   char id[NAME_LEN];
@@ -623,6 +642,28 @@ static int match_ident_decl(void) {
   slot = lookup_slot(id);
   record_capture(slot);
   vlog("  decl '%s' scope %u slot %u\n", id, (unsigned)scope_depth, (unsigned)slot);
+  return 1;
+}
+
+// \f — declare function: slot + vector index; mark entry at current bin_ptr later
+static int match_ident_func_decl(void) {
+  char id[NAME_LEN];
+  uchar slot;
+  word i;
+
+  if (!match_ident_raw(id, NAME_LEN)) return 0;
+  if (!name_add(id)) return 0;
+  slot = lookup_slot(id);
+  for (i = 0; i < nnames; i++) {
+    if (name_eq(names[i], id)) {
+      name_vec[i] = nvector;
+      if (nvector < 63) nvector++;
+      last_func_vec = name_vec[i];
+      break;
+    }
+  }
+  record_capture(slot);
+  vlog("  func '%s' slot %u vec %u\n", id, (unsigned)slot, (unsigned)last_func_vec);
   return 1;
 }
 
@@ -727,7 +768,7 @@ static void build_one_rule(uchar r, char *rhs) {
   for (p = rhs; *p; p++) {
     if (*p == '\\' && p[1]) {
       e = (uchar)p[1];
-      if (e == 'i' || e == 'n' || e == 's' || e == 'S' || e == 'C' || e == '<' ||
+      if (e == 'i' || e == 'n' || e == 's' || e == 'S' || e == 'C' || e == 'f' || e == 'v' || e == '<' ||
           e == 'd' || e == '+' || e == '{' || e == '}' ||
           e == '[' || e == ']' || e == '#' || e == '=' || e == 'a' ||
           (e >= '1' && e <= '9'))
@@ -756,7 +797,7 @@ static void build_one_rule(uchar r, char *rhs) {
   for (p = rhs; *p; p++) {
     if (*p == '\\' && p[1]) {
       e = (uchar)p[1];
-      if (e == 'i' || e == 'n' || e == 's' || e == 'S' || e == 'C' || e == '<' ||
+      if (e == 'i' || e == 'n' || e == 's' || e == 'S' || e == 'C' || e == 'f' || e == 'v' || e == '<' ||
           e == 'd' || e == '+' || e == '{' || e == '}' ||
           e == '[' || e == ']' || e == '#' || e == '=' || e == 'a' ||
           (e >= '1' && e <= '9')) {
@@ -1108,6 +1149,7 @@ static int step(void) {
     }
     else if (e == 'i') ok = match_ident();
     else if (e == '+') ok = match_ident_decl();
+    else if (e == 'f') ok = match_ident_func_decl();
     else if (e == 'd') ok = match_num();
     else if (e == 'n') ok = match_newline();
     else if (e == 's') ok = match_str();
@@ -1267,6 +1309,8 @@ static int init(const char *bnf_path, const char *src_path) {
   next_slot = 0;
   next_tmp = 200;
   gen_reset();
+  nvector = 0;
+  last_func_vec = 0xff;
   // no pre-seeded names — X must be declared in source if used
   {
     uchar i;
