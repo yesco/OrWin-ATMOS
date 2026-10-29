@@ -198,6 +198,15 @@
   typedef IVMVARTYPE ivmvar;
 #endif // IVMVARTYPE
 
+
+#ifndef UCHAR
+  #define UCHAR
+  typedef unsigned char   uchar;
+  typedef uint16_t        word;
+#endif
+
+
+
 // Host soft-heap: ivmvar is often 16-bit and cannot hold a real malloc pointer.
 // We store an offset into soft_heap as the "pointer" value on non-cc65.
 // On cc65/6502, M/F/@/!/(/) use real addresses.
@@ -208,14 +217,6 @@
   #define IVM_PTR(addr) ((ivmvar *)(soft_heap + (unsigned)(addr)))
 #else
   #define IVM_PTR(addr) ((ivmvar *)(unsigned)(addr))
-#endif
-
-
-
-#ifndef UCHAR
-  #define UCHAR
-  typedef unsigned char   uchar;
-  typedef uint16_t        word;
 #endif
 
 // --- limits
@@ -477,8 +478,22 @@ int isWHAT(int c, int w) {
   }
 };
 
-#ifndef STRNDUP
+
+#ifdef __CC65__
+
+  #define BZERO
+
+#else
+
+  // linux
   #define STRNDUP
+
+#endif
+
+
+
+#ifndef MEMDUP
+  #define MEMDUP
 
   void* memdup(void* p, word n) {
     char* r= NULL;
@@ -490,13 +505,24 @@ int isWHAT(int c, int w) {
     return r;
   }
 
-  char* strndup(char* s, word n) {
-    word l = s? strlen(s): 0;
+#endif // MEMDUP
+
+#ifndef STRNDUP
+  #define STRNDUP
+
+  uchar* strndup(uchar* s, word n) {
+    word l = s? strlen((char*)s): 0;
     word z = (n<l? n: l) + 1;
 
     return memdup(s, z==1? 0: z);
   }
+
 #endif // STRNDUP
+
+// just use mine, lol
+void* ivm_bzero(void* p, word n) {
+  return memset(p, 0, n);
+}
 
 word strprefix(char* a, char* b) {
   word n= 0;
@@ -508,14 +534,14 @@ word strprefix(char* a, char* b) {
   return n;
 }
   
-char* memmem(char* a, char* b) {
+uchar* ivm_memmem(uchar* a, uchar* b) {
   assert(!"TODO");
   return NULL;
   (void)a; (void)b;
 }
 
 void* strfuns_2[]= {
-  bzero,       0,        strcpy,     strlen,
+  ivm_bzero,   0,        strcpy,     strlen,
   strchr,      strrchr,  strstr,     strcmp,
   strcasecmp,  strcpy,   strcat,     strndup,
   strprefix,   isWHAT,   atoi,       0,
@@ -523,7 +549,7 @@ void* strfuns_2[]= {
   
 void* strfuns_3[]= {
   memset,      memmove,  strncpy,    0,
-  0,           0,        memmem,     strncmp,
+  0,           0,        ivm_memmem, strncmp,
   strncasecmp, strncpy,  strncat,    memdup,
   atoi,        strspn,   strcspn,    strpbrk,
 };
@@ -543,7 +569,7 @@ void*** library[16]= {
 
 #if 1
 
-word sys(char n, word acc, char* ipc) {
+word sys(uchar n, word acc, uchar* ipc) {
   word id = ipc[0];
   char fidx = id & 0x0f;
   char lib_idx = id >> 4;

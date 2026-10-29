@@ -165,7 +165,17 @@
 //#define USE_LABELS
 
 uchar *g_loaded;
+// host: libc has strndup/memmem — keep ivm library under alternate names
+#ifndef __CC65__
+#define strndup ivm_strndup
+#define memmem ivm_memmem
+#include <strings.h> // bzero
+#endif
 #include "ivm.c"
+#ifndef __CC65__
+#undef strndup
+#undef memmem
+#endif
 
 // shared bytecode pretty-printer
 #include "ivm-print.c"
@@ -372,6 +382,7 @@ char next(void) {
 
 // shared emit + const pool
 #define IVM_GEN_FAIL(msg) FAIL(msg)
+#define IVM_GEN_NO_VECTORS
 #include "ivm-gen.c"
 
 // emit/bin/acc from ivm-gen.c

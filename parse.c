@@ -74,9 +74,9 @@
 #include <stdint.h>
 
 #ifndef UCHAR
-#define UCHAR
-typedef unsigned char uchar;
-typedef uint16_t word;
+  #define UCHAR
+  typedef unsigned char uchar;
+  typedef uint16_t word;
 #endif
 
 #include "ivm-print.c"
@@ -84,11 +84,28 @@ typedef uint16_t word;
 // shared emit + real const addresses
 static void note_load(uchar addr) { (void)addr; }
 static void note_store(uchar addr) { (void)addr; }
+
 #define IVM_GEN_FAIL(msg) do { fprintf(stderr, "%s\n", (msg)); abort(); } while (0)
+
 #define MAX_BIN_LEN 4096
+#define MAX_SLOTS 255
+
 #include "ivm-gen.c"
+
 #define code_buf ((uchar *)bin)
 #define code_len bin_ptr
+
+uchar *g_loaded;
+
+#define MAIN
+
+// host libc already has strndup/memmem — keep ivm library, avoid name clash
+
+#include <assert.h>
+#include <string.h>
+#include <strings.h>
+
+#include "ivm.c"
 
 #define NRULES      26
 #define MAX_STACK   128
@@ -160,7 +177,6 @@ static word  undef_pos_abs;
 // name -> slot index (same order as names[])
 static uchar name_slot[MAX_NAMES];
 static uchar name_vec[MAX_NAMES]; // 0xff = not a function; else vector index
-static uchar nvector;
 static uchar last_func_vec; // last \i that was a function (for \v)
 static uchar next_slot; // next free slot index for \+ decls / temps
 
@@ -657,8 +673,9 @@ static int match_ident_func_decl(void) {
   for (i = 0; i < nnames; i++) {
     if (name_eq(names[i], id)) {
       name_vec[i] = nvector;
-      if (nvector < 63) nvector++;
+      if (nvector < (char)(MAX_VECTORS - 1)) nvector++;
       last_func_vec = name_vec[i];
+      pending_func_entry = last_func_vec;
       break;
     }
   }
@@ -945,6 +962,10 @@ static void push(uchar r, uchar state) {
     for (zi = 0; zi < 10; zi++)
       stack[sp].prod_cap[zi] = 0;
   }
+  // program main begin → blob.main
+  if (r == (uchar)('B' - 'A') && sp > 0 &&
+      stack[sp - 1].rule == (uchar)('P' - 'A'))
+    main_offset = bin_ptr;
   cap_len[sp] = 0;
   sp++;
 }
@@ -1436,6 +1457,30 @@ int main(int argc, char **argv) {
       }
       if (code_len & 15) fputc('\n', stderr);
 
+    }
+    // quit so run_ivm can stop
+    emit('q');
+    {
+      int blen = 0;
+      uchar *blob = build_blob(&blen);
+      Process *proc;
+      ivmvar ret;
+      int ci;
+      fprintf(stderr, "--- BLOB (%d bytes) main=%u nvector=%d ---\n",
+        blen, (unsigned)main_offset, (int)nvector);
+      if (blob) {
+        proc = Nevm(blob);
+        if (proc) {
+          word *pool = (word *)(blob + ((BlobHeader *)blob)->con);
+          for (ci = 0; ci < (int)nconst; ci++)
+            proc->mem[CONST_TOP - ci] = pool[ci];
+          fprintf(stderr, "--- RUN ---\n");
+          ret = run_ivm(proc);
+          fprintf(stderr, "--- END acc=%u ---\n", (unsigned)ret);
+          free(proc);
+        }
+        free(blob);
+      }
     }
     err = 0; goto doclean;
   }
