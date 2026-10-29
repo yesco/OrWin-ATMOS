@@ -161,6 +161,11 @@ static uchar next_tmp;
 
 // ---- logging ----
 
+#include <stdio.h>
+
+#define GREEN  "\033[32m"
+#define NORMAL "\033[0m"
+
 static void vlog(const char *fmt, ...) {
   va_list ap;
 
@@ -400,70 +405,38 @@ static uchar intern_const(word v) {
 }
 
 // run production at p (first char after '['); returns after ']'
+// quiet: GEN is printed only when the owning alt commits (ST_OK)
 static uchar *run_production(uchar *p) {
   Frame *fr;
   uchar n, b;
   word w;
 
   fr = &stack[sp - 1];
-  if (verbose >= 1) {
-    fprintf(stderr, "    GEN:%c<[", 'A' + fr->rule);
-    fflush(stderr);
-  }
   while (*p && *p != ']') {
-
     if (*p == '\\') {
-
-      // TODO: describe purpose
-      if (p[1] == 'a' && isdigit(p[2])) {
+      if (p[1] == 'a' && p[2] >= '1' && p[2] <= '9') {
         n = (uchar)(p[2] - '0');
         w = force_addr(n);
         b = (uchar)(w & 0xff);
         if (code_len < MAX_CODE) code_buf[code_len++] = b;
         p += 3;
-        if (verbose >= 1) { fprintf(stderr, "%02x ", b); fflush(stderr); }
         continue;
       }
-
-      // \3 parameter address generate
-      if (isdigit(p[1])) {
+      if (p[1] >= '1' && p[1] <= '9') {
         n = (uchar)(p[1] - '0');
         w = (n <= fr->prod_n) ? fr->prod_cap[n] : 0;
         if (w == VAL_ACC) w = force_addr(n);
         b = (uchar)(w & 0xff);
         if (code_len < MAX_CODE) code_buf[code_len++] = b;
         p += 2;
-
-        if (verbose >= 1) {
-          // TDOO: same as prev...
-          fprintf(stderr, "%02x ", b);
-          fflush(stderr);
-        }
         continue;
       }
     }
-
-    // TODO: describe purpose
     b = *p++;
     if (code_len < MAX_CODE) code_buf[code_len++] = b;
-    if (verbose >= 1) {
-      if (b > ' ' && b < 127) fprintf(stderr, "%c", b);
-      else if (b >= 0xC0) fprintf(stderr, "(%02x)", b & 0x7f);
-      else if (b >= 0x80) fprintf(stderr, "[%02x]", b & 0x3f);
-      else if (b <  32)    printf("<%02x>", b);
-      else if (b == ' ')  printf("_   ");
-      else fprintf(stderr, "%02x ", b);
-      fflush(stderr);
-    }
-
   }
-
-  // ] - end of codegen
-  if (verbose >= 1) { fprintf(stderr, "]>\n"); fflush(stderr); }
   if (*p == ']') p++;
-
-  fr->result = VAL_ACC; // production leaves value in ACC
-
+  fr->result = VAL_ACC;
   return p;
 }
 
@@ -998,6 +971,19 @@ static int step(void) {
 
   if (fr->state == ST_OK) {
     vlog("ok %c alt %u -> @%u\n", 'A' + fr->rule, fr->alt, abs_pos());
+    // -v: one GEN per statement (K), after alt commits
+    if (verbose >= 1 && code_len > fr->code_save &&
+        (uchar)('A' + fr->rule) == 'K') {
+      word gi;
+      fprintf(stderr, NORMAL "GEN:          [ ");
+      for (gi = fr->code_save; gi < code_len; gi++) {
+        uchar gb = code_buf[gi];
+        if (gb > ' ' && gb < 127) fprintf(stderr, "%c", gb);
+        else fprintf(stderr, "%02x ", gb);
+      }
+      fprintf(stderr, " ]\n");
+      fflush(stderr);
+    }
     if (verbose >= 1 && cap_len[sp - 1] > 0) {
       word i;
       uchar rch = (uchar)('A' + fr->rule);
@@ -1008,13 +994,13 @@ static int step(void) {
           if (nalt > 1) fprintf(stderr, "%u", fr->alt);
           fprintf(stderr, ":\n");
         }
-        fprintf(stderr, "    SRC:");
+        fprintf(stderr, GREEN "SRC: ");
         for (i = 0; i < cap_len[sp - 1]; i++) {
           uchar ch = capture[sp - 1][i];
-          if (ch == '\n') fprintf(stderr, "\n    SRC:");
+          if (ch == '\n') fprintf(stderr, NORMAL "\nSRC:" GREEN);
           else fputc(ch, stderr);
         }
-        fprintf(stderr, "\n");
+        fprintf(stderr, NORMAL "\n");
         if (verbose >= 2)
           fprintf(stderr, "    <%c\n", rch);
         fflush(stderr);

@@ -9,12 +9,14 @@ A=\+:T,\<|\+:T;\<|\+:T|
 T=^I|I
 I=integer|word
 H=V|
-B=begin C end;|begin C end
+# N matches end; or end without re-parsing C
+N=end;|end
+B=begin C N
 C=K\<|
 # keyword statements FIRST so IF/FOR/WRITE are not tried as \i
 K=if E then K else K|if E then K
 |for \i:=E to E do K
-|writeln();[N]|writeln(W);[N]|write();|write(W);
+|writeln();[N]|writeln(JW);[N]|write();|write(JW);
 |new(\i);|dispose(\i);|freemem(\i);|getmem(\i,E);|setlength(\i,E);
 |B|;
 |\i:=0;[Z\1]
@@ -23,16 +25,12 @@ K=if E then K else K|if E then K
 |\i:=S;[L\2S\1]
 |\i:=E;[S\1]
 |\i\[E\]:=E;[S\1]
-# print args: W = comma-separated J; J = expr (in ACC) print OR string emit
-W=J,W|J|
-# E first so a+b is one expr (no S-then-backtrack double gen)
-# E loads primary via [L\1] then O; [.] prints ACC
+# JW: one or more J, comma-separated (W = optional ,J tail)
+W=,J\<|
 J=E[.]|"\S
 # E = load primary into ACC, then optional ops
 E=S[L\1]O
-# S = primary -> mem/const address
 S=\d|\i(Z)|\i|sizeof(T)\#02|sizeof(\i)\#02|(E)|not S[?\1]
-# O = op + primary; ACC := ACC op mem[S]
 O=+S[+\1]\<
 |-S[-\1]\<
 |*S[*\1]\<
@@ -60,7 +58,6 @@ Tokens:
   \d  number -> const 0x80|idx
   \s  string (match only)
   \S  emit string bytes + \0 (opening " already matched)
-  \[ \] literal brackets
 
 Control:
   \{ \} scope  \< tail  \C commit
@@ -68,11 +65,11 @@ Control:
   \=n   result := capture n
 
 Generate:
-  [..]  production  (-v: "    GEN:K<[...]>")
+  [..]  production  (-v prints GEN only when alt commits)
   \1..\9  capture byte
   \aN     force address
 
 Expr:
   S = address, E = S[L\1]O leaves ACC
   J = E[.] print ACC, or "\S string
-  no S-before-E on J (avoids double emit on backtrack)
+  write(JW) / writeln(JW): J then optional W=,J tail
