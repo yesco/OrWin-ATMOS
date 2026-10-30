@@ -145,6 +145,7 @@ static const char *src_name;
 
 // input line buffer (unbounded source via fgetc; buffer one statement)
 static uchar *line_buf;
+static word line_no_base;
 static word line_len;
 static word line_cap;
 static word line_pos;       // cursor in line_buf
@@ -310,9 +311,16 @@ static void line_commit(void) {
   word i, rest;
 
   if (line_pos == 0) return;
+
+  // keep line numbers accurate without re-scanning the file
+  for (i = 0; i < line_pos; i++)
+    if (line_buf[i] == '\n')
+      line_no_base++;
+
   rest = line_len - line_pos;
   for (i = 0; i < rest; i++)
     line_buf[i] = line_buf[line_pos + i];
+
   line_abs = (word)(line_abs + line_pos);
   line_len = rest;
   line_pos = 0;
@@ -1514,8 +1522,8 @@ static void report_reject(void) {
 
     fprintf(stderr, "EXPECTED: rule %c", far_stack[far_sp - 1]);
     if (rule_defined(r) && a < rule_nalt(r))
-      fprintf(stderr, " alt %u \"%s\"", (unsigned)a,
-              rule[r][a] ? (char *)rule[r][a] : "");
+      fprintf(stderr, " alt %u \"%s\"", a,
+              rule[r][a] ? rule[r][a] : "");
 
     fprintf(stderr, "\n");
   }
@@ -1525,60 +1533,78 @@ static void report_reject(void) {
   else if (had_undef)
     fprintf(stderr, "ERROR: identifier \"%s\" not defined here\n", last_undef);
 
-  // re-read source around furthest absolute offset
+  // Show error from line_buf only — no rewind/fseek (cc65-friendly).
+  // line_no_base tracks the line number of line_buf[0] across \C commits.
   fprintf(stderr, "REJECT:\n");
-  if (src_name) {
-    FILE *rf = fopen(src_name, "r");
+  {
+    word want = (word)((had_undef && undef_pos_abs) ? undef_pos_abs : max_pos_abs);
+    word i, start, off, col, line, endpos;
+    word nlines;
 
-    if (rf) {
-      long want = (long)((had_undef && undef_pos_abs) ? undef_pos_abs : max_pos_abs);
-      long base = 0;
-      int ch, col = 0, nlines = 0, line = 1;
-      long i;
+    if (!line_buf || line_len == 0) {
+      fprintf(stderr, "  (no buffered source)\n");
+    } else if (want < line_abs) {
 
-      // count line number and find line start
-      rewind(rf);
-      for (i = 0; i < want; i++) {
-        ch = fgetc(rf);
-        if (ch == EOF) break;
-        if (ch == '\n') { line++; base = i + 1; col = 0; }
-        else col++;
+      // furthest was discarded by \C; still report position
+      fprintf(stderr, "%s: (offset %u, before current buffer @%u)\n",
+              src_name ? src_name : "?", (unsigned)want, (unsigned)line_abs);
+
+    } else {
+
+      off = (word)(want - line_abs);
+      if (off > line_len) off = line_len;
+
+      // line start / column within buffer
+      start = 0;
+      line = line_no_base;
+      col = 0;
+      for (i = 0; i < off; i++) {
+        if (line_buf[i] == '\n') {
+          line++;
+          start = i + 1;
+          col = 0;
+        } else
+          col++;
       }
-      // print error line, then caret under it, then a few following lines
 
-// TODO: shouldn't this be in the buffer? I mean we should
-//   at least store till last newline boudnary, or two?
-
-      fseek(rf, base, SEEK_SET);
-
-      fprintf(stderr, "%s:%d: ", src_name, line);
-      while ((ch = fgetc(rf)) != EOF && ch != '\n')
-        fputc(ch, stderr);
+      // error line text
+// TODO: seems to only print the current
+      fprintf(stderr, "%s:%u: ", src_name ? src_name : "?", line);
+      for (i = start; i < line_len && line_buf[i] != '\n'; i++)
+        fputc(line_buf[i], stderr);
       fputc('\n', stderr);
 
-      fprintf(stderr, "%s:%d: ", src_name, line);
+      // caret under column
+      fprintf(stderr, "%s:%u: ", src_name ? src_name : "?", line);
       for (i = 0; i < col; i++)
         fputc(' ', stderr);
       fprintf(stderr, "^\n");
 
-      // up to 4 more lines of context
+      // following lines still in buffer (no second open of the file)
+      endpos = start;
+      while (endpos < line_len && line_buf[endpos] != '\n')
+        endpos++;
+      if (endpos < line_len && line_buf[endpos] == '\n')
+        endpos++;
+
       nlines = 0;
-      while (nlines < ERR_LINES_CONTEXT && ch != EOF) {
-
-        fprintf(stderr, "%s:%d: ", src_name, line + 1 + nlines);
-        while ((ch = fgetc(rf)) != EOF && ch != '\n')
-          fputc(ch, stderr);
+      while (nlines < ERR_LINES_CONTEXT && endpos < line_len) {
+        fprintf(stderr, "%s:%u: ", src_name ? src_name : "?",
+          line + 1 + nlines);
+        while (endpos < line_len && line_buf[endpos] != '\n') {
+          fputc(line_buf[endpos], stderr);
+          endpos++;
+        }
         fputc('\n', stderr);
-
+        if (endpos < line_len && line_buf[endpos] == '\n')
+          endpos++;
         nlines++;
-        if (ch == EOF) break;
-
       }
-
-      fclose(rf);
     }
   }
+
 }
+
 
 // init: load grammar + open source
 static int init(const char *bnf_path, const char *src_path) {
@@ -1595,6 +1621,7 @@ static int init(const char *bnf_path, const char *src_path) {
   }
 
   line_buf = NULL;
+  line_no_base = 0;
   line_cap = 0;
   line_len = 0;
   line_pos = 0;
