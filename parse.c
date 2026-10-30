@@ -669,14 +669,19 @@ static int comments_add_from_line(const char *p) {
 }
 
 // True if line_buf[line_pos..] starts with s[0..len)
+// Must read past line_len even when line_pos < line_len (line_need alone is not enough).
 static int match_at(const char *s, uchar len) {
   uchar i;
+  int ch;
 
   if (!len) return 0;
   for (i = 0; i < len; i++) {
-    // ensure char at line_pos+i is buffered
     while (line_pos + i >= line_len) {
-      if (!line_need()) return 0;
+      if (!src_fp) return 0;
+      ch = fgetc(src_fp);
+      if (ch == EOF) return 0;
+      file_pos++;
+      if (!line_grow((uchar)ch)) return 0;
     }
     if (line_buf[line_pos + i] != (uchar)s[i]) return 0;
   }
@@ -1280,7 +1285,15 @@ static word rule_nalt(uchar r) {
 
 static void push(uchar r, uchar state) {
   if (sp >= MAX_STACK) {
-    fprintf(stderr, "stack overflow\n");
+    word i;
+    fprintf(stderr, "stack overflow (sp=%u) at @%u\n", (unsigned)sp, abs_pos());
+    fprintf(stderr, "STACK:");
+    for (i = 0; i < sp && i < MAX_STACK; i++) {
+      fprintf(stderr, " %c%u", 'A' + stack[i].rule, stack[i].alt);
+    }
+    fprintf(stderr, " +%c\n", 'A' + r);
+    if (line_need())
+      fprintf(stderr, "NEXT: '%c'\n", line_buf[line_pos]);
     exit(1);
   }
   if (sp >= stack_cap) {
@@ -1912,7 +1925,7 @@ int main(int argc, char **argv) {
             free(proc);
           }
         }
-#endif // RUN
+#endif RUN
 
         free(blob);
       }

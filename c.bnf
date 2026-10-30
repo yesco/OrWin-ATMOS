@@ -1,41 +1,33 @@
 # -- BNF grammar for tpi.c C implementation targeting Custom Bytecode
-# Comment styles for the *source* language (not the BNF itself):
 #= /* */
 #= //
-# K = statement, S = simple primary (address), R = ACC primary (call, (E), not)
-# O = op chain, E = expression
-#
-# Zero-or-more pattern (same as tpi.bnf):
-#   X=A\<|B\<|
-# consuming alts end with \< ; bare empty alt is LAST and has no \<.
-# Never put an empty alt under a pure \< path — that loops forever.
+# \{ \} = scope enter/leave only (no input). Match literal { } separately.
+# Zero-or-more: X=A\<|B\<|  (empty alt LAST, no \< on empty)
 
-# Program: zero-or-more top-level declarations
-P=D.
+P=D
 
-# Declarations — includes first (#), then var, then function
 D=#include <\+.h>\n\<|#include "\+.h"\n\<|#include <\+.c>\n\<|V\<|F\<|
 
-# Variable declaration: int a, b;
+# int a, b;
 V=T M;
-M=\+:Q|
-Q=,M|
+M=\+U|
+U=,M|
 
-# Types
 T=I^*|I
 I=int|word|void
 
-# Function: int f(int a, int b) { body }
-F=T \f(A)\r B[X]
+# int f(...) { body }
+# \{ after params opens function scope; \} before end closes it
+F=T \f\{(A)\r B \}[X]
 A=T \pQ|void|
 Q=,A|
 
-# C blocks { ... }
-N=\}|
-B=\{ C N
+# blocks: literal braces + scope enter/leave
+# B = {  <scope>  stmts  }  <unscope>
+B={ \{ C } \}
 C=V\<|K\<|
 
-# -- keyword statements FIRST
+# statements — keywords first
 K=if (E)[?G\x] K else[0?G\x\w\y] K[\y]|if (E)[?G\x] K[\y]
 |for (\i=E[S\1]; \i<=E[S\t]; \i++)[\mL\1-\4G\x] K[I\1B\z\y]
 |printf("\n");[N]|printf(JW);[N]
@@ -49,23 +41,17 @@ K=if (E)[?G\x] K else[0?G\x\w\y] K[\y]|if (E)[?G\x] K[\y]
 |\i=S;[L\2S\1]
 |\i=E;[S\1]
 
-# printf args
 W=,J\<|
 J=E[.]|"%d"|"%u"|"%s"|"["]\S
 
-# Expression
 E=RO[]|S[\l1]O[]
 
-# R = primary leaving value in ACC
 R=\i(Z)[\v]|* \i[@\1]|\i\[S\][(\1\2]|(E)[]|! E[?]
 
-# S = simple primary
 S=\d|sizeof(T)\#02|sizeof(\i)\#02|\i
 
-# Call args
 Z=E,[S\k]\<|E|
 
-# Op chain — multi-char ops before single-char
 O=
 |<<[S\t]R[[\a1]\<
 |>>[S\t]R[]\a1]\<
