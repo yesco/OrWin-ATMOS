@@ -59,31 +59,17 @@ void note_load(uchar addr);
 void note_store(uchar addr);
 
 // ---------------------------------------------------------------------------
-// Vectors / main (shared; tpi may #define IVM_GEN_NO_VECTORS to use its own)
+// Vectors / main
 // ---------------------------------------------------------------------------
-
-// TODO: compliated and ll the #ifdef in the code is ugly, why not
-//   just do it one way, here once for all instead of different
-//   ways elsewhere?
-
-// TODO: add answer to WHY they are differnt?
 
 #ifndef MAX_VECTORS
   #define MAX_VECTORS 64
 #endif
 
-#ifdef IVM_GEN_NO_VECTORS
-  // tpi supplies vectors[], frame_base[], nvector, main_offset
-  extern uint16_t vectors[];
-  extern uchar frame_base[];
-  extern uchar nvector;
-  extern word main_offset;
-#else
-  uint16_t vectors[MAX_VECTORS];
-  uchar frame_base[MAX_VECTORS];
-  uchar nvector;
-  word main_offset;
-#endif
+uint16_t vectors[MAX_VECTORS];
+uchar frame_base[MAX_VECTORS];
+uchar nvector;
+word main_offset;
 
 // The current func_entry being compiled
 uchar pending_func_entry; // 0xff = none
@@ -352,31 +338,12 @@ void gen_reset(void) {
   constidx = 255;
   pending_func_entry = 0xff;
 
-#ifndef IVM_GEN_NO_VECTORS
-  {
-    int i;
-
-    nvector = 0;
-    main_offset = 0;
-    for (i = 0; i < MAX_VECTORS; i++) {
-      vectors[i] = 0;
-      frame_base[i] = 0;
-    }
-  }
-#endif
-
   acc_invalidate();
 }
 
 void gen_func_entry(uchar v) {
-
-#ifndef IVM_GEN_NO_VECTORS
   if (v < (uchar)MAX_VECTORS)
     vectors[v] = (uint16_t)bin_ptr;
-#else
-  (void)v;
-#endif
-
 }
 
 // TODO: write why it's doing this?
@@ -414,11 +381,7 @@ uchar *build_blob(int *out_len) {
   unsigned need;
   char nv;
 
-#ifndef IVM_GEN_NO_VECTORS
   nv = nvector;
-#else
-  nv = 0;
-#endif
 
   need = (unsigned)sizeof(GenBlobHeader)
        + (unsigned)nv * sizeof(word) + sizeof(word)
@@ -433,21 +396,12 @@ uchar *build_blob(int *out_len) {
 
   h.call = gen_memadd(body, &p, 0, (word)(nv * sizeof(word)));
   gen_memadd(body, &p, &zero, sizeof(zero));
-  h.con = gen_memadd(body, &p, const_pool, (word)(nconst * sizeof(word)));
+  h.con  = gen_memadd(body, &p, const_pool, (word)(nconst * sizeof(word)));
 
-#ifndef IVM_GEN_NO_VECTORS
-  h.fp = gen_memadd(body, &p, frame_base, (word)nv);
-#else
-  h.fp = gen_memadd(body, &p, 0, 0);
-#endif
-
+  h.fp   = gen_memadd(body, &p, frame_base, (word)nv);
   h.code = gen_memadd(body, &p, bin, (word)bin_ptr);
 
-#ifndef IVM_GEN_NO_VECTORS
   h.main = (word)(h.code + (word)main_offset);
-#else
-  h.main = h.code;
-#endif
 
   h.data = (word)(p - body);
   h.memsz = (word)(CONST_TOP + 1);
@@ -458,14 +412,12 @@ uchar *build_blob(int *out_len) {
   h.magic[3] = 0;
   h.len = (word)(p - body);
 
-#ifndef IVM_GEN_NO_VECTORS
   {
     int i;
     
     for (i = 0; i < nv; i++)
       ((word *)(body + h.call))[i] = (word)(vectors[i] + h.code);
   }
-#endif
 
   memcpy(body, &h, sizeof(h));
   if (out_len)
