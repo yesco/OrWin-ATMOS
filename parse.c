@@ -936,6 +936,8 @@ static int match_ident_func_decl(void) {
   nvector++;
   last_func_vec = vec;
   pending_func_entry = vec;
+  if (strcmp(id, "main") == 0)
+    main_vec = vec;
   record_capture((uchar)(base + 1));
   vlog("  func '%s' slot %u vec %u frame %u\n", id, (unsigned)(base + 1), (unsigned)vec, (unsigned)base);
   return 1;

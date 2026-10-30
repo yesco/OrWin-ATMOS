@@ -70,6 +70,7 @@ uint16_t vectors[MAX_VECTORS];
 uchar frame_base[MAX_VECTORS];
 uchar nvector;
 word main_offset;
+uchar main_vec;           // vector index of function "main", 0xff = none
 
 // The current func_entry being compiled
 uchar pending_func_entry; // 0xff = none
@@ -337,6 +338,8 @@ void gen_reset(void) {
   nconst = 0;
   constidx = 255;
   pending_func_entry = 0xff;
+  main_vec = 0xff;
+  main_offset = 0;
 
   acc_invalidate();
 }
@@ -344,6 +347,9 @@ void gen_reset(void) {
 void gen_func_entry(uchar v) {
   if (v < (uchar)MAX_VECTORS)
     vectors[v] = (uint16_t)bin_ptr;
+  // C entry: function named main
+  if (v == main_vec)
+    main_offset = (word)bin_ptr;
 }
 
 // TODO: write why it's doing this?
