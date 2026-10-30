@@ -1,14 +1,12 @@
-# -- BNF grammar for tpi.c C implementation targeting Custom Bytecode
+# -- BNF for C → IVM
 #= /* */
 #= //
-# \{ \} = scope enter/leave only (no input). Match literal { } separately.
-# Zero-or-more: X=A\<|B\<|  (empty alt LAST, no \< on empty)
+# Four backslashes before n so blob is \\n and matches source \\n
 
 P=D
 
 D=#include <\+.h>\n\<|#include "\+.h"\n\<|#include <\+.c>\n\<|V\<|F\<|
 
-# int a, b;
 V=T M;
 M=\+U|
 U=,M|
@@ -16,21 +14,22 @@ U=,M|
 T=I^*|I
 I=int|word|void
 
-# int f(...) { body }
-# \{ after params opens function scope; \} before end closes it
 F=T \f\{(A)\r B \}[X]
 A=T \pQ|void|
 Q=,A|
 
-# blocks: literal braces + scope enter/leave
-# B = {  <scope>  stmts  }  <unscope>
 B={ \{ C } \}
 C=V\<|K\<|
 
-# statements — keywords first
 K=if (E)[?G\x] K else[0?G\x\w\y] K[\y]|if (E)[?G\x] K[\y]
 |for (\i=E[S\1]; \i<=E[S\t]; \i++)[\mL\1-\4G\x] K[I\1B\z\y]
-|printf("\n");[N]|printf(JW);[N]
+|printf("%u\\\\n",E);[.N]
+|printf("%d\\\\n",E);[.N]
+|printf("%u ",E);[."\#20\#00]
+|printf("%d ",E);[."\#20\#00]
+|printf("%u%u%u\\\\n",E,E,E);[...N]
+|printf("%u%u%u",E,E,E);[...]
+|printf(JW);
 |return E;[S\1X]|return;[Q]
 |B|;
 |* \i=E;[!\1]
@@ -42,14 +41,11 @@ K=if (E)[?G\x] K else[0?G\x\w\y] K[\y]|if (E)[?G\x] K[\y]
 |\i=E;[S\1]
 
 W=,J\<|
-J=E[.]|"%d"|"%u"|"%s"|"["]\S
+J="%u\\\\n"|"%d\\\\n"|"%s\\\\n"|"%u "|"%d "|"%u"|"%d"|"%s"|E[.]|"["]\S
 
 E=RO[]|S[\l1]O[]
-
 R=\i(Z)[\v]|* \i[@\1]|\i\[S\][(\1\2]|(E)[]|! E[?]
-
 S=\d|sizeof(T)\#02|sizeof(\i)\#02|\i
-
 Z=E,[S\k]\<|E|
 
 O=

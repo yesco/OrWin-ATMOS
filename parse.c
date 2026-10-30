@@ -378,6 +378,7 @@ static void note_progress(void) {
 
 
 // ---- bytecode emission (tpi-style) ----
+static uchar hexval(uchar c);
 
 // record a value-producing match into \\1..\\9 of current frame
 static void record_capture(word val) {
@@ -566,6 +567,12 @@ static uchar *run_production(uchar *p) {
         // (the "S" opcode is not missing: the BNF has [S\k], \k is only the slot)
         emit(fs->param_slot[fr->arg_i++]);
         p += 2;
+        continue;
+      }
+      // \#xx: emit raw hex byte (e.g. \#00 for NUL, \#20 for space)
+      if (p[1] == '#' && p[2] && p[3]) {
+        emit((uchar)(hexval(p[2]) * 16 + hexval(p[3])));
+        p += 4;
         continue;
       }
     }
@@ -1019,18 +1026,50 @@ static int match_num(void) {
   return 1;
 }
 
+// Interpret C-style escapes in a string body; emit bytes + trailing NUL.
+// Opening " already matched by the BNF. Closing " consumed here.
 static int match_str_emit(void) {
+  uchar c, v, i;
+
   if (!line_need()) return 0;
   while (line_need() && line_buf[line_pos] != '"') {
-    uchar c = line_buf[line_pos];
+    c = line_buf[line_pos++];
     if (c == '\\') {
-      line_pos++;
       if (!line_need()) return 0;
-      c = line_buf[line_pos];
+      c = line_buf[line_pos++];
+      switch (c) {
+      case 'n':  c = '\n'; break;
+      case 't':  c = '\t'; break;
+      case 'r':  c = '\r'; break;
+      case '0':  c = 0;    break;
+      case '\\': c = '\\'; break;
+      case '"':  c = '"';  break;
+      case '\'': c = '\''; break;
+      case 'a':  c = '\a'; break;
+      case 'b':  c = '\b'; break;
+      case 'f':  c = '\f'; break;
+      case 'v':  c = '\v'; break;
+      case 'x': case 'X':
+        // \xHH — up to 2 hex digits
+        v = 0;
+        for (i = 0; i < 2; i++) {
+          if (!line_need()) break;
+          c = line_buf[line_pos];
+          if (c >= '0' && c <= '9') v = (uchar)((v << 4) + (c - '0'));
+          else if (c >= 'a' && c <= 'f') v = (uchar)((v << 4) + (c - 'a' + 10));
+          else if (c >= 'A' && c <= 'F') v = (uchar)((v << 4) + (c - 'A' + 10));
+          else break;
+          line_pos++;
+        }
+        c = v;
+        break;
+      default:
+        // unknown escape: keep the char as-is (C keeps unknown as itself)
+        break;
+      }
     }
     emit(c);
     capture_add(c);
-    line_pos++;
   }
   if (!line_need() || line_buf[line_pos] != '"') return 0;
   line_pos++;
@@ -1871,8 +1910,11 @@ int main(int argc, char **argv) {
     // OK
     skip_ws();
     if (line_need()) {
-      fprintf(stderr, "--- OK but trailing input ---\n");
-      err = 2; goto doclean;
+      fprintf(stderr, "--- REJECT (trailing input at @%u) ---\n", abs_pos());
+      if (line_need())
+        fprintf(stderr, "NEXT: '%c'\n", line_buf[line_pos]);
+      report_reject();
+      err = 1; goto doclean;
     }
 
     fprintf(stderr, "--- ACCEPT ---\n");
