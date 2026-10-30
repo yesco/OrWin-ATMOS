@@ -1,0 +1,4 @@
+clang -DRUN parse.c && time ./a.out -v -v c.bnf test.c
+echo
+echo "=== parse.c: `./wcode parse.c` LOC ==="
+echo
