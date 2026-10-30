@@ -1,3 +1,4 @@
+rm a.out t.ivm
 clang parse.c && time ./a.out -v tpi.bnf t.p
 echo
 echo "=== parse.c: `./wcode parse.c` LOC ==="

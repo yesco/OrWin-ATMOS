@@ -383,7 +383,13 @@ char next(void) {
 // shared emit + const pool
 #define IVM_GEN_FAIL(msg) FAIL(msg)
 #define IVM_GEN_NO_VECTORS
-#include "ivm-gen.c"
+
+// TODO: why aren't we using the IVM_GEN vectors,
+//   these is lots of duplciated code.
+
+// To checkin changes to parse.c and ivm-get.c
+//   I had do keep the OLD file as the new one broke it...
+#include "ivm-gen-old.c"
 
 // emit/bin/acc from ivm-gen.c
 
@@ -510,7 +516,7 @@ char nvector = 0;
 int opt_level = 0;
 int opt_pass = 0; // 0 first, 1 second...
 
-int main_offset = 0;
+word main_offset = 0;
 char *main_entry = 0;
 char is_code_addr[MAX_CONSTS];
 
@@ -525,6 +531,7 @@ int add_vector(int entry_offset) {
 // ---------------------------------------------------------------------------
 // Symbol table
 // ---------------------------------------------------------------------------
+#if 1
 typedef enum { SYM_VAR, SYM_FUNC } SymbolType;
 
 typedef struct {
@@ -539,7 +546,9 @@ typedef struct {
 } Symbol;
 
 Symbol syms[MAX_SYMBOLS];
-char nsym = 0;
+uchar nsym = 0;
+#endif
+
 
 void add_symbol(const char* name, SymbolType type, char address) {
   if (nsym >= MAX_SYMBOLS) FAIL("symbol table full");

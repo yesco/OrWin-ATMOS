@@ -169,7 +169,7 @@ typedef struct {
   word save;          // line_pos at start of this alt
   word save_abs;      // absolute for furthest
   word cap_save;      // capture length at alt entry (for backtrack)
-  word nnames_save;   // scope name count at alt entry
+  word nsym_save;     // symbol count at alt entry (backtrack drops newer ones)
   uchar scope_save;   // scope_depth at alt entry
   uchar state;
   // production value captures \1..\9; result = rule value (word)
@@ -186,7 +186,9 @@ typedef struct {
   word mark;          // \m loop start (for \z)
 } Frame;
 
-static Frame stack[MAX_STACK];
+// grows on demand (8 frames at a time, up to MAX_STACK)
+static Frame *stack;
+static uchar stack_cap;
 static uchar sp;
 
 // capture: hold matched text until alt commits (grows)
@@ -194,37 +196,22 @@ static uchar *capture[MAX_STACK];
 static word  cap_len[MAX_STACK];
 static word  cap_max[MAX_STACK];
 
-// scopes: \+ adds name at scope_depth; \} drops names with name_scope >= depth
-#define MAX_NAMES  256
+// Symbols and scopes (\+ \f \p \i \{ \}) live in ivm-gen.c, allocated on demand:
+//   sym_add / sym_find / sym_func / sym_truncate, scope_enter / scope_leave
+// Function frames use the tpi.c layout, frame_base[vec] goes into the blob:
+//   base+0 ret addr, +1 ret value (= function name), +2 prev fp,
+//   +3 last param (JSR stores ACC there), +4.. other params, then locals
 
-// TODO: wtf, told you to move scoping/env/var stuff out to ivm-gen.c
-//   now you're back to static?
-
+// longest identifier (stack buffers only)
 #define NAME_LEN   32
 
-static char  names[MAX_NAMES][NAME_LEN];
-static uchar name_scope[MAX_NAMES];
-static word  nnames;
-static uchar scope_depth;
 static char  last_undef[NAME_LEN]; // last \i that failed scope check
 static uchar had_undef;
 static uchar had_undef_func;
 static word  undef_pos_abs;
 
-// name -> slot index (same order as names[])
-static uchar name_slot[MAX_NAMES];
-static uchar name_vec[MAX_NAMES]; // 0xff = not a function; else vector index
-static uchar name_pidx[MAX_NAMES]; // parameter number + 1, 0 = not a parameter
-static uchar last_func_vec; // last \i that was a function (set by \f)
+static uchar last_func_vec; // function being declared by \f (for \p \r)
 static uchar next_slot; // next free slot index for \+ decls / temps
-
-// function frames (same layout as tpi.c):
-//   base+0 ret addr, +1 ret value (= function name), +2 prev fp,
-//   +3 last param (JSR stores ACC there), +4.. other params, then locals
-#define MAX_PARAMS 4
-static uchar fbase[MAX_VECTORS];              // frame base per vector -> blob fp table
-static uchar fnparams[MAX_VECTORS];           // parameter count per vector
-static uchar fpslot[MAX_VECTORS][MAX_PARAMS]; // slot of each parameter
 
 // const + bin from ivm-gen.c (code_buf/code_len macros)
 #define VAL_ACC  0xffff
@@ -384,34 +371,6 @@ static void note_progress(void) {
 }
 
 
-// ---- scopes ----
-
-static int name_eq(const char *a, const char *b) {
-  // identifiers are always case-sensitive
-  return strcmp(a, b) == 0;
-}
-
-static int name_in_scope(const char *id) {
-  word i;
-
-  for (i = 0; i < nnames; i++) {
-    if (name_eq(names[i], id))
-      return 1;
-  }
-  return 0;
-}
-
-// innermost declaration wins (names are appended in declaration order)
-static word find_name(const char *id) {
-  word i;
-
-  for (i = nnames; i > 0; i--) {
-    if (name_eq(names[i - 1], id))
-      return (word)(i - 1);
-  }
-  return 0xffff;
-}
-
 // ---- bytecode emission (tpi-style) ----
 
 // record a value-producing match into \\1..\\9 of current frame
@@ -457,14 +416,6 @@ static word force_addr(uchar n) {
     fflush(stderr);
   }
   return tmp;
-}
-
-static uchar lookup_slot(const char *id) {
-  word i;
-
-  i = find_name(id);
-  if (i == 0xffff) return 0xff;
-  return name_slot[i];
 }
 
 
@@ -589,12 +540,17 @@ static uchar *run_production(uchar *p) {
       // (the rule that matched \i and called Z)
       if (p[1] == 'k') {
         uchar cv;
+        word f;
+        Symbol *fs;
 
         cv = (sp >= 2) ? stack[sp - 2].func_vec : 0xff;
-        if (cv == 0xff || (word)(fr->arg_i + 1) >= fnparams[cv])
+        f = (cv == 0xff) ? SYM_NONE : sym_func(cv);
+        if (f == SYM_NONE) IVM_GEN_FAIL("call of unknown function");
+        fs = &syms[f];
+        if ((word)(fr->arg_i + 1) >= fs->nparams)
           IVM_GEN_FAIL("too many arguments");
-// TODO: shouldn't this generate a "Sxx" ???
-        emit(fpslot[cv][fr->arg_i++]);
+        // (the "S" opcode is not missing: the BNF has [S\k], \k is only the slot)
+        emit(fs->param_slot[fr->arg_i++]);
         p += 2;
         continue;
       }
@@ -608,73 +564,6 @@ static uchar *run_production(uchar *p) {
   return p;
 }
 
-
-static int name_add(const char *id) {
-  word i;
-
-  if (nnames >= MAX_NAMES) return 0;
-
-  // only the current scope: an inner name may shadow an outer one
-  for (i = 0; i < nnames; i++)
-    if (name_scope[i] == scope_depth && name_eq(names[i], id)) return 1;
-
-  // not found
-  strncpy(names[nnames], id, NAME_LEN - 1);
-  names[nnames][NAME_LEN - 1] = 0;
-  name_scope[nnames] = scope_depth;
-  name_slot[nnames] = alloc_slot();
-  name_vec[nnames] = 0xff;
-  name_pidx[nnames] = 0;
-  nnames++;
-  return 1;
-}
-
-// same, but at a fixed slot (function parameters)
-static int name_add_at(const char *id, uchar slot, uchar pidx) {
-  word i;
-
-  if (nnames >= MAX_NAMES) return 0;
-
-  for (i = 0; i < nnames; i++)
-    if (name_scope[i] == scope_depth && name_eq(names[i], id)) return 0;
-
-  strncpy(names[nnames], id, NAME_LEN - 1);
-  names[nnames][NAME_LEN - 1] = 0;
-  name_scope[nnames] = scope_depth;
-  name_slot[nnames] = slot;
-  name_vec[nnames] = 0xff;
-  name_pidx[nnames] = pidx;
-  nnames++;
-  return 1;
-}
-
-static void scope_enter(void) {
-  if (scope_depth < 255) scope_depth++;
-}
-
-static void scope_leave(void) {
-  word i, w;
-
-  if (scope_depth == 0) return;
-
-  // remove last scope names
-  w = 0;
-  for (i = 0; i < nnames; i++) {
-    if (name_scope[i] < scope_depth) {
-      if (w != i) {
-        memcpy(names[w], names[i], NAME_LEN);
-        name_scope[w] = name_scope[i];
-        name_slot[w] = name_slot[i];
-        name_vec[w] = name_vec[i];
-        name_pidx[w] = name_pidx[i];
-      }
-      w++;
-    }
-  }
-
-  nnames = w;
-  scope_depth--;
-}
 
 static void skip_hspace(void) {
   uchar c;
@@ -744,7 +633,7 @@ static int match_lit(uchar want) {
   skip_ws();
   if (!line_need()) return 0;
   g = line_buf[line_pos];
-  // -I: fold case for keyword/literal letters only (idents use name_eq)
+  // -I: fold case for keyword/literal letters only (idents use strcmp)
   if (ignore_case && isalpha(want)) {
     if (tolower(g) != tolower(want)) return 0;
   } else if (g != want) {
@@ -784,19 +673,41 @@ static int match_ident_raw(char *idbuf, word idmax) {
   return 1;
 }
 
+// next non-blank source char after line_pos; nothing consumed or captured
+static uchar peek_char(void) {
+  word p, sv;
+  uchar c;
+
+  sv = line_pos;
+  p = sv;
+  for (;;) {
+    line_pos = p;
+    if (!line_need()) {
+      c = 0;
+      break;
+    }
+    c = line_buf[p];
+    if (!is_ws(c)) break;
+    p++;
+  }
+  line_pos = sv;
+  return c;
+}
+
 // \i — ident must already be in scope; result = its slot
+//   name followed by ( is looked up as a function (like tpi.c), else a variable
 static int match_ident(void) {
   char id[NAME_LEN];
-  uchar slot, c;
-  word start_abs, save_pos, i;
+  uchar c;
+  word start_abs, i;
+  Symbol *s;
 
   start_abs = abs_pos();
   if (!match_ident_raw(id, NAME_LEN)) return 0;
-  if (!name_in_scope(id)) {
-    save_pos = line_pos;
-    skip_ws();
-    c = line_need() ? line_buf[line_pos] : 0;
-    line_pos = save_pos;
+
+  c = peek_char();
+  i = sym_find(id, (c == '(') ? SYM_FUNC : SYM_VAR, 0);
+  if (i == SYM_NONE) {
     if (c == '(') {
       if (!had_undef_func || start_abs >= undef_pos_abs) {
         strncpy(last_undef, id, NAME_LEN - 1);
@@ -814,12 +725,17 @@ static int match_ident(void) {
     vlog("  ident '%s' not in scope\n", id);
     return 0;
   }
-  i = find_name(id);
-  slot = name_slot[i];
-  last_func_vec = name_vec[i];
+
+  s = &syms[i];
+  if (s->type == SYM_FUNC) {
+    last_func_vec = s->address;
+    record_capture(s->ret_slot);
+  } else {
+    last_func_vec = 0xff;
+    record_capture(s->address);
+  }
   // kept in the frame: later \i matches (call arguments) must not change \v
   stack[sp - 1].func_vec = last_func_vec;
-  record_capture(slot);
   return 1;
 }
 
@@ -827,10 +743,16 @@ static int match_ident(void) {
 static int match_ident_decl(void) {
   char id[NAME_LEN];
   uchar slot;
+  word i;
 
   if (!match_ident_raw(id, NAME_LEN)) return 0;
-  if (!name_add(id)) return 0;
-  slot = lookup_slot(id);
+  i = sym_find(id, SYM_VAR, 1);
+  if (i != SYM_NONE)
+    slot = syms[i].address;
+  else {
+    slot = alloc_slot();
+    sym_add(id, SYM_VAR, slot);
+  }
   record_capture(slot);
   vlog("  decl '%s' scope %u slot %u\n", id, (unsigned)scope_depth, (unsigned)slot);
   return 1;
@@ -839,31 +761,34 @@ static int match_ident_decl(void) {
 // \f — declare function: new frame + vector index; mark entry at current bin_ptr later
 static int match_ident_func_decl(void) {
   char id[NAME_LEN];
-  uchar slot, base;
-  word i;
+  uchar base, vec;
+  Symbol *s;
 
   if (!match_ident_raw(id, NAME_LEN)) return 0;
+  if (sym_find(id, SYM_FUNC, 1) != SYM_NONE) return 0; // declared twice
+  if (nvector >= (uchar)(MAX_VECTORS - 1)) IVM_GEN_FAIL("too many functions");
 
   // frame: base+0 ret addr, +1 ret value (the function name), +2 prev fp,
   // +3 last param (JSR stores ACC there), +4.. other params, then locals
   base = next_slot;
   if (base >= CONST_TOP - 40) return 0;
-  next_slot = (uchar)(base + 1);        // name_add takes the ret-value cell
-  if (!name_add(id)) {
-    next_slot = base;
-    return 0;
-  }
   next_slot = (uchar)(base + 4);
-  slot = lookup_slot(id);
-  i = find_name(id);
-  name_vec[i] = nvector;
-  fbase[nvector] = base;
-  fnparams[nvector] = 0;
-  if (nvector < (uchar)(MAX_VECTORS - 1)) nvector++;
-  last_func_vec = name_vec[i];
-  pending_func_entry = last_func_vec;
-  record_capture(slot);
-  vlog("  func '%s' slot %u vec %u frame %u\n", id, (unsigned)slot, (unsigned)last_func_vec, (unsigned)base);
+
+  vec = nvector;
+  s = sym_add(id, SYM_FUNC, vec);
+  s->ret_addr_slot = base;
+  s->ret_slot = (uchar)(base + 1);
+
+  // return value variable: only visible inside the body (dropped by \})
+  s = sym_add(id, SYM_VAR, (uchar)(base + 1));
+  s->scope = (uchar)(scope_depth + 1);
+
+  frame_base[vec] = base;
+  nvector++;
+  last_func_vec = vec;
+  pending_func_entry = vec;
+  record_capture((uchar)(base + 1));
+  vlog("  func '%s' slot %u vec %u frame %u\n", id, (unsigned)(base + 1), (unsigned)vec, (unsigned)base);
   return 1;
 }
 
@@ -872,17 +797,20 @@ static int match_param_decl(void) {
   char id[NAME_LEN];
   uchar k, slot, v;
   word i;
+  Symbol *s;
 
   if (!match_ident_raw(id, NAME_LEN)) return 0;
   v = last_func_vec;
   if (v == 0xff) return 0;
   // parameter number = params already in this scope (rewinds on backtrack)
   k = 0;
-  for (i = 0; i < nnames; i++)
-    if (name_scope[i] == scope_depth && name_pidx[i]) k++;
+  for (i = 0; i < nsym; i++)
+    if (syms[i].scope == scope_depth && syms[i].pidx) k++;
   if (k >= MAX_PARAMS) return 0;
-  slot = (uchar)(fbase[v] + 4 + k);
-  if (!name_add_at(id, slot, (uchar)(k + 1))) return 0;
+  if (sym_find(id, SYM_VAR, 1) != SYM_NONE) return 0;
+  slot = (uchar)(frame_base[v] + 4 + k);
+  s = sym_add(id, SYM_VAR, slot);
+  s->pidx = (uchar)(k + 1);
   if (next_slot <= slot) next_slot = (uchar)(slot + 1);
   record_capture(slot);
   vlog("  param '%s' #%u slot %u\n", id, (unsigned)k, (unsigned)slot);
@@ -892,25 +820,30 @@ static int match_param_decl(void) {
 // \r — end of parameter list (no input): the last param lives at fp+3
 static int params_done(void) {
   uchar v, n;
-  word i, last;
+  word i, last, f;
+  Symbol *fs;
 
   v = last_func_vec;
   if (v == 0xff) return 0;
+  f = sym_func(v);
+  if (f == SYM_NONE) return 0;
+  fs = &syms[f];        // nothing is added below: pointer stays valid
+
   n = 0;
   last = 0;
-  for (i = 0; i < nnames; i++) {
-    if (name_scope[i] == scope_depth && name_pidx[i]) {
-      fpslot[v][n] = name_slot[i];
+  for (i = 0; i < nsym; i++) {
+    if (syms[i].scope == scope_depth && syms[i].pidx) {
+      fs->param_slot[n] = syms[i].address;
       last = i;
       n++;
     }
   }
   if (n) {
-    name_slot[last] = (uchar)(fbase[v] + 3);
-    fpslot[v][n - 1] = name_slot[last];
+    syms[last].address = (uchar)(frame_base[v] + 3);
+    fs->param_slot[n - 1] = syms[last].address;
     next_slot--;        // its old cell was the top one: reuse it for locals
   }
-  fnparams[v] = n;
+  fs->nparams = n;
   vlog("  params done vec %u n=%u\n", (unsigned)v, (unsigned)n);
   return 1;
 }
@@ -1193,13 +1126,26 @@ static void push(uchar r, uchar state) {
     fprintf(stderr, "stack overflow\n");
     exit(1);
   }
+  if (sp >= stack_cap) {
+    Frame *ns;
+    uchar ncap = (uchar)(stack_cap + 8);
+
+    if (ncap > MAX_STACK) ncap = MAX_STACK;
+    ns = (Frame *)realloc(stack, ncap * sizeof(Frame));
+    if (!ns) {
+      fprintf(stderr, "out of memory (stack)\n");
+      exit(1);
+    }
+    stack = ns;
+    stack_cap = ncap;
+  }
   stack[sp].rule = r;
   stack[sp].alt = 0;
   stack[sp].ip = 0;
   stack[sp].save = line_pos;
   stack[sp].save_abs = abs_pos();
   stack[sp].cap_save = 0;
-  stack[sp].nnames_save = nnames;
+  stack[sp].nsym_save = nsym;
   stack[sp].scope_save = scope_depth;
   stack[sp].slot_save = next_slot;
   stack[sp].func_vec = 0xff;
@@ -1224,7 +1170,7 @@ static void push(uchar r, uchar state) {
 }
 
 static void restore_scope(Frame *fr) {
-  nnames = fr->nnames_save;
+  sym_truncate(fr->nsym_save);
   scope_depth = fr->scope_save;
   next_slot = fr->slot_save;
 }
@@ -1383,7 +1329,7 @@ static int step(void) {
       fr->save = line_pos;
       fr->save_abs = abs_pos();
       fr->cap_save = cap_len[sp - 1];
-      fr->nnames_save = nnames;
+      fr->nsym_save = nsym;
       fr->scope_save = scope_depth;
       fr->slot_save = next_slot;
       fr->code_save = code_len;
@@ -1629,9 +1575,10 @@ static int init(const char *bnf_path, const char *src_path) {
   file_pos = 0;
   max_pos_abs = 0;
   far_sp = 0;
+  stack = NULL;
+  stack_cap = 0;
   sp = 0;
-  nnames = 0;
-  scope_depth = 0;
+  sym_reset();
   had_undef = 0;
   had_undef_func = 0;
   undef_pos_abs = 0;
@@ -1640,9 +1587,6 @@ static int init(const char *bnf_path, const char *src_path) {
   gen_reset();
   nvector = 0;
   last_func_vec = 0xff;
-  memset(fbase, 0, sizeof(fbase));
-  memset(fnparams, 0, sizeof(fnparams));
-  memset(fpslot, 0, sizeof(fpslot));
   // no pre-seeded names — X must be declared in source if used
   for (i = 0; i < MAX_STACK; i++) {
     capture[i] = NULL;
@@ -1680,6 +1624,11 @@ static void shutdown(void) {
     free(blobs[i]);
     blobs[i] = NULL;
   }
+
+  free(stack);
+  stack = NULL;
+  stack_cap = 0;
+  sym_free();
 }
 
 int main(int argc, char **argv) {
@@ -1767,6 +1716,7 @@ int main(int argc, char **argv) {
     emitop('q');
     {
       int blen = 0;
+      // frame_base[] (set by \f) goes into the blob's fp table
       uchar *blob = build_blob(&blen);
       Process *proc;
       ivmvar ret;
@@ -1775,13 +1725,9 @@ int main(int argc, char **argv) {
         blen, main_offset, nvector);
 
       if (blob) {
-        // frame bases: JSR keeps ret addr / ACC at fp+0 / fp+3, ';' returns fp+1
-        for (i = 0; i < nvector; i++) {
-          blob[((BlobHeader *)blob)->fp + i] = fbase[i];
-          if (verbose >= 1)
-            fprintf(stderr, "  frame V%02x fp=%u nparams=%u\n",
-              i, fbase[i], fnparams[i]);
-        }
+        if (verbose >= 1)
+          for (i = 0; i < nvector; i++)
+            fprintf(stderr, "  frame V%02x fp=%u\n", i, frame_base[i]);
 
         proc = Nevm(blob);
         if (proc) {

@@ -20,12 +20,12 @@ end;
 
 function Local1(a : integer; b: integer) : integer;
 begin
-   Two := a;
+   Local1 := a;
 end;
 
 function LocalLast(a : integer; b: integer) : integer;
 begin
-   Two := b;
+   LocalLast := b;
 end;
 
 FUNCTION TestMath(a: INTEGER; b: INTEGER): INTEGER;

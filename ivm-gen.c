@@ -36,6 +36,14 @@
   #define CONST_TOP     253
 #endif
 
+#ifndef MAX_PARAMS
+  #define MAX_PARAMS    4 // max arguments per function
+#endif
+
+#ifndef MAX_SYMBOLS
+  #define MAX_SYMBOLS   250
+#endif
+
 // fail hook — tpi: #define IVM_GEN_FAIL(m) FAIL(m) before include
 #ifndef IVM_GEN_FAIL
   #define IVM_GEN_FAIL(msg) do { \
@@ -197,6 +205,141 @@ uchar lit_addr(unsigned int v) {
   if (v == 0) return IMM0;
   if (v == (unsigned int)-1) return IMM1;
   return add_const(v);
+}
+
+// ---------------------------------------------------------------------------
+// Symbols and scopes — shared by tpi.c and parse.c
+//
+// Allocated on demand (grows SYM_GROW at a time), names are malloc'd at their
+// exact length, so nothing is reserved for symbols that don't exist.
+//
+//   VAR   address = slot
+//   FUNC  address = vector index, ret_addr_slot = frame base,
+//         ret_slot = return value cell, nparams/param_slot = parameters
+//
+// scope: depth the name lives in; scope_leave() drops everything declared at
+// the depth being left (names are appended, so those are the newest ones).
+// sym_truncate() drops back to an earlier count (parse.c backtracking).
+//
+// Pointers from sym_add() stay valid only until the next sym_add(): keep the
+// index (nsym-1) and use &syms[idx] again afterwards.
+// ---------------------------------------------------------------------------
+#define SYM_ANY   0xff
+#define SYM_NONE  0xffff
+#define SYM_GROW  8
+
+typedef enum { SYM_VAR, SYM_FUNC } SymbolType;
+
+typedef struct {
+  char *name;          // malloc'd
+  SymbolType type;
+  uchar address;       // VAR: slot   FUNC: vector index
+  uchar nparams;
+  uchar param_slot[MAX_PARAMS];
+  uchar ret_slot;
+  uchar ret_addr_slot; // FUNC: frame base
+  uchar is_ptr;        // 1 if ^WORD / ^INTEGER (still one cell)
+  uchar scope;         // scope depth it was declared in
+  uchar pidx;          // parameter number + 1 (0 = not a parameter)
+} Symbol;
+
+Symbol *syms;          // grows on demand
+word nsym;
+uchar scope_depth;
+static word sym_cap;
+
+Symbol *sym_add(const char *name, SymbolType type, uchar address) {
+  Symbol *s;
+  char *nm;
+  word n;
+
+  if (nsym >= MAX_SYMBOLS) IVM_GEN_FAIL("symbol table full");
+
+  if (nsym >= sym_cap) {
+    Symbol *ns = (Symbol *)realloc(syms, (sym_cap + SYM_GROW) * sizeof(Symbol));
+
+    if (!ns) IVM_GEN_FAIL("out of memory (symbols)");
+    syms = ns;
+    sym_cap = (word)(sym_cap + SYM_GROW);
+  }
+
+  n = (word)(strlen(name) + 1);
+  nm = (char *)malloc(n);
+  if (!nm) IVM_GEN_FAIL("out of memory (symbol name)");
+  memcpy(nm, name, n);
+
+  s = &syms[nsym++];
+  s->name = nm;
+  s->type = type;
+  s->address = address;
+  s->nparams = 0;
+  s->ret_slot = 0xff;
+  s->ret_addr_slot = 0xff;
+  s->is_ptr = 0;
+  s->scope = scope_depth;
+  s->pidx = 0;
+  return s;
+}
+
+// innermost declaration wins. type: SYM_VAR, SYM_FUNC or SYM_ANY.
+// local=1: only names declared in the current scope. SYM_NONE if not found.
+word sym_find(const char *name, uchar type, uchar local) {
+  word i;
+  Symbol *s;
+
+  for (i = nsym; i > 0; i--) {
+    s = &syms[i - 1];
+    if (local && s->scope != scope_depth) continue;
+    if ((type == SYM_ANY || s->type == type) && strcmp(s->name, name) == 0)
+      return (word)(i - 1);
+  }
+  return SYM_NONE;
+}
+
+// the FUNC symbol of vector v
+word sym_func(uchar v) {
+  word i;
+
+  for (i = nsym; i > 0; i--)
+    if (syms[i - 1].type == SYM_FUNC && syms[i - 1].address == v)
+      return (word)(i - 1);
+  return SYM_NONE;
+}
+
+// drop symbols declared after the first n
+void sym_truncate(word n) {
+  while (nsym > n) {
+    nsym--;
+    free(syms[nsym].name);
+    syms[nsym].name = NULL;
+  }
+}
+
+void sym_reset(void) {
+  sym_truncate(0);
+  scope_depth = 0;
+}
+
+void sym_free(void) {
+  sym_reset();
+  free(syms);
+  syms = NULL;
+  sym_cap = 0;
+}
+
+void scope_enter(void) {
+  if (scope_depth < 255) scope_depth++;
+}
+
+void scope_leave(void) {
+  if (scope_depth == 0) return;
+
+  while (nsym > 0 && syms[nsym - 1].scope >= scope_depth) {
+    nsym--;
+    free(syms[nsym].name);
+    syms[nsym].name = NULL;
+  }
+  scope_depth--;
 }
 
 // emitload/emitstore live in tpi.c (frame-relative); parse uses emit/emitop2
