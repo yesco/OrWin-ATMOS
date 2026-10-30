@@ -81,40 +81,26 @@
 
 // BYTE CODES OVERVIEW
 // ====================
-// 0-31:                - fast var load (load typically 4x more common th store)
-// #$ ' ,    : \ _ `    - FREE to use byte read/write/indexing?
+// 0-31                 - fast var load (load typically 4x more common th store)
+// #$ \ (:_) (`)        - FREE to use
 // 12345678             - local vars 1-7, 8 ist last var (AX)
 // ACD H R T VY         - FREE op vars
 //   possibly usage: cAr Cons cDr, Heap/Here, Recurse, Tail-call, Vector/index? Yndex?
 //
 // 23: a-w              - FREE OrwinOS API or system library strXX functions?
-// ? abcdefgh           - store local (need analyze code savings)
-// ? ijklmno(p)         - index stuff, built in loops iGG GG if zero/non-zero?
-// ? qrstuvw            - str funs
+// ? abcd   efgh        - ?store local (need analyze code savings)
+// ? ijk(l) mnop        - ?index stuff, built in loops iGG GG if zero/non-zero?
+// ? q(rs)t uv(w)       - ?SSTACK saves, param: 1..7 (ACC is 0th)
 // ? xyz                - syscall function LN with 1,2,3 byte args indices+acc
 //
+
+
 // HIBIT
 //   64: 00-3f            - conditional relative jump forward
 //   64: (xx)             - vectored calls (max 64 funs)
-// 
-// Notes:
-//   ;  - load acc w return register (pascal) and do return
-//   X  - return with value in acc
-//   Q  - return with acc = 0
-// 
-// Missing: (q)
-//   memove  v
-//   memset  w
-//   strcpy  p
-//   strcat  t
-//   strchr  r
-//   strstr  s - test... 
-//   strdup  u
-//   atoi    q
-//
-//   strcmp  $
-//   strlen  `
-//   strN... ...
+
+
+
 
 // BYTE CODE DETAILS
 // =================
@@ -123,24 +109,24 @@
 // ' '- nop
 //  ! - store at global address ACC
 //  " - inline print string end with \0
-//  # - number?
-//  $ - string?
+//? # - number? TODO: atoi?!?!
+//? $ - string ptr at end? $ == \
 //  % - mod
 //  & - and
-//? ' - FREE
+//  ' - read next char using pointer++ "'vv": ACC= *vv++;
 //  ( - load from indexed array "(aaii" to ACC
 //  ) - store to indexed array ACC to ")aaii"
-//  *+ - mul, add
-//? , - TODO: read char inc ptr ",vv"
+// *+ - mul, add
+//  , - write char: inc ptr ",vv": *vv++= ACC;
 //  - - subtract
 //  . - print number
 //  / - div
-//  0 - acc = 0/null/nil
+//  0 - ACC = 0/null/nil
 //  1234576 - parameter/local var read
 //  8 - first parameter
-//  9 - acc= -1/TRUE/0xffff
-//? : - define?
-//? ; - return /enddef
+//  9 - ACC= -1/TRUE/0xffff
+//? : - store ACC by name :cc (cc - const char* ptr), see _
+//  ; - return (ACC=returnvalue, for pascal), see X and Q, too.
 //  <=> - cmp - lt eq gt => 0 or 1
 //  ? - NOT acc (C: !)
 //  @ - read from global address ACC
@@ -151,7 +137,7 @@
 //  E - emit char = putchar(acc)
 //  F - free var, set it 0 "Fvv"
 //  G - conditional acc > 0: goto 1-255
-//? H
+//? H - TODO: heap/here something?
 //  IJ - inc/dec var, leave val in ACC
 //  K - key = getchar (waits?)
 //  L - load var
@@ -159,21 +145,35 @@
 //  N - print newline 
 //  O - output next byte "O:" putchar(':')
 //  P - print string from ACC global address, acc points to \0
-//  Q - "Quit" local function, return 0
+//  Q - "Quit" local function == return 0;
 //? R - recurse (save current frame, malloc?)
 //  S - store ACC in variable "Svv"
-//? T - type acc chars from $ (?)
+//? T - type #ACCc chars from arg (or reverse), or Tailcall: Tii
 //  U - Unified op: ACC= var2 += var2
-//? V - TODO: same using ACC as value?
+//? V - TODO: same using ACC as value?  Vss == +ssSss (2 not 4 B)
 //  W - write var as number (unsigned) "Wvv"
-//  XY
-//  Z - zero # (fill)
+//  X - return ACC; see ';' and Q
+//? Y - 
+//  Z - zero variable Zvv
 //
+//? a-h - save local param (h needed, meaning ACC?)
+//? ijk - indexing stuff?
+//  l   - load byte from slot
+//? mn  -
+//? op  - 
+//? qr  -
+//  s   - save byte in slot (reset hibit)
+//? t   -
+//? u   - similar U ? or not need
+//? vw
+//  xyz - call library functions w 2..4 args
+
 //  [ - shift left variable steps "[vv]
-//  '\'
+//? '\' possible use instead of 'O'!!! \ is like literal... lol
 //  ] - shift rigth varible steps "]vv"
 //  ^ - xor "^vv"
-//? _ - global name lookup(acc) => addr
+//? _ - load ACC by name _cc (cc - const char* ptr)
+
 //" ` - 
 //  { - shift ACC left fixed steps "{nn}
 //  | - or w var "|vv"
@@ -795,6 +795,7 @@ ivmvar run_ivm(Process *p) {
       t['L'] = &&op_L;    t['S'] = &&op_S;   t['Z'] = &&op_Z;
       t['M'] = &&op_M;    t['F'] = &&op_F;
       t['@'] = &&op_at;   t['!'] = &&op_bang;
+todo
       t['('] = &&op_idxl; t[')'] = &&op_idxs;
       t['I'] = &&op_I;    t['J'] = &&op_J;   t['U'] = &&op_U;
       t['<'] = &&op_lt;   t['='] = &&op_eq;  t['>'] = &&op_gt;
@@ -871,11 +872,41 @@ ZL(op_shr, ']')  zp.acc >>= PAR; goto pnext;
 ZL(op_shlm,'{')  zp.mem[*zp.ipc] <<= zp.acc; goto pnext;
 ZL(op_shrm,'}')  zp.mem[*zp.ipc] >>= zp.acc; goto pnext;
 
-// Memory ops
+
+// TODO: Global name address lookup (sys registry)
+
+// Memory ops - slots
 ZL(op_L,   'L')  zp.acc = PAR;             goto pnext;
 ZL(op_S,   'S')  zp.mem[*zp.ipc] = zp.acc; goto pnext;
 ZL(op_Z,   'Z')  zp.mem[*zp.ipc] = 0;      goto pnext;
 
+// We use a full 2 byte slot for single byte var, lol
+ZL(op_L,   'l')  zp.acc = *(char*)(zp.mem+*zp.ipc); goto pnext;
+ZL(op_S,   's')  zp.mem[*zp.ipc] = zp.acc & 0xff;   goto pnext;
+
+// Memory ops - raw
+ZL(op_at,  '@')  zp.acc = *IVM_PTR(PAR); goto pnext;
+ZL(op_bang,'!')  *IVM_PTR(PAR) = zp.acc; goto pnext;
+
+ZL(op_at,  'r')  zp.acc = *IVM_PTR(PAR) & 0xff; goto pnext;
+ZL(op_bang,'w')  *IVM_PTR(PAR) = zp.acc & 0xff; goto pnext;
+
+// string (char) pointer walkers
+ZL(op_Z,   '\'') zp.acc = *(uchar*)(PAR++); goto pnext;
+ZL(op_Z,   ',')  *(uchar*)(PAR++) = zp.acc; goto pnext;
+
+
+// indexed: (aaii, aa is index of base address, ii is index var
+ZL(op_idxl,'(')
+    zp.acc = IVM_PTR(PAR)[zp.mem[zp.ipc[1]]];
+    zp.ipc += 2; goto xnext; // 2 args
+ZL(op_idxs,')')
+    IVM_PTR(PAR)[zp.mem[zp.ipc[1]]] = zp.acc;
+    zp.ipc += 2; goto xnext; // 2 args
+
+
+ 
+// Memmory heap
 ZL(op_M,   'M')
     // operand = slot of pointer var; ACC = size in bytes
     {
@@ -904,23 +935,11 @@ ZL(op_F,   'F')
     goto pnext;
 
 
-// pointer in slot is a raw address (heap/static), not a mem[] index
-ZL(op_at,  '@')  zp.acc = *IVM_PTR(PAR); goto pnext;
-ZL(op_bang,'!')  *IVM_PTR(PAR) = zp.acc; goto pnext;
-
-// indexed: pointer in base slot, element index in idx slot
-ZL(op_idxl,'(')
-    zp.acc = IVM_PTR(zp.mem[zp.ipc[0]])[zp.mem[zp.ipc[1]]];
-    zp.ipc += 2; goto xnext;
-ZL(op_idxs,')')
-    IVM_PTR(zp.mem[zp.ipc[0]])[zp.mem[zp.ipc[1]]] = zp.acc;
-    zp.ipc += 2; goto xnext;
-
 ZL(op_I,   'I')  zp.acc = ++zp.mem[*zp.ipc]; goto pnext;
 ZL(op_J,   'J')  zp.acc = --zp.mem[*zp.ipc]; goto pnext;
 ZL(op_U,   'U')  zp.acc = (zp.mem[zp.ipc[0]]
                         += zp.mem[zp.ipc[1]]);
-                                zp.ipc += 2; goto xnext;
+                                zp.ipc += 2; goto xnext; // two args
 
 ZL(op_lt,  '<')  zp.acc = zp.acc < PAR;  goto pnext;
 ZL(op_eq,  '=')  zp.acc = zp.acc == PAR; goto pnext;
