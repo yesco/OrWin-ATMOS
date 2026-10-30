@@ -13,6 +13,7 @@
 //   \+         ident declare (match + add to current scope)
 //   \d         number
 //   \s         string
+//   \S         emit string bytes + \0 (opening " already matched)
 //   \n         >=1 newline; eats surrounding horizontal space
 //   \{ \}      enter / leave scope (\} drops names added in scope)
 //   \| \c      literal | or other escaped char
@@ -776,7 +777,7 @@ static uchar *blobs[NRULES];
 
 static void build_one_rule(uchar r, char *rhs) {
   char *p;
-  uchar *blob, **altp, e;
+  uchar *blob, **altp, e, depth;
   word blob_len, a, bi, na, alt_starts[64];
 
   // expand \| and \c (not specials) into blob; keep \i \n \s \C \< \d \+ \{ \}
@@ -810,6 +811,7 @@ static void build_one_rule(uchar r, char *rhs) {
 
   bi = 0;
   na = 0;
+  depth = 0;
   alt_starts[na++] = 0;
   for (p = rhs; *p; p++) {
     if (*p == '\\' && p[1]) {
@@ -826,7 +828,8 @@ static void build_one_rule(uchar r, char *rhs) {
       p++;
       continue;
     }
-    if (*p == '|') {
+    // '|' separates alts only outside a bare [ ... ] production
+    if (*p == '|' && depth == 0) {
       // skip empty alts from || or line-join artifacts
       if (na > 0 && alt_starts[na - 1] == bi)
         continue;
@@ -835,6 +838,9 @@ static void build_one_rule(uchar r, char *rhs) {
         alt_starts[na++] = bi;
       continue;
     }
+    // bare [ ] = production; | inside is a literal (\[ \] are handled above)
+    if (*p == '[') depth++;
+    else if (*p == ']' && depth) depth--;
     blob[bi++] = (uchar)*p;
   }
   blob[bi++] = 0;
@@ -975,6 +981,14 @@ static void restore_scope(Frame *fr) {
   scope_depth = fr->scope_save;
 }
 
+// hex digit value for \#xx
+static uchar hexval(uchar c) {
+  if (c >= '0' && c <= '9') return c - '0';
+  c = tolower(c);
+  if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+  return 0;
+}
+
 // ---- one step ----
 // estimated ~50-200us per step on 6502 @ 1MHz (dispatch + match)
 
@@ -994,13 +1008,9 @@ static int step(void) {
       sp--;
       if (sp == 0) return -1;
       fr = &stack[sp - 1];
-      line_pos = fr->save;
-      cap_len[sp - 1] = 0;
-      fr->alt++;
-      fr->ip = 0;
-      fr->save = line_pos;
-      fr->save_abs = abs_pos();
-      fr->state = ST_TRY;
+      // parent's current alt failed: ST_FAIL restores pos, capture,
+      // code, scope, then moves to the next alt
+      fr->state = ST_FAIL;
       return 1;
     }
     line_pos = fr->save;
@@ -1160,6 +1170,33 @@ static int step(void) {
       scope_leave();
       fr->ip = (word)(fr->ip + 2);
       vlog("  scope leave %u\n", (unsigned)scope_depth);
+      return 1;
+    }
+
+    // \#xx: result := hex xx, same as \d having matched that number (no input)
+    if (e == '#') {
+      word v;
+      uchar slot;
+
+      if (!alt[fr->ip + 2] || !alt[fr->ip + 3]) {
+        fr->state = ST_FAIL;
+        return 1;
+      }
+      v = (word)(hexval(alt[fr->ip + 2]) * 16 + hexval(alt[fr->ip + 3]));
+      slot = (uchar)as_addr((uchar)lit_addr((unsigned int)v));
+      record_capture(slot);
+      fr->ip = (word)(fr->ip + 4);
+      vlog("  hex const %u\n", (unsigned)v);
+      return 1;
+    }
+
+    // \=n: result := capture n (no new capture recorded)
+    if (e == '=') {
+      uchar n = (uchar)(alt[fr->ip + 2] - '0');
+
+      if (n >= 1 && n <= fr->prod_n)
+        fr->result = fr->prod_cap[n];
+      fr->ip = (word)(fr->ip + 3);
       return 1;
     }
 

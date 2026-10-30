@@ -28,7 +28,7 @@ K=if E then K else K|if E then K
 |\i\[E\]:=E;[S\1]
 # JW: one or more J, comma-separated (W = optional ,J tail)
 W=,J\<|
-J=E[.]|"\S
+J=E[.]|"["]\S
 # E = primary then ops. Call primary uses [\v] (ACC); others [L\1] load
 E=\i(Z)[\v]O|S[L\1]O
 # S = non-call primary -> address
@@ -68,11 +68,12 @@ Tokens:
 
 Control:
   \{ \} scope  \< tail  \C commit
-  \#xx  result := hex xx
+  \#xx  result := hex xx  (same as \d having matched that number)
   \=n   result := capture n
 
 Generate:
   [..]     production  (-v prints GEN only when alt commits)
+           a bare | inside [..] is literal, not an alternative separator
   \1 - \9  capture byte
   \aN      force address (spill ACC to temp if needed)
   \v       emit 0xC0|vec for last matched function \i (in production)
