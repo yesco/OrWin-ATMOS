@@ -1,3 +1,13 @@
+
+
+
+// TODO: this file should be replaced by tpi-new.c that 
+//   works on linux, however, that one uses so much memory
+//   that malloc fails easily on test.p and t.p using cc65
+
+
+
+
 // tpi.c - Tiny Pascal → IVM bytecode
 //
 // Notice:

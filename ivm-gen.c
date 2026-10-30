@@ -226,7 +226,8 @@ uchar lit_addr(unsigned int v) {
 // ---------------------------------------------------------------------------
 #define SYM_ANY   0xff
 #define SYM_NONE  0xffff
-#define SYM_GROW  8
+#define SYM_GROW  16
+//#define SYM_GROW  250
 
 typedef enum { SYM_VAR, SYM_FUNC } SymbolType;
 
@@ -258,9 +259,10 @@ Symbol *sym_add(const char *name, SymbolType type, uchar address) {
   if (nsym >= sym_cap) {
     Symbol *ns = (Symbol *)realloc(syms, (sym_cap + SYM_GROW) * sizeof(Symbol));
 
+    printf("nsym= %u symcap = %u\n", nsym, sym_cap);
     if (!ns) IVM_GEN_FAIL("out of memory (symbols)");
     syms = ns;
-    sym_cap = (word)(sym_cap + SYM_GROW);
+    sym_cap = sym_cap + SYM_GROW;
   }
 
   n = (word)(strlen(name) + 1);
