@@ -378,11 +378,13 @@ static void record_capture(word val) {
   Frame *fr;
 
   if (sp == 0) return;
+
   fr = &stack[sp - 1];
   if (fr->prod_n < 9) {
     fr->prod_n++;
     fr->prod_cap[fr->prod_n] = val;
   }
+
   fr->result = val;
 }
 
@@ -392,8 +394,10 @@ static uchar alloc_slot(void) {
   uchar s;
 
   if (next_slot >= CONST_TOP - 32) IVM_GEN_FAIL("out of slots");
+
   s = next_slot;
   next_slot++;
+
   return s;
 }
 
@@ -404,12 +408,16 @@ static word force_addr(uchar n) {
   uchar tmp;
 
   if (sp == 0) return 0;
+
   fr = &stack[sp - 1];
   if (n < 1 || n > fr->prod_n) return 0;
+
   v = fr->prod_cap[n];
   if (v != VAL_ACC) return v;
+
   tmp = alloc_slot();
   emitop2('S', tmp);
+
   fr->prod_cap[n] = tmp;
   if (verbose >= 1) {
     fprintf(stderr, "  spill->%02x\n", tmp);
@@ -706,9 +714,15 @@ static int match_ident(void) {
   if (!match_ident_raw(id, NAME_LEN)) return 0;
 
   c = peek_char();
+
+  // TODO: how about function pointers, lol
   i = sym_find(id, (c == '(') ? SYM_FUNC : SYM_VAR, 0);
+
   if (i == SYM_NONE) {
+
     if (c == '(') {
+
+      // It's a functiono call
       if (!had_undef_func || start_abs >= undef_pos_abs) {
         strncpy(last_undef, id, NAME_LEN - 1);
         last_undef[NAME_LEN - 1] = 0;
@@ -717,25 +731,36 @@ static int match_ident(void) {
         undef_pos_abs = start_abs;
       }
     } else if (!had_undef_func) {
+      
+      // TODO: does this mean it's a var? what we're doing here?
       strncpy(last_undef, id, NAME_LEN - 1);
       last_undef[NAME_LEN - 1] = 0;
       had_undef = 1;
       undef_pos_abs = start_abs;
     }
+
     vlog("  ident '%s' not in scope\n", id);
+
     return 0;
   }
 
   s = &syms[i];
   if (s->type == SYM_FUNC) {
+
+    // It's a function name?
     last_func_vec = s->address;
     record_capture(s->ret_slot);
+
   } else {
+
+    // It's a variable name?
     last_func_vec = 0xff;
     record_capture(s->address);
   }
+
   // kept in the frame: later \i matches (call arguments) must not change \v
   stack[sp - 1].func_vec = last_func_vec;
+
   return 1;
 }
 
@@ -1493,7 +1518,8 @@ static void report_reject(void) {
 
       // furthest was discarded by \C; still report position
       fprintf(stderr, "%s: (offset %u, before current buffer @%u)\n",
-              src_name ? src_name : "?", (unsigned)want, (unsigned)line_abs);
+        src_name ? src_name : "?",
+        want, line_abs);
 
     } else {
 
