@@ -477,7 +477,7 @@ static uchar *run_production(uchar *p) {
     if (*p == '\\') {
       if (p[1] == 'v') {
         uchar op = (uchar)(0xC0 | (fr->func_vec & 0x3f));
-        emit(op);
+        emitop(op);
         p += 2;
         continue;
       }
@@ -495,8 +495,7 @@ static uchar *run_production(uchar *p) {
         w = (n <= fr->prod_n) ? fr->prod_cap[n] : 0;
         if (w != VAL_ACC) {
           b = (uchar)as_addr((uchar)(w & 0xff));
-          emit('L');
-          emit(b);
+          emitop2('L', b);
         }
         p += 3;
         continue;
@@ -506,13 +505,13 @@ static uchar *run_production(uchar *p) {
         w = (n <= fr->prod_n) ? fr->prod_cap[n] : 0;
         if (w == VAL_ACC) w = force_addr(n);
         b = (uchar)as_addr((uchar)(w & 0xff));
-        emit(b);
+        emit(b); 
         p += 2;
         continue;
       }
       // \[ \] emit a literal bracket
       if (p[1] == '[' || p[1] == ']') {
-        emit(p[1]);
+        emitop(p[1]);
         p += 2;
         continue;
       }
@@ -574,6 +573,7 @@ static uchar *run_production(uchar *p) {
         cv = (sp >= 2) ? stack[sp - 2].func_vec : 0xff;
         if (cv == 0xff || (word)(fr->arg_i + 1) >= fnparams[cv])
           IVM_GEN_FAIL("too many arguments");
+// TODO: shouldn't this generate a "Sxx" ???
         emit(fpslot[cv][fr->arg_i++]);
         p += 2;
         continue;
@@ -582,6 +582,7 @@ static uchar *run_production(uchar *p) {
     b = *p++;
     emit(b);
   }
+
   if (*p == ']') p++;
   fr->result = VAL_ACC;
   return p;
@@ -1718,7 +1719,7 @@ int main(int argc, char **argv) {
 
     }
     // quit so run_ivm can stop
-    emit('q');
+    emitop('q');
     {
       int blen = 0;
       uchar *blob = build_blob(&blen);

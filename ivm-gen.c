@@ -123,8 +123,12 @@ void emitop(uchar op) {
 }
 
 void emitop2(uchar op, uchar arg) {
-  emitop(op);
-  emit(arg);
+  if (op == 'L' && arg < 32)
+    emit(arg); // one byte short-code
+  else {
+    emitop(op);
+    emit(arg);
+  }
 
   // update acc and stats
   if (op == 'S' || op == 'L' || op == 'U') {
