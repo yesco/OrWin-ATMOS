@@ -52,7 +52,7 @@ if [ -f "$name.c" ]; then
   echo
   echo
   echo "========== C ===== $name.c Run from C ================"
-  cl65 -t sim6502 -Oirs -o test.sim test.c \
+  cl65 -t sim6502 -Oirs -vm -m test.map -o test.sim test.c -vm \
   && (sim65 -c test.sim | tee $name.c.log)
   echo
   echo

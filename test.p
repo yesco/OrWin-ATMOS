@@ -1,9 +1,21 @@
 Program ShowcaseSuite;
 
-{ (/ 1345 5656.0) = 0.24 bytecode / 65-2  = > 24% !!!
--rw-------. 1 1345 Oct 31 03:41 test.ivm
+{  --- sizes
+
+-rw-------. 1 1345 Oct 31 03:41 test.ivm (bytecode header const)
+              1228              BYTECODE, SSTACK compacted STACK
+              1316              parse.c bytecode, no opt
+
 -rw-------. 1 5656 Oct 31 03:27 test.sim
+              3908              code for MAIN and all the func in test.c
+
+(/ 1228 3908.0) = 31% size, relocated unoptimized bytecode
+
+1/3 size 3s slower (now 5x, but with new NEXT...)
+
+
 }
+
 
 { TODO: do function var names hide/obstruct globals? }
 

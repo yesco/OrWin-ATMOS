@@ -803,9 +803,11 @@ ivmvar run_ivm(Process *p) {
       t['['] = &&op_shl;  t[']'] = &&op_shr;
       t['{'] = &&op_shlm; t['}'] = &&op_shrm;
       t['L'] = &&op_L;    t['S'] = &&op_S;   t['Z'] = &&op_Z;
+      t['l'] = &&op_l;    t['s'] = &&op_s;
       t['M'] = &&op_M;    t['F'] = &&op_F;
       t['@'] = &&op_at;   t['!'] = &&op_bang;
-todo
+      t['r'] = &&op_r;    t['w'] = &&op_w;
+      t['\'']= &&op_ri;   t[','] = &&op_wi;
       t['('] = &&op_idxl; t[')'] = &&op_idxs;
       t['I'] = &&op_I;    t['J'] = &&op_J;   t['U'] = &&op_U;
       t['<'] = &&op_lt;   t['='] = &&op_eq;  t['>'] = &&op_gt;
@@ -890,20 +892,21 @@ ZL(op_L,   'L')  zp.acc = PAR;             goto pnext;
 ZL(op_S,   'S')  zp.mem[*zp.ipc] = zp.acc; goto pnext;
 ZL(op_Z,   'Z')  zp.mem[*zp.ipc] = 0;      goto pnext;
 
-// We use a full 2 byte slot for single byte var, lol
-ZL(op_L,   'l')  zp.acc = *(char*)(zp.mem+*zp.ipc); goto pnext;
-ZL(op_S,   's')  zp.mem[*zp.ipc] = zp.acc & 0xff;   goto pnext;
-
-// Memory ops - raw
+// Memory ops - word raw
 ZL(op_at,  '@')  zp.acc = *IVM_PTR(PAR); goto pnext;
 ZL(op_bang,'!')  *IVM_PTR(PAR) = zp.acc; goto pnext;
 
-ZL(op_at,  'r')  zp.acc = *IVM_PTR(PAR) & 0xff; goto pnext;
-ZL(op_bang,'w')  *IVM_PTR(PAR) = zp.acc & 0xff; goto pnext;
+
+// We use a full 2 byte slot for single byte var, lol
+ZL(op_l,   'l')  zp.acc = *(char*)(zp.mem+*zp.ipc); goto pnext;
+ZL(op_s,   's')  zp.mem[*zp.ipc] = zp.acc & 0xff;   goto pnext;
+
+ZL(op_r,   'r')  zp.acc = *IVM_PTR(PAR) & 0xff; goto pnext;
+ZL(op_w,   'w')  *IVM_PTR(PAR) = zp.acc & 0xff; goto pnext;
 
 // string (char) pointer walkers
-ZL(op_Z,   '\'') zp.acc = *(uchar*)(PAR++); goto pnext;
-ZL(op_Z,   ',')  *(uchar*)(PAR++) = zp.acc; goto pnext;
+ZL(op_ri,  '\'') zp.acc = *(uchar*)(PAR++); goto pnext;
+ZL(op_wi,  ',' ) *(uchar*)(PAR++) = zp.acc; goto pnext;
 
 
 // indexed: (aaii, aa is index of base address, ii is index var

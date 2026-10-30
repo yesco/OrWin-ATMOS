@@ -1,5 +1,33 @@
 #include <stdio.h>
 
+/*
+
+14      _Local1
+14      _LocalLast
+19      _AddTen
+21      _Mul2
+29      _TShl                      
+29      _TShr
+34      _TNot
+64      _TCmp
+
+118     _TestWrites
+123     _fwrite
+247     _TestMath
+318     _TestIf
+318     _TestOps
+2560    __MAIN_SIZE__
+
+-- BYTES FROM test.c
+
+  (+ 14 14 19 21 29 29 34 64 118 123 247 318 318 2560) = 3908
+
+-- CC65 stuff (and maybe strings?)
+
+  ls -l test.sim   => 5656
+
+*/
+
 // Global Variables
 int alpha;
 int beta;

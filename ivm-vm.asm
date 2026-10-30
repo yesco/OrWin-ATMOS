@@ -20,6 +20,7 @@
 ;TRACE=1
 TRACE=0
         
+// ALTCODE: 1.5 % faster...
 ALTCODE=0
 ;ALTCODE=1
 	
