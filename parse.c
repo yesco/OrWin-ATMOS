@@ -588,31 +588,78 @@ static void skip_hspace(void) {
 
 // ---- skip whitespace and { comments } ----
 
+#include <stdbool.h>
+#include <string.h>
+
+// Compact comment configuration for cc65 (NULL blocks disable them)
+#ifdef CCC
+  static const char *start_blk = "/*";
+  static const char *end_blk   = "*/";
+  // Set to NULL to disable line comments
+  static const char *line_pfx  = "//";
+#else
+  static const char *start_blk = "{";
+  static const char *end_blk   = "}";
+  // Set to NULL to disable line comments
+  static const char *line_pfx  = NULL;
+#endif
+
 static void skip_ws(void) {
+  char c;
+  const char *match;
+
   for (;;) {
 
-    while (line_need() && is_ws(line_buf[line_pos])) {
-      capture_add(line_buf[line_pos]);
+    // Unified whitespace skip loop
+    while (line_need() && is_ws(c = line_buf[line_pos])) {
+      capture_add(c);
       line_pos++;
       note_progress();
     }
     if (!line_need()) return;
 
-    // skip { comments }
-    if (line_buf[line_pos] != '{') return;
-    capture_add(line_buf[line_pos]);
-
-    line_pos++;
-    while (line_need() && line_buf[line_pos] != '}') {
-      capture_add(line_buf[line_pos]);
-      line_pos++;
-    }
-
-    if (line_need() && line_buf[line_pos] == '}') {
-      capture_add(line_buf[line_pos]);
-      line_pos++;
+    // Check for Line Comment match
+    if (line_pfx && line_buf[line_pos] == line_pfx[0] && 
+        line_pos + 1 < line_len && line_buf[line_pos + 1] == line_pfx[1]) {
+      
+      capture_add(line_buf[line_pos++]);
+      capture_add(line_buf[line_pos++]);
+      
+      while (line_need()) {
+        capture_add(line_buf[line_pos++]);
+      }
       note_progress();
+      continue;
     }
+
+    // Check for Block Comment match
+    if (start_blk && line_buf[line_pos] == start_blk[0]) {
+      // Handle either 2-char markers (like /*) or 1-char markers (like {)
+      if (!start_blk[1] || 
+         (line_pos + 1 < line_len && line_buf[line_pos + 1] == start_blk[1])) {
+        
+        capture_add(line_buf[line_pos++]);
+        if (start_blk[1]) capture_add(line_buf[line_pos++]);
+
+        // Consume characters until the end marker is found
+        while (line_need()) {
+          c = line_buf[line_pos];
+          if (c == end_blk[0] && (!end_blk[1] || 
+             (line_pos + 1 < line_len && line_buf[line_pos + 1] == end_blk[1]))) {
+            
+            capture_add(line_buf[line_pos++]);
+            if (end_blk[1]) capture_add(line_buf[line_pos++]);
+            break;
+          }
+          capture_add(line_buf[line_pos++]);
+        }
+        note_progress();
+        continue;
+      }
+    }
+
+    // No whitespace or comments matched, drop out cleanly
+    return;
   }
 }
 

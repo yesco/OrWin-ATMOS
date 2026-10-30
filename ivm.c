@@ -105,6 +105,8 @@
 // BYTE CODE DETAILS
 // =================
 //
+//? === not implemented
+//
 //0-31: global memory read value
 // ' '- nop
 //  ! - store at global address ACC
