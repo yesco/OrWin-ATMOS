@@ -86,24 +86,24 @@ uchar *build_blob(int *out_len);
 // ---------------------------------------------------------------------------
 // Bytecode buffer
 // ---------------------------------------------------------------------------
-char bin[MAX_BIN_LEN];
+uchar bin[MAX_BIN_LEN];
 int bin_ptr = 0;
 
 // ACC mirror: which mem slot ACC currently holds (-1 = none/unknown)
-char acc_slot;
-char acc_valid;
+uchar acc_slot;
+uchar acc_valid;
 
 void acc_invalidate(void) {
   acc_valid = 0;
-  acc_slot = (char)-1;
+  acc_slot = (uchar)-1;
 }
 
-void acc_set_slot(char slot) {
+void acc_set_slot(uchar slot) {
   acc_slot = slot;
   acc_valid = 1;
 }
 
-void emit(char c) {
+void emit(uchar c) {
   if (pending_func_entry != 0xff) {
     gen_func_entry(pending_func_entry);
     pending_func_entry = 0xff;
@@ -115,14 +115,14 @@ void emit(char c) {
   bin[bin_ptr++] = c;
 }
 
-void emitop(char op) {
+void emitop(uchar op) {
   emit(op);
 
   if (op == '0' || op == '9' || op == '~' || op == '?' || op == 'G' || op == 'B')
     acc_invalidate();
 }
 
-void emitop2(char op, char arg) {
+void emitop2(uchar op, uchar arg) {
   emitop(op);
   emit(arg);
 
@@ -143,7 +143,7 @@ void emitop2(char op, char arg) {
 // Constants — grow downward from CONST_TOP (253,252,…)
 // ---------------------------------------------------------------------------
 uint16_t const_pool[MAX_CONSTS];
-char nconst = 0;
+uchar nconst = 0;
 uchar constidx = 255; // lowest const slot; 255 = none
 
 uchar add_const(unsigned int v) {
@@ -177,22 +177,22 @@ int is_lit(uchar a) {
   return a == IMM0 || a == IMM1 || isconst(a);
 }
 
-unsigned int lit_val(char a) {
-  if ((uchar)a == IMM0) return 0;
-  if ((uchar)a == IMM1) return (unsigned int)-1;
+unsigned int lit_val(uchar a) {
+  if (a == IMM0) return 0;
+  if (a == IMM1) return (unsigned int)-1;
   return const_val(a);
 }
 
-char as_addr(uchar a) {
-  if (a == IMM0) return (char)add_const(0);
-  if (a == IMM1) return (char)add_const((unsigned int)-1);
-  return (char)a;
+uchar as_addr(uchar a) {
+  if (a == IMM0) return (uchar)add_const(0);
+  if (a == IMM1) return (uchar)add_const((unsigned int)-1);
+  return a;
 }
 
-char lit_addr(unsigned int v) {
-  if (v == 0) return (char)IMM0;
-  if (v == (unsigned int)-1) return (char)IMM1;
-  return (char)add_const(v);
+uchar lit_addr(unsigned int v) {
+  if (v == 0) return IMM0;
+  if (v == (unsigned int)-1) return IMM1;
+  return add_const(v);
 }
 
 // emitload/emitstore live in tpi.c (frame-relative); parse uses emit/emitop2

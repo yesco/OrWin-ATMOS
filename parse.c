@@ -11,6 +11,9 @@
 //   \C         commit: drop line buffer up to current point
 //   \i         ident in scope (must be declared by \+)
 //   \+         ident declare (match + add to current scope)
+//   \f         declare function: name = ret-value cell of a new frame + vector
+//   \p         declare parameter (frame cell base+4+n); \r ends the list
+//   \r         end of parameter list (no input): last param -> base+3
 //   \d         number
 //   \s         string
 //   \S         emit string bytes + \0 (opening " already matched)
@@ -20,12 +23,24 @@
 //   |          alternative (epsilon allowed)
 //   line '|'   continue previous rule (long alts)
 //   line '.'   end of rules section
-//   [ ... ]   production: after match, emit bytecode (tpi-style)
-//   \1..\9    in production: insert result byte from nth value match
+//   [ ... ]    production: after match, emit bytecode (tpi-style)
+//   \1..\9     in production: insert result byte from nth value match
 //              value matches: \i \+ \d and successful subrule calls
 //
+//   production only:
+//         \aN force addr
+//         \lN load capture N (not if ACC)
+//         \t temp
+//         \v call opcode
+//         \k next call arg param slot
+//         \x \y \w jump placeholder / patch / swap
+//         \m \z loop mark / back
+//         \[ \] literal   [ ]    [] alone: no code, result is ACC
+//
 // Explicit stack — no recursive match.
+//
 // capture == text held until alternative commits (then printed / flushed).
+
 
 // EDING INSTRUCTION (don't remove!)
 // =================================
@@ -152,6 +167,12 @@ typedef struct {
   uchar prod_n;
   word result;
   word code_save; // code_len at alt entry (backtrack)
+  uchar slot_save;    // next_slot at alt entry (backtrack frees slots)
+  uchar func_vec;     // vector of the function matched by \i in THIS frame (for \v)
+  uchar arg_i;        // call args stored so far (rule Z, for \k)
+  uchar npatch;       // pending forward jumps (\x pushes, \y pops)
+  word patch[4];
+  word mark;          // \m loop start (for \z)
 } Frame;
 
 static Frame stack[MAX_STACK];
@@ -178,12 +199,20 @@ static word  undef_pos_abs;
 // name -> slot index (same order as names[])
 static uchar name_slot[MAX_NAMES];
 static uchar name_vec[MAX_NAMES]; // 0xff = not a function; else vector index
-static uchar last_func_vec; // last \i that was a function (for \v)
+static uchar name_pidx[MAX_NAMES]; // parameter number + 1, 0 = not a parameter
+static uchar last_func_vec; // last \i that was a function (set by \f)
 static uchar next_slot; // next free slot index for \+ decls / temps
+
+// function frames (same layout as tpi.c):
+//   base+0 ret addr, +1 ret value (= function name), +2 prev fp,
+//   +3 last param (JSR stores ACC there), +4.. other params, then locals
+#define MAX_PARAMS 4
+static uchar fbase[MAX_VECTORS];              // frame base per vector -> blob fp table
+static uchar fnparams[MAX_VECTORS];           // parameter count per vector
+static uchar fpslot[MAX_VECTORS][MAX_PARAMS]; // slot of each parameter
 
 // const + bin from ivm-gen.c (code_buf/code_len macros)
 #define VAL_ACC  0xffff
-static uchar next_tmp;
 
 // ---- logging ----
 
@@ -352,6 +381,17 @@ static int name_in_scope(const char *id) {
   return 0;
 }
 
+// innermost declaration wins (names are appended in declaration order)
+static word find_name(const char *id) {
+  word i;
+
+  for (i = nnames; i > 0; i--) {
+    if (name_eq(names[i - 1], id))
+      return (word)(i - 1);
+  }
+  return 0xffff;
+}
+
 // ---- bytecode emission (tpi-style) ----
 
 // record a value-producing match into \\1..\\9 of current frame
@@ -367,6 +407,17 @@ static void record_capture(word val) {
   fr->result = val;
 }
 
+// slots: globals, frames, params, locals and temps share one counter
+// (a failed alt gives its slots back, see restore_scope)
+static uchar alloc_slot(void) {
+  uchar s;
+
+  if (next_slot >= CONST_TOP - 32) IVM_GEN_FAIL("out of slots");
+  s = next_slot;
+  next_slot++;
+  return s;
+}
+
 // spill ACC to temp slot; return mem address for capture n
 static word force_addr(uchar n) {
   Frame *fr;
@@ -378,9 +429,8 @@ static word force_addr(uchar n) {
   if (n < 1 || n > fr->prod_n) return 0;
   v = fr->prod_cap[n];
   if (v != VAL_ACC) return v;
-  tmp = next_tmp;
-  if (next_tmp < 0xfe) next_tmp++;
-  emitop2('S', (char)tmp);
+  tmp = alloc_slot();
+  emitop2('S', tmp);
   fr->prod_cap[n] = tmp;
   if (verbose >= 1) {
     fprintf(stderr, "  spill->%02x\n", tmp);
@@ -392,20 +442,9 @@ static word force_addr(uchar n) {
 static uchar lookup_slot(const char *id) {
   word i;
 
-  for (i = 0; i < nnames; i++) {
-    if (name_eq(names[i], id))
-      return name_slot[i];
-  }
-  return 0xff;
-}
-
-static uchar alloc_slot(void) {
-  uchar s;
-
-  s = next_slot;
-  if (next_slot < 0xff)
-    next_slot++;
-  return s;
+  i = find_name(id);
+  if (i == 0xffff) return 0xff;
+  return name_slot[i];
 }
 
 
@@ -413,15 +452,32 @@ static uchar alloc_slot(void) {
 // quiet: GEN is printed only when the owning alt commits (ST_OK)
 static uchar *run_production(uchar *p) {
   Frame *fr;
-  uchar n, b;
+  uchar n, b, *q;
   word w;
 
   fr = &stack[sp - 1];
+
+  // ACC captures this production refers to are spilled FIRST, so the
+  // spill code lands before the bytes that use it (\l takes ACC as is)
+  for (q = p; *q && *q != ']'; q++) {
+    if (*q != '\\') continue;
+    q++;
+    if (!*q) break;
+    if (*q == 'l') continue;
+    if (*q == 'a' && q[1]) q++;
+    if (*q >= '1' && *q <= '9') {
+      n = (uchar)(*q - '0');
+      if (n <= fr->prod_n && fr->prod_cap[n] == VAL_ACC)
+        force_addr(n);
+      // TDOO: should 1..9 be relative to frame pointer?
+    }
+  }
+
   while (*p && *p != ']') {
     if (*p == '\\') {
       if (p[1] == 'v') {
-        uchar op = (uchar)(0xC0 | (last_func_vec & 0x3f));
-        emit((char)op);
+        uchar op = (uchar)(0xC0 | (fr->func_vec & 0x3f));
+        emit(op);
         p += 2;
         continue;
       }
@@ -429,7 +485,19 @@ static uchar *run_production(uchar *p) {
         n = (uchar)(p[2] - '0');
         w = force_addr(n);
         b = (uchar)(w & 0xff);
-        emit((char)b);
+        emit(b);
+        p += 3;
+        continue;
+      }
+      // \lN: load capture N into ACC unless it already is there
+      if (p[1] == 'l' && p[2] >= '1' && p[2] <= '9') {
+        n = (uchar)(p[2] - '0');
+        w = (n <= fr->prod_n) ? fr->prod_cap[n] : 0;
+        if (w != VAL_ACC) {
+          b = (uchar)as_addr((uchar)(w & 0xff));
+          emit('L');
+          emit(b);
+        }
         p += 3;
         continue;
       }
@@ -438,13 +506,81 @@ static uchar *run_production(uchar *p) {
         w = (n <= fr->prod_n) ? fr->prod_cap[n] : 0;
         if (w == VAL_ACC) w = force_addr(n);
         b = (uchar)as_addr((uchar)(w & 0xff));
-        emit((char)b);
+        emit(b);
+        p += 2;
+        continue;
+      }
+      // \[ \] emit a literal bracket
+      if (p[1] == '[' || p[1] == ']') {
+        emit(p[1]);
+        p += 2;
+        continue;
+      }
+      // \t: new temp slot, emit it, remember it as a capture
+      if (p[1] == 't') {
+        b = alloc_slot();
+        emit(b);
+        record_capture(b);
+        p += 2;
+        continue;
+      }
+      // \x: forward jump placeholder
+      if (p[1] == 'x') {
+        emit(0);
+        if (fr->npatch < 4)
+          fr->patch[fr->npatch++] = (word)(code_len - 1);
+        p += 2;
+        continue;
+      }
+      // \y: patch newest placeholder to jump here
+      if (p[1] == 'y') {
+        if (fr->npatch) {
+          w = fr->patch[--fr->npatch];
+          if (code_len - (w + 1) > 255) IVM_GEN_FAIL("jump too far");
+          code_buf[w] = (uchar)(code_len - (w + 1));
+        }
+        p += 2;
+        continue;
+      }
+      // \w: swap the two newest placeholders
+      if (p[1] == 'w') {
+        if (fr->npatch >= 2) {
+          w = fr->patch[fr->npatch - 1];
+          fr->patch[fr->npatch - 1] = fr->patch[fr->npatch - 2];
+          fr->patch[fr->npatch - 2] = w;
+        }
+        p += 2;
+        continue;
+      }
+      // \m: remember loop start
+      if (p[1] == 'm') {
+        fr->mark = (word)code_len;
+        p += 2;
+        continue;
+      }
+      // \z: backward jump delta to the mark (after the B opcode)
+      if (p[1] == 'z') {
+        w = (word)(code_len + 1 - fr->mark);
+        if (w > 255) IVM_GEN_FAIL("loop body too large");
+        emit(w);
+        p += 2;
+        continue;
+      }
+      // \k: param slot for the next call argument; frame above is the caller
+      // (the rule that matched \i and called Z)
+      if (p[1] == 'k') {
+        uchar cv;
+
+        cv = (sp >= 2) ? stack[sp - 2].func_vec : 0xff;
+        if (cv == 0xff || (word)(fr->arg_i + 1) >= fnparams[cv])
+          IVM_GEN_FAIL("too many arguments");
+        emit(fpslot[cv][fr->arg_i++]);
         p += 2;
         continue;
       }
     }
     b = *p++;
-    emit((char)b);
+    emit(b);
   }
   if (*p == ']') p++;
   fr->result = VAL_ACC;
@@ -457,8 +593,9 @@ static int name_add(const char *id) {
 
   if (nnames >= MAX_NAMES) return 0;
 
+  // only the current scope: an inner name may shadow an outer one
   for (i = 0; i < nnames; i++)
-    if (name_eq(names[i], id)) return 1;
+    if (name_scope[i] == scope_depth && name_eq(names[i], id)) return 1;
 
   // not found
   strncpy(names[nnames], id, NAME_LEN - 1);
@@ -466,6 +603,26 @@ static int name_add(const char *id) {
   name_scope[nnames] = scope_depth;
   name_slot[nnames] = alloc_slot();
   name_vec[nnames] = 0xff;
+  name_pidx[nnames] = 0;
+  nnames++;
+  return 1;
+}
+
+// same, but at a fixed slot (function parameters)
+static int name_add_at(const char *id, uchar slot, uchar pidx) {
+  word i;
+
+  if (nnames >= MAX_NAMES) return 0;
+
+  for (i = 0; i < nnames; i++)
+    if (name_scope[i] == scope_depth && name_eq(names[i], id)) return 0;
+
+  strncpy(names[nnames], id, NAME_LEN - 1);
+  names[nnames][NAME_LEN - 1] = 0;
+  name_scope[nnames] = scope_depth;
+  name_slot[nnames] = slot;
+  name_vec[nnames] = 0xff;
+  name_pidx[nnames] = pidx;
   nnames++;
   return 1;
 }
@@ -487,6 +644,8 @@ static void scope_leave(void) {
         memcpy(names[w], names[i], NAME_LEN);
         name_scope[w] = name_scope[i];
         name_slot[w] = name_slot[i];
+        name_vec[w] = name_vec[i];
+        name_pidx[w] = name_pidx[i];
       }
       w++;
     }
@@ -593,7 +752,7 @@ static int match_ident_raw(char *idbuf, word idmax) {
     // letter, digit, or underscore
     if (isalnum(c) || c == '_') {
       if (n + 1 < idmax)
-        idbuf[n++] = (char)c;
+        idbuf[n++] = c;
       capture_add(c);
       line_pos++;
     } else
@@ -608,7 +767,7 @@ static int match_ident_raw(char *idbuf, word idmax) {
 static int match_ident(void) {
   char id[NAME_LEN];
   uchar slot, c;
-  word start_abs, save_pos;
+  word start_abs, save_pos, i;
 
   start_abs = abs_pos();
   if (!match_ident_raw(id, NAME_LEN)) return 0;
@@ -634,17 +793,11 @@ static int match_ident(void) {
     vlog("  ident '%s' not in scope\n", id);
     return 0;
   }
-  slot = lookup_slot(id);
-  {
-    word i;
-    last_func_vec = 0xff;
-    for (i = 0; i < nnames; i++) {
-      if (name_eq(names[i], id) && name_vec[i] != 0xff) {
-        last_func_vec = name_vec[i];
-        break;
-      }
-    }
-  }
+  i = find_name(id);
+  slot = name_slot[i];
+  last_func_vec = name_vec[i];
+  // kept in the frame: later \i matches (call arguments) must not change \v
+  stack[sp - 1].func_vec = last_func_vec;
   record_capture(slot);
   return 1;
 }
@@ -662,26 +815,82 @@ static int match_ident_decl(void) {
   return 1;
 }
 
-// \f — declare function: slot + vector index; mark entry at current bin_ptr later
+// \f — declare function: new frame + vector index; mark entry at current bin_ptr later
 static int match_ident_func_decl(void) {
   char id[NAME_LEN];
-  uchar slot;
+  uchar slot, base;
   word i;
 
   if (!match_ident_raw(id, NAME_LEN)) return 0;
-  if (!name_add(id)) return 0;
+
+  // frame: base+0 ret addr, +1 ret value (the function name), +2 prev fp,
+  // +3 last param (JSR stores ACC there), +4.. other params, then locals
+  base = next_slot;
+  if (base >= CONST_TOP - 40) return 0;
+  next_slot = (uchar)(base + 1);        // name_add takes the ret-value cell
+  if (!name_add(id)) {
+    next_slot = base;
+    return 0;
+  }
+  next_slot = (uchar)(base + 4);
   slot = lookup_slot(id);
+  i = find_name(id);
+  name_vec[i] = nvector;
+  fbase[nvector] = base;
+  fnparams[nvector] = 0;
+  if (nvector < (uchar)(MAX_VECTORS - 1)) nvector++;
+  last_func_vec = name_vec[i];
+  pending_func_entry = last_func_vec;
+  record_capture(slot);
+  vlog("  func '%s' slot %u vec %u frame %u\n", id, (unsigned)slot, (unsigned)last_func_vec, (unsigned)base);
+  return 1;
+}
+
+// \p — declare parameter n of the function just declared by \f
+static int match_param_decl(void) {
+  char id[NAME_LEN];
+  uchar k, slot, v;
+  word i;
+
+  if (!match_ident_raw(id, NAME_LEN)) return 0;
+  v = last_func_vec;
+  if (v == 0xff) return 0;
+  // parameter number = params already in this scope (rewinds on backtrack)
+  k = 0;
+  for (i = 0; i < nnames; i++)
+    if (name_scope[i] == scope_depth && name_pidx[i]) k++;
+  if (k >= MAX_PARAMS) return 0;
+  slot = (uchar)(fbase[v] + 4 + k);
+  if (!name_add_at(id, slot, (uchar)(k + 1))) return 0;
+  if (next_slot <= slot) next_slot = (uchar)(slot + 1);
+  record_capture(slot);
+  vlog("  param '%s' #%u slot %u\n", id, (unsigned)k, (unsigned)slot);
+  return 1;
+}
+
+// \r — end of parameter list (no input): the last param lives at fp+3
+static int params_done(void) {
+  uchar v, n;
+  word i, last;
+
+  v = last_func_vec;
+  if (v == 0xff) return 0;
+  n = 0;
+  last = 0;
   for (i = 0; i < nnames; i++) {
-    if (name_eq(names[i], id)) {
-      name_vec[i] = nvector;
-      if (nvector < (char)(MAX_VECTORS - 1)) nvector++;
-      last_func_vec = name_vec[i];
-      pending_func_entry = last_func_vec;
-      break;
+    if (name_scope[i] == scope_depth && name_pidx[i]) {
+      fpslot[v][n] = name_slot[i];
+      last = i;
+      n++;
     }
   }
-  record_capture(slot);
-  vlog("  func '%s' slot %u vec %u\n", id, (unsigned)slot, (unsigned)last_func_vec);
+  if (n) {
+    name_slot[last] = (uchar)(fbase[v] + 3);
+    fpslot[v][n - 1] = name_slot[last];
+    next_slot--;        // its old cell was the top one: reuse it for locals
+  }
+  fnparams[v] = n;
+  vlog("  params done vec %u n=%u\n", (unsigned)v, (unsigned)n);
   return 1;
 }
 
@@ -714,7 +923,7 @@ static int match_str_emit(void) {
       if (!line_need()) return 0;
       c = line_buf[line_pos];
     }
-    emit((char)c);
+    emit(c);
     capture_add(c);
     line_pos++;
   }
@@ -775,6 +984,12 @@ static void free_rules(void) {
 // blobs[r] holds the contiguous text for rule r
 static uchar *blobs[NRULES];
 
+// escapes that stay "\c" in the blob (all others become the plain char c)
+static int esc_kept(uchar e) {
+  if (e >= '1' && e <= '9') return 1;
+  return strchr("insSCfv<d+{}[]#=aptrlxywmzk", e) != NULL;
+}
+
 static void build_one_rule(uchar r, char *rhs) {
   char *p;
   uchar *blob, **altp, e, depth;
@@ -786,10 +1001,7 @@ static void build_one_rule(uchar r, char *rhs) {
   for (p = rhs; *p; p++) {
     if (*p == '\\' && p[1]) {
       e = (uchar)p[1];
-      if (e == 'i' || e == 'n' || e == 's' || e == 'S' || e == 'C' || e == 'f' || e == 'v' || e == '<' ||
-          e == 'd' || e == '+' || e == '{' || e == '}' ||
-          e == '[' || e == ']' || e == '#' || e == '=' || e == 'a' ||
-          (e >= '1' && e <= '9'))
+      if (esc_kept(e))
         blob_len = (word)(blob_len + 2);
       else
         blob_len++;
@@ -816,10 +1028,7 @@ static void build_one_rule(uchar r, char *rhs) {
   for (p = rhs; *p; p++) {
     if (*p == '\\' && p[1]) {
       e = (uchar)p[1];
-      if (e == 'i' || e == 'n' || e == 's' || e == 'S' || e == 'C' || e == 'f' || e == 'v' || e == '<' ||
-          e == 'd' || e == '+' || e == '{' || e == '}' ||
-          e == '[' || e == ']' || e == '#' || e == '=' || e == 'a' ||
-          (e >= '1' && e <= '9')) {
+      if (esc_kept(e)) {
         blob[bi++] = '\\';
         blob[bi++] = e;
       } else {
@@ -959,6 +1168,11 @@ static void push(uchar r, uchar state) {
   stack[sp].cap_save = 0;
   stack[sp].nnames_save = nnames;
   stack[sp].scope_save = scope_depth;
+  stack[sp].slot_save = next_slot;
+  stack[sp].func_vec = 0xff;
+  stack[sp].arg_i = 0;
+  stack[sp].npatch = 0;
+  stack[sp].mark = 0;
   stack[sp].state = state;
   stack[sp].prod_n = 0;
   stack[sp].result = 0;
@@ -979,6 +1193,7 @@ static void push(uchar r, uchar state) {
 static void restore_scope(Frame *fr) {
   nnames = fr->nnames_save;
   scope_depth = fr->scope_save;
+  next_slot = fr->slot_save;
 }
 
 // hex digit value for \#xx
@@ -1017,6 +1232,7 @@ static int step(void) {
     cap_len[sp - 1] = fr->cap_save;
     code_len = fr->code_save;
     fr->prod_n = 0;
+    fr->npatch = 0;
     had_undef = 0;
     fr->ip = 0;
     fr->state = ST_RUN;
@@ -1079,6 +1295,7 @@ static int step(void) {
     cap_len[sp - 1] = fr->cap_save;
     code_len = fr->code_save;
     fr->prod_n = 0;
+    fr->npatch = 0;
     restore_scope(fr);
     fr->alt++;
     fr->ip = 0;
@@ -1135,6 +1352,7 @@ static int step(void) {
       fr->cap_save = cap_len[sp - 1];
       fr->nnames_save = nnames;
       fr->scope_save = scope_depth;
+      fr->slot_save = next_slot;
       fr->code_save = code_len;
       fr->prod_n = 0;
       fr->state = ST_TRY;
@@ -1208,6 +1426,8 @@ static int step(void) {
     else if (e == 'i') ok = match_ident();
     else if (e == '+') ok = match_ident_decl();
     else if (e == 'f') ok = match_ident_func_decl();
+    else if (e == 'p') ok = match_param_decl();
+    else if (e == 'r') ok = params_done();
     else if (e == 'd') ok = match_num();
     else if (e == 'n') ok = match_newline();
     else if (e == 's') ok = match_str();
@@ -1365,10 +1585,12 @@ static int init(const char *bnf_path, const char *src_path) {
   undef_pos_abs = 0;
   last_undef[0] = 0;
   next_slot = 0;
-  next_tmp = 200;
   gen_reset();
   nvector = 0;
   last_func_vec = 0xff;
+  memset(fbase, 0, sizeof(fbase));
+  memset(fnparams, 0, sizeof(fnparams));
+  memset(fpslot, 0, sizeof(fpslot));
   // no pre-seeded names — X must be declared in source if used
   {
     uchar i;
@@ -1506,6 +1728,13 @@ int main(int argc, char **argv) {
       fprintf(stderr, "--- BLOB (%d bytes) main=%u nvector=%d ---\n",
         blen, (unsigned)main_offset, (int)nvector);
       if (blob) {
+        // frame bases: JSR keeps ret addr / ACC at fp+0 / fp+3, ';' returns fp+1
+        for (ci = 0; ci < (int)nvector; ci++) {
+          blob[((BlobHeader *)blob)->fp + ci] = fbase[ci];
+          if (verbose >= 1)
+            fprintf(stderr, "  frame V%02x fp=%u nparams=%u\n",
+              ci, (unsigned)fbase[ci], (unsigned)fnparams[ci]);
+        }
         proc = Nevm(blob);
         if (proc) {
           word *pool = (word *)(blob + ((BlobHeader *)blob)->con);

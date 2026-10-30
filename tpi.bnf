@@ -1,12 +1,15 @@
 # -- BNF grammar for tpi.c PASCAL implementation
-# K = statement, S = simple primary (address), O = op chain, E = expression
+# K = statement, S = simple primary (address), R = ACC primary (call, (E), not)
+# O = op chain, E = expression
 P=program \+;DB.
 D=V\<|F\<|
 V=var M
 M=\+:T;\<|
-# \f = declare function name (+ vector); [;] = return opcode after body
-F=function \f\{(A):T;HB[;]\}
-A=\+:T,\<|\+:T;\<|\+:T|
+# \f = declare function (name + vector + frame), \p = parameter, \r = end of params
+# [;] = return opcode after body
+F=function \f\{(A)\r:T;HB[;]\}
+A=\p:TQ|
+Q=,A|;A|
 T=^I|I
 I=integer|word
 H=V|
@@ -15,41 +18,67 @@ N=end;|end
 B=begin C N
 C=K\<|
 # keyword statements FIRST so IF/FOR/WRITE are not tried as \i
-K=if E then K else K|if E then K
-|for \i:=E to E do K
+# if: [?G\x] jump over THEN when false; else: [0?G\x\w\y] jump over ELSE, patch THEN jump
+# for: ctrl and limit stored, [\m..] loop start, G exit / B back
+K=if E[?G\x] then K else[0?G\x\w\y] K[\y]|if E[?G\x] then K[\y]
+|for \i:=E[S\1] to E[S\t] do[\mL\1-\4G\x] K[I\1B\z\y]
 |writeln();[N]|writeln(JW);[N]|write();|write(JW);
-|new(\i);|dispose(\i);|freemem(\i);|getmem(\i,E);|setlength(\i,E);
+|new(\i)\#02;[L\2M\1]|dispose(\i);[F\1]|freemem(\i);[F\1]|getmem(\i,E);[M\1]|setlength(\i,E)\#02;[*\3M\1]
 |B|;
+|\i^:=E;[!\1]
+|\i\[S\]:=E;[)\1\2]
 |\i:=0;[Z\1]
 |\i:=S+S;[L\2+\3S\1]
 |\i:=S-S;[L\2-\3S\1]
 |\i:=S;[L\2S\1]
 |\i:=E;[S\1]
-|\i\[E\]:=E;[S\1]
 # JW: one or more J, comma-separated (W = optional ,J tail)
 W=,J\<|
 J=E[.]|"["]\S
-# E = primary then ops. Call primary uses [\v] (ACC); others [L\1] load
-E=\i(Z)[\v]O|S[L\1]O
-# S = non-call primary -> address
-S=\d|\i|sizeof(T)\#02|sizeof(\i)\#02|(E)|not S[?\1]
-# O = op + RHS; RHS may be call (ACC) or address — use \a1 to force addr if ACC
-O=+R[+\a1]\<
-|-R[-\a1]\<
-|*R[*\a1]\<
-|/R[/\a1]\<
-|&R[&\a1]\<
-|\|R[|\a1]\<
-|^R[^\a1]\<
-|=R[=\a1]\<
-|<R[<\a1]\<
-|>R[>\a1]\<
-|shl R[{\a1]\<
-|shr R[}\a1]\<
+
+# -- E = ACC primary or simple primary (loaded), then ops; result is always ACC
+E=RO[]|S[\l1]O[]
+
+# R = primary that leaves its value in ACC: call [\v], p^, a[i], (E), not
+R=\i(Z)[\v]|\i^[@\1]|\i\[S\][(\1\2]|(E)[]|not S[\l1?]
+
+# S = simple primary -> address, no code
+S=\d|sizeof(T)\#02|sizeof(\i)\#02|\i
+
+# Z = call arguments: every arg but the last is stored to its param slot [S\k],
+# the last stays in ACC (JSR stores it at fp+3)
+Z=E,[S\k]\<|E|
+
+# -- RHS in ACC (call): spill left first [S\t], then commutative: ACC op tmp,
+#    else (non-commutative) save right, load left, left op right.
+O=
+# TODO: | start before first does this imply empty match? seems to work!
+|+[S\t]R[+\a1]\<
+|-[S\t]R[S\tL\a1-\a3]\<
+|*[S\t]R[*\a1]\<
+|/[S\t]R[S\tL\a1/\a3]\<
+|&[S\t]R[&\a1]\<
+|\|[S\t]R[|\a1]\<
+|\|S[|\a1]\<
+|^[S\t]R[^\a1]\<
+|=[S\t]R[=\a1]\<
+|<[S\t]R[S\tL\a1<\a3]\<
+|>[S\t]R[S\tL\a1>\a3]\<
+|shl[S\t]R[S\tL\a1\[\a3]\<
+|shr[S\t]R[S\tL\a1\]\a3]\<
+# - simple stream modifying ACC
+|+S[+\a1]\<
+|-S[-\a1]\<
+|*S[*\a1]\<
+|/S[/\a1]\<
+|&S[&\a1]\<
+|^S[^\a1]\<
+|=S[=\a1]\<
+|<S[<\a1]\<
+|>S[>\a1]\<
+|shl S[\[\a1]\<
+|shr S[\]\a1]\<
 |
-# R = RHS of binary op: call or simple primary
-R=\i(Z)[\v]|S
-Z=E,\<|E|
 .
 
 
@@ -58,13 +87,16 @@ Z=E,\<|E|
 |   at line start = continue previous rule
 
 Tokens:
-  \i  ident in scope -> slot
+  \i  ident in scope -> slot (call vector remembered in the frame for \v)
   \+  declare ident -> slot
-  \f  declare function ident -> slot + vector index
+  \f  declare function ident: name = ret-value cell of a new frame
+      (base+0 ret addr, +1 ret value, +2 prev fp, +3 last param) + vector index
+  \p  declare parameter: slot base+4+n
+  \r  end of params (no input): last param moves to base+3 (JSR stores ACC there)
 
   \d  number -> const address (CONST_TOP down, via lit_addr)
   \s  string (match only)
-  \S  emit string bytes + \0 (opening " already matched)
+  \S  emit string bytes + \0 (opening " already matched; ["] emits the " opcode)
 
 Control:
   \{ \} scope  \< tail  \C commit
@@ -74,17 +106,23 @@ Control:
 Generate:
   [..]     production  (-v prints GEN only when alt commits)
            a bare | inside [..] is literal, not an alternative separator
+           [] alone = no code, result := ACC
   \1 - \9  capture byte
-  \aN      force address (spill ACC to temp if needed)
-  \v       emit 0xC0|vec for last matched function \i (in production)
+  \aN      force address (spill ACC to temp, BEFORE the production's bytes)
+  \lN      load capture N into ACC (nothing if it already is ACC)
+  \t       allocate temp, emit its slot, record it as a capture
+  \v       emit 0xC0|vec for the function matched by \i in this rule
+  \k       emit param slot of the next call argument (rule Z)
+  \x       emit jump placeholder, push on patch stack
+  \y       patch top placeholder to jump to here    \w swap top two
+  \m       mark loop start    \z emit backward delta to the mark
+  \[ \]    emit a literal [ or ]
 
   [;]      function return opcode (after body)
 
 
 Expr:
-  S = address
-  E = call[\v]O | S[L\1]O leaves ACC
-  R = call or S (RHS of binary ops)
+  S = address, R = ACC value, E = ACC value (RO | S loaded, then O)
   J = E[.] print ACC, or "\S string
   write(JW) / writeln(JW):
   J then optional W=,J tail
