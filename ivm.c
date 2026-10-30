@@ -421,6 +421,14 @@ typedef word (*libfun_3)(word acc, word a, word b);
 typedef word (*libfun_4)(word acc, word a, word b, word c);
 
 
+#define LIBRARY
+
+#ifndef LIBRARYY
+
+void*** library[16]= { 0,0,0,0,  0,0,0,0,  0,0,0,0,  0,0,0,0,  };
+
+#else // LIBRARY
+
 void* osfuns_N[]= {
   0,0,0,0,
   0,0,0,0,
@@ -560,7 +568,6 @@ void* strfuns_3[]= {
 void** strfuns[]= { strfuns_2, strfuns_3, NULL };
 
 
-
 void*** library[16]= {
   osfuns,      fsfuns,   windowfuns, strfuns,
   0,           0,        0,          0,
@@ -568,6 +575,7 @@ void*** library[16]= {
   0,           0,        0,          0,
 };
 
+#endif // LIBRARYY
 
 #if 1
 

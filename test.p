@@ -1,5 +1,10 @@
 Program ShowcaseSuite;
 
+{ (/ 1345 5656.0) = 0.24 bytecode / 65-2  = > 24% !!!
+-rw-------. 1 1345 Oct 31 03:41 test.ivm
+-rw-------. 1 5656 Oct 31 03:27 test.sim
+}
+
 { TODO: do function var names hide/obstruct globals? }
 
 function Mul2(val : integer) : integer;

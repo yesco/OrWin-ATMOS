@@ -47,11 +47,23 @@ echo
 echo
 
 
+
+if [ -f "$name.c" ]; then
+  echo
+  echo
+  echo "========== C ===== $name.c Run from C ================"
+  cl65 -t sim6502 -Oirs -o test.sim test.c \
+  && (sim65 -c test.sim | tee $name.c.log)
+  echo
+  echo
+fi
+
 echo
 echo "=== tpi.c: `./wcode tpi.c` LOC ===" 
 echo "=== ivm.c: `./wcode ivm.c` LOC ===" 
 echo
-ls -ugGlf $name.p $name.pas $name.c $name.prg $name.sim $name.ivm tpi.sim tpi.tap tpi.prg ivm.sim ivm-asm.sim ivm-noivm.sim ivm.tap ivm.prg 2>/dev/null
+ls -ugGlf $name.p $name.pas $name.c $name.ivm $name.sim $name.prg  2>/dev/null
+ls -ugGlf tpi.c tpi.sim tpi.tap tpi.prg ivm.sim ivm-asm.sim ivm-asm-noivm.sim ivm-noivm.sim ivm.tap ivm.prg 2>/dev/null
 
 echo
 if [ -f "$name.out" ]; then
@@ -66,4 +78,10 @@ if [ -f "$name.out" ]; then
 
 fi
 
+if [ -f "$name.c.log" ]; then
+  echo "========== C ======= DIFF ======= C ==========="
+  (diff -a -w -I "cycles" -I "RUN" -I "loaded" -U9999 $name.out $name.c.log \
+  && printf "\n\t\t  -- TESTS OK --\n\n") || diff -a -U0 $name.out $name.c.log
+
+fi
 

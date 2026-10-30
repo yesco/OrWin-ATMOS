@@ -6,3 +6,11 @@ cl65 -Oirs -vm -C sim6502.cfg -t sim6502 -m ivm.map -o ivm.sim ivm.c || exit 1
 cl65 -DNOIVM -vm -C sim6502.cfg -Oirs -t sim6502 -m ivm.map -o ivm-noivm.sim ivm.c || exit 1
 
 sim65 -c ivm.sim $name.ivm
+
+echo
+echo
+ls -ugGlf ivm.sim ivm-noivm.sim $name.ivm 2>/dev/null
+echo
+echo "=== ivm.c: `./wcode ivm.c` LOC ==="
+echo
+

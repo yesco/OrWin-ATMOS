@@ -29,24 +29,26 @@ int LocalLast(int a, int b) {
 
 int TestMath(int a, int b) {
     // Standard baseline tests
-    printf("--Math checks: a: %d b: %d\n", a, b);
-    printf("%d\n", a + b);
-    printf("%d\n", a - b);
-    printf("%d\n", a * b);
-    printf("%d\n", a / b); // Note: Integer division
+    printf("--Math checks: a: %u b: %u\n", a, b);
+    printf("%u\n", a + b);
+    printf("%u\n", a - b);
+    printf("%u\n", a * b);
+    printf("%u\n", a / b); // Note: Integer division
     
     // Bitwise operators via table lookup
-    printf("%d\n", a & 15);
-    printf("%d\n", a | 1);
+    printf("%u\n", a & 15);
+    printf("%u\n", a | 1);
 
     // Commutative poop-hole trigger: complex right side inside addition/bitwise operations
     return (a * b) + (a & b);
 }
 
 int TestIf(int x) {
+    int test_if_ret;
+
     // Ported strictly to replicate the flawed Pascal indentation and block scope logic
     printf("--IF THEN ELSE checks:\n");
-    printf("%d\n", x);
+    printf("%u\n", x);
     
     if (x) {
         printf("1:TRUE\n");
@@ -93,7 +95,6 @@ int TestIf(int x) {
 
     printf("7:NOT:\n");
 
-    int test_if_ret;
     if (x) {
         test_if_ret = 1;
     } else {
@@ -136,21 +137,21 @@ int TestOps(int dummy) {
     int b;
     int r;
     
-    printf("cmp 5=5\n"); printf("%d\n", TCmp(5, 5));
-    printf("cmp 3<9\n"); printf("%d\n", TCmp(3, 9));
-    printf("cmp 9>3\n"); printf("%d\n", TCmp(9, 3));
-    printf("not 0\n"); printf("%d\n", TNot(0));
-    printf("not 7\n"); printf("%d\n", TNot(7));
+    printf("cmp 5=5\n"); printf("%u\n", TCmp(5, 5));
+    printf("cmp 3<9\n"); printf("%u\n", TCmp(3, 9));
+    printf("cmp 9>3\n"); printf("%u\n", TCmp(9, 3));
+    printf("not 0\n"); printf("%u\n", TNot(0));
+    printf("not 7\n"); printf("%u\n", TNot(7));
     
     a = 1;
     r = TShl(a, 3);
-    printf("1 shl 3\n"); printf("%d\n", r);
+    printf("1 shl 3\n"); printf("%u\n", r);
     
     r = TShr(16, 2);
-    printf("16 shr 2\n"); printf("%d\n", r);
+    printf("16 shr 2\n"); printf("%u\n", r);
     
     r = (3 << 2) + (20 >> 2);
-    printf("3shl2+20shr2\n"); printf("%d\n", r);
+    printf("3shl2+20shr2\n"); printf("%u\n", r);
     
     return 0; // Return dummy/default value for function type matching Pascal wrapper
 }
@@ -158,9 +159,9 @@ int TestOps(int dummy) {
 int TestWrites(void) {
     printf("--TestWrites\n");
     printf("abc\n");
-    printf("%d%d%d\n", 1, 2, 3);
+    printf("%u%u%u\n", 1, 2, 3);
     printf("abc"); printf("\n");
-    printf("%d%d%d", 1, 2, 3); printf("\n");
+    printf("%u%u%u", 1, 2, 3); printf("\n");
     
     return 0; // Return default value
 }
@@ -169,45 +170,45 @@ int main(void) {
     // Test: Direct literal string compilation
     printf("Hello 6502 World at OrWIN-ATMOS TinyPascal VM!\n");
 
-    printf("12345: %d\n", 12345);
+    printf("12345: %u\n", 12345);
    
     // Test: 16-Bit variable immediate assignment
     alpha = 7;
 
-    printf("alpha: %d\n", alpha);
+    printf("alpha: %u\n", alpha);
    
-    printf("3+4: %d\n", 3 + 4);
+    printf("3+4: %u\n", 3 + 4);
 
-    printf("Mul2(33): %d\n", Mul2(33));
+    printf("Mul2(33): %u\n", Mul2(33));
 
-    printf("AddTen(7): %d\n", AddTen(7));
+    printf("AddTen(7): %u\n", AddTen(7));
 
-    printf("Mul2(11)+Mul2(22): %d\n", Mul2(11) + Mul2(22));
+    printf("Mul2(11)+Mul2(22): %u\n", Mul2(11) + Mul2(22));
 
     // Test: Complex math addition using our functional JSR routine
     beta = AddTen(Mul2(alpha) + 1) + Mul2(11);
 
     // Test: Printing numeric 47 value from memory
-    printf("%d\n", beta);
+    printf("%u\n", beta);
 
     // Test: 54 = Two parameter function calling
     printf("--Two:\n");
-    printf("%d\n", Two(alpha, beta));
+    printf("%u\n", Two(alpha, beta));
 
     sum = 40;
     sum = sum + 2;
    
-    printf("sum := 40; sum := sum + 2; : %d\n", sum);
+    printf("sum := 40; sum := sum + 2; : %u\n", sum);
 
     printf("1..10: ");
     for (i = 1; i <= 10; i++) {
-        printf("%d ", i);
+        printf("%u ", i);
     }
     printf("\n");
 
     printf("7..21: ");
     for (i = 7; i <= 21; i++) {
-        printf("%d ", i);
+        printf("%u ", i);
     }
     printf("\n");
 
@@ -216,7 +217,7 @@ int main(void) {
     for (i = 1; i <= 10; i++) {
         sum = sum + i;
     }
-    printf("%d\n", sum);
+    printf("%u\n", sum);
 
     printf("\n");
    
@@ -227,11 +228,11 @@ int main(void) {
     beta = AddTen(Mul2(alpha) + 1) + Mul2(11);
 
     // Test: Printing numeric 47 value from memory
-    printf("%d\n", beta);
+    printf("%u\n", beta);
 
     // Test: 54 = Two parameter function calling
     printf("--Two:\n");
-    printf("%d\n", Two(alpha, beta));
+    printf("%u\n", Two(alpha, beta));
 
     // Test: looping sum
     sum = 0;
@@ -239,7 +240,7 @@ int main(void) {
         sum = sum + i;
     }
     printf("--Sum:\n");
-    printf("%d\n", sum);
+    printf("%u\n", sum);
 
     // Test: looping funsum
     fsum = 0;
@@ -247,34 +248,38 @@ int main(void) {
         fsum = Two(fsum, i);
     }
     printf("--FunSum:\n");
-    printf("%d\n", fsum);
+    printf("%u\n", fsum);
 
     // Test Case 6: Literal subtraction
     printf("--Subtraction tests:\n");
-    printf("%d\n", 20 - 3);       // expected 17
-    printf("%d\n", 100 - 10 - 5); // expected 85
+    printf("%u\n", 20 - 3);       // expected 17
+    printf("%u\n", 100 - 10 - 5); // expected 85
 
     // Test Case 7: Subtract from a variable
-    printf("%d\n", alpha - 2);    // expected 5
+    printf("%u\n", alpha - 2);    // expected 5
 
     // Test Case 8: Function call on the left
-    printf("%d\n", Mul2(alpha) - 3); // expected 11
+    printf("%u\n", Mul2(alpha) - 3); // expected 11
 
     // Test Case 9: Function call on the right
-    printf("%d\n", 100 - Mul2(7));   // expected 86
+    printf("%u\n", 100 - Mul2(7));   // expected 86
 
     // Test Case 10: Subtraction with a function on each side
-    printf("%d\n", Mul2(10) - Mul2(3)); // expected 14
+    printf("%u\n", Mul2(10) - Mul2(3)); // expected 14
 
-    printf("TestMath(42, 33): %d\n", TestMath(42, 33));
-    printf("TestMath(17, 255): %d\n", TestMath(17, 255));
+    {
+      int t1, t2;
+      
+      printf("TestMath(42, 33): ");  t1 = TestMath(42, 33);  printf("%u\n", t1);
+      printf("TestMath(17, 255): "); t2 = TestMath(17, 255); printf("%u\n", t2);
+    }
 
-    printf("%d\n", TestIf(0));
-    printf("%d\n", TestIf(1));
+    printf("%u\n", TestIf(0));
+    printf("%u\n", TestIf(1));
 
-    printf("%d\n", TestOps(666));
+    printf("%u\n", TestOps(666));
 
-    printf("%d\n", TestWrites());
+    printf("%u\n", TestWrites());
     
     return 0;
 }

@@ -130,7 +130,9 @@ uchar *g_loaded;
 #include <string.h>
 //#include <strings.h>
 
-#include "ivm.c"
+#ifdef RUN
+  #include "ivm.c"
+#endif
 
 // A-Z
 #define NRULES      26
@@ -141,7 +143,7 @@ uchar *g_loaded;
 static uchar **rule[NRULES];
 
 static FILE *src_fp;
-static const char *src_name;
+static char *src_name;
 
 // input line buffer (unbounded source via fgetc; buffer one statement)
 static uchar *line_buf;
@@ -606,7 +608,6 @@ static void skip_hspace(void) {
 
 static void skip_ws(void) {
   char c;
-  const char *match;
 
   for (;;) {
 
@@ -1517,6 +1518,10 @@ static int run(word n) {
 
   for (i = 0; i < n && rc == 1; i++)
     rc = step();
+
+  // quit so run_ivm can stop
+  if (!rc) emit('q');
+  
   return rc;
 }
 
@@ -1626,7 +1631,7 @@ static void report_reject(void) {
 
 
 // init: load grammar + open source
-static int init(const char *bnf_path, const char *src_path) {
+static int init(char *bnf_path, char *src_path) {
   uchar i;
 
   src_name = src_path;
@@ -1705,8 +1710,8 @@ static void shutdown(void) {
 }
 
 int main(int argc, char **argv) {
-  const char *bnf = NULL;
-  const char *srcpath = NULL;
+  char *bnf = NULL;
+  char *srcpath = NULL;
   word i, a;
   int rc;
   int err= 0;
@@ -1759,11 +1764,12 @@ int main(int argc, char **argv) {
     rc = run(10000);
   } while (rc == 1);
 
+
   // consistency check
   putchar('\n');
   if (rc == 0) {
+
     // OK
-    
     skip_ws();
     if (line_need()) {
       fprintf(stderr, "--- OK but trailing input ---\n");
@@ -1785,33 +1791,45 @@ int main(int argc, char **argv) {
     }
     if (code_len & 15) fputc('\n', stderr);
 
-    // quit so run_ivm can stop
-    emitop('q');
     {
       int blen = 0;
       // frame_base[] (set by \f) goes into the blob's fp table
       uchar *blob = build_blob(&blen);
-      Process *proc;
-      ivmvar ret;
 
       fprintf(stderr, "--- BLOB (%d bytes) main=%u nvector=%d ---\n",
         blen, main_offset, nvector);
 
+      // RUN
       if (blob) {
-        if (verbose >= 1)
-          for (i = 0; i < nvector; i++)
-            fprintf(stderr, "  frame V%02x fp=%u\n", i, frame_base[i]);
 
-        proc = Nevm(blob);
-        if (proc) {
-          word *pool = (word *)(blob + ((BlobHeader *)blob)->con);
-          for (i = 0; i < nconst; i++)
-            proc->mem[CONST_TOP - i] = pool[i];
-          fprintf(stderr, "--- RUN ---\n");
-          ret = run_ivm(proc);
-          fprintf(stderr, "--- END acc=%u ---\n", ret);
-          free(proc);
+        // SAVE
+
+        // TODO: save it!
+
+#ifdef RUN
+        {
+          Process *proc;
+          ivmvar ret;
+
+          if (verbose >= 1)
+            for (i = 0; i < nvector; i++)
+              fprintf(stderr, "  frame V%02x fp=%u\n", i, frame_base[i]);
+
+          proc = Nevm(blob);
+          if (proc) {
+            word *pool = (word *)(blob + ((BlobHeader *)blob)->con);
+
+            for (i = 0; i < nconst; i++)
+              proc->mem[CONST_TOP - i] = pool[i];
+
+            fprintf(stderr, "--- RUN ---\n");
+            ret = run_ivm(proc);
+            fprintf(stderr, "--- END acc=%u ---\n", ret);
+            free(proc);
+          }
         }
+#endif RUN
+
         free(blob);
       }
     }

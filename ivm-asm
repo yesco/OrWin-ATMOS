@@ -3,5 +3,14 @@ name=$1
 name="${name%.ivm}"
 
 cl65 -DIVMASM -Oirs -vm -C sim6502.cfg -t sim6502 -m ivm-asm.map -o ivm-asm.sim ivm.c ivm-vm.asm || exit 1
+cl65 -DNOIVM -DIVMASM -Oirs -vm -C sim6502.cfg -t sim6502 -m ivm-asm.map -o ivm-asm-noivm.sim ivm.c || exit 1
 
 sim65 -c ivm-asm.sim $name.ivm
+
+echo
+echo
+ls -ugGlf ivm-asm.sim ivm-asm-noivm.sim $name.ivm 2>/dev/null
+echo
+echo "=== ivm.c     : `./wcode ivm.c` LOC ==="
+echo "=== ivm-vm.asm: `./wcode ivm-vm.asm` LOC ==="
+echo

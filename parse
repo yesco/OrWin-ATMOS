@@ -1,1 +1,16 @@
-cl65 -t sim6502 -Oirs -o parse.sim parse.c
+# dadada
+
+name= $1
+
+cl65 -t sim6502 -Oirs -o parse.sim parse.c \
+  && sim65 -c parse.sim tpi.bnf $name.p
+
+cl65 -DRUN -t sim6502 -Oirs -o parse-run.sim parse.c \
+  && sim65 -c parse-run.sim tpi.bnf sim $name.p
+
+echo
+
+ls -ugGlf parse.sim parse-run.sim
+echo
+echo "=== parse.c: `./wcode parse.c` LOC ==="
+echo
