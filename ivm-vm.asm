@@ -20,7 +20,7 @@
 ;TRACE=1
 TRACE=0
         
-// ALTCODE: 1.5 % faster...
+;; ALTCODE: 1.5 % faster...
 ALTCODE=0
 ;ALTCODE=1
 	
@@ -58,34 +58,34 @@ displo:
         .byte   <op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31
         .byte   <op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31
         .byte   <op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31
-        .byte   <op_sp, <op_bad, <op_str, <op_bad, <op_bad, <op_mod, <op_and, <op_bad
-        .byte   <op_bad, <op_bad, <op_mul, <op_add, <op_bad, <op_sub, <op_dot, <op_div
+        .byte   <op_sp, <op_bang, <op_str, <op_bad, <op_bad, <op_mod, <op_and, <op_ri
+        .byte   <op_idxl, <op_idxs, <op_mul, <op_add, <op_wi, <op_sub, <op_dot, <op_div
         .byte   <op_0, <op_1to7, <op_1to7, <op_1to7, <op_1to7, <op_1to7, <op_1to7, <op_1to7
         .byte   <op_8, <op_9, <op_bad, <op_semi, <op_lt, <op_eq, <op_gt, <op_not
-        .byte   <op_bad, <op_bad, <op_B, <op_bad, <op_bad, <op_bad, <op_bad, <op_G
+        .byte   <op_at, <op_bad, <op_B, <op_bad, <op_bad, <op_bad, <op_bad, <op_G
         .byte   <op_bad, <op_I, <op_J, <op_bad, <op_L, <op_bad, <op_N, <op_O
         .byte   <op_P, <op_Q, <op_bad, <op_S, <op_bad, <op_U, <op_bad, <op_bad
         .byte   <op_X, <op_bad, <op_Z, <op_shl, <op_bad, <op_shr, <op_xor, <op_bad
         .byte   <op_bad, <op_bad, <op_bad, <op_bad, <op_bad, <op_bad, <op_bad, <op_bad
-        .byte   <op_bad, <op_bad, <op_bad, <op_bad, <op_bad, <op_bad, <op_bad, <op_bad
-        .byte   <op_bad, <op_q, <op_bad, <op_bad, <op_bad, <op_bad, <op_bad, <op_bad
+        .byte   <op_bad, <op_bad, <op_bad, <op_bad, <op_l, <op_bad, <op_bad, <op_bad
+        .byte   <op_bad, <op_q, <op_r, <op_s, <op_bad, <op_bad, <op_bad, <op_w
         .byte   <op_bad, <op_bad, <op_bad, <op_shlm, <op_or, <op_shrm, <op_bnot, <op_bad
 disphi:
         .byte   >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31
         .byte   >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31
         .byte   >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31
         .byte   >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31
-        .byte   >op_sp, >op_bad, >op_str, >op_bad, >op_bad, >op_mod, >op_and, >op_bad
-        .byte   >op_bad, >op_bad, >op_mul, >op_add, >op_bad, >op_sub, >op_dot, >op_div
+        .byte   >op_sp, >op_bang, >op_str, >op_bad, >op_bad, >op_mod, >op_and, >op_ri
+        .byte   >op_idxl, >op_idxs, >op_mul, >op_add, >op_wi, >op_sub, >op_dot, >op_div
         .byte   >op_0, >op_1to7, >op_1to7, >op_1to7, >op_1to7, >op_1to7, >op_1to7, >op_1to7
         .byte   >op_8, >op_9, >op_bad, >op_semi, >op_lt, >op_eq, >op_gt, >op_not
-        .byte   >op_bad, >op_bad, >op_B, >op_bad, >op_bad, >op_bad, >op_bad, >op_G
+        .byte   >op_at, >op_bad, >op_B, >op_bad, >op_bad, >op_bad, >op_bad, >op_G
         .byte   >op_bad, >op_I, >op_J, >op_bad, >op_L, >op_bad, >op_N, >op_O
         .byte   >op_P, >op_Q, >op_bad, >op_S, >op_bad, >op_U, >op_bad, >op_bad
         .byte   >op_X, >op_bad, >op_Z, >op_shl, >op_bad, >op_shr, >op_xor, >op_bad
         .byte   >op_bad, >op_bad, >op_bad, >op_bad, >op_bad, >op_bad, >op_bad, >op_bad
-        .byte   >op_bad, >op_bad, >op_bad, >op_bad, >op_bad, >op_bad, >op_bad, >op_bad
-        .byte   >op_bad, >op_q, >op_bad, >op_bad, >op_bad, >op_bad, >op_bad, >op_bad
+        .byte   >op_bad, >op_bad, >op_bad, >op_bad, >op_l, >op_bad, >op_bad, >op_bad
+        .byte   >op_bad, >op_q, >op_r, >op_s, >op_bad, >op_bad, >op_bad, >op_w
         .byte   >op_bad, >op_bad, >op_bad, >op_shlm, >op_or, >op_shrm, >op_bnot, >op_bad
 
 .code
@@ -125,6 +125,7 @@ disphi:
         sty     savey
 .endmacro
         
+;;; TODO: one case PARY without leading USEY, lol
 .macro PARY
         lda     (_ivm_ipc),y
         tay
@@ -545,6 +546,222 @@ op_Z:   USEY
         sta     (_ivm_memhi),y
 
         jmp     pnext
+
+
+;;; ============================================================
+;;; Byte / pointer / indexed memory ops (added for C parity)
+;;; ============================================================
+
+;;; lxx  ACC = low byte of slot xx  (hi := 0)
+op_l:   USEY
+        PARY
+        lda     (_ivm_memlo),y
+        sta     _ivm_acc
+        lda     #0
+        sta     _ivm_acc+1
+        jmp     pnext
+
+;;; sxx  slot xx := ACC & 0xff  (hi := 0)
+op_s:   USEY
+        PARY
+        lda     _ivm_acc
+        sta     (_ivm_memlo),y
+        lda     #0
+        sta     (_ivm_memhi),y
+        jmp     pnext
+
+;;; rxx  ACC = *(uchar*)PAR
+op_r:   PARAX                       ; A=addr_lo, X=addr_hi
+        sta     tmp_lo
+        stx     tmp_hi
+        ldy     #0
+        lda     (tmp_lo),y
+        sta     _ivm_acc
+        lda     #0
+        sta     _ivm_acc+1
+        jmp     pnext
+
+;;; wxx  *(uchar*)PAR = ACC & 0xff
+op_w:   PARAX
+        sta     tmp_lo
+        stx     tmp_hi
+        ldy     #0
+        lda     _ivm_acc
+        sta     (tmp_lo),y
+        jmp     pnext
+
+;;; 'xx  ACC = *(uchar*)ptr;  ptr++   (ptr lives in slot xx)
+op_ri:  USEY
+        PARY                        ; Y = slot
+        tya
+        tax                         ; X = slot
+        lda     (_ivm_memlo),y
+        sta     tmp_lo
+        lda     (_ivm_memhi),y
+        sta     tmp_hi              ; tmp = current ptr
+        ldy     #0
+        lda     (tmp_lo),y
+        sta     _ivm_acc
+        lda     #0
+        sta     _ivm_acc+1
+        ;; ptr++
+        inc     tmp_lo
+        bne     :+
+        inc     tmp_hi
+:
+        ;; write ptr back
+        txa
+        tay
+        lda     tmp_lo
+        sta     (_ivm_memlo),y
+        lda     tmp_hi
+        sta     (_ivm_memhi),y
+        jmp     pnext
+
+;;; ,xx  *(uchar*)ptr = ACC;  ptr++
+op_wi:  USEY
+        PARY
+        tya
+        tax                         ; X = slot
+        lda     (_ivm_memlo),y
+        sta     tmp_lo
+        lda     (_ivm_memhi),y
+        sta     tmp_hi
+        ldy     #0
+        lda     _ivm_acc
+        sta     (tmp_lo),y
+        ;; ptr++
+        inc     tmp_lo
+        bne     :+
+        inc     tmp_hi
+:
+        txa
+        tay
+        lda     tmp_lo
+        sta     (_ivm_memlo),y
+        lda     tmp_hi
+        sta     (_ivm_memhi),y
+        jmp     pnext
+
+;;; @xx  ACC = *(ivmvar*)PAR     (word load via pointer in slot)
+op_at:  PARAX
+        sta     tmp_lo
+        stx     tmp_hi
+        ldy     #0
+        lda     (tmp_lo),y
+        sta     _ivm_acc
+        iny
+        lda     (tmp_lo),y
+        sta     _ivm_acc+1
+        jmp     pnext
+
+;;; !xx  *(ivmvar*)PAR = ACC
+op_bang: PARAX
+        sta     tmp_lo
+        stx     tmp_hi
+        ldy     #0
+        lda     _ivm_acc
+        sta     (tmp_lo),y
+        iny
+        lda     _ivm_acc+1
+        sta     (tmp_lo),y
+        jmp     pnext
+
+;;; (aa ii   ACC = base[index]   (word elements, index*=2)
+op_idxl:
+        USEY
+        ; ipc[0]=aa (base slot), ipc[1]=ii (index slot)
+        ldy     #0
+        lda     (_ivm_ipc),y        ; aa
+        tax
+        iny
+        lda     (_ivm_ipc),y        ; ii
+        tay
+        ; index *= 2
+        lda     (_ivm_memlo),y
+        asl     a
+        sta     tmp_lo
+        lda     (_ivm_memhi),y
+        rol     a
+        sta     tmp_hi
+        ; base + (index*2)
+        txa
+        tay
+        clc
+        lda     (_ivm_memlo),y
+        adc     tmp_lo
+        sta     tmp_lo
+        lda     (_ivm_memhi),y
+        adc     tmp_hi
+        sta     tmp_hi
+        ; load word
+        ldy     #0
+        lda     (tmp_lo),y
+        sta     _ivm_acc
+        iny
+        lda     (tmp_lo),y
+        sta     _ivm_acc+1
+        ; consume 2 operands
+.if ALTCODE
+        ldy     savey
+        iny
+        iny
+        jmp     xnext
+.else
+        inc     _ivm_ipc
+        bne     :+
+        inc     _ivm_ipc+1
+:
+        jmp     pnext               ; pnext does the second ++
+.endif
+
+;;; )aa ii   base[index] = ACC
+op_idxs:
+        USEY
+        ldy     #0
+        lda     (_ivm_ipc),y        ; aa
+        tax
+        iny
+        lda     (_ivm_ipc),y        ; ii
+        tay
+        ; index *= 2
+        lda     (_ivm_memlo),y
+        asl     a
+        sta     tmp_lo
+        lda     (_ivm_memhi),y
+        rol     a
+        sta     tmp_hi
+        ; base + (index*2)
+        txa
+        tay
+        clc
+        lda     (_ivm_memlo),y
+        adc     tmp_lo
+        sta     tmp_lo
+        lda     (_ivm_memhi),y
+        adc     tmp_hi
+        sta     tmp_hi
+        ; store ACC
+        ldy     #0
+        lda     _ivm_acc
+        sta     (tmp_lo),y
+        iny
+        lda     _ivm_acc+1
+        sta     (tmp_lo),y
+        ; consume 2 operands
+.if ALTCODE
+        ldy     savey
+        iny
+        iny
+        jmp     xnext
+.else
+        inc     _ivm_ipc
+        bne     :+
+        inc     _ivm_ipc+1
+:
+        jmp     pnext
+.endif
+
 
 
 ;;; ACC = -1  or 0xFF or TRUE (forth/basic)

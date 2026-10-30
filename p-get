@@ -2,11 +2,13 @@ mv ~/storage/downloads/*.c .
 mv ~/storage/downloads/*.h .
 mv ~/storage/downloads/*.bnf .
 mv ~/storage/downloads/*.p .
+mv ~/storage/downloads/*.asm .
 
 rm ~/storage/downloads/*.c
 rm ~/storage/downloads/*.h
 rm ~/storage/downloads/*.bnf
 rm ~/storage/downloads/*.p
+rm ~/storage/downloads/*.asm
 
 git diff > diff
 git diff
