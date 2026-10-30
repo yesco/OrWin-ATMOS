@@ -1067,15 +1067,22 @@ static void build_one_rule(uchar r, char *rhs) {
   rule[r] = altp;
 }
 
+#define MAX_LINE 1024
+#define MAX_ACCUM 4096
+
 static int load_bnf(const char *path) {
-  FILE *f;
-  char line[1024];
-  char acc[4096];
+  FILE *f = NULL;
+  char *line = malloc(MAX_LINE);
+  char acc[MAX_ACCUM];
   uchar r, cur;
   char *nl, *eq, *p;
   word acc_len, have_cur;
-
+  char ret = 0;
+  
+  if (!line) goto done;
+  
   free_rules();
+
   for (r = 0; r < NRULES; r++) {
     blobs[r] = NULL;
     rule[r] = NULL;
@@ -1084,7 +1091,7 @@ static int load_bnf(const char *path) {
   f = fopen(path, "r");
   if (!f) {
     perror(path);
-    return 0;
+    goto done;
   }
 
   have_cur = 0;
@@ -1092,7 +1099,7 @@ static int load_bnf(const char *path) {
   acc_len = 0;
   acc[0] = 0;
 
-  while (fgets(line, sizeof(line), f)) {
+  while (fgets(line, MAX_LINE, f)) {
 
     nl = strchr(line, '\n');
     if (nl) *nl = 0;
@@ -1105,7 +1112,7 @@ static int load_bnf(const char *path) {
 
     // continuation: line starts with |
     if (*p == '|' && have_cur) {
-      while (*p && acc_len + 1 < sizeof(acc))
+      while (*p && acc_len + 1 < MAX_ACCUM)
         acc[acc_len++] = *p++;
       acc[acc_len] = 0;
       continue;
@@ -1138,8 +1145,12 @@ static int load_bnf(const char *path) {
   if (have_cur)
     build_one_rule(cur, acc);
 
-  fclose(f);
-  return 1;
+  ret = 1;
+
+ done:
+  if (f) fclose(f);
+  if (line) free(line);
+  return ret;
 }
 
 static int rule_defined(uchar r) {
