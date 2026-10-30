@@ -1912,7 +1912,7 @@ int main(int argc, char **argv) {
             free(proc);
           }
         }
-#endif RUN
+#endif // RUN
 
         free(blob);
       }
