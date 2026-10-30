@@ -222,6 +222,11 @@ static uchar next_slot; // next free slot index for \+ decls / temps
 // const + bin from ivm-gen.c (code_buf/code_len macros)
 #define VAL_ACC  0xffff
 
+// Type of the declaration currently being parsed (set by matching I/T).
+// Low byte is TY_WORD/TY_CHAR; OR with TY_PTR for pointers.
+static word cur_type = TY_WORD;
+
+
 // ---- logging ----
 
 #include <stdio.h>
@@ -420,7 +425,7 @@ static word force_addr(uchar n) {
   if (n < 1 || n > fr->prod_n) return 0;
 
   v = fr->prod_cap[n];
-  if (v != VAL_ACC) return v;
+  if (v != VAL_ACC) return (word)CAP_SLOT(v);
 
   tmp = alloc_slot();
   emitop2('S', tmp);
@@ -880,13 +885,13 @@ static int match_ident(void) {
 
     // It's a function name?
     last_func_vec = s->address;
-    record_capture(s->ret_slot);
+    record_capture(MAKE_CAP(s->ret_slot, ((word)s->vtype << 8) | (s->is_ptr ? TY_PTR : 0)));
 
   } else {
 
     // It's a variable name?
     last_func_vec = 0xff;
-    record_capture(s->address);
+    record_capture(MAKE_CAP(s->address, ((word)s->vtype << 8) | (s->is_ptr ? TY_PTR : 0)));
   }
 
   // kept in the frame: later \i matches (call arguments) must not change \v
@@ -907,10 +912,16 @@ static int match_ident_decl(void) {
     slot = syms[i].address;
   else {
     slot = alloc_slot();
-    sym_add(id, SYM_VAR, slot);
+    {
+      Symbol *ns = sym_add(id, SYM_VAR, slot);
+      ns->vtype = (uchar)(CAP_TYPE(cur_type) >> 8);
+      ns->is_ptr = CAP_IS_PTR(cur_type) ? 1 : 0;
+    }
   }
-  record_capture(slot);
-  vlog("  decl '%s' scope %u slot %u\n", id, (unsigned)scope_depth, (unsigned)slot);
+  record_capture(MAKE_CAP(slot, cur_type));
+  vlog("  decl '%s' scope %u slot %u type %c%s\n",
+       id, (unsigned)scope_depth, (unsigned)slot,
+       (char)(CAP_TYPE(cur_type) >> 8), CAP_IS_PTR(cur_type) ? "*" : "");
   return 1;
 }
 
@@ -969,9 +980,13 @@ static int match_param_decl(void) {
   slot = (uchar)(frame_base[v] + 4 + k);
   s = sym_add(id, SYM_VAR, slot);
   s->pidx = (uchar)(k + 1);
+  s->vtype = (uchar)(CAP_TYPE(cur_type) >> 8);
+  s->is_ptr = CAP_IS_PTR(cur_type) ? 1 : 0;
   if (next_slot <= slot) next_slot = (uchar)(slot + 1);
-  record_capture(slot);
-  vlog("  param '%s' #%u slot %u\n", id, (unsigned)k, (unsigned)slot);
+  record_capture(MAKE_CAP(slot, cur_type));
+  vlog("  param '%s' #%u slot %u type %c%s\n",
+       id, (unsigned)k, (unsigned)slot,
+       (char)(CAP_TYPE(cur_type) >> 8), CAP_IS_PTR(cur_type) ? "*" : "");
   return 1;
 }
 
@@ -1022,7 +1037,7 @@ static int match_num(void) {
   }
   note_progress();
   slot = (uchar)as_addr((uchar)lit_addr((unsigned int)v));
-  record_capture(slot);
+  record_capture(MAKE_CAP(slot, TY_WORD));
   return 1;
 }
 
@@ -1075,6 +1090,70 @@ static int match_str_emit(void) {
   line_pos++;
   emit(0);
   note_progress();
+  return 1;
+}
+
+
+// \s — constant string: parse with escapes, store in data pool, capture
+// a relocatable pointer const (like \d yields a number const).
+// Opening " already matched by the BNF (or matched here if bare).
+static int match_str_const(void) {
+  uchar buf[512];
+  word n = 0;
+  uchar c, v, i;
+  uchar slot;
+
+  skip_ws();
+  if (!line_need() || line_buf[line_pos] != '"') return 0;
+  line_pos++; // opening "
+
+  while (line_need() && line_buf[line_pos] != '"') {
+    c = line_buf[line_pos++];
+    if (c == '\\') {
+      if (!line_need()) return 0;
+      c = line_buf[line_pos++];
+      switch (c) {
+      case 'n':  c = '\n'; break;
+      case 't':  c = '\t'; break;
+      case 'r':  c = '\r'; break;
+      case '0':  c = 0;    break;
+      case '\\': c = '\\'; break;
+      case '"':  c = '"';  break;
+      case '\'': c = '\''; break;
+      case 'a':  c = '\a'; break;
+      case 'b':  c = '\b'; break;
+      case 'f':  c = '\f'; break;
+      case 'v':  c = '\v'; break;
+      case 'x': case 'X':
+        v = 0;
+        for (i = 0; i < 2; i++) {
+          if (!line_need()) break;
+          c = line_buf[line_pos];
+          if (c >= '0' && c <= '9') v = (uchar)((v << 4) + (c - '0'));
+          else if (c >= 'a' && c <= 'f') v = (uchar)((v << 4) + (c - 'a' + 10));
+          else if (c >= 'A' && c <= 'F') v = (uchar)((v << 4) + (c - 'A' + 10));
+          else break;
+          line_pos++;
+        }
+        c = v;
+        break;
+      default: break;
+      }
+    }
+    if (n + 1 >= (word)sizeof(buf)) return 0;
+    buf[n++] = c;
+    capture_add(c);
+  }
+  if (!line_need() || line_buf[line_pos] != '"') return 0;
+  line_pos++;
+  buf[n++] = 0; // NUL terminator in data pool
+
+  slot = add_string_const(buf, n);
+  // char* constant
+  record_capture(MAKE_CAP(slot, TY_CHAR | TY_PTR));
+  note_progress();
+  vlog("  str const slot %u data +%u len %u\n",
+       (unsigned)slot, (unsigned)(n ? const_val(slot) : 0), (unsigned)n);
   return 1;
 }
 
@@ -1131,7 +1210,7 @@ static uchar *blobs[NRULES];
 // escapes that stay "\c" in the blob (all others become the plain char c)
 static int esc_kept(uchar e) {
   if (e >= '1' && e <= '9') return 1;
-  return strchr("insSCfv<d+{}[]#=aptrlxywmzk", e) != NULL;
+  return strchr("insSCfv<d+{}[]#=aptrlxywmzkz", e) != NULL;
 }
 
 static void build_one_rule(uchar r, char *rhs) {
@@ -1433,6 +1512,18 @@ static int step(void) {
   }
 
   if (fr->state == ST_OK) {
+    // Type rules I and T set cur_type for subsequent \+/\p decls
+    if ((uchar)('A' + fr->rule) == 'I') {
+      // alts: int=0, word=1, void=2, char=3 (order in c.bnf)
+      if (fr->alt == 3) cur_type = TY_CHAR;
+      else if (fr->alt == 2) cur_type = TY_WORD; // void treated as word-sized
+      else cur_type = TY_WORD;
+    }
+    if ((uchar)('A' + fr->rule) == 'T') {
+      // T=I *|I^*|I  → alt 0/1 pointer, alt 2 plain
+      if (fr->alt == 0 || fr->alt == 1)
+        cur_type = (word)(cur_type | TY_PTR);
+    }
     vlog("ok %c alt %u -> @%u\n", 'A' + fr->rule, fr->alt, abs_pos());
     // -v: one GEN per statement (K), after alt commits
     if (verbose >= 1 && code_len > fr->code_save &&
@@ -1620,8 +1711,18 @@ static int step(void) {
     else if (e == 'r') ok = params_done();
     else if (e == 'd') ok = match_num();
     else if (e == 'n') ok = match_newline();
-    else if (e == 's') ok = match_str();
+    else if (e == 's') ok = match_str_const();
     else if (e == 'S') ok = match_str_emit();
+    else if (e == 'z') {
+      // sizeof value from cur_type (after matching T)
+      {
+        unsigned int sz = CAP_IS_PTR(cur_type) ? 2
+                        : (CAP_TYPE(cur_type) == TY_CHAR ? 1 : 2);
+        uchar slot = (uchar)as_addr((uchar)lit_addr(sz));
+        record_capture(MAKE_CAP(slot, TY_WORD));
+        ok = 1;
+      }
+    }
     else {
       skip_ws();
       ok = match_lit(e);
@@ -1960,8 +2061,14 @@ int main(int argc, char **argv) {
           if (proc) {
             word *pool = (word *)(blob + ((BlobHeader *)blob)->con);
 
-            for (i = 0; i < nconst; i++)
-              proc->mem[CONST_TOP - i] = pool[i];
+            for (i = 0; i < nconst; i++) {
+              word cv = pool[i];
+              if (const_is_reloc[i]) {
+                // blob-relative pointer → absolute
+                cv = (word)(uintptr_t)(blob + cv);
+              }
+              proc->mem[CONST_TOP - i] = cv;
+            }
 
             fprintf(stderr, "--- RUN ---\n");
             ret = run_ivm(proc);

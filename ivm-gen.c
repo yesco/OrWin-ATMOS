@@ -21,7 +21,7 @@
 #endif
 
 #ifndef MAX_CONSTS
-  #define MAX_CONSTS    128
+  #define MAX_CONSTS    256
 #endif
 
 #ifndef MAX_SLOTS
@@ -140,17 +140,51 @@ void emitop2(uchar op, uchar arg) {
 
 // ---------------------------------------------------------------------------
 // Constants — grow downward from CONST_TOP (253,252,…)
+//
+// Two kinds of pool entries:
+//   - integer literals (not relocated)
+//   - data offsets for string literals (relocated at load: base + data + off)
+//
+// Packing order in the blob const section:
+//   [reloc_off_1, reloc_off_2, ..., 0, int_1, int_2, ...]
+// The 0 terminator separates relocatable pointer consts from plain ints.
+// Slot addresses (CONST_TOP - i) stay stable for bytecode; only the *packed*
+// order for the blob puts reloc entries first.
 // ---------------------------------------------------------------------------
 uint16_t const_pool[MAX_CONSTS];
+uchar    const_is_reloc[MAX_CONSTS]; // 1 = value is offset into data section
 uchar nconst = 0;
 uchar constidx = 255; // lowest const slot; 255 = none
+uchar nreloc_const = 0; // how many reloc entries (for pack)
 
-uchar add_const(unsigned int v) {
+// String / data pool (appended to blob at h.data)
+#ifndef MAX_DATA
+  #define MAX_DATA 2048
+#endif
+uchar data_pool[MAX_DATA];
+word  data_len = 0;
+
+// Type tags for captures / symbols (high byte of word results)
+// Low 8 bits of a capture = slot or IMM; high 8 = type info.
+// Bit 15 set (0x8000) => pointer. Low type char in bits 8-14: 'w'/'c'.
+// Type lives in the HIGH byte; low byte is the slot/const index.
+#define TY_WORD   ((word)(('w') << 8))   /* 0x7700 */
+#define TY_CHAR   ((word)(('c') << 8))   /* 0x6300 */
+#define TY_PTR    ((word)0x8000)         /* pointer flag in bit 15 */
+#define CAP_SLOT(w)   ((uchar)((w) & 0xff))
+#define CAP_TYPE(w)   ((word)((w) & 0xff00))
+#define CAP_IS_PTR(w) (((w) & TY_PTR) != 0)
+#define MAKE_CAP(slot, ty) ((word)(((word)(uchar)(slot)) | (word)(ty)))
+
+uchar add_const_raw(unsigned int v, uchar reloc) {
   uchar i, addr;
 
-  for (i = 0; i < (uchar)nconst; i++)
-    if (const_pool[i] == v)
-      return (uchar)(CONST_TOP - i);
+  // dedup only non-reloc (integer) values; string offsets are unique by content
+  if (!reloc) {
+    for (i = 0; i < (uchar)nconst; i++)
+      if (!const_is_reloc[i] && const_pool[i] == v)
+        return (uchar)(CONST_TOP - i);
+  }
 
   if (nconst >= MAX_CONSTS)
     IVM_GEN_FAIL("constant pool full");
@@ -158,11 +192,37 @@ uchar add_const(unsigned int v) {
     IVM_GEN_FAIL("constants collided with frames");
 
   const_pool[nconst] = (uint16_t)v;
+  const_is_reloc[nconst] = reloc;
+  if (reloc) nreloc_const++;
   addr = (uchar)(CONST_TOP - nconst);
   nconst++;
   constidx = addr;
-
   return addr;
+}
+
+uchar add_const(unsigned int v) {
+  return add_const_raw(v, 0);
+}
+
+// Append bytes to data_pool; return offset from start of data section.
+// Then register a relocatable const whose value is that offset (filled with
+// absolute data-section base at pack time → final value = data_base + off).
+word data_append(const uchar *bytes, word n) {
+  word off;
+  if ((word)(data_len + n) > MAX_DATA)
+    IVM_GEN_FAIL("data pool full");
+  off = data_len;
+  memcpy(data_pool + data_len, bytes, n);
+  data_len = (word)(data_len + n);
+  return off;
+}
+
+// Add a C string (already escaped, including trailing NUL) as a data constant.
+// Returns the mem slot for the pointer const (like lit_addr for numbers).
+uchar add_string_const(const uchar *bytes, word n) {
+  word off = data_append(bytes, n);
+  // value stored = offset within data section; pack will add h.data
+  return add_const_raw((unsigned int)off, 1);
 }
 
 #define isconst(a) ((uchar)(a) >= constidx && (uchar)(a) <= CONST_TOP)
@@ -226,7 +286,8 @@ typedef struct {
   uchar param_slot[MAX_PARAMS];
   uchar ret_slot;
   uchar ret_addr_slot; // FUNC: frame base
-  uchar is_ptr;        // 1 if ^WORD / ^INTEGER (still one cell)
+  uchar is_ptr;        // 1 if pointer type (still one cell)
+  uchar vtype;         // TY_WORD ('w') or TY_CHAR ('c') — element type
   uchar scope;         // scope depth it was declared in
   uchar pidx;          // parameter number + 1 (0 = not a parameter)
 } Symbol;
@@ -265,6 +326,7 @@ Symbol *sym_add(const char *name, SymbolType type, uchar address) {
   s->ret_slot = 0xff;
   s->ret_addr_slot = 0xff;
   s->is_ptr = 0;
+  s->vtype = 'w';
   s->scope = scope_depth;
   s->pidx = 0;
   return s;
@@ -337,6 +399,8 @@ void gen_reset(void) {
   bin_ptr = 0;
   nconst = 0;
   constidx = 255;
+  nreloc_const = 0;
+  data_len = 0;
   pending_func_entry = 0xff;
   main_vec = 0xff;
   main_offset = 0;
@@ -366,6 +430,10 @@ static word gen_memadd(uchar *base, uchar **pp, const void *src, word n) {
 }
 
 // Build IVM image (magic IVM\0 + sections). Caller free().
+// Const pool keeps original index order (bytecode slots = CONST_TOP - i).
+// Relocatable string consts store a *data-relative* offset; the loader adds
+// (blob_base + h.data) to form a usable pointer. Integer consts are raw values.
+// Data section holds string bytes (and any other static data).
 uchar *build_blob(int *out_len) {
 
   typedef struct {
@@ -386,6 +454,7 @@ uchar *build_blob(int *out_len) {
   word zero = 0;
   unsigned need;
   char nv;
+  int i;
 
   nv = nvector;
 
@@ -393,7 +462,8 @@ uchar *build_blob(int *out_len) {
        + (unsigned)nv * sizeof(word) + sizeof(word)
        + (unsigned)nconst * sizeof(word)
        + (unsigned)nv
-       + (unsigned)bin_ptr + 8;
+       + (unsigned)bin_ptr
+       + (unsigned)data_len + 16;
 
   body = (uchar *)malloc(need);
   if (!body) IVM_GEN_FAIL("malloc blob");
@@ -406,10 +476,20 @@ uchar *build_blob(int *out_len) {
 
   h.fp   = gen_memadd(body, &p, frame_base, (word)nv);
   h.code = gen_memadd(body, &p, bin, (word)bin_ptr);
-
   h.main = (word)(h.code + (word)main_offset);
 
-  h.data = (word)(p - body);
+  // Data section (strings). Reloc consts in the pool are offsets *into* this.
+  h.data = gen_memadd(body, &p, data_pool, data_len);
+
+  // Rewrite reloc const values in the blob to blob-relative addresses
+  // (h.data + data_offset) so one +base reloc makes them absolute.
+  {
+    word *pool = (word *)(body + h.con);
+    for (i = 0; i < (int)nconst; i++)
+      if (const_is_reloc[i])
+        pool[i] = (word)(h.data + const_pool[i]);
+  }
+
   h.memsz = (word)(CONST_TOP + 1);
   h.constidx = (word)constidx;
   h.magic[0] = 'I';
@@ -418,12 +498,8 @@ uchar *build_blob(int *out_len) {
   h.magic[3] = 0;
   h.len = (word)(p - body);
 
-  {
-    int i;
-    
-    for (i = 0; i < nv; i++)
-      ((word *)(body + h.call))[i] = (word)(vectors[i] + h.code);
-  }
+  for (i = 0; i < nv; i++)
+    ((word *)(body + h.call))[i] = (word)(vectors[i] + h.code);
 
   memcpy(body, &h, sizeof(h));
   if (out_len)
