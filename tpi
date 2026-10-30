@@ -47,9 +47,6 @@ echo
 echo
 
 
-
-
-
 echo
 echo "=== tpi.c: `./wcode tpi.c` LOC ===" 
 echo "=== ivm.c: `./wcode ivm.c` LOC ===" 

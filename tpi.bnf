@@ -17,9 +17,10 @@ H=V|
 N=end;|end
 B=begin C N
 C=K\<|
-# keyword statements FIRST so IF/FOR/WRITE are not tried as \i
-# if: [?G\x] jump over THEN when false; else: [0?G\x\w\y] jump over ELSE, patch THEN jump
-# for: ctrl and limit stored, [\m..] loop start, G exit / B back
+
+# -- keyword statements FIRST so IF/FOR/WRITE are not tried as \i
+# - if: [?G\x] jump over THEN when false; else: [0?G\x\w\y] jump over ELSE, patch THEN jump
+# - for: ctrl and limit stored, [\m..] loop start, G exit / B back
 K=if E[?G\x] then K else[0?G\x\w\y] K[\y]|if E[?G\x] then K[\y]
 |for \i:=E[S\1] to E[S\t] do[\mL\1-\4G\x] K[I\1B\z\y]
 |writeln();[N]|writeln(JW);[N]|write();|write(JW);
@@ -32,6 +33,7 @@ K=if E[?G\x] then K else[0?G\x\w\y] K[\y]|if E[?G\x] then K[\y]
 |\i:=S-S;[L\2-\3S\1]
 |\i:=S;[L\2S\1]
 |\i:=E;[S\1]
+
 # JW: one or more J, comma-separated (W = optional ,J tail)
 W=,J\<|
 J=E[.]|"["]\S
@@ -40,7 +42,7 @@ J=E[.]|"["]\S
 E=RO[]|S[\l1]O[]
 
 # R = primary that leaves its value in ACC: call [\v], p^, a[i], (E), not
-R=\i(Z)[\v]|\i^[@\1]|\i\[S\][(\1\2]|(E)[]|not S[\l1?]
+R=\i(Z)[\v]|\i^[@\1]|\i\[S\][(\1\2]|(E)[]|not E[?]
 
 # S = simple primary -> address, no code
 S=\d|sizeof(T)\#02|sizeof(\i)\#02|\i
