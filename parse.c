@@ -119,7 +119,7 @@ uchar *g_loaded;
 
 #include <assert.h>
 #include <string.h>
-#include <strings.h>
+//#include <strings.h>
 
 #include "ivm.c"
 
@@ -1073,13 +1073,13 @@ static void build_one_rule(uchar r, char *rhs) {
 static int load_bnf(const char *path) {
   FILE *f = NULL;
   char *line = malloc(MAX_LINE);
-  char acc[MAX_ACCUM];
+  char *acc = malloc(MAX_ACCUM);
   uchar r, cur;
   char *nl, *eq, *p;
   word acc_len, have_cur;
   char ret = 0;
   
-  if (!line) goto done;
+  if (!line || !acc) goto done;
   
   free_rules();
 
@@ -1137,7 +1137,7 @@ static int load_bnf(const char *path) {
     have_cur = 1;
     p = eq + 1;
     acc_len = 0;
-    while (*p && acc_len + 1 < sizeof acc)
+    while (*p && acc_len + 1 < MAX_ACCUM)
       acc[acc_len++] = *p++;
     acc[acc_len] = 0;
   }
@@ -1149,7 +1149,8 @@ static int load_bnf(const char *path) {
 
  done:
   if (f) fclose(f);
-  if (line) free(line);
+  free(line);
+  free(acc);
   return ret;
 }
 
