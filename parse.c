@@ -123,9 +123,10 @@ uchar *g_loaded;
 
 #include "ivm.c"
 
+// A-Z
 #define NRULES      26
-#define MAX_STACK   128
-#define LINE_CAP    4096
+
+#define MAX_STACK   64
 
 // rule['X'-'A'] = NULL-terminated array of uchar* into one malloc blob
 static uchar **rule[NRULES];
@@ -180,12 +181,16 @@ static uchar sp;
 
 // capture: hold matched text until alt commits (grows)
 static uchar *capture[MAX_STACK];
-static word cap_len[MAX_STACK];
-static word cap_max[MAX_STACK];
+static word  cap_len[MAX_STACK];
+static word  cap_max[MAX_STACK];
 
 // scopes: \+ adds name at scope_depth; \} drops names with name_scope >= depth
 #define MAX_NAMES  256
-#define NAME_LEN   48
+
+// TODO: wtf, told you to move scoping/env/var stuff out to ivm-gen.c
+//   now you're back to static?
+
+#define NAME_LEN   32
 
 static char  names[MAX_NAMES][NAME_LEN];
 static uchar name_scope[MAX_NAMES];
@@ -231,6 +236,7 @@ static void vlog(const char *fmt, ...) {
   va_end(ap);
 }
 
+// TODO: use or remove? prefer save bytes for cc65, use it if can
 static void v1(const char *fmt, ...) {
   va_list ap;
 
@@ -241,6 +247,7 @@ static void v1(const char *fmt, ...) {
   va_end(ap);
 }
 
+// TODO: use or remove? prefer save bytes for cc65, use it if can
 static void v1_indent(void) {
   uchar i;
 
@@ -257,10 +264,6 @@ static int is_ws(uchar c) {
   return isspace(c);
 }
 
-static void line_reset(void) {
-  line_len = 0;
-  line_pos = 0;
-}
 
 // append one char from file into line_buf
 static int line_grow(uchar c) {
@@ -1482,19 +1485,8 @@ static int run(word n) {
   return rc;
 }
 
-static word line_at_abs(word ap) {
-  word i, line = 1;
-
-  // only know lines in current buffer + estimate from abs
-  // scan from start of file is not available; approximate via buffer
-  (void)ap;
-  for (i = 0; i < line_pos && i < line_len; i++)
-    if (line_buf[i] == '\n') line++;
-  return line;
-}
-
 static void report_reject(void) {
-  word i, col, start, end, nlines, lp, cur_line;
+  word i;
 
   fprintf(stderr, "\n--- REJECT at %u (furthest %u) ---\n",
           abs_pos(), max_pos_abs);
@@ -1570,7 +1562,7 @@ static void report_reject(void) {
 
 // init: load grammar + open source
 static int init(const char *bnf_path, const char *src_path) {
-  uchar r;
+  uchar i;
 
   src_name = src_path;
   if (!load_bnf(bnf_path)) return 0;
@@ -1605,13 +1597,10 @@ static int init(const char *bnf_path, const char *src_path) {
   memset(fnparams, 0, sizeof(fnparams));
   memset(fpslot, 0, sizeof(fpslot));
   // no pre-seeded names — X must be declared in source if used
-  {
-    uchar i;
-    for (i = 0; i < MAX_STACK; i++) {
-      capture[i] = NULL;
-      cap_len[i] = 0;
-      cap_max[i] = 0;
-    }
+  for (i = 0; i < MAX_STACK; i++) {
+    capture[i] = NULL;
+    cap_len[i] = 0;
+    cap_max[i] = 0;
   }
 
   if (!rule_defined((uchar)('P' - 'A'))) {
@@ -1619,6 +1608,7 @@ static int init(const char *bnf_path, const char *src_path) {
     return 0;
   }
   push((uchar)('P' - 'A'), ST_TRY);
+
   return 1;
 }
 
@@ -1712,24 +1702,20 @@ int main(int argc, char **argv) {
     }
 
     fprintf(stderr, "--- ACCEPT ---\n");
-    {
-      word i;
-      uchar b;
       
-      fprintf(stderr, "--- BYTECODE (%u bytes) ---\n", (unsigned)code_len);
+    fprintf(stderr, "--- BYTECODE (%u bytes) ---\n", (unsigned)code_len);
 
-      ivm_print_code(stderr, code_buf, code_len);
-      fputc('\n', stderr);
+    ivm_print_code(stderr, code_buf, code_len);
+    fputc('\n', stderr);
 
-      // dump hex
-      for (i = 0; i < code_len; i++) {
-        fprintf(stderr, "%02x", code_buf[i]);
-        if ((i & 15) == 15) fputc('\n', stderr);
-        else fputc(' ', stderr);
-      }
-      if (code_len & 15) fputc('\n', stderr);
-
+    // dump hex
+    for (i = 0; i < code_len; i++) {
+      fprintf(stderr, "%02x", code_buf[i]);
+      if ((i & 15) == 15) fputc('\n', stderr);
+      else fputc(' ', stderr);
     }
+    if (code_len & 15) fputc('\n', stderr);
+
     // quit so run_ivm can stop
     emitop('q');
     {
@@ -1737,25 +1723,27 @@ int main(int argc, char **argv) {
       uchar *blob = build_blob(&blen);
       Process *proc;
       ivmvar ret;
-      int ci;
+
       fprintf(stderr, "--- BLOB (%d bytes) main=%u nvector=%d ---\n",
-        blen, (unsigned)main_offset, (int)nvector);
+        blen, main_offset, nvector);
+
       if (blob) {
         // frame bases: JSR keeps ret addr / ACC at fp+0 / fp+3, ';' returns fp+1
-        for (ci = 0; ci < (int)nvector; ci++) {
-          blob[((BlobHeader *)blob)->fp + ci] = fbase[ci];
+        for (i = 0; i < nvector; i++) {
+          blob[((BlobHeader *)blob)->fp + i] = fbase[i];
           if (verbose >= 1)
             fprintf(stderr, "  frame V%02x fp=%u nparams=%u\n",
-              ci, (unsigned)fbase[ci], (unsigned)fnparams[ci]);
+              i, fbase[i], fnparams[i]);
         }
+
         proc = Nevm(blob);
         if (proc) {
           word *pool = (word *)(blob + ((BlobHeader *)blob)->con);
-          for (ci = 0; ci < (int)nconst; ci++)
-            proc->mem[CONST_TOP - ci] = pool[ci];
+          for (i = 0; i < nconst; i++)
+            proc->mem[CONST_TOP - i] = pool[i];
           fprintf(stderr, "--- RUN ---\n");
           ret = run_ivm(proc);
-          fprintf(stderr, "--- END acc=%u ---\n", (unsigned)ret);
+          fprintf(stderr, "--- END acc=%u ---\n", ret);
           free(proc);
         }
         free(blob);

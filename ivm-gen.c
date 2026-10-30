@@ -67,14 +67,14 @@ void note_store(uchar addr);
 #ifdef IVM_GEN_NO_VECTORS
   // tpi supplies vectors[], frame_base[], nvector, main_offset
   extern uint16_t vectors[];
-  extern char frame_base[];
-  extern char nvector;
-  extern int main_offset;
+  extern uchar frame_base[];
+  extern uchar nvector;
+  extern word main_offset;
 #else
   uint16_t vectors[MAX_VECTORS];
-  char frame_base[MAX_VECTORS];
-  char nvector;
-  int main_offset;
+  uchar frame_base[MAX_VECTORS];
+  uchar nvector;
+  word main_offset;
 #endif
 
 // The current func_entry being compiled
