@@ -97,14 +97,23 @@
 
 #include "ivm-print.c"
 
+
+// CONFIGURATION
+
+#define MAX_BIN_LEN 4096
+#define MAX_SLOTS 255
+
+#define ERR_LINES_CONTEXT 4
+
+
+
+
 // shared emit + real const addresses
 static void note_load(uchar addr) { (void)addr; }
 static void note_store(uchar addr) { (void)addr; }
 
 #define IVM_GEN_FAIL(msg) do { fprintf(stderr, "%s\n", (msg)); abort(); } while (0)
 
-#define MAX_BIN_LEN 4096
-#define MAX_SLOTS 255
 
 #include "ivm-gen.c"
 
@@ -1536,25 +1545,36 @@ static void report_reject(void) {
         else col++;
       }
       // print error line, then caret under it, then a few following lines
+
+// TODO: shouldn't this be in the buffer? I mean we should
+//   at least store till last newline boudnary, or two?
+
       fseek(rf, base, SEEK_SET);
+
       fprintf(stderr, "%s:%d: ", src_name, line);
       while ((ch = fgetc(rf)) != EOF && ch != '\n')
         fputc(ch, stderr);
       fputc('\n', stderr);
+
       fprintf(stderr, "%s:%d: ", src_name, line);
       for (i = 0; i < col; i++)
         fputc(' ', stderr);
       fprintf(stderr, "^\n");
+
       // up to 4 more lines of context
       nlines = 0;
-      while (nlines < 4 && ch != EOF) {
+      while (nlines < ERR_LINES_CONTEXT && ch != EOF) {
+
         fprintf(stderr, "%s:%d: ", src_name, line + 1 + nlines);
         while ((ch = fgetc(rf)) != EOF && ch != '\n')
           fputc(ch, stderr);
         fputc('\n', stderr);
+
         nlines++;
         if (ch == EOF) break;
+
       }
+
       fclose(rf);
     }
   }
