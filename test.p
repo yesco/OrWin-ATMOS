@@ -135,7 +135,7 @@ END;
 { TODO: Procedure }
 function TestWrites() : integer;
 begin
-   writeln("--TestWrrites");
+   writeln("--TestWrites");
    writeln("a", "b", "c");
    writeln(1,2,3);
    write("a", "b", "c"); writeln();
