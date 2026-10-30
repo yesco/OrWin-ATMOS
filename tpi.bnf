@@ -1,6 +1,10 @@
 # -- BNF grammar for tpi.c PASCAL implementation
-# K = statement, S = simple primary (address), R = ACC primary (call, (E), not)
-# O = op chain, E = expression
+# - K = statement, S = simple primary (address), R = ACC primary (call, (E), not)
+# - O = op chain, E = expression
+
+# - comment format start end
+#= { }
+
 P=program \+;DB.
 D=V\<|F\<|
 V=var M

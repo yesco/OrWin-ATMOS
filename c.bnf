@@ -1,4 +1,7 @@
 # -- BNF grammar for tpi.c C implementation targeting Custom Bytecode
+# Comment styles for the *source* language (not the BNF itself):
+#= /* */
+#= //
 # K = statement, S = simple primary (address), R = ACC primary (call, (E), not)
 # O = op chain, E = expression
 #

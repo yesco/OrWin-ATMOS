@@ -5,7 +5,11 @@
 // BNF:
 //   X=body     rule X (A-Z)
 //   a-z/punct  match char (-I case-insensitive, default)
-//   space      skip whitespace (c<=32) and { comments }
+//   space      skip whitespace and comments (styles from #= lines)
+//   #= { }     block comment style (start end); multiple #= allowed
+//   #= /* */   e.g. C block comments
+//   #= //      line comment (to newline); no end token
+//              default if no #=: Pascal { }
 //   A-Z        call rule
 //   \<         tail-recurse current rule (reset ip/alt, keep frame)
 //   \C         commit: drop line buffer up to current point
@@ -588,30 +592,105 @@ static void skip_hspace(void) {
   }
 }
 
-// ---- skip whitespace and { comments } ----
+// ---- skip whitespace and comments (configured from BNF via #= lines) ----
 
 #include <stdbool.h>
 #include <string.h>
 
-// Compact comment configuration for cc65 (NULL blocks disable them)
-#ifdef CCC
-  static const char *start_blk = "/*";
-  static const char *end_blk   = "*/";
-  // Set to NULL to disable line comments
-  static const char *line_pfx  = "//";
-#else
-  static const char *start_blk = "{";
-  static const char *end_blk   = "}";
-  // Set to NULL to disable line comments
-  static const char *line_pfx  = NULL;
-#endif
+// Comment styles loaded from grammar:
+//   #= { }        block comment  start="{", end="}"
+//   #= /* */      block comment  start="/*", end="*/"
+//   #= //         line  comment  start="//", runs to newline
+// Multiple #= lines are allowed (C needs both /* */ and //).
+// Default (no #=): Pascal-style { } only.
+
+#define MAX_COMMENTS 4
+#define COMM_START_MAX 4
+#define COMM_END_MAX   4
+
+typedef struct {
+  char start[COMM_START_MAX]; // NUL-terminated, length 1..3
+  char end[COMM_END_MAX];     // empty => line comment (to \n)
+  uchar start_len;
+  uchar end_len;              // 0 = line comment
+} CommentStyle;
+
+static CommentStyle comments[MAX_COMMENTS];
+static uchar ncomments;
+
+// Default: { } block (Pascal). Cleared/replaced when BNF has #= lines.
+static void comments_set_default(void) {
+  ncomments = 1;
+  comments[0].start[0] = '{';
+  comments[0].start[1] = 0;
+  comments[0].start_len = 1;
+  comments[0].end[0] = '}';
+  comments[0].end[1] = 0;
+  comments[0].end_len = 1;
+}
+
+// Parse one #= directive body (after the "#="). Returns 1 on success.
+// Forms:  "{ }" | "/* */" | "//"   (whitespace separates start/end)
+static int comments_add_from_line(const char *p) {
+  CommentStyle *cs;
+  word i;
+
+  if (ncomments >= MAX_COMMENTS) return 0;
+  while (*p == ' ' || *p == '\t') p++;
+  if (!*p) return 0;
+
+  cs = &comments[ncomments];
+  cs->start_len = 0;
+  cs->end_len = 0;
+  cs->start[0] = 0;
+  cs->end[0] = 0;
+
+  // start delimiter: non-space run
+  i = 0;
+  while (*p && *p != ' ' && *p != '\t' && i + 1 < COMM_START_MAX) {
+    cs->start[i++] = *p++;
+  }
+  cs->start[i] = 0;
+  cs->start_len = (uchar)i;
+  if (!cs->start_len) return 0;
+
+  while (*p == ' ' || *p == '\t') p++;
+
+  // optional end delimiter => block comment; none => line comment
+  i = 0;
+  while (*p && *p != ' ' && *p != '\t' && i + 1 < COMM_END_MAX) {
+    cs->end[i++] = *p++;
+  }
+  cs->end[i] = 0;
+  cs->end_len = (uchar)i;
+
+  ncomments++;
+  return 1;
+}
+
+// True if line_buf[line_pos..] starts with s[0..len)
+static int match_at(const char *s, uchar len) {
+  uchar i;
+
+  if (!len) return 0;
+  for (i = 0; i < len; i++) {
+    // ensure char at line_pos+i is buffered
+    while (line_pos + i >= line_len) {
+      if (!line_need()) return 0;
+    }
+    if (line_buf[line_pos + i] != (uchar)s[i]) return 0;
+  }
+  return 1;
+}
 
 static void skip_ws(void) {
   char c;
+  uchar ci, i;
+  CommentStyle *cs;
 
   for (;;) {
 
-    // Unified whitespace skip loop
+    // whitespace
     while (line_need() && is_ws(c = line_buf[line_pos])) {
       capture_add(c);
       line_pos++;
@@ -619,48 +698,40 @@ static void skip_ws(void) {
     }
     if (!line_need()) return;
 
-    // Check for Line Comment match
-    if (line_pfx && line_buf[line_pos] == line_pfx[0] && 
-        line_pos + 1 < line_len && line_buf[line_pos + 1] == line_pfx[1]) {
-      
-      capture_add(line_buf[line_pos++]);
-      capture_add(line_buf[line_pos++]);
-      
-      while (line_need()) {
-        capture_add(line_buf[line_pos++]);
-      }
-      note_progress();
-      continue;
-    }
+    // try each configured comment style
+    for (ci = 0; ci < ncomments; ci++) {
+      cs = &comments[ci];
+      if (!match_at(cs->start, cs->start_len)) continue;
 
-    // Check for Block Comment match
-    if (start_blk && line_buf[line_pos] == start_blk[0]) {
-      // Handle either 2-char markers (like /*) or 1-char markers (like {)
-      if (!start_blk[1] || 
-         (line_pos + 1 < line_len && line_buf[line_pos + 1] == start_blk[1])) {
-        
+      // consume start
+      for (i = 0; i < cs->start_len; i++)
         capture_add(line_buf[line_pos++]);
-        if (start_blk[1]) capture_add(line_buf[line_pos++]);
 
-        // Consume characters until the end marker is found
+      if (cs->end_len == 0) {
+        // line comment: to newline (keep the \n) or EOF
+        while (line_need() && line_buf[line_pos] != '\n') {
+          capture_add(line_buf[line_pos++]);
+        }
+      } else {
+        // block comment: to end marker
         while (line_need()) {
-          c = line_buf[line_pos];
-          if (c == end_blk[0] && (!end_blk[1] || 
-             (line_pos + 1 < line_len && line_buf[line_pos + 1] == end_blk[1]))) {
-            
-            capture_add(line_buf[line_pos++]);
-            if (end_blk[1]) capture_add(line_buf[line_pos++]);
+          if (match_at(cs->end, cs->end_len)) {
+            for (i = 0; i < cs->end_len; i++)
+              capture_add(line_buf[line_pos++]);
             break;
           }
           capture_add(line_buf[line_pos++]);
         }
-        note_progress();
-        continue;
       }
+      note_progress();
+      goto next_round;
     }
 
-    // No whitespace or comments matched, drop out cleanly
+    // nothing matched
     return;
+
+  next_round:
+    ;
   }
 }
 
@@ -1125,13 +1196,23 @@ static int load_bnf(const char *path) {
   acc_len = 0;
   acc[0] = 0;
 
+  // comment styles from #= lines; default Pascal { } if none given
+  ncomments = 0;
+
   while (fgets(line, MAX_LINE, f)) {
 
     nl = strchr(line, '\n');
     if (nl) *nl = 0;
 
     if (line[0] == '.') break;
-    if (line[0] == 0 || line[0] == '#') continue;
+    if (line[0] == 0) continue;
+
+    // #= comment-style directive (must be before bare # skip)
+    if (line[0] == '#' && line[1] == '=') {
+      comments_add_from_line(line + 2);
+      continue;
+    }
+    if (line[0] == '#') continue;
 
     p = line;
     while (*p == ' ' || *p == '\t') p++;
@@ -1170,6 +1251,9 @@ static int load_bnf(const char *path) {
 
   if (have_cur)
     build_one_rule(cur, acc);
+
+  if (ncomments == 0)
+    comments_set_default();
 
   ret = 1;
 
