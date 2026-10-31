@@ -3,12 +3,20 @@
 #include <stdio.h>
 //#include <whatever.h>
 
-char *h     = "Hello";
-word spc    = 32;
-char *world = "World";
-char nl     = '\n';
 
 int main(void) {
+  // Global vars cannot be initialized, do here...
+  // TODO: consider a more efficient initilizer opcode?
+  //   (like a stream <init><count><var#><const#>
+  //   use Y(nit) or H(mmm)?
+  char *h     = "Hello";
+  char spc    = 32;
+  char *world = "World";
+  char nl     = '\n';
+  word a      = 65;
+
+  printf("%d", a);
+  putchar(a);
   putchar('>');        // op: O>
   putchar(spc);        // op: LvvE
   printf("%s", h);     // op: LvvP
