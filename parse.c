@@ -1042,7 +1042,8 @@ static int match_num(void) {
 }
 
 // Interpret C-style escapes in a string body; emit bytes + trailing NUL.
-// Opening " already matched by the BNF. Closing " consumed here.
+// Opening " already matched by the BNF; the production [" ] emits the
+// op_str '"' opcode. Closing " consumed here.
 static int match_str_emit(void) {
   uchar c, v, i;
 

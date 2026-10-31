@@ -29,7 +29,7 @@ K=if (E)[?G\x] K else[0?G\x\w\y] K[\y]|if (E)[?G\x] K[\y]
 |printf("%d ",E);[."\#20\#00]
 |printf("%u%u%u\\\\n",E,E,E);[...N]
 |printf("%u%u%u",E,E,E);[...]
-|printf(JW);
+|printf(\i);[L\1P]|printf(JW);
 |return E;[S\1X]|return;[Q]
 |B|;
 |* \i=E;[!\1]
@@ -41,7 +41,7 @@ K=if (E)[?G\x] K else[0?G\x\w\y] K[\y]|if (E)[?G\x] K[\y]
 |\i=E;[S\1]
 
 W=,J\<|
-J="%u\\\\n"|"%d\\\\n"|"%s\\\\n"|"%u "|"%d "|"%u"|"%d"|"%s"|E[.]|"["]\S
+J="%u\\\\n"|"%d\\\\n"|"%s\\\\n"|"%u "|"%d "|"%u"|"%d"|"%s"|"["]\S|E[.]
 
 E=RO[]|S[\l1]O[]
 R=\i(Z)[\v]|* \i[@\1]|\i\[S\][(\1\2]|(E)[]|! E[?]

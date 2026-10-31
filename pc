@@ -1,4 +1,11 @@
-clang -DRUN parse.c && time ./a.out c.bnf test.c
+name=$1
+
+if [ -z "$name" ]; then
+  name= "test"
+fi
+
+clang -DRUN parse.c && time ./a.out c.bnf $name.c
 echo
+echo "=== $name.c: `./wcode $name.c` LOC ==="
 echo "=== parse.c: `./wcode parse.c` LOC ==="
 echo
