@@ -918,9 +918,13 @@ ZL(op_r,   'r')  zp.acc = *IVM_PTR(PAR) & 0xff; goto pnext;
 ZL(op_w,   'w')  *IVM_PTR(PAR) = zp.acc & 0xff; goto pnext;
 
 // string (char) pointer walkers
+#ifdef __CC65__
 ZL(op_ri,  '\'') zp.acc = *(uchar*)(PAR++); goto pnext;
 ZL(op_wi,  ',' ) *(uchar*)(PAR++) = zp.acc; goto pnext;
-
+#else
+ZL(op_ri,  '\'') zp.acc = soft_heap[zp.mem[*zp.ipc]++];        goto pnext;
+ZL(op_wi,  ',' ) soft_heap[zp.mem[*zp.ipc]++] = (uchar)zp.acc; goto pnext;
+#endif
 
 // indexed: (aaii, aa is index of base address, ii is index var
 ZL(op_idxl,'(')

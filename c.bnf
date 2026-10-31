@@ -33,6 +33,7 @@ C=V\<|K\<|
 K=if (E)[?G\x] K else[0?G\x\w\y] K[\y]
 |if (E)[?G\x] K[\y]
 |for (\i=E[S\1]; \i<=E[S\t]; \i++)[\mL\1-\4G\x] K[I\1B\z\y]
+|while ([\m]E)[?G\x] K[B\z\y]
 |putchar('\\n');[N]
 |putchar(\d);[O\c1]
 |putchar(\i);[L\1E]
@@ -40,11 +41,13 @@ K=if (E)[?G\x] K else[0?G\x\w\y] K[\y]
 |printf("%s",\i);[L\1P]
 |printf("%u\\n",E);[.N]
 |printf("%d\\n",E);[.N]
+|printf("%d",E);[.]
 |printf("%u ",E);[."\#20\#00]
 |printf("%d ",E);[."\#20\#00]
 |printf("%u%u%u\\\\n",E,E,E);[...N]
 |printf("%u%u%u",E,E,E);[...]
 |printf(\i);[L\1P]
+|printf("\\"%s\\" has %d characters\\n",\i,\i(Z)[\v]);[S\tL\1P" has \#00L\3.N]
 |printf(JW);
 |return E;[X]|return;[Q]
 |B|;
@@ -54,6 +57,10 @@ K=if (E)[?G\x] K else[0?G\x\w\y] K[\y]
 |\i=S+S;[L\2+\3S\1]
 |\i=S-S;[L\2-\3S\1]
 |\i=S;[L\2S\1]
+|\i++;[I\1]
+|++\i;[I\1]
+|\i--;[J\1]
+|--\i;[J\1]
 |\i=E;[S\1]
 
 # - print support
@@ -64,6 +71,7 @@ E=RO[]|S[\l1]O[]
 
 # - function call
 R=\i(Z)[\v]
+|* \i++['\1]
 |* \i[@\1]
 |\i\[S\][(\1\2]|(E)[]|! E[?]
 
