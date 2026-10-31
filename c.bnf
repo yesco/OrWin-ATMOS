@@ -25,7 +25,8 @@ C=V\<|K\<|
 # statements — keywords / specific forms first
 K=if (E)[?G\x] K else[0?G\x\w\y] K[\y]|if (E)[?G\x] K[\y]
 |for (\i=E[S\1]; \i<=E[S\t]; \i++)[\mL\1-\4G\x] K[I\1B\z\y]
-|putchar(\c);[\C]
+|putchar('\\n');[N]
+|putchar(\d);[O\c1]
 |putchar(\i);[L\1E]
 |putchar(E);[E]
 |printf("%s",\i);[L\1P]
@@ -55,7 +56,7 @@ E=RO[]|S[\l1]O[]
 R=\i(Z)[\v]|* \i[@\1]|\i\[S\][(\1\2]|(E)[]|! E[?]
 
 # \c = char lit, \s = string const, \d = number
-S=\c|\d|sizeof(T)\z|sizeof(\i)\z|\s|\i
+S=\d|sizeof(T)\z|sizeof(\i)\z|\s|\i
 
 Z=E,[S\k]\<|E|
 

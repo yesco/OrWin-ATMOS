@@ -441,8 +441,6 @@ static word force_addr(uchar n) {
 
 // run production at p (first char after '['); returns after ']'
 // quiet: GEN is printed only when the owning alt commits (ST_OK)
-static uchar last_char_lit;
-
 static uchar *run_production(uchar *p) {
   Frame *fr;
   uchar n, b, *q;
@@ -582,15 +580,22 @@ static uchar *run_production(uchar *p) {
         p += 4;
         continue;
       }
-      // \C: putchar(last_char_lit) — 'N' if newline, else 'O' + byte
-      if (p[1] == 'C') {
-        if (last_char_lit == '\n')
-          emit('N');
-        else {
-          emit('O');
-          emit(last_char_lit);
+            // \cN: emit low byte of capture N's *value* (consts from \d / 'x')
+      // \hN: emit high byte of that value
+      if ((p[1] == 'c' || p[1] == 'h') && p[2] >= '1' && p[2] <= '9') {
+        unsigned int val = 0;
+        n = (uchar)(p[2] - '0');
+        w = (n <= fr->prod_n) ? fr->prod_cap[n] : 0;
+        if (w != VAL_ACC) {
+          b = (uchar)(w & 0xff);
+          if (is_lit(b) || isconst(b))
+            val = lit_val(b);
         }
-        p += 2;
+        if (p[1] == 'c')
+          emit((uchar)(val & 0xff));
+        else
+          emit((uchar)((val >> 8) & 0xff));
+        p += 3;
         continue;
       }
     }
@@ -1125,25 +1130,6 @@ static void put_buf(uchar c, void *ctx) {
   }
 }
 
-// \c — character literal 'x' / '\n' → TY_CHAR const
-static int match_char_lit(void) {
-  uchar c, slot;
-
-  skip_ws();
-  if (!line_need() || line_buf[line_pos] != '\'') return 0;
-  line_pos++;
-  if (!next_body_char(&c)) return 0;
-  if (!line_need() || line_buf[line_pos] != '\'') return 0;
-  line_pos++;
-  note_progress();
-  last_char_lit = c;
-  slot = (uchar)as_addr((uchar)lit_addr((unsigned int)c));
-  record_capture(MAKE_CAP(slot, TY_CHAR));
-  return 1;
-}
-
-// \S — emit string bytes + NUL into bytecode (opening " already matched;
-//      BNF production [" ] emits the op_str '"' opcode)
 static int match_str_emit(void) {
   if (!line_need()) return 0;
   if (!read_quoted_body('"', put_emit, 0)) return 0;
@@ -1172,12 +1158,25 @@ static int match_str_const(void) {
 
 static int match_num(void) {
   word v;
-  uchar slot;
+  uchar slot, ch;
 
   skip_ws();
   if (!line_need()) return 0;
-  if (!isdigit(line_buf[line_pos])) return 0;
 
+  /* character literal 'x' / '\n' / ... → small integer const */
+  if (line_buf[line_pos] == '\'') {
+    line_pos++;
+    if (!next_body_char(&ch)) return 0;
+    if (!line_need() || line_buf[line_pos] != '\'') return 0;
+    line_pos++;
+    note_progress();
+    v = (word)ch;
+    slot = (uchar)as_addr((uchar)lit_addr((unsigned int)v));
+    record_capture(MAKE_CAP(slot, TY_CHAR));
+    return 1;
+  }
+
+  if (!isdigit(line_buf[line_pos])) return 0;
   v = 0;
   while (line_need() && isdigit(line_buf[line_pos])) {
     v = (word)(v * 10 + (line_buf[line_pos] - '0'));
@@ -1211,7 +1210,7 @@ static uchar *blobs[NRULES];
 // escapes that stay "\c" in the blob (all others become the plain char c)
 static int esc_kept(uchar e) {
   if (e >= '1' && e <= '9') return 1;
-  return strchr("insSCfv<d+{}[]#=aptrlxywmzkzc", e) != NULL;
+  return e == '\\' || strchr("insSCcfhv<d+{}[]#=aptrlxywmzkz", e) != NULL;
 }
 
 static void build_one_rule(uchar r, char *rhs) {
@@ -1714,7 +1713,7 @@ static int step(void) {
     else if (e == 'n') ok = match_newline();
     else if (e == 's') ok = match_str_const();
     else if (e == 'S') ok = match_str_emit();
-    else if (e == 'c') ok = match_char_lit();
+    else if (e == '\\') ok = match_lit('\\');
     else if (e == 'z') {
       // sizeof value from cur_type (after matching T)
       {
