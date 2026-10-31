@@ -146,6 +146,9 @@ uchar *g_loaded;
 // rule['X'-'A'] = NULL-terminated array of uchar* into one malloc blob
 static uchar **rule[NRULES];
 
+// blobs[r] holds the contiguous text for rule r
+static uchar *blobs[NRULES];
+
 static FILE *src_fp;
 static char *src_name;
 
@@ -197,6 +200,11 @@ static Frame *stack;
 static uchar stack_cap;
 static uchar sp;
 
+// newest frame (one call instead of a repeated index multiply)
+static Frame *top(void) {
+  return &stack[sp - 1];
+}
+
 // capture: hold matched text until alt commits (grows)
 static uchar *capture[MAX_STACK];
 static word  cap_len[MAX_STACK];
@@ -210,6 +218,9 @@ static word  cap_max[MAX_STACK];
 
 // longest identifier (stack buffers only)
 #define NAME_LEN   32
+
+// the identifier just matched by match_ident_raw (shared, no arguments)
+static char  id_buf[NAME_LEN];
 
 static char  last_undef[NAME_LEN]; // furthest undefined ident (for reject msg)
 static uchar had_undef;            // sticky: saw undefined ident
@@ -234,6 +245,13 @@ static word cur_type = TY_WORD;
 #define GREEN  "\033[32m"
 #define NORMAL "\033[0m"
 
+// -DNOVLOG: all vlog() calls (and their string literals) vanish
+#ifdef NOVLOG
+
+  #define vlog(...) ((void)0)
+
+#else
+
 static void vlog(const char *fmt, ...) {
   va_list ap;
 
@@ -243,6 +261,8 @@ static void vlog(const char *fmt, ...) {
   vfprintf(stderr, fmt, ap);
   va_end(ap);
 }
+
+#endif
 
 // TODO: use or remove? prefer save bytes for cc65, use it if can
 static void v1(const char *fmt, ...) {
@@ -267,17 +287,15 @@ static void v1_indent(void) {
 
 // ---- line buffer ----
 
-static int is_ws(uchar c) {
-  // c <= 32 was the old rule; isspace is clearer and smaller on cc65
-  return isspace(c);
-}
+// c <= 32 was the old rule; isspace is clearer and smaller on cc65
+#define is_ws(c) isspace(c)
 
 
 // append one char from file into line_buf
 static int line_grow(uchar c) {
   if (line_len + 1 >= line_cap) {
     word ncap = line_cap ? (word)(line_cap * 2) : 256;
-    uchar *n = (uchar *)realloc(line_buf, ncap);
+    uchar *n = realloc(line_buf, ncap);
 
     if (!n) return 0;
     line_buf = n;
@@ -287,17 +305,21 @@ static int line_grow(uchar c) {
   return 1;
 }
 
-// ensure at least one more char available at line_pos (read from file)
-static int line_need(void) {
+// read ONE more char from the file onto the end of line_buf
+static int line_fetch(void) {
   int ch;
 
-  if (line_pos < line_len) return 1;
   if (!src_fp) return 0;
   ch = fgetc(src_fp);
   if (ch == EOF) return 0;
   file_pos++;
-  if (!line_grow((uchar)ch)) return 0;
-  return 1;
+  return line_grow(ch);
+}
+
+// ensure at least one more char available at line_pos (read from file)
+static int line_need(void) {
+  if (line_pos < line_len) return 1;
+  return line_fetch();
 }
 
 static word abs_pos(void) {
@@ -324,26 +346,43 @@ static void line_commit(void) {
   line_pos = 0;
 }
 
-static void capture_add(uchar c) {
-  word i, nm;
+// make room for one more byte in capture[i]
+static int cap_room(word i) {
+  word nm;
   uchar *nbuf;
+
+  if (cap_len[i] + 1 < cap_max[i]) return 1;
+
+  nm = cap_max[i] ? (word)(cap_max[i] * 2) : 256;
+  nbuf = realloc(capture[i], nm);
+  if (!nbuf) return 0;
+  capture[i] = nbuf;
+  cap_max[i] = nm;
+  return 1;
+}
+
+static void capture_add(uchar c) {
+  word i;
 
   if (sp == 0) return;
 
   i = (word)(sp - 1);
-  if (cap_len[i] + 1 >= cap_max[i]) {
-    nm = cap_max[i] ? (word)(cap_max[i] * 2) : 256;
-    nbuf = (uchar *)realloc(capture[i], nm);
-    if (!nbuf) return;
-    capture[i] = nbuf;
-    cap_max[i] = nm;
-  }
+  if (!cap_room(i)) return;
   capture[i][cap_len[i]++] = c;
 }
 
+// consume one source char into the capture
+static void eat(void) {
+  capture_add(line_buf[line_pos++]);
+}
+
+// consume n source chars into the capture
+static void eat_n(uchar n) {
+  while (n--) eat();
+}
+
 static void capture_commit(uchar frame) {
-  word p, i, nm;
-  uchar *nbuf;
+  word p, i;
 
   if (frame == 0) {
     for (i = 0; i < cap_len[0]; i++)
@@ -355,13 +394,7 @@ static void capture_commit(uchar frame) {
 
   p = (word)(frame - 1);
   for (i = 0; i < cap_len[frame]; i++) {
-    if (cap_len[p] + 1 >= cap_max[p]) {
-      nm = cap_max[p] ? (word)(cap_max[p] * 2) : 256;
-      nbuf = (uchar *)realloc(capture[p], nm);
-      if (!nbuf) break;
-      capture[p] = nbuf;
-      cap_max[p] = nm;
-    }
+    if (!cap_room(p)) break;
     capture[p][cap_len[p]++] = capture[frame][i];
   }
   cap_len[frame] = 0;
@@ -376,14 +409,31 @@ static void note_progress(void) {
   far_sp = sp;
   if (far_sp > MAX_STACK) far_sp = MAX_STACK;
   for (i = 0; i < far_sp; i++) {
-    far_stack[i] = (uchar)('A' + stack[i].rule);
+    far_stack[i] = 'A' + stack[i].rule;
     far_alt[i] = stack[i].alt;
   }
 }
 
 
 // ---- bytecode emission (tpi-style) ----
-static uchar hexval(uchar c);
+
+// hex digit value for \#xx
+static uchar hexval(uchar c) {
+  if (c >= '0' && c <= '9') return c - '0';
+  c = tolower(c);
+  if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+  return 0;
+}
+
+// two hex digits at p -> byte
+static uchar hex2(uchar *p) {
+  return hexval(p[0]) * 16 + hexval(p[1]);
+}
+
+// const-pool slot holding value v
+static uchar const_slot(unsigned int v) {
+  return as_addr(lit_addr(v));
+}
 
 // record a value-producing match into \\1..\\9 of current frame
 static void record_capture(word val) {
@@ -391,13 +441,20 @@ static void record_capture(word val) {
 
   if (sp == 0) return;
 
-  fr = &stack[sp - 1];
+  fr = top();
   if (fr->prod_n < 9) {
     fr->prod_n++;
     fr->prod_cap[fr->prod_n] = val;
   }
 
   fr->result = val;
+}
+
+// capture n of the current frame (0 if there is none)
+static word cap_val(uchar n) {
+  Frame *fr = top();
+
+  return (n <= fr->prod_n) ? fr->prod_cap[n] : 0;
 }
 
 // slots: globals, frames, params, locals and temps share one counter
@@ -421,11 +478,11 @@ static word force_addr(uchar n) {
 
   if (sp == 0) return 0;
 
-  fr = &stack[sp - 1];
+  fr = top();
   if (n < 1 || n > fr->prod_n) return 0;
 
   v = fr->prod_cap[n];
-  if (v != VAL_ACC) return (word)CAP_SLOT(v);
+  if (v != VAL_ACC) return CAP_SLOT(v);
 
   tmp = alloc_slot();
   emitop2('S', tmp);
@@ -443,10 +500,12 @@ static word force_addr(uchar n) {
 // quiet: GEN is printed only when the owning alt commits (ST_OK)
 static uchar *run_production(uchar *p) {
   Frame *fr;
-  uchar n, b, *q;
-  word w;
+  uchar n, b, e, adv, cv, dest, src, *q;
+  word w, f;
+  unsigned int val;
+  Symbol *fs;
 
-  fr = &stack[sp - 1];
+  fr = top();
 
   // ACC captures this production refers to are spilled FIRST, so the
   // spill code lands before the bytes that use it (\l takes ACC as is)
@@ -457,7 +516,7 @@ static uchar *run_production(uchar *p) {
     if (*q == 'l') continue;
     if (*q == 'a' && q[1]) q++;
     if (*q >= '1' && *q <= '9') {
-      n = (uchar)(*q - '0');
+      n = *q - '0';
       if (n <= fr->prod_n && fr->prod_cap[n] == VAL_ACC)
         force_addr(n);
       // TDOO: should 1..9 be relative to frame pointer?
@@ -466,103 +525,99 @@ static uchar *run_production(uchar *p) {
 
   while (*p && *p != ']') {
     if (*p == '\\') {
-      if (p[1] == 'v') {
-        uchar op = (uchar)(0xC0 | (fr->func_vec & 0x3f));
-        emitop(op);
-        p += 2;
-        continue;
-      }
-      if (p[1] == 'a' && p[2] >= '1' && p[2] <= '9') {
-        n = (uchar)(p[2] - '0');
-        w = force_addr(n);
-        b = (uchar)(w & 0xff);
-        emit(b);
-        p += 3;
-        continue;
-      }
-      // \lN: load capture N into ACC unless it already is there
-      if (p[1] == 'l' && p[2] >= '1' && p[2] <= '9') {
-        n = (uchar)(p[2] - '0');
-        w = (n <= fr->prod_n) ? fr->prod_cap[n] : 0;
-        if (w != VAL_ACC) {
-          b = (uchar)as_addr((uchar)(w & 0xff));
-          emitop2('L', b);
+      e = p[1];
+      n = p[2] - '0';   // capture digit for \a \l \c \h
+      adv = 2;          // chars used; 0 = not an escape, emit it literally
+
+      if (e >= '1' && e <= '9') {
+        // \N: insert result byte of capture N
+        w = cap_val(e - '0');
+        if (w == VAL_ACC) w = force_addr(e - '0');
+        emit(as_addr(w & 0xff));
+      } else if ((e == 'a' || e == 'l' || e == 'c' || e == 'h') && n >= 1 && n <= 9) {
+        adv = 3;
+        w = cap_val(n);
+        if (e == 'a') {
+          // \aN: force addr
+          emit(force_addr(n) & 0xff);
+        } else if (e == 'l') {
+          // \lN: load capture N into ACC unless it already is there
+          if (w != VAL_ACC)
+            emitop2('L', as_addr(w & 0xff));
+        } else {
+          // \cN: emit low byte of capture N's *value* (consts from \d / 'x')
+          // \hN: emit high byte of that value
+          val = 0;
+          if (w != VAL_ACC) {
+            b = w & 0xff;
+            if (is_lit(b) || isconst(b))
+              val = lit_val(b);
+          }
+          emit((e == 'c' ? val : val >> 8) & 0xff);
         }
-        p += 3;
-        continue;
-      }
-      if (p[1] >= '1' && p[1] <= '9') {
-        n = (uchar)(p[1] - '0');
-        w = (n <= fr->prod_n) ? fr->prod_cap[n] : 0;
-        if (w == VAL_ACC) w = force_addr(n);
-        b = (uchar)as_addr((uchar)(w & 0xff));
-        emit(b); 
-        p += 2;
-        continue;
-      }
+      } else switch (e) {
+
+      case 'v':
+        emitop(0xC0 | (fr->func_vec & 0x3f));
+        break;
+
       // \[ \] emit a literal bracket
-      if (p[1] == '[' || p[1] == ']') {
-        emitop(p[1]);
-        p += 2;
-        continue;
-      }
+      case '[': case ']':
+        emitop(e);
+        break;
+
       // \t: new temp slot, emit it, remember it as a capture
-      if (p[1] == 't') {
+      // \e: exclusive limit — S temp; J temp (store ACC-1)
+      case 't': case 'e':
         b = alloc_slot();
-        emit(b);
+        if (e == 'e') {
+          emitop2('S', b);
+          emitop2('J', b);
+        } else
+          emit(b);
         record_capture(b);
-        p += 2;
-        continue;
-      }
+        break;
+
       // \x: forward jump placeholder
-      if (p[1] == 'x') {
+      case 'x':
         emit(0);
         if (fr->npatch < 4)
-          fr->patch[fr->npatch++] = (word)(code_len - 1);
-        p += 2;
-        continue;
-      }
+          fr->patch[fr->npatch++] = code_len - 1;
+        break;
+
       // \y: patch newest placeholder to jump here
-      if (p[1] == 'y') {
+      case 'y':
         if (fr->npatch) {
           w = fr->patch[--fr->npatch];
           if (code_len - (w + 1) > 255) IVM_GEN_FAIL("jump too far");
-          code_buf[w] = (uchar)(code_len - (w + 1));
+          code_buf[w] = code_len - (w + 1);
         }
-        p += 2;
-        continue;
-      }
+        break;
+
       // \w: swap the two newest placeholders
-      if (p[1] == 'w') {
+      case 'w':
         if (fr->npatch >= 2) {
           w = fr->patch[fr->npatch - 1];
           fr->patch[fr->npatch - 1] = fr->patch[fr->npatch - 2];
           fr->patch[fr->npatch - 2] = w;
         }
-        p += 2;
-        continue;
-      }
+        break;
+
       // \m: remember loop start
-      if (p[1] == 'm') {
-        fr->mark = (word)code_len;
-        p += 2;
-        continue;
-      }
+      case 'm':
+        fr->mark = code_len;
+        break;
+
       // \z: backward jump delta to the mark (after the B opcode)
-      if (p[1] == 'z') {
-        w = (word)(code_len + 1 - fr->mark);
+      case 'z':
+        w = code_len + 1 - fr->mark;
         if (w > 255) IVM_GEN_FAIL("loop body too large");
         emit(w);
-        p += 2;
-        continue;
-      }
+        break;
+
       // \k: param slot for the next call argument; frame above is the caller
       // (the rule that matched \i and called Z)
-      if (p[1] == 'k') {
-        uchar cv;
-        word f;
-        Symbol *fs;
-
+      case 'k':
         cv = (sp >= 2) ? stack[sp - 2].func_vec : 0xff;
         f = (cv == 0xff) ? SYM_NONE : sym_func(cv);
         if (f == SYM_NONE) IVM_GEN_FAIL("call of unknown function");
@@ -571,49 +626,22 @@ static uchar *run_production(uchar *p) {
           IVM_GEN_FAIL("too many arguments");
         // (the "S" opcode is not missing: the BNF has [S\k], \k is only the slot)
         emit(fs->param_slot[fr->arg_i++]);
-        p += 2;
-        continue;
-      }
+        break;
+
       // \#xx: emit raw hex byte (e.g. \#00 for NUL, \#20 for space)
-      if (p[1] == '#' && p[2] && p[3]) {
-        emit((uchar)(hexval(p[2]) * 16 + hexval(p[3])));
-        p += 4;
-        continue;
-      }
-            // \cN: emit low byte of capture N's *value* (consts from \d / 'x')
-      // \hN: emit high byte of that value
-      if ((p[1] == 'c' || p[1] == 'h') && p[2] >= '1' && p[2] <= '9') {
-        unsigned int val = 0;
-        n = (uchar)(p[2] - '0');
-        w = (n <= fr->prod_n) ? fr->prod_cap[n] : 0;
-        if (w != VAL_ACC) {
-          b = (uchar)(w & 0xff);
-          if (is_lit(b) || isconst(b))
-            val = lit_val(b);
-        }
-        if (p[1] == 'c')
-          emit((uchar)(val & 0xff));
-        else
-          emit((uchar)((val >> 8) & 0xff));
-        p += 3;
-        continue;
-      }
+      case '#':
+        if (p[2] && p[3]) {
+          emit(hex2(p + 2));
+          adv = 4;
+        } else
+          adv = 0;
+        break;
+
       // \g: global/local init from captures \1=dest slot, \2=src const
       //   scope 0: defer until main entry; else emit L+S now
-      // \e: exclusive limit — S temp; J temp (store ACC-1)
-      if (p[1] == 'e') {
-        b = alloc_slot();
-        emitop2('S', b);
-        emitop2('J', b);
-        record_capture(b);
-        p += 2;
-        continue;
-      }
-      if (p[1] == 'g') {
-        uchar dest, src;
-        dest = (uchar)(fr->prod_cap[1] & 0xff);
-        src  = (uchar)(fr->prod_cap[2] & 0xff);
-        src  = (uchar)as_addr(src);
+      case 'g':
+        dest = fr->prod_cap[1] & 0xff;
+        src  = as_addr(fr->prod_cap[2] & 0xff);
         if (scope_depth == 0) {
           if (nginit >= MAX_GINIT)
             IVM_GEN_FAIL("too many global inits");
@@ -625,7 +653,14 @@ static uchar *run_production(uchar *p) {
           emitop2('L', src);
           emitop2('S', dest);
         }
-        p += 2;
+        break;
+
+      default:
+        adv = 0;
+      }
+
+      if (adv) {
+        p += adv;
         continue;
       }
     }
@@ -644,10 +679,9 @@ static void skip_hspace(void) {
 
   while (line_need()) {
     c = line_buf[line_pos];
-    if (c == ' ' || c == '\t' || c == '\r') {
-      capture_add(c);
-      line_pos++;
-    } else
+    if (c == ' ' || c == '\t' || c == '\r')
+      eat();
+    else
       break;
   }
 }
@@ -678,17 +712,6 @@ typedef struct {
 static CommentStyle comments[MAX_COMMENTS];
 static uchar ncomments;
 
-// Default: { } block (Pascal). Cleared/replaced when BNF has #= lines.
-static void comments_set_default(void) {
-  ncomments = 1;
-  comments[0].start[0] = '{';
-  comments[0].start[1] = 0;
-  comments[0].start_len = 1;
-  comments[0].end[0] = '}';
-  comments[0].end[1] = 0;
-  comments[0].end_len = 1;
-}
-
 // Parse one #= directive body (after the "#="). Returns 1 on success.
 // Forms:  "{ }" | "/* */" | "//"   (whitespace separates start/end)
 static int comments_add_from_line(const char *p) {
@@ -711,7 +734,7 @@ static int comments_add_from_line(const char *p) {
     cs->start[i++] = *p++;
   }
   cs->start[i] = 0;
-  cs->start_len = (uchar)i;
+  cs->start_len = i;
   if (!cs->start_len) return 0;
 
   while (*p == ' ' || *p == '\t') p++;
@@ -722,45 +745,42 @@ static int comments_add_from_line(const char *p) {
     cs->end[i++] = *p++;
   }
   cs->end[i] = 0;
-  cs->end_len = (uchar)i;
+  cs->end_len = i;
 
   ncomments++;
   return 1;
+}
+
+// Default: { } block (Pascal). Cleared/replaced when BNF has #= lines.
+static void comments_set_default(void) {
+  ncomments = 0;
+  comments_add_from_line("{ }");
 }
 
 // True if line_buf[line_pos..] starts with s[0..len)
 // Must read past line_len even when line_pos < line_len (line_need alone is not enough).
 static int match_at(const char *s, uchar len) {
   uchar i;
-  int ch;
 
   if (!len) return 0;
   for (i = 0; i < len; i++) {
-    while (line_pos + i >= line_len) {
-      if (!src_fp) return 0;
-      ch = fgetc(src_fp);
-      if (ch == EOF) return 0;
-      file_pos++;
-      if (!line_grow((uchar)ch)) return 0;
-    }
+    while (line_pos + i >= line_len)
+      if (!line_fetch()) return 0;
     if (line_buf[line_pos + i] != (uchar)s[i]) return 0;
   }
   return 1;
 }
 
 static void skip_ws(void) {
-  char c;
-  uchar ci, i;
+  uchar ci;
   CommentStyle *cs;
 
   for (;;) {
 
     // whitespace
-    while (line_need() && is_ws(c = line_buf[line_pos])) {
-      capture_add(c);
-      line_pos++;
-      note_progress();
-    }
+    while (line_need() && is_ws(line_buf[line_pos]))
+      eat();
+    note_progress();
     if (!line_need()) return;
 
     // try each configured comment style
@@ -769,34 +789,28 @@ static void skip_ws(void) {
       if (!match_at(cs->start, cs->start_len)) continue;
 
       // consume start
-      for (i = 0; i < cs->start_len; i++)
-        capture_add(line_buf[line_pos++]);
+      eat_n(cs->start_len);
 
       if (cs->end_len == 0) {
         // line comment: to newline (keep the \n) or EOF
-        while (line_need() && line_buf[line_pos] != '\n') {
-          capture_add(line_buf[line_pos++]);
-        }
+        while (line_need() && line_buf[line_pos] != '\n')
+          eat();
       } else {
         // block comment: to end marker
         while (line_need()) {
           if (match_at(cs->end, cs->end_len)) {
-            for (i = 0; i < cs->end_len; i++)
-              capture_add(line_buf[line_pos++]);
+            eat_n(cs->end_len);
             break;
           }
-          capture_add(line_buf[line_pos++]);
+          eat();
         }
       }
       note_progress();
-      goto next_round;
+      break;
     }
 
     // nothing matched
-    return;
-
-  next_round:
-    ;
+    if (ci >= ncomments) return;
   }
 }
 
@@ -807,8 +821,7 @@ static int match_newline(void) {
   skip_hspace();
   nnl = 0;
   while (line_need() && line_buf[line_pos] == '\n') {
-    capture_add('\n');
-    line_pos++;
+    eat();
     nnl++;
     note_progress();
     skip_hspace();
@@ -833,13 +846,13 @@ static int match_lit(uchar want) {
   } else if (g != want) {
     return 0;
   }
-  capture_add(g);
-  line_pos++;
+  eat();
   note_progress();
   return 1;
 }
 
-static int match_ident_raw(char *idbuf, word idmax) {
+// match an identifier into id_buf
+static int match_ident_raw(void) {
   uchar c;
   word n;
 
@@ -855,14 +868,13 @@ static int match_ident_raw(char *idbuf, word idmax) {
     c = line_buf[line_pos];
     // letter, digit, or underscore
     if (isalnum(c) || c == '_') {
-      if (n + 1 < idmax)
-        idbuf[n++] = c;
-      capture_add(c);
-      line_pos++;
+      if (n + 1 < NAME_LEN)
+        id_buf[n++] = c;
+      eat();
     } else
       break;
   }
-  idbuf[n] = 0;
+  id_buf[n] = 0;
   note_progress();
   return 1;
 }
@@ -892,58 +904,66 @@ static uchar peek_char(void) {
 //   name followed by ( is looked up as a function (like tpi.c), else a variable
 
 
-// Record undefined ident for reject message (keep furthest; funcs win over vars)
-static void note_undef(const char *id, uchar is_func, word pos) {
+// Record undefined ident (id_buf) for reject message (keep furthest; funcs win over vars)
+static void note_undef(uchar is_func, word pos) {
   if (!is_func && had_undef_func) return;
   if (had_undef && pos < undef_pos_abs) return;
-  strncpy(last_undef, id, NAME_LEN - 1);
+  strncpy(last_undef, id_buf, NAME_LEN - 1);
   last_undef[NAME_LEN - 1] = 0;
   had_undef = 1;
   had_undef_func = is_func;
   undef_pos_abs = pos;
 }
 
+// type word of a symbol (for MAKE_CAP)
+static word sym_type(Symbol *s) {
+  return ((word)s->vtype << 8) | (s->is_ptr ? TY_PTR : 0);
+}
+
+// give a new symbol the type being declared (cur_type)
+static void set_decl_type(Symbol *s) {
+  s->vtype = CAP_TYPE(cur_type) >> 8;
+  s->is_ptr = CAP_IS_PTR(cur_type) ? 1 : 0;
+}
+
 // \1..\9 — like \i, but slot must equal capture n (same variable).
 // Fail quietly (no had_undef): rule should fall through to next alt.
 static int match_ident_same(uchar n) {
-  char id[NAME_LEN];
   word i, expect;
   Frame *fr;
   uchar slot;
 
   if (sp == 0) return 0;
-  fr = &stack[sp - 1];
+  fr = top();
   if (n < 1 || n > fr->prod_n) return 0;
   expect = fr->prod_cap[n];
   if (expect == VAL_ACC) return 0;
 
-  if (!match_ident_raw(id, NAME_LEN)) return 0;
-  i = sym_find(id, SYM_VAR, 0);
+  if (!match_ident_raw()) return 0;
+  i = sym_find(id_buf, SYM_VAR, 0);
   if (i == SYM_NONE) return 0; /* not defined: just fail this alt */
   slot = syms[i].address;
-  if (slot != (uchar)(expect & 0xff)) return 0;
-  record_capture(MAKE_CAP(slot, ((word)syms[i].vtype << 8) |
-                 (syms[i].is_ptr ? TY_PTR : 0)));
+  if (slot != (expect & 0xff)) return 0;
+  record_capture(MAKE_CAP(slot, sym_type(&syms[i])));
   return 1;
 }
 
 static int match_ident(void) {
-  char id[NAME_LEN];
-  uchar c;
+  uchar c, slot;
   word start_abs, i;
   Symbol *s;
 
   start_abs = abs_pos();
-  if (!match_ident_raw(id, NAME_LEN)) return 0;
+  if (!match_ident_raw()) return 0;
 
   c = peek_char();
 
   // TODO: how about function pointers, lol
-  i = sym_find(id, (c == '(') ? SYM_FUNC : SYM_VAR, 0);
+  i = sym_find(id_buf, (c == '(') ? SYM_FUNC : SYM_VAR, 0);
 
   if (i == SYM_NONE) {
-    note_undef(id, (uchar)(c == '('), start_abs);
-    vlog("  ident '%s' not in scope\n", id);
+    note_undef(c == '(', start_abs);
+    vlog("  ident '%s' not in scope\n", id_buf);
     return 0;
   }
 
@@ -952,90 +972,84 @@ static int match_ident(void) {
 
     // It's a function name?
     last_func_vec = s->address;
-    record_capture(MAKE_CAP(s->ret_slot, ((word)s->vtype << 8) | (s->is_ptr ? TY_PTR : 0)));
+    slot = s->ret_slot;
 
   } else {
 
     // It's a variable name?
     last_func_vec = 0xff;
-    record_capture(MAKE_CAP(s->address, ((word)s->vtype << 8) | (s->is_ptr ? TY_PTR : 0)));
+    slot = s->address;
   }
+  record_capture(MAKE_CAP(slot, sym_type(s)));
 
   // kept in the frame: later \i matches (call arguments) must not change \v
-  stack[sp - 1].func_vec = last_func_vec;
+  top()->func_vec = last_func_vec;
 
   return 1;
 }
 
 // \+ — declare ident into current scope; result = new slot
 static int match_ident_decl(void) {
-  char id[NAME_LEN];
   uchar slot;
   word i;
 
-  if (!match_ident_raw(id, NAME_LEN)) return 0;
-  i = sym_find(id, SYM_VAR, 1);
+  if (!match_ident_raw()) return 0;
+  i = sym_find(id_buf, SYM_VAR, 1);
   if (i != SYM_NONE)
     slot = syms[i].address;
   else {
     slot = alloc_slot();
-    {
-      Symbol *ns = sym_add(id, SYM_VAR, slot);
-      ns->vtype = (uchar)(CAP_TYPE(cur_type) >> 8);
-      ns->is_ptr = CAP_IS_PTR(cur_type) ? 1 : 0;
-    }
+    set_decl_type(sym_add(id_buf, SYM_VAR, slot));
   }
   record_capture(MAKE_CAP(slot, cur_type));
   vlog("  decl '%s' scope %u slot %u type %c%s\n",
-       id, (unsigned)scope_depth, (unsigned)slot,
+       id_buf, (unsigned)scope_depth, (unsigned)slot,
        (char)(CAP_TYPE(cur_type) >> 8), CAP_IS_PTR(cur_type) ? "*" : "");
   return 1;
 }
 
 // \f — declare function: new frame + vector index; mark entry at current bin_ptr later
 static int match_ident_func_decl(void) {
-  char id[NAME_LEN];
   uchar base, vec;
   Symbol *s;
 
-  if (!match_ident_raw(id, NAME_LEN)) return 0;
-  if (sym_find(id, SYM_FUNC, 1) != SYM_NONE) return 0; // declared twice
+  if (!match_ident_raw()) return 0;
+  if (sym_find(id_buf, SYM_FUNC, 1) != SYM_NONE) return 0; // declared twice
   if (nvector >= (uchar)(MAX_VECTORS - 1)) IVM_GEN_FAIL("too many functions");
 
   // frame: base+0 ret addr, +1 ret value (the function name), +2 prev fp,
   // +3 last param (JSR stores ACC there), +4.. other params, then locals
   base = next_slot;
   if (base >= CONST_TOP - 40) return 0;
-  next_slot = (uchar)(base + 4);
+  next_slot = base + 4;
 
   vec = nvector;
-  s = sym_add(id, SYM_FUNC, vec);
+  s = sym_add(id_buf, SYM_FUNC, vec);
   s->ret_addr_slot = base;
-  s->ret_slot = (uchar)(base + 1);
+  s->ret_slot = base + 1;
 
   // return value variable: only visible inside the body (dropped by \})
-  s = sym_add(id, SYM_VAR, (uchar)(base + 1));
-  s->scope = (uchar)(scope_depth + 1);
+  s = sym_add(id_buf, SYM_VAR, base + 1);
+  s->scope = scope_depth + 1;
 
   frame_base[vec] = base;
   nvector++;
   last_func_vec = vec;
   pending_func_entry = vec;
-  if (strcmp(id, "main") == 0)
+  if (strcmp(id_buf, "main") == 0)
     main_vec = vec;
-  record_capture((uchar)(base + 1));
-  vlog("  func '%s' slot %u vec %u frame %u\n", id, (unsigned)(base + 1), (unsigned)vec, (unsigned)base);
+  record_capture(base + 1);
+  vlog("  func '%s' slot %u vec %u frame %u\n", id_buf, (unsigned)(base + 1), (unsigned)vec, (unsigned)base);
   return 1;
 }
 
 // \p — declare parameter n of the function just declared by \f
 static int match_param_decl(void) {
-  char id[NAME_LEN];
   uchar k, slot, v;
   word i;
   Symbol *s;
 
-  if (!match_ident_raw(id, NAME_LEN)) return 0;
+  if (!match_ident_raw()) return 0;
   v = last_func_vec;
   if (v == 0xff) return 0;
   // parameter number = params already in this scope (rewinds on backtrack)
@@ -1043,16 +1057,15 @@ static int match_param_decl(void) {
   for (i = 0; i < nsym; i++)
     if (syms[i].scope == scope_depth && syms[i].pidx) k++;
   if (k >= MAX_PARAMS) return 0;
-  if (sym_find(id, SYM_VAR, 1) != SYM_NONE) return 0;
-  slot = (uchar)(frame_base[v] + 4 + k);
-  s = sym_add(id, SYM_VAR, slot);
-  s->pidx = (uchar)(k + 1);
-  s->vtype = (uchar)(CAP_TYPE(cur_type) >> 8);
-  s->is_ptr = CAP_IS_PTR(cur_type) ? 1 : 0;
-  if (next_slot <= slot) next_slot = (uchar)(slot + 1);
+  if (sym_find(id_buf, SYM_VAR, 1) != SYM_NONE) return 0;
+  slot = frame_base[v] + 4 + k;
+  s = sym_add(id_buf, SYM_VAR, slot);
+  s->pidx = k + 1;
+  set_decl_type(s);
+  if (next_slot <= slot) next_slot = slot + 1;
   record_capture(MAKE_CAP(slot, cur_type));
   vlog("  param '%s' #%u slot %u type %c%s\n",
-       id, (unsigned)k, (unsigned)slot,
+       id_buf, (unsigned)k, (unsigned)slot,
        (char)(CAP_TYPE(cur_type) >> 8), CAP_IS_PTR(cur_type) ? "*" : "");
   return 1;
 }
@@ -1079,7 +1092,7 @@ static int params_done(void) {
     }
   }
   if (n) {
-    syms[last].address = (uchar)(frame_base[v] + 3);
+    syms[last].address = frame_base[v] + 3;
     fs->param_slot[n - 1] = syms[last].address;
     next_slot--;        // its old cell was the top one: reuse it for locals
   }
@@ -1094,42 +1107,36 @@ static int params_done(void) {
 // String / char escapes — one decoder, shared by \S \s \c
 // ---------------------------------------------------------------------------
 
+// simple escapes: esc_in[i] decodes to esc_out[i]
+static const char esc_in[]  = "ntrabfv";
+static const char esc_out[] = "\n\t\r\a\b\f\v";
+
 // After a leading '\\' has been consumed: decode one escape into *out.
 // Advances line_pos. Returns 0 on failure (EOF / bad \x).
 static int decode_escape(uchar *out) {
   uchar c, v, i;
+  char *s;
 
   if (!line_need()) return 0;
   c = line_buf[line_pos++];
-  switch (c) {
-  case 'n':  *out = '\n'; return 1;
-  case 't':  *out = '\t'; return 1;
-  case 'r':  *out = '\r'; return 1;
-  case '0':  *out = 0;    return 1;
-  case '\\': *out = '\\'; return 1;
-  case '"':  *out = '"';  return 1;
-  case '\'': *out = '\''; return 1;
-  case 'a':  *out = '\a'; return 1;
-  case 'b':  *out = '\b'; return 1;
-  case 'f':  *out = '\f'; return 1;
-  case 'v':  *out = '\v'; return 1;
-  case 'x': case 'X':
+  if (c == '0') {
+    *out = 0;
+  } else if (c == 'x' || c == 'X') {
     v = 0;
     for (i = 0; i < 2; i++) {
       if (!line_need()) break;
       c = line_buf[line_pos];
-      if (c >= '0' && c <= '9')      v = (uchar)((v << 4) + (c - '0'));
-      else if (c >= 'a' && c <= 'f') v = (uchar)((v << 4) + (c - 'a' + 10));
-      else if (c >= 'A' && c <= 'F') v = (uchar)((v << 4) + (c - 'A' + 10));
-      else break;
+      if (!isxdigit(c)) break;
+      v = (v << 4) + hexval(c);
       line_pos++;
     }
     *out = v;
-    return 1;
-  default:
-    *out = c; /* C: unknown escape → the char itself */
-    return 1;
+  } else {
+    // \\ \" \' and unknown escapes → the char itself (like C)
+    s = c ? strchr(esc_in, c) : NULL;
+    *out = s ? esc_out[s - esc_in] : c;
   }
+  return 1;
 }
 
 // Next body character of a "..." or '...' string (handles \\ escapes).
@@ -1172,7 +1179,7 @@ static void put_emit(uchar c, void *ctx) {
 typedef struct { uchar *buf; word n, max; } StrBuf;
 
 static void put_buf(uchar c, void *ctx) {
-  StrBuf *sb = (StrBuf *)ctx;
+  StrBuf *sb = ctx;
   if (sb->n + 1 < sb->max) {
     sb->buf[sb->n++] = c;
     capture_add(c);
@@ -1195,7 +1202,7 @@ static int match_str_const(void) {
   skip_ws();
   if (!line_need() || line_buf[line_pos] != '"') return 0;
   line_pos++;
-  sb.buf = buf; sb.n = 0; sb.max = (word)sizeof(buf);
+  sb.buf = buf; sb.n = 0; sb.max = sizeof(buf);
   if (!read_quoted_body('"', put_buf, &sb)) return 0;
   if (sb.n + 1 >= sb.max) return 0;
   buf[sb.n++] = 0;
@@ -1206,55 +1213,46 @@ static int match_str_const(void) {
 
 
 static int match_num(void) {
-  word v;
-  uchar slot, ch;
+  word v, ty;
+  uchar ch;
 
   skip_ws();
   if (!line_need()) return 0;
 
-  /* character literal 'x' / '\n' / ... → small integer const */
   if (line_buf[line_pos] == '\'') {
+    /* character literal 'x' / '\n' / ... → small integer const */
     line_pos++;
     if (!next_body_char(&ch)) return 0;
     if (!line_need() || line_buf[line_pos] != '\'') return 0;
     line_pos++;
-    note_progress();
-    v = (word)ch;
-    slot = (uchar)as_addr((uchar)lit_addr((unsigned int)v));
-    record_capture(MAKE_CAP(slot, TY_CHAR));
-    return 1;
-  }
-
-  if (!isdigit(line_buf[line_pos])) return 0;
-  v = 0;
-  while (line_need() && isdigit(line_buf[line_pos])) {
-    v = (word)(v * 10 + (line_buf[line_pos] - '0'));
-    capture_add(line_buf[line_pos]);
-    line_pos++;
+    v = ch;
+    ty = TY_CHAR;
+  } else {
+    if (!isdigit(line_buf[line_pos])) return 0;
+    v = 0;
+    while (line_need() && isdigit(line_buf[line_pos])) {
+      v = v * 10 + (line_buf[line_pos] - '0');
+      eat();
+    }
+    ty = TY_WORD;
   }
   note_progress();
-  slot = (uchar)as_addr((uchar)lit_addr((unsigned int)v));
-  record_capture(MAKE_CAP(slot, TY_WORD));
+  record_capture(MAKE_CAP(const_slot(v), ty));
   return 1;
 }
 
 
+// frees rule blobs + alt tables (rule[r] and blobs[r] are separate allocations)
 static void free_rules(void) {
   uchar r;
 
   for (r = 0; r < NRULES; r++) {
-    if (rule[r]) {
-      // alts point into blob; blob is rule[r][0]'s base — store blob at [-1]?
-      // we keep blob pointer as rule[r][0] only if first alt non-null.
-      // simpler: first entry is special — actually free blob via separate table
-      free(rule[r]);
-      rule[r] = NULL;
-    }
+    free(rule[r]);
+    rule[r] = NULL;
+    free(blobs[r]);
+    blobs[r] = NULL;
   }
 }
-
-// blobs[r] holds the contiguous text for rule r
-static uchar *blobs[NRULES];
 
 // escapes that stay "\c" in the blob (all others become the plain char c)
 static int esc_kept(uchar e) {
@@ -1265,29 +1263,12 @@ static int esc_kept(uchar e) {
 static void build_one_rule(uchar r, char *rhs) {
   char *p;
   uchar *blob, **altp, e, depth;
-  word blob_len, a, bi, na, alt_starts[64];
+  word a, bi, na, alt_starts[64];
 
   // expand \| and \c (not specials) into blob; keep \i \n \s \C \< \d \+ \{ \}
-  // count alts and build contiguous string with 0 separators between alts
-  blob_len = 0;
-  for (p = rhs; *p; p++) {
-    if (*p == '\\' && p[1]) {
-      e = (uchar)p[1];
-      if (esc_kept(e))
-        blob_len = (word)(blob_len + 2);
-      else
-        blob_len++;
-      p++;
-      continue;
-    }
-    if (*p == '|') {
-      blob_len++;
-      continue;
-    }
-    blob_len++;
-  }
-
-  blob = (uchar *)malloc(blob_len + 64);
+  // build contiguous string with 0 separators between alts.
+  // output is never longer than rhs (+ final 0), so no counting pass is needed
+  blob = malloc(strlen(rhs) + 2);
   if (!blob) return;
   free(blobs[r]);
   free(rule[r]);
@@ -1299,13 +1280,10 @@ static void build_one_rule(uchar r, char *rhs) {
   alt_starts[na++] = 0;
   for (p = rhs; *p; p++) {
     if (*p == '\\' && p[1]) {
-      e = (uchar)p[1];
-      if (esc_kept(e)) {
+      e = p[1];
+      if (esc_kept(e))
         blob[bi++] = '\\';
-        blob[bi++] = e;
-      } else {
-        blob[bi++] = e;
-      }
+      blob[bi++] = e;
       p++;
       continue;
     }
@@ -1322,11 +1300,11 @@ static void build_one_rule(uchar r, char *rhs) {
     // bare [ ] = production; | inside is a literal (\[ \] are handled above)
     if (*p == '[') depth++;
     else if (*p == ']' && depth) depth--;
-    blob[bi++] = (uchar)*p;
+    blob[bi++] = *p;
   }
   blob[bi++] = 0;
 
-  altp = (uchar **)malloc(sizeof(uchar *) * (na + 1));
+  altp = malloc(sizeof(uchar *) * (na + 1));
   if (!altp) {
     free(blob);
     blobs[r] = NULL;
@@ -1345,7 +1323,7 @@ static int load_bnf(const char *path) {
   FILE *f = NULL;
   char *line = malloc(MAX_LINE);
   char *acc = malloc(MAX_ACCUM);
-  uchar r, cur;
+  uchar cur;
   char *nl, *eq, *p;
   word acc_len, have_cur;
   char ret = 0;
@@ -1353,11 +1331,6 @@ static int load_bnf(const char *path) {
   if (!line || !acc) goto done;
   
   free_rules();
-
-  for (r = 0; r < NRULES; r++) {
-    blobs[r] = NULL;
-    rule[r] = NULL;
-  }
 
   f = fopen(path, "r");
   if (!f) {
@@ -1391,33 +1364,25 @@ static int load_bnf(const char *path) {
     p = line;
     while (*p == ' ' || *p == '\t') p++;
 
-    // continuation: line starts with |
-    if (*p == '|' && have_cur) {
-      while (*p && acc_len + 1 < MAX_ACCUM)
-        acc[acc_len++] = *p++;
-      acc[acc_len] = 0;
-      continue;
-    }
+    // continuation: line starts with |  (p stays, text is appended below)
+    if (!(*p == '|' && have_cur)) {
 
-    // new rule: flush previous
-    if (have_cur)
-      build_one_rule(cur, acc);
-
-    if (!isupper(line[0])) {
+      // new rule: flush previous
+      if (have_cur)
+        build_one_rule(cur, acc);
       have_cur = 0;
-      continue;
+
+      if (!isupper(line[0])) continue;
+
+      eq = strchr(line, '=');
+      if (!eq) continue;
+
+      cur = line[0] - 'A';
+      have_cur = 1;
+      p = eq + 1;
+      acc_len = 0;
     }
 
-    eq = strchr(line, '=');
-    if (!eq) {
-      have_cur = 0;
-      continue;
-    }
-
-    cur = (uchar)(line[0] - 'A');
-    have_cur = 1;
-    p = eq + 1;
-    acc_len = 0;
     while (*p && acc_len + 1 < MAX_ACCUM)
       acc[acc_len++] = *p++;
     acc[acc_len] = 0;
@@ -1452,7 +1417,26 @@ static word rule_nalt(uchar r) {
 
 // ---- stack ----
 
+// snapshot the input/capture/code/scope state of the newest frame as the
+// start of an alt (used by push and by tail-recursion \<)
+static void frame_mark(void) {
+  Frame *fr = top();
+
+  fr->alt = 0;
+  fr->ip = 0;
+  fr->save = line_pos;
+  fr->save_abs = abs_pos();
+  fr->cap_save = cap_len[sp - 1];
+  fr->nsym_save = nsym;
+  fr->scope_save = scope_depth;
+  fr->slot_save = next_slot;
+  fr->code_save = code_len;
+  fr->prod_n = 0;
+}
+
 static void push(uchar r, uchar state) {
+  Frame *fr;
+
   if (sp >= MAX_STACK) {
     word i;
     fprintf(stderr, "stack overflow (sp=%u) at @%u\n", (unsigned)sp, abs_pos());
@@ -1467,10 +1451,10 @@ static void push(uchar r, uchar state) {
   }
   if (sp >= stack_cap) {
     Frame *ns;
-    uchar ncap = (uchar)(stack_cap + 8);
+    uchar ncap = stack_cap + 8;
 
     if (ncap > MAX_STACK) ncap = MAX_STACK;
-    ns = (Frame *)realloc(stack, ncap * sizeof(Frame));
+    ns = realloc(stack, ncap * sizeof(Frame));
     if (!ns) {
       fprintf(stderr, "out of memory (stack)\n");
       exit(1);
@@ -1478,34 +1462,25 @@ static void push(uchar r, uchar state) {
     stack = ns;
     stack_cap = ncap;
   }
-  stack[sp].rule = r;
-  stack[sp].alt = 0;
-  stack[sp].ip = 0;
-  stack[sp].save = line_pos;
-  stack[sp].save_abs = abs_pos();
-  stack[sp].cap_save = 0;
-  stack[sp].nsym_save = nsym;
-  stack[sp].scope_save = scope_depth;
-  stack[sp].slot_save = next_slot;
-  stack[sp].func_vec = 0xff;
-  stack[sp].arg_i = 0;
-  stack[sp].npatch = 0;
-  stack[sp].mark = 0;
-  stack[sp].state = state;
-  stack[sp].prod_n = 0;
-  stack[sp].result = 0;
-  stack[sp].code_save = code_len;
-  {
-    uchar zi;
-    for (zi = 0; zi < 10; zi++)
-      stack[sp].prod_cap[zi] = 0;
-  }
+
   // program main begin → blob.main
-  if (r == (uchar)('B' - 'A') && sp > 0 &&
-      stack[sp - 1].rule == (uchar)('P' - 'A'))
+  if (r == 'B' - 'A' && sp > 0 &&
+      stack[sp - 1].rule == 'P' - 'A')
     main_offset = bin_ptr;
+
   cap_len[sp] = 0;
   sp++;
+
+  fr = top();
+  fr->rule = r;
+  fr->func_vec = 0xff;
+  fr->arg_i = 0;
+  fr->npatch = 0;
+  fr->mark = 0;
+  fr->result = 0;
+  memset(fr->prod_cap, 0, sizeof(fr->prod_cap));
+  frame_mark();
+  fr->state = state;
 }
 
 static void restore_scope(Frame *fr) {
@@ -1514,12 +1489,15 @@ static void restore_scope(Frame *fr) {
   next_slot = fr->slot_save;
 }
 
-// hex digit value for \#xx
-static uchar hexval(uchar c) {
-  if (c >= '0' && c <= '9') return c - '0';
-  c = tolower(c);
-  if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-  return 0;
+// back to the start of the current alt: input, capture, code, productions
+static void frame_rewind(void) {
+  Frame *fr = top();
+
+  line_pos = fr->save;
+  cap_len[sp - 1] = fr->cap_save;
+  code_len = fr->code_save;
+  fr->prod_n = 0;
+  fr->npatch = 0;
 }
 
 // ---- one step ----
@@ -1528,54 +1506,50 @@ static uchar hexval(uchar c) {
 static int step(void) {
   Frame *fr;
   uchar *alt;
-  uchar c;
-  word nalt;
+  uchar c, e, rch;
+  int ok;
+  word nalt, adv;
 
   if (sp == 0) return 0;
-  fr = &stack[sp - 1];
-  nalt = rule_nalt(fr->rule);
+  fr = top();
 
   if (fr->state == ST_TRY) {
+    nalt = rule_nalt(fr->rule);
     if (fr->alt >= nalt) {
       vlog("fail %c (no alt) @%u\n", 'A' + fr->rule, abs_pos());
       sp--;
       if (sp == 0) return -1;
-      fr = &stack[sp - 1];
+      fr = top();
       // parent's current alt failed: ST_FAIL restores pos, capture,
       // code, scope, then moves to the next alt
       fr->state = ST_FAIL;
       return 1;
     }
-    line_pos = fr->save;
-    cap_len[sp - 1] = fr->cap_save;
-    code_len = fr->code_save;
-    fr->prod_n = 0;
-    fr->npatch = 0;
+    frame_rewind();
     fr->ip = 0;
     fr->state = ST_RUN;
     vlog("try %c alt %u @%u \"%s\"\n",
          'A' + fr->rule, fr->alt, abs_pos(),
-         rule[fr->rule][fr->alt] ? (char *)rule[fr->rule][fr->alt] : "");
+         (char *)rule[fr->rule][fr->alt]);
     return 1;
   }
 
   if (fr->state == ST_OK) {
+    rch = 'A' + fr->rule;
+
     // Type rules I and T set cur_type for subsequent \+/\p decls
-    if ((uchar)('A' + fr->rule) == 'I') {
-      // alts: int=0, word=1, void=2, char=3 (order in c.bnf)
-      if (fr->alt == 3) cur_type = TY_CHAR;
-      else if (fr->alt == 2) cur_type = TY_WORD; // void treated as word-sized
-      else cur_type = TY_WORD;
+    if (rch == 'I') {
+      // alts: int=0, word=1, void=2 (word sized), char=3 (order in c.bnf)
+      cur_type = (fr->alt == 3) ? TY_CHAR : TY_WORD;
     }
-    if ((uchar)('A' + fr->rule) == 'T') {
+    if (rch == 'T') {
       // T=I *|I^*|I  → alt 0/1 pointer, alt 2 plain
-      if (fr->alt == 0 || fr->alt == 1)
-        cur_type = (word)(cur_type | TY_PTR);
+      if (fr->alt < 2)
+        cur_type |= TY_PTR;
     }
-    vlog("ok %c alt %u -> @%u\n", 'A' + fr->rule, fr->alt, abs_pos());
+    vlog("ok %c alt %u -> @%u\n", rch, fr->alt, abs_pos());
     // -v: one GEN per statement (K), after alt commits
-    if (verbose >= 1 && code_len > fr->code_save &&
-        (uchar)('A' + fr->rule) == 'K') {
+    if (verbose >= 1 && code_len > fr->code_save && rch == 'K') {
       fprintf(stderr, NORMAL "GEN:          [ ");
       ivm_print_code_range(stderr, code_buf, fr->code_save, code_len, 0);
       fprintf(stderr, "]\n");
@@ -1583,12 +1557,11 @@ static int step(void) {
     }
     if (verbose >= 1 && cap_len[sp - 1] > 0) {
       word i;
-      uchar rch = (uchar)('A' + fr->rule);
       // -v: SRC for K/B/P only; -vv: all rules + tags
       if (verbose >= 2 || rch == 'K' || rch == 'B' || rch == 'P') {
         if (verbose >= 2) {
           fprintf(stderr, "    %c", rch);
-          if (nalt > 1) fprintf(stderr, "%u", fr->alt);
+          if (rule_nalt(fr->rule) > 1) fprintf(stderr, "%u", fr->alt);
           fprintf(stderr, ":\n");
         }
         fprintf(stderr, "SRC: " GREEN);
@@ -1604,14 +1577,14 @@ static int step(void) {
       }
     }
 
-    capture_commit((uchar)(sp - 1));
+    capture_commit(sp - 1);
     {
-      word child_res = stack[sp - 1].result;
+      word child_res = fr->result;
       sp--;
       if (sp == 0) return 0;
       // parent records subrule result as next \n capture
       record_capture(child_res);
-      fr = &stack[sp - 1];
+      fr = top();
       fr->ip++;
       fr->state = ST_RUN;
     }
@@ -1620,11 +1593,7 @@ static int step(void) {
 
   // current alt failed — next alt of same rule
   if (fr->state == ST_FAIL) {
-    line_pos = fr->save;
-    cap_len[sp - 1] = fr->cap_save;
-    code_len = fr->code_save;
-    fr->prod_n = 0;
-    fr->npatch = 0;
+    frame_rewind();
     restore_scope(fr);
     fr->alt++;
     fr->ip = 0;
@@ -1650,13 +1619,12 @@ static int step(void) {
 
   // bare [ ... ] = production (use \[ \] in BNF to match bracket chars)
   if (c == '[') {
-    uchar *p = run_production(alt + fr->ip + 1);
-    fr->ip = (word)(p - alt);
+    fr->ip = run_production(alt + fr->ip + 1) - alt;
     return 1;
   }
 
   if (isupper(c)) {
-    uchar r = (uchar)(c - 'A');
+    uchar r = c - 'A';
 
     if (!rule_defined(r)) {
       fprintf(stderr, "\n[no rule %c]\n", c);
@@ -1669,21 +1637,13 @@ static int step(void) {
   }
 
   if (c == '\\') {
-    uchar e = alt[fr->ip + 1];
-    int ok = 0;
+    e = alt[fr->ip + 1];
+    ok = 1;
+    adv = 2;      // bytes of the BNF alt used by this escape
 
     if (e == '<') {
       // tail-recurse: restart alts at current input, keep capture
-      fr->alt = 0;
-      fr->ip = 0;
-      fr->save = line_pos;
-      fr->save_abs = abs_pos();
-      fr->cap_save = cap_len[sp - 1];
-      fr->nsym_save = nsym;
-      fr->scope_save = scope_depth;
-      fr->slot_save = next_slot;
-      fr->code_save = code_len;
-      fr->prod_n = 0;
+      frame_mark();
       fr->state = ST_TRY;
       vlog("  tail %c @%u\n", 'A' + fr->rule, abs_pos());
       return 1;
@@ -1693,61 +1653,31 @@ static int step(void) {
       // commit: drop buffer prefix; keep matching
       line_commit();
       // fix save positions relative to new buffer
-      {
-        uchar i;
-
-        for (i = 0; i < sp; i++) {
-          if (stack[i].save > 0)
-            stack[i].save = 0;
-        }
-      }
-      fr->ip = (word)(fr->ip + 2);
-      vlog("  commit @%u\n", abs_pos());
-      return 1;
+      for (c = 0; c < sp; c++)
+        stack[c].save = 0;
     }
-
-    if (e == '{') {
-      scope_enter();
-      fr->ip = (word)(fr->ip + 2);
-      vlog("  scope enter %u\n", (unsigned)scope_depth);
-      return 1;
-    }
-
-    if (e == '}') {
-      scope_leave();
-      fr->ip = (word)(fr->ip + 2);
-      vlog("  scope leave %u\n", (unsigned)scope_depth);
-      return 1;
-    }
+    else if (e == '{') scope_enter();
+    else if (e == '}') scope_leave();
 
     // \#xx: result := hex xx, same as \d having matched that number (no input)
-    if (e == '#') {
-      word v;
-      uchar slot;
-
-      if (!alt[fr->ip + 2] || !alt[fr->ip + 3]) {
-        fr->state = ST_FAIL;
-        return 1;
+    else if (e == '#') {
+      if (!alt[fr->ip + 2] || !alt[fr->ip + 3])
+        ok = 0;
+      else {
+        record_capture(const_slot(hex2(alt + fr->ip + 2)));
+        adv = 4;
       }
-      v = (word)(hexval(alt[fr->ip + 2]) * 16 + hexval(alt[fr->ip + 3]));
-      slot = (uchar)as_addr((uchar)lit_addr((unsigned int)v));
-      record_capture(slot);
-      fr->ip = (word)(fr->ip + 4);
-      vlog("  hex const %u\n", (unsigned)v);
-      return 1;
     }
 
     // \=n: result := capture n (no new capture recorded)
-    if (e == '=') {
-      uchar n = (uchar)(alt[fr->ip + 2] - '0');
-
-      if (n >= 1 && n <= fr->prod_n)
-        fr->result = fr->prod_cap[n];
-      fr->ip = (word)(fr->ip + 3);
-      return 1;
+    else if (e == '=') {
+      c = alt[fr->ip + 2] - '0';
+      if (c >= 1 && c <= fr->prod_n)
+        fr->result = fr->prod_cap[c];
+      adv = 3;
     }
 
-    if (isdigit(e)) ok = match_ident_same((uchar)(e - '0'));
+    else if (isdigit(e)) ok = match_ident_same(e - '0');
     else if (e == 'i') ok = match_ident();
     else if (e == '+') ok = match_ident_decl();
     else if (e == 'f') ok = match_ident_func_decl();
@@ -1760,24 +1690,19 @@ static int step(void) {
     else if (e == '\\') ok = match_lit('\\');
     else if (e == 'z') {
       // sizeof value from cur_type (after matching T)
-      {
-        unsigned int sz = CAP_IS_PTR(cur_type) ? 2
-                        : (CAP_TYPE(cur_type) == TY_CHAR ? 1 : 2);
-        uchar slot = (uchar)as_addr((uchar)lit_addr(sz));
-        record_capture(MAKE_CAP(slot, TY_WORD));
-        ok = 1;
-      }
+      record_capture(MAKE_CAP(const_slot(
+        (!CAP_IS_PTR(cur_type) && CAP_TYPE(cur_type) == TY_CHAR) ? 1 : 2), TY_WORD));
     }
-    else {
+    else
       ok = match_lit(e); /* match_lit skips ws unless want is space/tab */
-    }
+
     if (!ok) {
       vlog("  fail \\%c @%u\n", e, abs_pos());
       fr->state = ST_FAIL;
       return 1;
     }
     vlog("  ok \\%c @%u\n", e, abs_pos());
-    fr->ip = (word)(fr->ip + 2);
+    fr->ip += adv;
     return 1;
   }
 
@@ -1808,6 +1733,21 @@ static int run(word n) {
   return rc;
 }
 
+// "file:line: " prefix of an error line
+static void err_prefix(word line) {
+  fprintf(stderr, "%s:%u: ", src_name ? src_name : "?", line);
+}
+
+// print buffered source line starting at i; returns index after its '\n'
+static word show_line(word line, word i) {
+  err_prefix(line);
+  while (i < line_len && line_buf[i] != '\n')
+    fputc(line_buf[i++], stderr);
+  fputc('\n', stderr);
+  if (i < line_len) i++;
+  return i;
+}
+
 static void report_reject(void) {
   word i;
 
@@ -1823,13 +1763,12 @@ static void report_reject(void) {
   fprintf(stderr, "\n");
 
   if (far_sp > 0) {
-    uchar r = (uchar)(far_stack[far_sp - 1] - 'A');
+    uchar r = far_stack[far_sp - 1] - 'A';
     uchar a = far_alt[far_sp - 1];
 
     fprintf(stderr, "EXPECTED: rule %c", far_stack[far_sp - 1]);
     if (rule_defined(r) && a < rule_nalt(r))
-      fprintf(stderr, " alt %u \"%s\"", a,
-              rule[r][a] ? rule[r][a] : "");
+      fprintf(stderr, " alt %u \"%s\"", a, (char *)rule[r][a]);
 
     fprintf(stderr, "\n");
   }
@@ -1843,8 +1782,8 @@ static void report_reject(void) {
   // line_no_base tracks the line number of line_buf[0] across \C commits.
   fprintf(stderr, "REJECT:\n");
   {
-    word want = (word)((had_undef && undef_pos_abs) ? undef_pos_abs : max_pos_abs);
-    word i, start, off, col, line, endpos;
+    word want = (had_undef && undef_pos_abs) ? undef_pos_abs : max_pos_abs;
+    word start, off, col, line, endpos;
     word nlines;
 
     if (!line_buf || line_len == 0) {
@@ -1858,7 +1797,7 @@ static void report_reject(void) {
 
     } else {
 
-      off = (word)(want - line_abs);
+      off = want - line_abs;
       if (off > line_len) off = line_len;
 
       // line start / column within buffer
@@ -1876,37 +1815,17 @@ static void report_reject(void) {
 
       // error line text
 // TODO: seems to only print the current
-      fprintf(stderr, "%s:%u: ", src_name ? src_name : "?", line);
-      for (i = start; i < line_len && line_buf[i] != '\n'; i++)
-        fputc(line_buf[i], stderr);
-      fputc('\n', stderr);
+      endpos = show_line(line, start);
 
       // caret under column
-      fprintf(stderr, "%s:%u: ", src_name ? src_name : "?", line);
+      err_prefix(line);
       for (i = 0; i < col; i++)
         fputc(' ', stderr);
       fprintf(stderr, "^\n");
 
       // following lines still in buffer (no second open of the file)
-      endpos = start;
-      while (endpos < line_len && line_buf[endpos] != '\n')
-        endpos++;
-      if (endpos < line_len && line_buf[endpos] == '\n')
-        endpos++;
-
-      nlines = 0;
-      while (nlines < ERR_LINES_CONTEXT && endpos < line_len) {
-        fprintf(stderr, "%s:%u: ", src_name ? src_name : "?",
-          line + 1 + nlines);
-        while (endpos < line_len && line_buf[endpos] != '\n') {
-          fputc(line_buf[endpos], stderr);
-          endpos++;
-        }
-        fputc('\n', stderr);
-        if (endpos < line_len && line_buf[endpos] == '\n')
-          endpos++;
-        nlines++;
-      }
+      for (nlines = 0; nlines < ERR_LINES_CONTEXT && endpos < line_len; nlines++)
+        endpos = show_line(line + 1 + nlines, endpos);
     }
   }
 
@@ -1915,7 +1834,6 @@ static void report_reject(void) {
 
 // init: load grammar + open source
 static int init(char *bnf_path, char *src_path) {
-  uchar i;
 
   src_name = src_path;
   if (!load_bnf(bnf_path)) return 0;
@@ -1949,17 +1867,13 @@ static int init(char *bnf_path, char *src_path) {
   nvector = 0;
   last_func_vec = 0xff;
   // no pre-seeded names — X must be declared in source if used
-  for (i = 0; i < MAX_STACK; i++) {
-    capture[i] = NULL;
-    cap_len[i] = 0;
-    cap_max[i] = 0;
-  }
+  // (capture[] / cap_len[] / cap_max[] are zero at start, shutdown() re-zeroes them)
 
-  if (!rule_defined((uchar)('P' - 'A'))) {
+  if (!rule_defined('P' - 'A')) {
     fprintf(stderr, "missing start rule P\n");
     return 0;
   }
-  push((uchar)('P' - 'A'), ST_TRY);
+  push('P' - 'A', ST_TRY);
 
   return 1;
 }
@@ -1977,14 +1891,11 @@ static void shutdown(void) {
   for (i = 0; i < MAX_STACK; i++) {
     free(capture[i]);
     capture[i] = NULL;
+    cap_len[i] = 0;
+    cap_max[i] = 0;
   }
 
-  for (i = 0; i < NRULES; i++) {
-    free(rule[i]);
-    rule[i] = NULL;
-    free(blobs[i]);
-    blobs[i] = NULL;
-  }
+  free_rules();
 
   free(stack);
   stack = NULL;
@@ -2030,7 +1941,7 @@ int main(int argc, char **argv) {
     fprintf(stderr, "--- rules ---\n");
     for (i = 0; i < NRULES; i++)
 
-      if (rule_defined((uchar)i)) {
+      if (rule_defined(i)) {
         fprintf(stderr, "%c =", 'A' + (int)i);
         for (a = 0; rule[i][a]; a++) {
           if (a) fprintf(stderr, "|");
@@ -2139,7 +2050,7 @@ int main(int argc, char **argv) {
             free(proc);
           }
         }
-#endif RUN
+#endif // RUN
 
         free(blob);
       }
