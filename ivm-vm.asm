@@ -320,37 +320,40 @@ subvec:
         ;; (inverse of op_X / op_semi)
 
         txa                     ; original op (kept across ASL)
+
+	;; get new frame pointer
         and     #$3F
         tay                     ; Y = v
         lda     (_ivm_fptab),y
         sta     tmp_lo          ; nfp
 
-        ;; FR_PREV = old fp
-        clc
-        adc     #FR_PREV
-        tay
-        lda     _ivm_fp
-        sta     (_ivm_memlo),y
-        lda     #0
-        sta     (_ivm_memhi),y
-
-        ;; FR_RET = ipc (return address)
-        lda     tmp_lo
-        clc
-        adc     #FR_RET
-        tay
+	;; -- Linear copying
+	;; (/ (- 2752774 2732460) 2752774.0) = 0.74% faster
+	
+	;; FR_RET:0 = ipc (return address)
+	tay
         lda     _ivm_ipc
         sta     (_ivm_memlo),y
+
         lda     _ivm_ipc+1
         sta     (_ivm_memhi),y
 
-        ;; FR_ACC = acc (last parameter)
-        lda     tmp_lo
-        clc
-        adc     #FR_ACC
-        tay
+	;; skip FR_VAL:1 (actually only there for pascal?)
+	iny
+	
+        ;; FR_PREV:2 = old fp
+	iny
+        lda     _ivm_fp
+        sta     (_ivm_memlo),y
+
+        lda     #0
+        sta     (_ivm_memhi),y
+
+        ;; FR_ACC:3 = acc (last parameter)
+	iny
         lda     _ivm_acc
         sta     (_ivm_memlo),y
+
         lda     _ivm_acc+1
         sta     (_ivm_memhi),y
 
@@ -368,6 +371,7 @@ subvec:
         iny
         lda     (_ivm_callv),y
         sta     _ivm_ipc+1
+
 
         ;; new ipc
         ldy     #0
