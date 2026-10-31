@@ -11,8 +11,20 @@ char *h     = "Hello";
 char spc    = 32;
 char *world = "World";
 char nl     = '\n';
-word a      = 65;
+int  a      = 65;
 
+char* mylen = "Guess my length!";
+
+int my_strlen(char* s) {
+  int len = 0;
+
+  // TODO: ???
+  //for( ; *s++ ; 0) ++len;
+
+  while(*s++) len++;
+
+  return len;
+}
 
 int main(void) {
   printf("%d", a);
@@ -24,6 +36,9 @@ int main(void) {
   printf("%s", world); // op: LvvP
   putchar('!');        // op: O!
   putchar('\n');       // op: N
+
+  printf("\"%s\" has %d characters\n",
+    mylen, my_strlen(mylen));
 
   return 42;
 }
