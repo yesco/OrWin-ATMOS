@@ -837,7 +837,7 @@ static int match_newline(void) {
 static int match_lit(uchar want) {
   uchar g;
 
-  /* bare space in a rule is a ws-gap (handled in step); \  matches one space */
+  // bare space in a rule is a ws-gap (handled in step); \  matches one space
   if (want != ' ' && want != '\t')
     skip_ws();
   if (!line_need()) return 0;
@@ -940,7 +940,7 @@ static int match_ident_same(uchar n) {
 
   if (!match_ident_raw()) return 0;
   i = sym_find(id_buf, SYM_VAR, 0);
-  if (i == SYM_NONE) return 0; /* not defined: just fail this alt */
+  if (i == SYM_NONE) return 0; // not defined: just fail this alt
   slot = syms[i].address;
   if (slot != (expect & 0xff)) return 0;
   record_capture(MAKE_CAP(slot, sym_type(&syms[i])));
@@ -1167,7 +1167,7 @@ static int read_quoted_body(uchar delim, void (*put)(uchar c, void *ctx), void *
   return 1;
 }
 
-/* put helpers for the three call sites */
+// put helpers for the three call sites
 
 static void put_emit(uchar c, void *ctx) {
   (void)ctx;
@@ -1219,7 +1219,7 @@ static int match_num(void) {
   if (!line_need()) return 0;
 
   if (line_buf[line_pos] == '\'') {
-    /* character literal 'x' / '\n' / ... → small integer const */
+    // character literal 'x' / '\n' / ... → small integer const
     line_pos++;
     if (!next_body_char(&ch)) return 0;
     if (!line_need() || line_buf[line_pos] != '\'') return 0;
@@ -1656,7 +1656,7 @@ static int step(void) {
         (!CAP_IS_PTR(cur_type) && CAP_TYPE(cur_type) == TY_CHAR) ? 1 : 2), TY_WORD));
     }
     else
-      ok = match_lit(e); /* match_lit skips ws unless want is space/tab */
+      ok = match_lit(e); // match_lit skips ws unless want is space/tab
 
     if (!ok) {
       vlog("  fail \\%c @%u\n", e, abs_pos());
@@ -1866,7 +1866,9 @@ int main(int argc, char **argv) {
   word i, a;
   int rc;
   int err;
-
+  int blen;
+  uchar *blob;
+  
   verbose = 0;
   ignore_case = 1;
 
@@ -1956,19 +1958,46 @@ int main(int argc, char **argv) {
   if (code_len & 15) fputc('\n', stderr);
 
   {
-    int blen = 0;
+    blen = 0;
     // frame_base[] (set by \f) goes into the blob's fp table
-    uchar *blob = build_blob(&blen);
+    blob = build_blob(&blen);
 
     fprintf(stderr, "--- BLOB (%d bytes) main=%u nvector=%d ---\n",
       blen, main_offset, nvector);
 
-    // RUN
     if (blob) {
 
-      // SAVE
+      // SAVE .ivm next to source (foo.c → foo.ivm)
+      {
+        char out[128];
+        const char *base, *s, *dot;
+        FILE *of;
+        word n;
 
-      // TODO: save it!
+        // find base and last '.' position
+        // TODO: strrchr ???
+        base = src_name ? src_name : "out";
+        for (s = base; *s; s++)
+          if (*s == '/' || *s == '\\') base = s + 1;
+        n = 0; dot = 0;
+        for (s = base; *s && n < sizeof(out) - 5; s++) {
+          out[n++] = *s;
+          if (*s == '.') dot = out + n - 1;
+        }
+
+        // change name test.p => test.ivm
+        if (dot) n = (word)(dot - out);
+        out[n++] = '.'; out[n++] = 'i'; out[n++] = 'v'; out[n++] = 'm';
+        out[n] = 0;
+
+        of = fopen(out, "wb");
+        if (of) {
+          fwrite(blob, 1, (size_t)blen, of);
+          fclose(of);
+          fprintf(stderr, "--- SAVED %s (%d bytes) ---\n", out, blen);
+        } else
+          fprintf(stderr, "--- SAVE failed: %s ---\n", out);
+      }
 
 #ifdef RUN
       {
@@ -1979,38 +2008,9 @@ int main(int argc, char **argv) {
           for (i = 0; i < nvector; i++)
             fprintf(stderr, "  frame V%02x fp=%u\n", i, frame_base[i]);
 
+        // Nevm installs consts (reversed pool) + host soft_heap from data
         proc = Nevm(blob);
         if (proc) {
-          word *pool = (word *)(blob + ((BlobHeader *)blob)->con);
-
-#ifndef __CC65__
-          {
-            extern word soft_top;
-            soft_top = 0;
-          }
-#endif
-          for (i = 0; i < nconst; i++) {
-            word cv = pool[i];
-#ifndef __CC65__
-            if (const_is_reloc[i]) {
-              /* host: copy string into soft_heap, store offset */
-              extern uchar soft_heap[];
-              extern word soft_top;
-              const uchar *src = blob + cv;
-              word n = 0;
-              while (src[n]) n++;
-              n++;
-              if (soft_top + n <= 4096) {
-                memcpy(soft_heap + soft_top, src, n);
-                cv = soft_top;
-                soft_top = (word)(soft_top + n);
-              } else
-                cv = 0;
-            }
-#endif
-            proc->mem[CONST_TOP - i] = cv;
-          }
-
           fprintf(stderr, "--- RUN ---\n");
           ret = run_ivm(proc);
           fprintf(stderr, "--- END acc=%u ---\n", ret);

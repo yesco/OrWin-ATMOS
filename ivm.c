@@ -246,7 +246,7 @@ unsigned long countops = 0;
 
 
 // No fixed global image buffer — load_blob/finalise malloc.
-extern uchar* g_loaded;
+uchar *g_loaded; /* blob base while running */
 
 
 // ===========================================================================
@@ -387,6 +387,16 @@ Process* Nevm(uchar *loaded) {
     for (i = 0; i < nc; i++)
       p->mem[bh->constidx + i] = pool[i];
   }
+#ifndef __CC65__
+  /* Host: data section holds strings; reloc consts are offsets into it.
+     Copy data → soft_heap so P/'/, see the same offsets. */
+  if (bh->data && bh->len > bh->data) {
+    word n = (word)(bh->len - bh->data);
+    if (n > SOFT_HEAP_MAX) n = SOFT_HEAP_MAX;
+    memcpy(soft_heap, loaded + bh->data, n);
+    soft_top = n;
+  }
+#endif
   return p;
 }
 

@@ -110,7 +110,7 @@ void acc_set_slot(uchar slot) {
 void emit(uchar c) {
   if (pending_func_entry != 0xff) {
     uchar v = pending_func_entry;
-    pending_func_entry = 0xff; /* clear first — gen may emit */
+    pending_func_entry = 0xff; // clear first — gen may emit
     gen_func_entry(v);
   }
 
@@ -178,9 +178,9 @@ word  data_len = 0;
 // Low 8 bits of a capture = slot or IMM; high 8 = type info.
 // Bit 15 set (0x8000) => pointer. Low type char in bits 8-14: 'w'/'c'.
 // Type lives in the HIGH byte; low byte is the slot/const index.
-#define TY_WORD   ((word)(('w') << 8))   /* 0x7700 */
-#define TY_CHAR   ((word)(('c') << 8))   /* 0x6300 */
-#define TY_PTR    ((word)0x8000)         /* pointer flag in bit 15 */
+#define TY_WORD   ((word)(('w') << 8))   // 0x7700
+#define TY_CHAR   ((word)(('c') << 8))   // 0x6300
+#define TY_PTR    ((word)0x8000)         // pointer flag in bit 15
 #define CAP_SLOT(w)   ((uchar)((w) & 0xff))
 #define CAP_TYPE(w)   ((word)((w) & 0xff00))
 #define CAP_IS_PTR(w) (((w) & TY_PTR) != 0)
@@ -469,8 +469,9 @@ uchar *build_blob(int *out_len) {
   uchar *body, *p;
   word zero = 0;
   unsigned need;
-  char nv;
+  uchar nv;
   int i;
+  word v;
 
   nv = nvector;
 
@@ -488,38 +489,39 @@ uchar *build_blob(int *out_len) {
 
   h.call = gen_memadd(body, &p, 0, (word)(nv * sizeof(word)));
   gen_memadd(body, &p, &zero, sizeof(zero));
-  h.con  = gen_memadd(body, &p, const_pool, (word)(nconst * sizeof(word)));
 
-  h.fp   = gen_memadd(body, &p, frame_base, (word)nv);
-  h.code = gen_memadd(body, &p, bin, (word)bin_ptr);
-  h.main = (word)(h.code + (word)main_offset);
-
-  // Data section (strings). Reloc consts in the pool are offsets *into* this.
-  h.data = gen_memadd(body, &p, data_pool, data_len);
-
-  // Rewrite reloc const values in the blob to blob-relative addresses
-  // (h.data + data_offset) so one +base reloc makes them absolute.
-  {
-    word *pool = (word *)(body + h.con);
-    for (i = 0; i < (int)nconst; i++)
-      if (const_is_reloc[i])
-        pool[i] = (word)(h.data + const_pool[i]);
+  // Const pool: Nevm installs pool[i] → mem[constidx+i].
+  // Slot constidx+i holds const_pool[nconst-1-i] (bytecode uses CONST_TOP-i).
+  // Reloc entries stay *data-relative* offsets (not blob-absolute). */
+  // (The reason for this loop is that it's a "REVERSE RE-ORDERING")
+  h.con = (word)(p - body);
+  for (i = 0; i < nconst; i++) {
+    v = const_pool[nconst - 1 - i];
+    memcpy(p, &v, sizeof(word));
+    p += sizeof(word);
   }
 
-  h.memsz = (word)(CONST_TOP + 1);
-  h.constidx = (word)constidx;
+  h.fp   = gen_memadd(body, &p, frame_base, nv);
+  h.code = gen_memadd(body, &p, bin, bin_ptr);
+  h.main = h.code + main_offset;
+
+  // Data section (strings); reloc consts index into this from 0
+  h.data = gen_memadd(body, &p, data_pool, data_len);
+
+  h.memsz = CONST_TOP + 1;
+  h.constidx = constidx;
   h.magic[0] = 'I';
   h.magic[1] = 'V';
   h.magic[2] = 'M';
   h.magic[3] = 0;
-  h.len = (word)(p - body);
+  h.len = p - body;
 
   for (i = 0; i < nv; i++)
     ((word *)(body + h.call))[i] = (word)(vectors[i] + h.code);
 
   memcpy(body, &h, sizeof(h));
   if (out_len)
-    *out_len = (int)h.len;
+    *out_len = h.len;
   return body;
 }
 
