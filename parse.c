@@ -441,6 +441,8 @@ static word force_addr(uchar n) {
 
 // run production at p (first char after '['); returns after ']'
 // quiet: GEN is printed only when the owning alt commits (ST_OK)
+static uchar last_char_lit;
+
 static uchar *run_production(uchar *p) {
   Frame *fr;
   uchar n, b, *q;
@@ -578,6 +580,17 @@ static uchar *run_production(uchar *p) {
       if (p[1] == '#' && p[2] && p[3]) {
         emit((uchar)(hexval(p[2]) * 16 + hexval(p[3])));
         p += 4;
+        continue;
+      }
+      // \C: putchar(last_char_lit) — 'N' if newline, else 'O' + byte
+      if (p[1] == 'C') {
+        if (last_char_lit == '\n')
+          emit('N');
+        else {
+          emit('O');
+          emit(last_char_lit);
+        }
+        p += 2;
         continue;
       }
     }
@@ -1123,6 +1136,7 @@ static int match_char_lit(void) {
   if (!line_need() || line_buf[line_pos] != '\'') return 0;
   line_pos++;
   note_progress();
+  last_char_lit = c;
   slot = (uchar)as_addr((uchar)lit_addr((unsigned int)c));
   record_capture(MAKE_CAP(slot, TY_CHAR));
   return 1;

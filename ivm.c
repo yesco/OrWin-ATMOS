@@ -974,7 +974,7 @@ ZL(op_P,   'P')
     printf("%s", (char *)(unsigned)zp.acc);
   #endif
   goto xnext;
-ZL(op_O,   'O')  putchar(PAR);          goto pnext;
+ZL(op_O,   'O')  putchar(*zp.ipc);      goto pnext;
 ZL(op_W,   'W')  printf("%u", PAR);     goto pnext;
 // TODO: T printn ? Type w length (from index)
 ZL(op_dot, '.')  printf("%u", zp.acc);  goto xnext;
