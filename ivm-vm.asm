@@ -422,36 +422,8 @@ op_q:   jmp     done
 op_Q:   lda     #0
         sta     _ivm_acc
         sta     _ivm_acc+1
-
-;;; return acc
-op_X:   FIXIPC
-        lda     _ivm_fp
-        ;; magic done, TODO: remove: use 0x7f as exit()
-        cmp     #FP_MAIN
-        beq     jmp_done
-
-        ;; restore IPC from FR_RET
-        clc
-        adc     #FR_RET
-
-        tay
-        lda     (_ivm_memlo),y
-        sta     _ivm_ipc
-        lda     (_ivm_memhi),y
-        sta     _ivm_ipc+1
-
-        ;; restore FP from FR_PREV
-        lda     _ivm_fp                 ; TODO: why again? should INY?"
-        clc
-        adc     #FR_PREV
-        tay
-        lda     (_ivm_memlo),y
-        sta     _ivm_fp
-
-        ;; new IPC, reset messed up Y
-        ldy     #0
-        
-        jmp     xnext
+	
+	jmp     op_X
 
 ;;; return FUNNAME
 op_semi:
@@ -469,7 +441,37 @@ op_semi:
 
         ldy     savey           ; for Y pc
         
-        jmp     op_X
+	;; fall-through (0.1% faster than having op_Q fallthrough)
+	;; (/ (- 2732460 2729364) 2732460.0)
+	
+
+;;; return acc
+op_X:   FIXIPC
+
+;;; TODO: inline FIXIPC no function call for ALTCODE=1 !
+
+	;; -- linear load
+	;; (/ (- 2752774 2713089) 2752774.0) 1.4% ;; ALTCODE= 0 TOTAL
+	
+        ;; restore IPC from FR_RET:0
+        ldy     _ivm_fp
+        lda     (_ivm_memlo),y
+        sta     _ivm_ipc
+
+        lda     (_ivm_memhi),y
+        sta     _ivm_ipc+1
+
+        ;; restore FP from FR_PREV
+	iny
+	iny
+        lda     (_ivm_memlo),y
+        sta     _ivm_fp
+
+        ;; new IPC, reset messed up Y
+        ldy     #0
+        
+        jmp     xnext
+
 
 
 ;;; arg 8 == last argument (ACC when called)
