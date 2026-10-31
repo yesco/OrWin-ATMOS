@@ -110,5 +110,33 @@ countops: 16761
 
 need better dispatch!
 
+--- 0 loops
+
+759 ops
+1016914 cycles
+
+(/ (- 2715329 1016914) (- 16761 759.0)) = 106 cycles / op
+
+(/ (- 2715329 1016914) (- 16761 759.0)) = 106 cycles / op
+
+
+-- sum :  6760 ops 1633142 c
+
+   (/ (- 1633142 1016914) 1000) = 616 c / loop cmp  - 640 c long time ago!
+                                  127 c - pure C run with cc65
+
+   (/ 616 127.0) = 4.85x slower interpretation than cc65
+
+
+- fsum : 10760 ops 2100688 c = 
+
+  (/ (- 2100688 1016914) 1000) = 1083 c / loop - 1148 c long time ago for asm.
+
 
 ```
+
+
+## size of VM
+
+- asm: 8927-6482 = 2445 bytes
+- C: 10953-6482 = 4471 bytes...
