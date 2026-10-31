@@ -131,6 +131,26 @@ disphi:
         tay
 .endmacro
         
+
+FIXINLINE=1
+
+.ifdef FIXINLINE
+	
+;;; leaves Y=0
+.macro FIXIPC
+        tya
+        clc
+        adc     _ivm_ipc
+        sta     _ivm_ipc
+        bcc     :+
+        inc     _ivm_ipc+1
+:       
+        ;; new ipc
+        ldy     #0
+.endmacro       
+
+.else
+
 ;;; leaves Y=0
 .macro FIXIPC
         jsr addy
@@ -148,7 +168,10 @@ addy:
         ;; new ipc
         ldy     #0
         rts
-        
+
+.endif ; FIXINLINE
+	
+	
 
 _run_ivm_asm:   
         ;; new ipc

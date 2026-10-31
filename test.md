@@ -1,10 +1,13 @@
 # IVM bytecode showcase
 
-- test.p   - 256 lines, 5400 chars, 196 LOC
-- test.c   - 285 lines, 5979 chars, 155 LOC
-- test.ivm
+- `test.p`   - 256 lines, 5400 chars, 196 LOC
+- `test.c`   - 285 lines, 5979 chars, 155 LOC
+- `test.ivm`
 
-
+- ./ivm`     - C VM is 6.9x slower than simple compiled asm
+- ./ivm-asm` - asm VM w opt is 2.66x faster than C, 2.72 slower than cc65
+- ./tp       - simple compiled asm 2.72 slower than cc65
+ 
 ## bytes
 
 ```
@@ -73,11 +76,39 @@
 (/ 255 48.0)  =   5.3 lines / s
 (/ 5400 48.0) = 112.5 char  / s 
 
-(/ 6949236.0 2252774) = 3.08x faster asm than C impl of IVM
-(/ 2252774 1011905.0) = 2.23x slower than cc65
+(/ 6949236.0 2752774) = 2.52x faster asm than C impl of IVM
+(/ 2752774 1011905.0) = 2.72x slower than cc65
 
 (/ 1345 5656.0) .ivm blobl: 24% of size of cc65 binary
 (/ 5656.0 1345) .ivm blobl: 4.2x smaller!
+
+
+-- ALTCALL=1 (-1.5%) and FIXINLINE=1 (-2.3%) and linear save/restore (-1.4%)
+
+(/ (-  2752774 2610103) 2752774.0) = 5.18% faster total!
+
+(/ 6950526 2610103.0) = 2.66x faster asm than C
+
+
+
+```
+
+## ops / s
+
+```
+./ivm test 
+
+countops: 16761
+
+./ivm-asm test
+
+2715329 cyclees
+
+(/ 2715329 16761.0) 162 cycles / ops
+
+(/ 1000000 162) = 6172 ops / s - kind of slow, lol
+
+need better dispatch!
 
 
 ```

@@ -195,6 +195,14 @@
 #include <stdio.h>
 #include <assert.h>
 
+
+#define COUNTOPS
+
+#ifdef COUNTOPS 
+unsigned long countops = 0;
+#endif
+
+
 #ifndef IVMVARTYPE
   #define IVMVARTYPE uint16_t
   typedef IVMVARTYPE ivmvar;
@@ -834,6 +842,10 @@ ivmvar run_ivm(Process *p) {
 #else
 
 
+#ifdef COUNTOPS
+  countops++;
+#endif
+  
   switch (op) {
 
   #define Z(c)         case (c):
@@ -1154,6 +1166,9 @@ int run_file(char* filename) {
   {
     int r= run_loaded_blob(img, len);
     free(img);
+    #ifdef COUNTOPS
+      printf("countops: %ld\n", countops);
+    #endif
     return r;
   }
 }
