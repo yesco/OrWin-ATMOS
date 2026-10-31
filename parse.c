@@ -211,10 +211,10 @@ static word  cap_max[MAX_STACK];
 // longest identifier (stack buffers only)
 #define NAME_LEN   32
 
-static char  last_undef[NAME_LEN]; // last \i that failed scope check
-static uchar had_undef;
-static uchar had_undef_func;
-static word  undef_pos_abs;
+static char  last_undef[NAME_LEN]; // furthest undefined ident (for reject msg)
+static uchar had_undef;            // sticky: saw undefined ident
+static uchar had_undef_func;       // sticky: it was a function call
+static word  undef_pos_abs;        // sticky: position of that ident
 
 static uchar last_func_vec; // function being declared by \f (for \p \r)
 static uchar next_slot; // next free slot index for \+ decls / temps
@@ -600,6 +600,15 @@ static uchar *run_production(uchar *p) {
       }
       // \g: global/local init from captures \1=dest slot, \2=src const
       //   scope 0: defer until main entry; else emit L+S now
+      // \e: exclusive limit — S temp; J temp (store ACC-1)
+      if (p[1] == 'e') {
+        b = alloc_slot();
+        emitop2('S', b);
+        emitop2('J', b);
+        record_capture(b);
+        p += 2;
+        continue;
+      }
       if (p[1] == 'g') {
         uchar dest, src;
         dest = (uchar)(fr->prod_cap[1] & 0xff);
@@ -813,7 +822,9 @@ static int match_newline(void) {
 static int match_lit(uchar want) {
   uchar g;
 
-  skip_ws();
+  /* bare space in a rule is a ws-gap (handled in step); \  matches one space */
+  if (want != ' ' && want != '\t')
+    skip_ws();
   if (!line_need()) return 0;
   g = line_buf[line_pos];
   // -I: fold case for keyword/literal letters only (idents use strcmp)
@@ -879,6 +890,43 @@ static uchar peek_char(void) {
 
 // \i — ident must already be in scope; result = its slot
 //   name followed by ( is looked up as a function (like tpi.c), else a variable
+
+
+// Record undefined ident for reject message (keep furthest; funcs win over vars)
+static void note_undef(const char *id, uchar is_func, word pos) {
+  if (!is_func && had_undef_func) return;
+  if (had_undef && pos < undef_pos_abs) return;
+  strncpy(last_undef, id, NAME_LEN - 1);
+  last_undef[NAME_LEN - 1] = 0;
+  had_undef = 1;
+  had_undef_func = is_func;
+  undef_pos_abs = pos;
+}
+
+// \1..\9 — like \i, but slot must equal capture n (same variable).
+// Fail quietly (no had_undef): rule should fall through to next alt.
+static int match_ident_same(uchar n) {
+  char id[NAME_LEN];
+  word i, expect;
+  Frame *fr;
+  uchar slot;
+
+  if (sp == 0) return 0;
+  fr = &stack[sp - 1];
+  if (n < 1 || n > fr->prod_n) return 0;
+  expect = fr->prod_cap[n];
+  if (expect == VAL_ACC) return 0;
+
+  if (!match_ident_raw(id, NAME_LEN)) return 0;
+  i = sym_find(id, SYM_VAR, 0);
+  if (i == SYM_NONE) return 0; /* not defined: just fail this alt */
+  slot = syms[i].address;
+  if (slot != (uchar)(expect & 0xff)) return 0;
+  record_capture(MAKE_CAP(slot, ((word)syms[i].vtype << 8) |
+                 (syms[i].is_ptr ? TY_PTR : 0)));
+  return 1;
+}
+
 static int match_ident(void) {
   char id[NAME_LEN];
   uchar c;
@@ -894,28 +942,8 @@ static int match_ident(void) {
   i = sym_find(id, (c == '(') ? SYM_FUNC : SYM_VAR, 0);
 
   if (i == SYM_NONE) {
-
-    if (c == '(') {
-
-      // It's a functiono call
-      if (!had_undef_func || start_abs >= undef_pos_abs) {
-        strncpy(last_undef, id, NAME_LEN - 1);
-        last_undef[NAME_LEN - 1] = 0;
-        had_undef = 1;
-        had_undef_func = 1;
-        undef_pos_abs = start_abs;
-      }
-    } else if (!had_undef_func) {
-      
-      // TODO: does this mean it's a var? what we're doing here?
-      strncpy(last_undef, id, NAME_LEN - 1);
-      last_undef[NAME_LEN - 1] = 0;
-      had_undef = 1;
-      undef_pos_abs = start_abs;
-    }
-
+    note_undef(id, (uchar)(c == '('), start_abs);
     vlog("  ident '%s' not in scope\n", id);
-
     return 0;
   }
 
@@ -1230,8 +1258,8 @@ static uchar *blobs[NRULES];
 
 // escapes that stay "\c" in the blob (all others become the plain char c)
 static int esc_kept(uchar e) {
-  if (e >= '1' && e <= '9') return 1;
-  return e == '\\' || strchr("insSCcfhvg<d+{}[]#=aptrlxywmzkz", e) != NULL;
+  if (isdigit(e) || e == ' ' || e == '\\') return 1;
+  return strchr("insSCcfhvge<d+{}[]#=aptrlxywmzkz", e) != NULL;
 }
 
 static void build_one_rule(uchar r, char *rhs) {
@@ -1523,7 +1551,6 @@ static int step(void) {
     code_len = fr->code_save;
     fr->prod_n = 0;
     fr->npatch = 0;
-    had_undef = 0;
     fr->ip = 0;
     fr->state = ST_RUN;
     vlog("try %c alt %u @%u \"%s\"\n",
@@ -1720,11 +1747,7 @@ static int step(void) {
       return 1;
     }
 
-    // \[ \] = literal brackets (not production)
-    if (e == '[' || e == ']') {
-      skip_ws();
-      ok = match_lit(e);
-    }
+    if (isdigit(e)) ok = match_ident_same((uchar)(e - '0'));
     else if (e == 'i') ok = match_ident();
     else if (e == '+') ok = match_ident_decl();
     else if (e == 'f') ok = match_ident_func_decl();
@@ -1746,8 +1769,7 @@ static int step(void) {
       }
     }
     else {
-      skip_ws();
-      ok = match_lit(e);
+      ok = match_lit(e); /* match_lit skips ws unless want is space/tab */
     }
     if (!ok) {
       vlog("  fail \\%c @%u\n", e, abs_pos());
