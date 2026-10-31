@@ -989,7 +989,7 @@ ZL(op_P,   'P')
   goto xnext;
 ZL(op_O,   'O')  putchar(*zp.ipc);      goto pnext; // inline char
 ZL(op_W,   'W')  printf("%u", PAR);     goto pnext;
-// TODO: T printn ? Type w length (from index)
+// TODO: T printing string ? Type w length (from index)
 ZL(op_dot, '.')  printf("%u", zp.acc);  goto xnext;
 ZL(op_str, '"')  while (*zp.ipc) putchar(*zp.ipc++);
                                         goto pnext;
@@ -997,6 +997,13 @@ ZL(op_str, '"')  while (*zp.ipc) putchar(*zp.ipc++);
 ZL(op_G,   'G')  if ((int16_t)zp.acc > 0)
                    zp.ipc += *zp.ipc;   goto pnext;
 ZL(op_B,   'B')  zp.ipc -= *zp.ipc;     goto pnext;
+
+// optimized counting up loops (pascal style): Ivv <uu Goo (6) => Yvvuuoo (4)
+ZL(op_Y,   'Y')  if (   (zp.acc = ++zp.mem[*zp.ipc])
+                     <= zp.mem[zp.ipc[1]] ) {
+                               zp.ipc += 3; goto xnext; // 3 args
+                 } else  zp.ipc += *zp.ipc; goto pnext;
+// TODO: counting up
 
 ZL(op_x,   'x')  zp.acc= sys(1, zp.acc, zp.ipc); zp.ipc+= 1; goto xnext;
 ZL(op_y,   'y')  zp.acc= sys(2, zp.acc, zp.ipc); zp.ipc+= 2; goto xnext;
