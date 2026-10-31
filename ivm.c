@@ -214,8 +214,8 @@
 // On cc65/6502, M/F/@/!/(/) use real addresses.
 #ifndef __CC65__
   #define SOFT_HEAP_MAX 4096
-  static uchar soft_heap[SOFT_HEAP_MAX];
-  static word soft_top;
+  uchar soft_heap[SOFT_HEAP_MAX];
+  word soft_top;
   #define IVM_PTR(addr) ((ivmvar *)(soft_heap + (unsigned)(addr)))
 #else
   #define IVM_PTR(addr) ((ivmvar *)(unsigned)(addr))
@@ -967,7 +967,13 @@ ZL(op_bnot,'~')  zp.acc = ~zp.acc;      goto xnext;
 ZL(op_K,   'K')  zp.acc = getchar();    goto xnext;
 ZL(op_E,   'E')  putchar(zp.acc);       goto xnext;
 ZL(op_N,   'N')  putchar('\n');         goto xnext;
-ZL(op_P,   'P')  printf("%s", zp.acc);  goto xnext; // TODO: other platform
+ZL(op_P,   'P')
+  #ifndef __CC65__
+    printf("%s", (char *)(soft_heap + (unsigned)zp.acc));
+  #else
+    printf("%s", (char *)(unsigned)zp.acc);
+  #endif
+  goto xnext;
 ZL(op_O,   'O')  putchar(PAR);          goto pnext;
 ZL(op_W,   'W')  printf("%u", PAR);     goto pnext;
 // TODO: T printn ? Type w length (from index)

@@ -1,14 +1,15 @@
-# -- BNF for C → IVM
+# -- BNF for C → IVM (char / char* / putchar / printf)
 #= /* */
 #= //
-# Four backslashes before n so blob is \\n and matches source \\n
+# Four backslashes before n in format alts → match source \n
 
 P=D
 
 D=#include <\+.h>\n\<|#include "\+.h"\n\<|#include <\+.c>\n\<|V\<|F\<|
 
+# Declarations with optional initializer: char *h = "Hello";  char spc = 32;
 V=T M;
-M=\+U|
+M=\+=E[S\1]U|\+U|
 U=,M|
 
 T=I *|I^*|I
@@ -21,15 +22,21 @@ Q=,A|
 B={ \{ C } \}
 C=V\<|K\<|
 
+# statements — keywords / specific forms first
 K=if (E)[?G\x] K else[0?G\x\w\y] K[\y]|if (E)[?G\x] K[\y]
 |for (\i=E[S\1]; \i<=E[S\t]; \i++)[\mL\1-\4G\x] K[I\1B\z\y]
+|putchar('\\n');[N]
+|putchar(\i);[L\1E]
+|putchar(E);[E]
+|printf("%s",\i);[L\1P]
 |printf("%u\\\\n",E);[.N]
 |printf("%d\\\\n",E);[.N]
 |printf("%u ",E);[."\#20\#00]
 |printf("%d ",E);[."\#20\#00]
 |printf("%u%u%u\\\\n",E,E,E);[...N]
 |printf("%u%u%u",E,E,E);[...]
-|printf(\i);[L\1P]|printf(JW);
+|printf(\i);[L\1P]
+|printf(JW);
 |return E;[S\1X]|return;[Q]
 |B|;
 |* \i=E;[!\1]
@@ -41,11 +48,15 @@ K=if (E)[?G\x] K else[0?G\x\w\y] K[\y]|if (E)[?G\x] K[\y]
 |\i=E;[S\1]
 
 W=,J\<|
-J="%u\\\\n"|"%d\\\\n"|"%s\\\\n"|"%u "|"%d "|"%u"|"%d"|"%s"|"["]\S|E[.]
+J="%u\\\\n"|"%d\\\\n"|"%s\\\\n"|"%s"|"%u "|"%d "|"%u"|"%d"|"["]\S|E[.]
 
 E=RO[]|S[\l1]O[]
+
 R=\i(Z)[\v]|* \i[@\1]|\i\[S\][(\1\2]|(E)[]|! E[?]
-S=\d|sizeof(T)\z|sizeof(\i)\z|\s|\i
+
+# \c = char lit, \s = string const, \d = number
+S=\c|\d|sizeof(T)\z|sizeof(\i)\z|\s|\i
+
 Z=E,[S\k]\<|E|
 
 O=

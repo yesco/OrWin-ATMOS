@@ -1021,6 +1021,141 @@ static int params_done(void) {
   return 1;
 }
 
+
+
+// ---------------------------------------------------------------------------
+// String / char escapes — one decoder, shared by \S \s \c
+// ---------------------------------------------------------------------------
+
+// After a leading '\\' has been consumed: decode one escape into *out.
+// Advances line_pos. Returns 0 on failure (EOF / bad \x).
+static int decode_escape(uchar *out) {
+  uchar c, v, i;
+
+  if (!line_need()) return 0;
+  c = line_buf[line_pos++];
+  switch (c) {
+  case 'n':  *out = '\n'; return 1;
+  case 't':  *out = '\t'; return 1;
+  case 'r':  *out = '\r'; return 1;
+  case '0':  *out = 0;    return 1;
+  case '\\': *out = '\\'; return 1;
+  case '"':  *out = '"';  return 1;
+  case '\'': *out = '\''; return 1;
+  case 'a':  *out = '\a'; return 1;
+  case 'b':  *out = '\b'; return 1;
+  case 'f':  *out = '\f'; return 1;
+  case 'v':  *out = '\v'; return 1;
+  case 'x': case 'X':
+    v = 0;
+    for (i = 0; i < 2; i++) {
+      if (!line_need()) break;
+      c = line_buf[line_pos];
+      if (c >= '0' && c <= '9')      v = (uchar)((v << 4) + (c - '0'));
+      else if (c >= 'a' && c <= 'f') v = (uchar)((v << 4) + (c - 'a' + 10));
+      else if (c >= 'A' && c <= 'F') v = (uchar)((v << 4) + (c - 'A' + 10));
+      else break;
+      line_pos++;
+    }
+    *out = v;
+    return 1;
+  default:
+    *out = c; /* C: unknown escape → the char itself */
+    return 1;
+  }
+}
+
+// Next body character of a "..." or '...' string (handles \\ escapes).
+// Returns 0 on failure; 1 and *out on success. Does not consume the closer.
+static int next_body_char(uchar *out) {
+  uchar c;
+
+  if (!line_need()) return 0;
+  c = line_buf[line_pos++];
+  if (c == '\\')
+    return decode_escape(out);
+  *out = c;
+  return 1;
+}
+
+// Read body until closing delim (' or "). Opening delim already consumed.
+// Calls put(c, ctx) for each decoded byte (not the closing delim).
+// Consumes the closing delim. Returns 0 on failure.
+static int read_quoted_body(uchar delim, void (*put)(uchar c, void *ctx), void *ctx) {
+  uchar c;
+
+  while (line_need() && line_buf[line_pos] != delim) {
+    if (!next_body_char(&c)) return 0;
+    put(c, ctx);
+  }
+  if (!line_need() || line_buf[line_pos] != delim) return 0;
+  line_pos++;
+  note_progress();
+  return 1;
+}
+
+/* put helpers for the three call sites */
+
+static void put_emit(uchar c, void *ctx) {
+  (void)ctx;
+  emit(c);
+  capture_add(c);
+}
+
+typedef struct { uchar *buf; word n, max; } StrBuf;
+
+static void put_buf(uchar c, void *ctx) {
+  StrBuf *sb = (StrBuf *)ctx;
+  if (sb->n + 1 < sb->max) {
+    sb->buf[sb->n++] = c;
+    capture_add(c);
+  }
+}
+
+// \c — character literal 'x' / '\n' → TY_CHAR const
+static int match_char_lit(void) {
+  uchar c, slot;
+
+  skip_ws();
+  if (!line_need() || line_buf[line_pos] != '\'') return 0;
+  line_pos++;
+  if (!next_body_char(&c)) return 0;
+  if (!line_need() || line_buf[line_pos] != '\'') return 0;
+  line_pos++;
+  note_progress();
+  slot = (uchar)as_addr((uchar)lit_addr((unsigned int)c));
+  record_capture(MAKE_CAP(slot, TY_CHAR));
+  return 1;
+}
+
+// \S — emit string bytes + NUL into bytecode (opening " already matched;
+//      BNF production [" ] emits the op_str '"' opcode)
+static int match_str_emit(void) {
+  if (!line_need()) return 0;
+  if (!read_quoted_body('"', put_emit, 0)) return 0;
+  emit(0);
+  return 1;
+}
+
+// \s — constant string → data pool + relocatable pointer const
+static int match_str_const(void) {
+  uchar buf[512];
+  StrBuf sb;
+  uchar slot;
+
+  skip_ws();
+  if (!line_need() || line_buf[line_pos] != '"') return 0;
+  line_pos++;
+  sb.buf = buf; sb.n = 0; sb.max = (word)sizeof(buf);
+  if (!read_quoted_body('"', put_buf, &sb)) return 0;
+  if (sb.n + 1 >= sb.max) return 0;
+  buf[sb.n++] = 0;
+  slot = add_string_const(buf, sb.n);
+  record_capture(MAKE_CAP(slot, TY_CHAR | TY_PTR));
+  return 1;
+}
+
+
 static int match_num(void) {
   word v;
   uchar slot;
@@ -1041,155 +1176,6 @@ static int match_num(void) {
   return 1;
 }
 
-// Interpret C-style escapes in a string body; emit bytes + trailing NUL.
-// Opening " already matched by the BNF; the production [" ] emits the
-// op_str '"' opcode. Closing " consumed here.
-static int match_str_emit(void) {
-  uchar c, v, i;
-
-  if (!line_need()) return 0;
-  while (line_need() && line_buf[line_pos] != '"') {
-    c = line_buf[line_pos++];
-    if (c == '\\') {
-      if (!line_need()) return 0;
-      c = line_buf[line_pos++];
-      switch (c) {
-      case 'n':  c = '\n'; break;
-      case 't':  c = '\t'; break;
-      case 'r':  c = '\r'; break;
-      case '0':  c = 0;    break;
-      case '\\': c = '\\'; break;
-      case '"':  c = '"';  break;
-      case '\'': c = '\''; break;
-      case 'a':  c = '\a'; break;
-      case 'b':  c = '\b'; break;
-      case 'f':  c = '\f'; break;
-      case 'v':  c = '\v'; break;
-      case 'x': case 'X':
-        // \xHH — up to 2 hex digits
-        v = 0;
-        for (i = 0; i < 2; i++) {
-          if (!line_need()) break;
-          c = line_buf[line_pos];
-          if (c >= '0' && c <= '9') v = (uchar)((v << 4) + (c - '0'));
-          else if (c >= 'a' && c <= 'f') v = (uchar)((v << 4) + (c - 'a' + 10));
-          else if (c >= 'A' && c <= 'F') v = (uchar)((v << 4) + (c - 'A' + 10));
-          else break;
-          line_pos++;
-        }
-        c = v;
-        break;
-      default:
-        // unknown escape: keep the char as-is (C keeps unknown as itself)
-        break;
-      }
-    }
-    emit(c);
-    capture_add(c);
-  }
-  if (!line_need() || line_buf[line_pos] != '"') return 0;
-  line_pos++;
-  emit(0);
-  note_progress();
-  return 1;
-}
-
-
-// \s — constant string: parse with escapes, store in data pool, capture
-// a relocatable pointer const (like \d yields a number const).
-// Opening " already matched by the BNF (or matched here if bare).
-static int match_str_const(void) {
-  uchar buf[512];
-  word n = 0;
-  uchar c, v, i;
-  uchar slot;
-
-  skip_ws();
-  if (!line_need() || line_buf[line_pos] != '"') return 0;
-  line_pos++; // opening "
-
-  while (line_need() && line_buf[line_pos] != '"') {
-    c = line_buf[line_pos++];
-    if (c == '\\') {
-      if (!line_need()) return 0;
-      c = line_buf[line_pos++];
-      switch (c) {
-      case 'n':  c = '\n'; break;
-      case 't':  c = '\t'; break;
-      case 'r':  c = '\r'; break;
-      case '0':  c = 0;    break;
-      case '\\': c = '\\'; break;
-      case '"':  c = '"';  break;
-      case '\'': c = '\''; break;
-      case 'a':  c = '\a'; break;
-      case 'b':  c = '\b'; break;
-      case 'f':  c = '\f'; break;
-      case 'v':  c = '\v'; break;
-      case 'x': case 'X':
-        v = 0;
-        for (i = 0; i < 2; i++) {
-          if (!line_need()) break;
-          c = line_buf[line_pos];
-          if (c >= '0' && c <= '9') v = (uchar)((v << 4) + (c - '0'));
-          else if (c >= 'a' && c <= 'f') v = (uchar)((v << 4) + (c - 'a' + 10));
-          else if (c >= 'A' && c <= 'F') v = (uchar)((v << 4) + (c - 'A' + 10));
-          else break;
-          line_pos++;
-        }
-        c = v;
-        break;
-      default: break;
-      }
-    }
-    if (n + 1 >= (word)sizeof(buf)) return 0;
-    buf[n++] = c;
-    capture_add(c);
-  }
-  if (!line_need() || line_buf[line_pos] != '"') return 0;
-  line_pos++;
-  buf[n++] = 0; // NUL terminator in data pool
-
-  slot = add_string_const(buf, n);
-  // char* constant
-  record_capture(MAKE_CAP(slot, TY_CHAR | TY_PTR));
-  note_progress();
-  vlog("  str const slot %u data +%u len %u\n",
-       (unsigned)slot, (unsigned)(n ? const_val(slot) : 0), (unsigned)n);
-  return 1;
-}
-
-static int match_str(void) {
-  skip_ws();
-  if (!line_need() || line_buf[line_pos] != '"') return 0;
-
-  capture_add(line_buf[line_pos]);
-  line_pos++;
-
-  while (line_need() && line_buf[line_pos] != '"') {
-
-    // \c quoted char
-    if (line_buf[line_pos] == '\\') {
-      capture_add(line_buf[line_pos]);
-      line_pos++;
-      if (!line_need()) return 0;
-      capture_add(line_buf[line_pos]);
-      line_pos++;
-    } else {
-      capture_add(line_buf[line_pos]);
-      line_pos++;
-    }
-  }
-
-  if (!line_need() || line_buf[line_pos] != '"') return 0;
-  capture_add(line_buf[line_pos]);
-  line_pos++;
-
-  note_progress();
-
-  return 1;
-}
-
-// ---- BNF load: one malloc blob per rule, alts[] NULL-terminated ----
 
 static void free_rules(void) {
   uchar r;
@@ -1211,7 +1197,7 @@ static uchar *blobs[NRULES];
 // escapes that stay "\c" in the blob (all others become the plain char c)
 static int esc_kept(uchar e) {
   if (e >= '1' && e <= '9') return 1;
-  return strchr("insSCfv<d+{}[]#=aptrlxywmzkz", e) != NULL;
+  return strchr("insSCfv<d+{}[]#=aptrlxywmzkzc", e) != NULL;
 }
 
 static void build_one_rule(uchar r, char *rhs) {
@@ -1714,6 +1700,7 @@ static int step(void) {
     else if (e == 'n') ok = match_newline();
     else if (e == 's') ok = match_str_const();
     else if (e == 'S') ok = match_str_emit();
+    else if (e == 'c') ok = match_char_lit();
     else if (e == 'z') {
       // sizeof value from cur_type (after matching T)
       {
@@ -2062,12 +2049,31 @@ int main(int argc, char **argv) {
           if (proc) {
             word *pool = (word *)(blob + ((BlobHeader *)blob)->con);
 
+#ifndef __CC65__
+            {
+              extern word soft_top;
+              soft_top = 0;
+            }
+#endif
             for (i = 0; i < nconst; i++) {
               word cv = pool[i];
+#ifndef __CC65__
               if (const_is_reloc[i]) {
-                // blob-relative pointer → absolute
-                cv = (word)(uintptr_t)(blob + cv);
+                /* host: copy string into soft_heap, store offset */
+                extern uchar soft_heap[];
+                extern word soft_top;
+                const uchar *src = blob + cv;
+                word n = 0;
+                while (src[n]) n++;
+                n++;
+                if (soft_top + n <= 4096) {
+                  memcpy(soft_heap + soft_top, src, n);
+                  cv = soft_top;
+                  soft_top = (word)(soft_top + n);
+                } else
+                  cv = 0;
               }
+#endif
               proc->mem[CONST_TOP - i] = cv;
             }
 

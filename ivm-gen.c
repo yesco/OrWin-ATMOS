@@ -188,7 +188,7 @@ uchar add_const_raw(unsigned int v, uchar reloc) {
 
   if (nconst >= MAX_CONSTS)
     IVM_GEN_FAIL("constant pool full");
-  if (CONST_TOP - nconst < FRAME_BASE)
+  if ((word)(CONST_TOP - nconst) < (word)FRAME_BASE)
     IVM_GEN_FAIL("constants collided with frames");
 
   const_pool[nconst] = (uint16_t)v;
