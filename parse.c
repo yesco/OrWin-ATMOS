@@ -598,6 +598,27 @@ static uchar *run_production(uchar *p) {
         p += 3;
         continue;
       }
+      // \g: global/local init from captures \1=dest slot, \2=src const
+      //   scope 0: defer until main entry; else emit L+S now
+      if (p[1] == 'g') {
+        uchar dest, src;
+        dest = (uchar)(fr->prod_cap[1] & 0xff);
+        src  = (uchar)(fr->prod_cap[2] & 0xff);
+        src  = (uchar)as_addr(src);
+        if (scope_depth == 0) {
+          if (nginit >= MAX_GINIT)
+            IVM_GEN_FAIL("too many global inits");
+          ginit_slot[nginit] = dest;
+          ginit_src[nginit]  = src;
+          nginit++;
+          vlog("  ginit defer slot %u <- const %u\n", dest, src);
+        } else {
+          emitop2('L', src);
+          emitop2('S', dest);
+        }
+        p += 2;
+        continue;
+      }
     }
     b = *p++;
     emit(b);
@@ -1210,7 +1231,7 @@ static uchar *blobs[NRULES];
 // escapes that stay "\c" in the blob (all others become the plain char c)
 static int esc_kept(uchar e) {
   if (e >= '1' && e <= '9') return 1;
-  return e == '\\' || strchr("insSCcfhv<d+{}[]#=aptrlxywmzkz", e) != NULL;
+  return e == '\\' || strchr("insSCcfhvg<d+{}[]#=aptrlxywmzkz", e) != NULL;
 }
 
 static void build_one_rule(uchar r, char *rhs) {

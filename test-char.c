@@ -3,18 +3,18 @@
 #include <stdio.h>
 //#include <whatever.h>
 
+// Global vars init, delayed till main!
+// TODO: consider a more efficient initilizer opcode?
+//   (like a stream <init><count><var#><const#>
+//   use Y(nit) or H(mmm)?
+char *h     = "Hello";
+char spc    = 32;
+char *world = "World";
+char nl     = '\n';
+word a      = 65;
+
 
 int main(void) {
-  // Global vars cannot be initialized, do here...
-  // TODO: consider a more efficient initilizer opcode?
-  //   (like a stream <init><count><var#><const#>
-  //   use Y(nit) or H(mmm)?
-  char *h     = "Hello";
-  char spc    = 32;
-  char *world = "World";
-  char nl     = '\n';
-  word a      = 65;
-
   printf("%d", a);
   putchar(a);
   putchar('>');        // op: O>

@@ -892,7 +892,8 @@ ZL(op_L,   'L')  zp.acc = PAR;             goto pnext;
 ZL(op_S,   'S')  zp.mem[*zp.ipc] = zp.acc; goto pnext;
 ZL(op_Z,   'Z')  zp.mem[*zp.ipc] = 0;      goto pnext;
 
-// Memory ops - word raw
+// Memory ops - word raw using variable
+// TODO: why not use ACC???
 ZL(op_at,  '@')  zp.acc = *IVM_PTR(PAR); goto pnext;
 ZL(op_bang,'!')  *IVM_PTR(PAR) = zp.acc; goto pnext;
 

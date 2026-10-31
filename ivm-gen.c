@@ -75,6 +75,15 @@ uchar main_vec;           // vector index of function "main", 0xff = none
 // The current func_entry being compiled
 uchar pending_func_entry; // 0xff = none
 
+// Deferred global initializers: applied at the start of main()
+#ifndef MAX_GINIT
+  #define MAX_GINIT 64
+#endif
+uchar ginit_slot[MAX_GINIT]; // destination var slot
+uchar ginit_src[MAX_GINIT];  // source const slot
+uchar nginit;
+
+
 void gen_func_entry(uchar v);
 uchar *build_blob(int *out_len);
 
@@ -100,8 +109,9 @@ void acc_set_slot(uchar slot) {
 
 void emit(uchar c) {
   if (pending_func_entry != 0xff) {
-    gen_func_entry(pending_func_entry);
-    pending_func_entry = 0xff;
+    uchar v = pending_func_entry;
+    pending_func_entry = 0xff; /* clear first — gen may emit */
+    gen_func_entry(v);
   }
 
   if (bin_ptr >= MAX_BIN_LEN - 1)
@@ -404,16 +414,23 @@ void gen_reset(void) {
   pending_func_entry = 0xff;
   main_vec = 0xff;
   main_offset = 0;
+  nginit = 0;
 
   acc_invalidate();
 }
 
 void gen_func_entry(uchar v) {
-  if (v < (uchar)MAX_VECTORS)
-    vectors[v] = (uint16_t)bin_ptr;
-  // C entry: function named main
-  if (v == main_vec)
+  // main: emit deferred global inits first so they run on entry
+  if (v == main_vec) {
+    uchar i;
     main_offset = (word)bin_ptr;
+    for (i = 0; i < nginit; i++) {
+      emitop2('L', ginit_src[i]);
+      emitop2('S', ginit_slot[i]);
+    }
+  }
+  if (v < (uchar)MAX_VECTORS)
+    vectors[v] = (uint16_t)(v == main_vec ? main_offset : bin_ptr);
 }
 
 // TODO: write why it's doing this?

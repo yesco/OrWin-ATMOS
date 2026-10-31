@@ -1,17 +1,24 @@
 # -- BNF for C → IVM (char / char* / putchar / printf)
+
+# - comment spec
 #= /* */
 #= //
-# Four backslashes before n in format alts → match source \n
 
+# - program starts with P
 P=D
 
-D=#include <\+.h>\n\<|#include "\+.h"\n\<|#include <\+.c>\n\<|V\<|F\<|
+D=#include <\+.h>\n\<
+|#include "\+.h"\n\<
+|#include <\+.c>\n\<
+|V\<|F\<|
 
 # Declarations with optional initializer: char *h = "Hello";  char spc = 32;
 V=T M;
-M=\+=E[S\1]U|\+U|
+M=\+=S[\g]U|\+=E[S\1]U|\+U|
+# TODO: deep recursion might be bad...
 U=,M|
 
+# TODO: why I^* - pascal artifact?
 T=I *|I^*|I
 I=int|word|void|char
 
@@ -23,15 +30,16 @@ B={ \{ C } \}
 C=V\<|K\<|
 
 # statements — keywords / specific forms first
-K=if (E)[?G\x] K else[0?G\x\w\y] K[\y]|if (E)[?G\x] K[\y]
+K=if (E)[?G\x] K else[0?G\x\w\y] K[\y]
+|if (E)[?G\x] K[\y]
 |for (\i=E[S\1]; \i<=E[S\t]; \i++)[\mL\1-\4G\x] K[I\1B\z\y]
 |putchar('\\n');[N]
 |putchar(\d);[O\c1]
 |putchar(\i);[L\1E]
 |putchar(E);[E]
 |printf("%s",\i);[L\1P]
-|printf("%u\\\\n",E);[.N]
-|printf("%d\\\\n",E);[.N]
+|printf("%u\\n",E);[.N]
+|printf("%d\\n",E);[.N]
 |printf("%u ",E);[."\#20\#00]
 |printf("%d ",E);[."\#20\#00]
 |printf("%u%u%u\\\\n",E,E,E);[...N]
@@ -48,12 +56,16 @@ K=if (E)[?G\x] K else[0?G\x\w\y] K[\y]|if (E)[?G\x] K[\y]
 |\i=S;[L\2S\1]
 |\i=E;[S\1]
 
+# - print support
 W=,J\<|
 J="%u\\\\n"|"%d\\\\n"|"%s\\\\n"|"%s"|"%u "|"%d "|"%u"|"%d"|"["]\S|E[.]
 
 E=RO[]|S[\l1]O[]
 
-R=\i(Z)[\v]|* \i[@\1]|\i\[S\][(\1\2]|(E)[]|! E[?]
+# - function call
+R=\i(Z)[\v]
+|* \i[@\1]
+|\i\[S\][(\1\2]|(E)[]|! E[?]
 
 # \c = char lit, \s = string const, \d = number
 S=\d|sizeof(T)\z|sizeof(\i)\z|\s|\i
