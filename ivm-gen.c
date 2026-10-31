@@ -21,7 +21,7 @@
 #endif
 
 #ifndef MAX_CONSTS
-  #define MAX_CONSTS    256
+  #define MAX_CONSTS    128
 #endif
 
 #ifndef MAX_SLOTS
@@ -317,7 +317,6 @@ Symbol *sym_add(const char *name, SymbolType type, uchar address) {
   if (nsym >= sym_cap) {
     Symbol *ns = (Symbol *)realloc(syms, (sym_cap + SYM_GROW) * sizeof(Symbol));
 
-    printf("nsym= %u symcap = %u\n", nsym, sym_cap);
     if (!ns) IVM_GEN_FAIL("out of memory (symbols)");
     syms = ns;
     sym_cap = sym_cap + SYM_GROW;
