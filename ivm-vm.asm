@@ -448,15 +448,11 @@ op_Q:   lda     #0
 	
 	jmp     op_X
 
-;;; return FUNNAME
+;;; return FUNNAME ('; val; fall into op_X)
 op_semi:
         USEY
-        lda     _ivm_fp
-        ;; TODO: seems redundant, no harm doing the other stuff?
-        cmp     #FP_MAIN
-        beq     jmp_done
-
         ;; Loads FR_VAL index
+        lda     _ivm_fp
         clc
         adc     #FR_VAL
         tay
@@ -468,14 +464,8 @@ op_semi:
 	;; (/ (- 2732460 2729364) 2732460.0)
 	
 
-;;; return acc (C: if fp==FP_MAIN goto done)
+;;; return acc — FR_RET is always valid (_start ends with q after Vmain)
 op_X:   FIXIPC
-
-;;;  TODO: FFS I don't want to waste 7 cycles on every function call
-	
-        lda     _ivm_fp
-        cmp     #FP_MAIN
-        beq     jmp_done
 
 	;; -- linear load
 	;; (/ (- 2752774 2713089) 2752774.0) 1.4% ;; ALTCODE= 0 TOTAL

@@ -881,9 +881,7 @@ ZL(op_semi,';')
     zp.acc = zp.mem[zp.fp + FR_VAL];
     // fall through
 op_X:    Z('X')
-    // TODO: remove
-    if (zp.fp == FP_MAIN)    goto done;
-
+    // main returns via X into _start's trailing q (no FP_MAIN test)
     #ifdef __CC65__
       zp.ipc = (uchar *)zp.mem[zp.fp + FR_RET];
     #else

@@ -159,9 +159,21 @@ int TestOps(int dummy) {
 int TestWrites(void) {
     printf("--TestWrites\n");
     printf("abc\n");
-    printf("%u%u%u\n", 1, 2, 3);
-    printf("abc"); printf("\n");
-    printf("%u%u%u", 1, 2, 3); printf("\n");
+
+    // printf("%u%u%u\n", 1, 2, 3);
+    printf("%u", 1);
+    printf("%u", 2);
+    printf("%u", 3);
+    putchar('\n');
+
+    printf("abc");
+    putchar('\n');
+
+    // printf("%u%u%u", 1, 2, 3); ptchar('\n');
+    printf("%u", 1);
+    printf("%u", 2);
+    printf("%u", 3);
+    printf("\n");
     
     return 0; // Return default value
 }

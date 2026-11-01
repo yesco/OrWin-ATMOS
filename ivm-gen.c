@@ -473,13 +473,17 @@ uchar *build_blob(int *out_len) {
   int i;
   word v;
 
+  // Pascal program body has main_offset but no FUNC vector — add one for _start
   nv = nvector;
+  if (main_vec == (uchar)0xff && nv < (uchar)MAX_VECTORS)
+    nv = (uchar)(nv + 1);
 
   need = (unsigned)sizeof(GenBlobHeader)
        + (unsigned)nv * sizeof(word) + sizeof(word)
        + (unsigned)nconst * sizeof(word)
        + (unsigned)nv
        + (unsigned)bin_ptr
+       + 2 // _start: Vmain q
        + (unsigned)data_len + 16;
 
   body = (uchar *)malloc(need);
@@ -503,9 +507,32 @@ uchar *build_blob(int *out_len) {
     p += sizeof(word);
   }
 
-  h.fp   = gen_memadd(body, &p, frame_base, nv);
-  h.code = gen_memadd(body, &p, bin, bin_ptr);
-  h.main = h.code + main_offset;
+  // Entry vector for _start: C "main" or Pascal program body (synth)
+  {
+    uchar entry_vec;
+    if (main_vec != (uchar)0xff)
+      entry_vec = main_vec;
+    else {
+      // program \+; begin... has main_offset only — not a FUNC vector
+      entry_vec = nvector;
+      if (entry_vec < (uchar)MAX_VECTORS) {
+        vectors[entry_vec] = main_offset;
+        frame_base[entry_vec] = 0;
+      } else
+        entry_vec = 0;
+    }
+
+    h.fp   = gen_memadd(body, &p, frame_base, (word)nv);
+    h.code = gen_memadd(body, &p, bin, (word)bin_ptr);
+
+    // _start: call entry_vec, then q (X returns here — no FP_MAIN test)
+    {
+      uchar tramp[2];
+      tramp[0] = (uchar)(0xC0 | (entry_vec & 0x3f));
+      tramp[1] = 'q';
+      h.main = gen_memadd(body, &p, tramp, 2);
+    }
+  }
 
   // Data section (strings); reloc consts index into this from 0
   h.data = gen_memadd(body, &p, data_pool, data_len);
