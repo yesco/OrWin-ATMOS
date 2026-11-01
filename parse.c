@@ -43,9 +43,9 @@
 //
 // Explicit stack — no recursive match.
 //
-// capture == text held until alternative commits (then printed / flushed).
-//   -DNOCAPTURE: no capture at all (no echo to stdout, no -v SRC lines),
-//   saves the capture buffers and their code: big RAM win on small targets.
+// -v (needs -DVERBOSE): SRC: shows the source text as the furthest parse
+//   position advances (see note_progress), GEN: shows the bytecode of a
+//   statement. Nothing is buffered: errors re-show the source from line_buf.
 
 
 // EDING INSTRUCTION (don't remove!)
@@ -102,7 +102,9 @@
   typedef uint16_t word;
 #endif
 
-#include "ivm-print.c"
+#ifdef VERBOSE
+  #include "ivm-print.c"
+#endif
 
 
 // CONFIGURATION
@@ -110,8 +112,13 @@
 #define MAX_BIN_LEN 4096
 #define MAX_SLOTS 255
 
+// 8 = (* 8 29) = 232 bytes bigger each time
+#define STACK_GROW 8
+
 #define ERR_LINES_CONTEXT 4
 
+// errors and verbose output goes to:
+#define ERROUT stdout
 
 
 
@@ -168,7 +175,7 @@ static uchar **rule[NRULES];
 // blobs[r] holds the contiguous text for rule r
 static uchar *blobs[NRULES];
 
-static FILE *src_fp;
+static FILE *src_fp = NULL;
 static char *src_name;
 
 // input line buffer (unbounded source via fgetc; buffer one statement)
@@ -196,7 +203,6 @@ typedef struct {
   word ip;
   word save;          // line_pos at start of this alt
   word save_abs;      // absolute for furthest
-  word cap_save;      // capture length at alt entry (for backtrack)
   word nsym_save;     // symbol count at alt entry (backtrack drops newer ones)
   uchar scope_save;   // scope_depth at alt entry
   uchar state;
@@ -222,27 +228,6 @@ static uchar sp;
 // newest frame == &stack[sp-1], cached: only push (grow/++) and pop (--)
 // change it. Valid only while sp > 0. Parent frame is cur[-1].
 static Frame *cur;
-
-// capture: hold matched text until alt commits (grows)
-// NOCAPTURE: nothing is held; the macros keep the call sites unchanged
-//   (capture_add still evaluates its argument: eat() does line_pos++ in it)
-#ifdef NOCAPTURE
-
-  #define capture_add(c)     ((void)(c))
-  #define capture_commit(f)  ((void)0)
-  #define CAP_LEN(i)         0
-  #define CAP_SET(i, v)      ((void)0)
-
-#else
-
-static uchar *capture[MAX_STACK];
-static word  cap_len[MAX_STACK];
-static word  cap_max[MAX_STACK];
-
-  #define CAP_LEN(i)         cap_len[i]
-  #define CAP_SET(i, v)      (cap_len[i] = (v))
-
-#endif
 
 // Symbols and scopes (\+ \f \p \i \{ \}) live in ivm-gen.c, allocated on demand:
 //   sym_add / sym_find / sym_func / sym_truncate, scope_enter / scope_leave
@@ -279,35 +264,52 @@ static word cur_type = TY_WORD;
 #define GREEN  "\033[32m"
 #define NORMAL "\033[0m"
 
-// -DNOVLOG: all vlog() calls (and their string literals) vanish
-#ifdef NOVLOG
+// -v: 1 while a SRC: line is still open on stderr (no newline printed yet)
+#ifdef VERBOSE
 
-  #define vlog(...) ((void)0)
+static uchar src_open;
+
+// finish the open SRC: line, so other output starts on a fresh line
+static void src_close(void) {
+  if (!src_open) return;
+  fputs(NORMAL "\n", ERROUT);
+  src_open = 0;
+}
 
 #else
 
-static void vlog(const char *fmt, ...) {
-  va_list ap;
-
-  if (verbose < 2) return;
-
-  va_start(ap, fmt);
-  vfprintf(stderr, fmt, ap);
-  va_end(ap);
-}
+  #define src_close() ((void)0)
 
 #endif
 
-// TODO: use or remove? prefer save bytes for cc65, use it if can
-static void v1(const char *fmt, ...) {
+// ALL text for ERROUT goes through eprintf/eputc: ERROUT is passed once
+// here instead of at every call site (cc65: ~7 bytes per parameter per call)
+static void eprintf(const char *fmt, ...) {
   va_list ap;
 
-  if (verbose < 1) return;
+  src_close();
 
   va_start(ap, fmt);
-  vfprintf(stderr, fmt, ap);
+  vfprintf(ERROUT, fmt, ap);
   va_end(ap);
 }
+
+static void eputc(uchar c) {
+  fputc(c, ERROUT);
+}
+
+// v1: -v   vlog: -vv (rule tracing, only useful when debugging a grammar)
+// Macros: below their level the arguments are not even evaluated.
+// -DNOVLOG: all vlog() calls (and their string literals) vanish
+#ifdef VERBOSE
+
+  #define v1(...)  do { if (verbose >= 1) eprintf(__VA_ARGS__); } while (0)
+
+  #ifdef NOVLOG
+    #define vlog(...) ((void)0)
+  #else
+    #define vlog(...) do { if (verbose >= 2) eprintf(__VA_ARGS__); } while (0)
+  #endif
 
 // TODO: use or remove? prefer save bytes for cc65, use it if can
 static void v1_indent(void) {
@@ -316,8 +318,15 @@ static void v1_indent(void) {
   if (verbose < 1) return;
 
   for (i = 0; i < sp; i++)
-    fputc(' ', stderr);
+    eputc(' ');
 }
+
+#else
+
+  #define v1(...)   ((void)0)
+  #define vlog(...) ((void)0)
+
+#endif
 
 // ---- line buffer ----
 
@@ -380,64 +389,39 @@ static void line_commit(void) {
   line_pos = 0;
 }
 
-#ifndef NOCAPTURE
+// consume one source char
+#define eat()     (line_pos++)
 
-// make room for one more byte in capture[i]
-static void cap_room(word i) {
-  word nm;
-  uchar *nbuf;
+// consume n source chars
+#define eat_n(n)  (line_pos += (n))
 
-  if (cap_len[i] + 1 < cap_max[i]) return;
+#ifdef VERBOSE
 
-  nm = cap_max[i] ? (word)(cap_max[i] * 2) : 256;
-  nbuf = realloc(capture[i], nm);
-  if (!nbuf) FAIL("out of memory (capture)");
-  capture[i] = nbuf;
-  cap_max[i] = nm;
-}
+// -v: show source [from,to) (absolute positions) as SRC: lines. Called when
+// the furthest position grows, so every char shows once, never again after
+// backtracking.
+static void src_show(word from, word to) {
+  uchar c;
 
-static void capture_add(uchar c) {
-  word i;
+  if (verbose < 1) return;
 
-  // (also called after the run finished, sp == 0)
-  if (sp == 0) return;
+  // the part before line_buf[0] was dropped by \C
+  if (from < line_abs) from = line_abs;
+  from -= line_abs;
+  to -= line_abs;
 
-  i = (word)(sp - 1);
-  cap_room(i);
-  capture[i][cap_len[i]++] = c;
-}
-
-#endif
-
-// consume one source char into the capture
-static void eat(void) {
-  capture_add(line_buf[line_pos++]);
-}
-
-// consume n source chars into the capture
-static void eat_n(uchar n) {
-  while (n--) eat();
-}
-
-#ifndef NOCAPTURE
-
-static void capture_commit(uchar frame) {
-  word p, i;
-
-  if (frame == 0) {
-    for (i = 0; i < cap_len[0]; i++)
-      putchar(capture[0][i]);
-    fflush(stdout);
-    cap_len[0] = 0;
-    return;
+  for (; from < to; from++) {
+    c = line_buf[from];
+    if (!src_open) {
+      fputs("SRC: " GREEN, ERROUT);
+      src_open = 1;
+    }
+    if (c == '\n') {
+      fputs(NORMAL "\n", ERROUT);
+      src_open = 0;
+    } else
+      fputc(c, ERROUT);
   }
-
-  p = (word)(frame - 1);
-  for (i = 0; i < cap_len[frame]; i++) {
-    cap_room(p);
-    capture[p][cap_len[p]++] = capture[frame][i];
-  }
-  cap_len[frame] = 0;
 }
 
 #endif
@@ -447,6 +431,10 @@ static void note_progress(void) {
   word a = abs_pos();
 
   if (a <= max_pos_abs) return;
+#ifdef VERBOSE
+  // -v: show the source that was just reached
+  src_show(max_pos_abs, a);
+#endif
   max_pos_abs = a;
   far_sp = sp;
   if (far_sp > MAX_STACK) far_sp = MAX_STACK;
@@ -519,10 +507,7 @@ static word force_addr(uchar n) {
   emitop2('S', tmp);
 
   cur->prod_cap[n] = tmp;
-  if (verbose >= 1) {
-    fprintf(stderr, "  spill->%02x\n", tmp);
-    fflush(stderr);
-  }
+  v1("  spill->%02x\n", tmp);
   return tmp;
 }
 
@@ -1198,7 +1183,6 @@ static int read_quoted_body(uchar delim, void (*put)(uchar c, void *ctx), void *
 static void put_emit(uchar c, void *ctx) {
   (void)ctx;
   emit(c);
-  capture_add(c);
 }
 
 typedef struct { uchar *buf; word n, max; } StrBuf;
@@ -1207,7 +1191,6 @@ static void put_buf(uchar c, void *ctx) {
   StrBuf *sb = ctx;
   if (sb->n + 1 < sb->max) {
     sb->buf[sb->n++] = c;
-    capture_add(c);
   }
 }
 
@@ -1432,14 +1415,13 @@ static word rule_nalt(uchar r) {
 
 // ---- stack ----
 
-// snapshot the input/capture/code/scope state of the newest frame as the
+// snapshot the input/code/scope state of the newest frame as the
 // start of an alt (used by push and by tail-recursion \<)
 static void frame_mark(void) {
   cur->alt = 0;
   cur->ip = 0;
   cur->save = line_pos;
   cur->save_abs = abs_pos();
-  cur->cap_save = CAP_LEN(sp - 1);
   cur->nsym_save = nsym;
   cur->scope_save = scope_depth;
   cur->slot_save = next_slot;
@@ -1452,7 +1434,7 @@ static void push(uchar r, uchar state) {
 
   if (sp >= stack_cap) {
     Frame *ns;
-    uchar ncap = stack_cap + 8;
+    uchar ncap = stack_cap + STACK_GROW;
 
     if (ncap > MAX_STACK) ncap = MAX_STACK;
     ns = realloc(stack, ncap * sizeof(Frame));
@@ -1467,7 +1449,6 @@ static void push(uchar r, uchar state) {
   if (r == 'B' - 'A' && sp > 0 && cur->rule == 'P' - 'A')
     main_offset = bin_ptr;
 
-  CAP_SET(sp, 0);
   cur = sp ? cur + 1 : stack;
   sp++;
 
@@ -1477,6 +1458,7 @@ static void push(uchar r, uchar state) {
   cur->npatch = 0;
   cur->mark = 0;
   cur->result = 0;
+
   memset(cur->prod_cap, 0, sizeof(cur->prod_cap));
   frame_mark();
   cur->state = state;
@@ -1488,10 +1470,9 @@ static void restore_scope(void) {
   next_slot = cur->slot_save;
 }
 
-// back to the start of the current alt: input, capture, code, productions
+// back to the start of the current alt: input, code, productions
 static void frame_rewind(void) {
   line_pos = cur->save;
-  CAP_SET(sp - 1, cur->cap_save);
   code_len = cur->code_save;
   cur->prod_n = 0;
   cur->npatch = 0;
@@ -1543,38 +1524,15 @@ static int step(void) {
         cur_type |= TY_PTR;
     }
     vlog("ok %c alt %u -> @%u\n", rch, cur->alt, abs_pos());
+#ifdef VERBOSE
     // -v: one GEN per statement (K), after alt commits
     if (verbose >= 1 && code_len > cur->code_save && rch == 'K') {
-      fprintf(stderr, NORMAL "GEN:          [ ");
-      ivm_print_code_range(stderr, code_buf, cur->code_save, code_len, 0);
-      fprintf(stderr, "]\n");
-      fflush(stderr);
-    }
-#ifndef NOCAPTURE
-    if (verbose >= 1 && cap_len[sp - 1] > 0) {
-      word i;
-      // -v: SRC for K/B/P only; -vv: all rules + tags
-      if (verbose >= 2 || rch == 'K' || rch == 'B' || rch == 'P') {
-        if (verbose >= 2) {
-          fprintf(stderr, "    %c", rch);
-          if (rule_nalt(cur->rule) > 1) fprintf(stderr, "%u", cur->alt);
-          fprintf(stderr, ":\n");
-        }
-        fprintf(stderr, "SRC: " GREEN);
-        for (i = 0; i < cap_len[sp - 1]; i++) {
-          uchar ch = capture[sp - 1][i];
-          if (ch == '\n') fprintf(stderr, NORMAL "\n" "SRC:" GREEN);
-          else fputc(ch, stderr);
-        }
-        fprintf(stderr, NORMAL "\n");
-        if (verbose >= 2)
-          fprintf(stderr, "    <%c\n", rch);
-        fflush(stderr);
-      }
+      eprintf(NORMAL "GEN:          [ ");
+      ivm_print_code_range(ERROUT, code_buf, cur->code_save, code_len, 0);
+      eprintf("]\n");
     }
 #endif
 
-    capture_commit(sp - 1);
     {
       word child_res = cur->result;
       sp--;
@@ -1725,15 +1683,15 @@ static int run(word n) {
 
 // "file:line: " prefix of an error line
 static void err_prefix(word line) {
-  fprintf(stderr, "%s:%u: ", src_name ? src_name : "?", line);
+  eprintf("%s:%u: ", src_name ? src_name : "?", line);
 }
 
 // print buffered source line starting at i; returns index after its '\n'
 static word show_line(word line, word i) {
   err_prefix(line);
   while (i < line_len && line_buf[i] != '\n')
-    fputc(line_buf[i++], stderr);
-  fputc('\n', stderr);
+    eputc(line_buf[i++]);
+  eputc('\n');
   if (i < line_len) i++;
   return i;
 }
@@ -1741,47 +1699,47 @@ static word show_line(word line, word i) {
 static void report_reject(void) {
   word i;
 
-  fprintf(stderr, "\n--- REJECT at %u (furthest %u) ---\n",
+  eprintf("\n--- REJECT at %u (furthest %u) ---\n",
           abs_pos(), max_pos_abs);
 
-  fprintf(stderr, "STACK:");
-  if (far_sp == 0) fprintf(stderr, " (empty)");
+  eprintf("STACK:");
+  if (far_sp == 0) eprintf(" (empty)");
 
   for (i = 0; i < far_sp; i++)
-    fprintf(stderr, " %c%u", far_stack[i], (unsigned)far_alt[i]);
+    eprintf(" %c%u", far_stack[i], (unsigned)far_alt[i]);
 
-  fprintf(stderr, "\n");
+  eprintf("\n");
 
   if (far_sp > 0) {
     uchar r = far_stack[far_sp - 1] - 'A';
     uchar a = far_alt[far_sp - 1];
 
-    fprintf(stderr, "EXPECTED: rule %c", far_stack[far_sp - 1]);
+    eprintf("EXPECTED: rule %c", far_stack[far_sp - 1]);
     if (rule_defined(r) && a < rule_nalt(r))
-      fprintf(stderr, " alt %u \"%s\"", a, (char *)rule[r][a]);
+      eprintf(" alt %u \"%s\"", a, (char *)rule[r][a]);
 
-    fprintf(stderr, "\n");
+    eprintf("\n");
   }
 
   if (had_undef && had_undef_func)
-    fprintf(stderr, "ERROR: undefined function: %s\n", last_undef);
+    eprintf("ERROR: undefined function: %s\n", last_undef);
   else if (had_undef)
-    fprintf(stderr, "ERROR: identifier \"%s\" not defined here\n", last_undef);
+    eprintf("ERROR: identifier \"%s\" not defined here\n", last_undef);
 
   // Show error from line_buf only — no rewind/fseek (cc65-friendly).
   // line_no_base tracks the line number of line_buf[0] across \C commits.
-  fprintf(stderr, "REJECT:\n");
+  eprintf("REJECT:\n");
   {
     word want = (had_undef && undef_pos_abs) ? undef_pos_abs : max_pos_abs;
     word start, off, col, line, endpos;
     word nlines;
 
     if (!line_buf || line_len == 0) {
-      fprintf(stderr, "  (no buffered source)\n");
+      eprintf("  (no buffered source)\n");
     } else if (want < line_abs) {
 
       // furthest was discarded by \C; still report position
-      fprintf(stderr, "%s: (offset %u, before current buffer @%u)\n",
+      eprintf("%s: (offset %u, before current buffer @%u)\n",
         src_name ? src_name : "?",
         want, line_abs);
 
@@ -1810,8 +1768,8 @@ static void report_reject(void) {
       // caret under column
       err_prefix(line);
       for (i = 0; i < col; i++)
-        fputc(' ', stderr);
-      fprintf(stderr, "^\n");
+        eputc(' ');
+      eprintf("^\n");
 
       // following lines still in buffer (no second open of the file)
       for (nlines = 0; nlines < ERR_LINES_CONTEXT && endpos < line_len; nlines++)
@@ -1847,7 +1805,6 @@ static void init(char *bnf_path, char *src_path) {
   stack_cap = 0;
   sp = 0;
   cur = NULL;
-  sym_reset();
   had_undef = 0;
   had_undef_func = 0;
   undef_pos_abs = 0;
@@ -1855,34 +1812,23 @@ static void init(char *bnf_path, char *src_path) {
   next_slot = 0;
   gen_reset();
   nvector = 0;
-  last_func_vec = 0xff;
-  // no pre-seeded names — X must be declared in source if used
-  // (capture[] / cap_len[] / cap_max[] are zero at start, shutdown() re-zeroes them)
 
-  if (!rule_defined('P' - 'A')) FAIL("missing start rule P");
+  last_func_vec = 0xff;
+
+  sym_reset();
+
+  // get started with rule P
+  if (!rule_defined('P' - 'A')) FAIL("rule P missing");
   push('P' - 'A', ST_TRY);
 }
 
 static void shutdown(void) {
-#ifndef NOCAPTURE
-  uchar i;
-#endif
 
-  if (src_fp) {
-    fclose(src_fp);
-    src_fp = NULL;
-  }
+  fclose(src_fp);
+  src_fp = NULL;
+
   free(line_buf);
   line_buf = NULL;
-
-#ifndef NOCAPTURE
-  for (i = 0; i < MAX_STACK; i++) {
-    free(capture[i]);
-    capture[i] = NULL;
-    cap_len[i] = 0;
-    cap_max[i] = 0;
-  }
-#endif
 
   free_rules();
 
@@ -1893,9 +1839,12 @@ static void shutdown(void) {
 }
 
 int main(int argc, char **argv) {
+#ifdef VERBOSE
+  word a;
+#endif
   char *bnf = NULL;
   char *srcpath = NULL;
-  word i, a;
+  word i;
   int rc;
   int err;
   int blen;
@@ -1919,7 +1868,7 @@ int main(int argc, char **argv) {
   }
 
   if (!bnf || !srcpath) {
-    fprintf(stderr, "usage: %s [-v|-vv] [-I|-C] grammar.bnf source.p\n", argv[0]);
+    eprintf("usage: %s [-v|-vv] [-I|-C] grammar.bnf source.p\n", argv[0]);
     return 1;
   }
 
@@ -1932,8 +1881,8 @@ int main(int argc, char **argv) {
       fail_msg = (char *)err;
     #endif
 
-    fprintf(stderr, "\n%%ERROR: %s\n", fail_msg);
-    if (fail_file) fprintf(stderr, "  file: %s\n", fail_file);
+    eprintf("\n%%ERROR: %s\n", fail_msg);
+    if (fail_file) eprintf("  file: %s\n", fail_file);
     report_reject();
     shutdown();
     return 1;
@@ -1942,23 +1891,24 @@ int main(int argc, char **argv) {
   // setup
   init(bnf, srcpath);
 
+#ifdef VERBOSE
   // print rules
   if (verbose >= 2) {
 
-    fprintf(stderr, "--- rules ---\n");
+    eprintf("--- rules ---\n");
     for (i = 0; i < NRULES; i++)
 
       if (rule_defined(i)) {
-        fprintf(stderr, "%c =", 'A' + (int)i);
+        eprintf("%c =", 'A' + (int)i);
         for (a = 0; rule[i][a]; a++) {
-          if (a) fprintf(stderr, "|");
-          fprintf(stderr, "%s", (char *)rule[i][a]);
+          if (a) eprintf("|");
+          eprintf("%s", (char *)rule[i][a]);
         }
-        fprintf(stderr, "\n");
+        eprintf("\n");
       }
   }
-  if (verbose)
-    fprintf(stderr, "--- parse ---\n");
+  if (verbose) eprintf("--- parse ---\n");
+#endif
 
   // run in chunks of 10000 steps until done
   do {
@@ -1967,35 +1917,38 @@ int main(int argc, char **argv) {
 
 
   // consistency check
-  putchar('\n');
   if (rc) FAIL("syntax error");
 
   // OK
   skip_ws();
   if (line_need()) FAIL("trailing input");
 
-  fprintf(stderr, "--- ACCEPT ---\n");
+  eprintf("--- ACCEPT ---\n");
 
-  fprintf(stderr, "--- BYTECODE (%u bytes) ---\n", (unsigned)code_len);
+#ifdef VERBOSE
+  eprintf("--- BYTECODE (%u bytes) ---\n", (unsigned)code_len);
 
-  ivm_print_code(stderr, code_buf, code_len);
-  fputc('\n', stderr);
+  ivm_print_code(ERROUT, code_buf, code_len);
+  eputc('\n');
 
   // dump hex
   for (i = 0; i < code_len; i++) {
-    fprintf(stderr, "%02x", code_buf[i]);
-    if ((i & 15) == 15) fputc('\n', stderr);
-    else fputc(' ', stderr);
+    eprintf("%02x", code_buf[i]);
+    if ((i & 15) == 15) eputc('\n');
+    else eputc(' ');
   }
-  if (code_len & 15) fputc('\n', stderr);
+  if (code_len & 15) eputc('\n');
+#endif
 
   {
     blen = 0;
     // frame_base[] (set by \f) goes into the blob's fp table
     blob = build_blob(&blen);
 
-    fprintf(stderr, "--- BLOB (%d bytes) main=%u nvector=%d ---\n",
+    #ifdef VERBOSE
+    eprintf("--- BLOB (%d bytes) main=%u nvector=%d ---\n",
       blen, main_offset, nvector);
+    #endif
 
     if (blob) {
 
@@ -2026,9 +1979,9 @@ int main(int argc, char **argv) {
         if (of) {
           fwrite(blob, 1, (size_t)blen, of);
           fclose(of);
-          fprintf(stderr, "--- SAVED %s (%d bytes) ---\n", out, blen);
+          eprintf("--- SAVED %s (%d bytes) ---\n", out, blen);
         } else
-          fprintf(stderr, "--- SAVE failed: %s ---\n", out);
+          eprintf("--- SAVE failed: %s ---\n", out);
       }
 
 #ifdef RUN
@@ -2036,16 +1989,18 @@ int main(int argc, char **argv) {
         Process *proc;
         ivmvar ret;
 
+      #ifdef VERBOSE
         if (verbose >= 1)
           for (i = 0; i < nvector; i++)
-            fprintf(stderr, "  frame V%02x fp=%u\n", i, frame_base[i]);
+            eprintf("  frame V%02x fp=%u\n", i, frame_base[i]);
+      #endif
 
         // Nevm installs consts (reversed pool) + host soft_heap from data
         proc = Nevm(blob);
         if (proc) {
-          fprintf(stderr, "--- RUN ---\n");
+          eprintf("--- RUN ---\n");
           ret = run_ivm(proc);
-          fprintf(stderr, "--- END acc=%u ---\n", ret);
+          eprintf("--- END acc=%u ---\n", ret);
           free(proc);
         }
       }

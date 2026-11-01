@@ -5,11 +5,11 @@ echo "NAME: $name"
 
 rm parse.sim parse-run.sim $name.ivm 2>/dev/null
 
-
-cl65 -DNOCAPTURE -t sim6502 -Oirs -o parse.sim parse.c | exit 1
+#cl65 -DVERBOSE -t sim6502 -Oirs -o parse.sim parse.c | exit 1
+cl65       -t sim6502 -Oirs -o parse.sim     parse.c | exit 1
 cl65 -DRUN -t sim6502 -Oirs -o parse-run.sim parse.c | exit 1
 
-sim65 -c parse.sim c.bnf $name.c
+sim65 -c parse.sim -v c.bnf $name.c
 
 echo
 
