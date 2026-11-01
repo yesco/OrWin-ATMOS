@@ -492,11 +492,14 @@ uchar *build_blob(int *out_len) {
 
   // Const pool: Nevm installs pool[i] → mem[constidx+i].
   // Slot constidx+i holds const_pool[nconst-1-i] (bytecode uses CONST_TOP-i).
-  // Reloc entries stay *data-relative* offsets (not blob-absolute). */
-  // (The reason for this loop is that it's a "REVERSE RE-ORDERING")
+  // Reloc: data-relative offset | 0x8000 (bit15 marks string/data ptr).
+  // Integers stay plain values. Loader strips 0x8000 and resolves.
   h.con = (word)(p - body);
-  for (i = 0; i < nconst; i++) {
-    v = const_pool[nconst - 1 - i];
+  for (i = 0; i < (int)nconst; i++) {
+    uchar j = (uchar)(nconst - 1 - i);
+    v = const_pool[j];
+    if (const_is_reloc[j])
+      v = (word)(v | (word)0x8000);
     memcpy(p, &v, sizeof(word));
     p += sizeof(word);
   }

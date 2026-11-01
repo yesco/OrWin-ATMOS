@@ -373,30 +373,39 @@ Process* Nevm(uchar *loaded) {
   p->h.mem = p->mem;
   p->h.acc = 0;
 
-  // Install constants into process mem[] (PAR = mem[idx] only)
+  // Install constants into process mem[] (PAR = mem[idx] only).
+  // Bit15 set => relocatable data-relative offset (string etc.).
   if (bh->constidx != 255 && bh->memsz > bh->constidx) {
     word *pool;
     word nc = bh->memsz - bh->constidx;
     word i;
-    #ifdef __CC65__
-      pool = (word *)(unsigned)bh->con;
-    #else
-      pool = (word *)(loaded + bh->con);
-    #endif
-    // pool[i] lives at mem[constidx + i]
-    for (i = 0; i < nc; i++)
-      p->mem[bh->constidx + i] = pool[i];
-  }
-#ifndef __CC65__
-  /* Host: data section holds strings; reloc consts are offsets into it.
-     Copy data → soft_heap so P/'/, see the same offsets. */
-  if (bh->data && bh->len > bh->data) {
-    word n = (word)(bh->len - bh->data);
-    if (n > SOFT_HEAP_MAX) n = SOFT_HEAP_MAX;
-    memcpy(soft_heap, loaded + bh->data, n);
-    soft_top = n;
-  }
+#ifdef __CC65__
+    pool = (word *)(unsigned)bh->con;
+#else
+    pool = (word *)(loaded + bh->con);
+    /* Host: strings live in soft_heap; copy data section once */
+    if (bh->data && bh->len > bh->data) {
+      word n = (word)(bh->len - bh->data);
+      if (n > SOFT_HEAP_MAX) n = SOFT_HEAP_MAX;
+      memcpy(soft_heap, loaded + bh->data, n);
+      soft_top = n;
+    }
 #endif
+    for (i = 0; i < nc; i++) {
+      word v = pool[i];
+      if (v & (word)0x8000) {
+        word off = (word)(v & (word)0x7fff);
+#ifdef __CC65__
+        /* absolute pointer into image data (hdr.data already +base if relocated) */
+        v = (word)(bh->data + off);
+#else
+        /* soft_heap offset (data copied at 0) */
+        v = off;
+#endif
+      }
+      p->mem[bh->constidx + i] = v;
+    }
+  }
   return p;
 }
 
