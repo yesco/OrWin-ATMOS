@@ -1,0 +1,306 @@
+I haven't profiled this; these are from reading the code, so measure
+after each change. At 55 s you're likely spending about 70 interpreter
+steps per source byte, so the biggest wins either cut steps or cut
+cost per step.
+
+## Speed
+
+1. **Every alternative is a full frame push.**
+
+   A statement or expression rule with many alts pushes a frame, runs
+   `ST_TRY`, `frame_rewind`, and fails on its first
+   literal. Expressions go through several precedence levels this
+   way. Fix: at `build_one_rule`, store each alt's first literal byte
+   if it has one. In `ST_TRY`, compare it against the peeked char and
+   skip the alt without pushing. Left-factoring the BNF helps
+   too. This is probably the biggest win.
+
+TODO: I think we have man cur-> references. So there is very many
+  allocations and disposals for each alt, and we burn through many
+  altos. How about one global "cur" struct that we copy if we push()?
+  Not only would that save code at each cur-> as they become fixed
+  reference, but we'd do far fewer allocations!
+
+
+2. **Whitespace and comments are re-scanned after every backtrack.**
+
+   The scan also goes through `eat()`, `capture_add()` and
+   `cap_room()` per char. `step()` calls `skip_ws()` and then
+   `match_lit()` calls it again. Remove the extra one in
+   `step()`. Cache `(ws_from → ws_to)` so a retry at the same position
+   jumps over it.
+
+TODO: make sure have at least 80 bytes whenever entering a rule,
+      if less refill till 160 \S \s maybe special
+      instrument in \C in the grammar(s).
+      comments are problematic as position becomes non-linear,
+      error pos reporting problem?
+
+
+3. **`note_progress()` copies the whole stack (up to 64 entries ×2) on every new furthest token.**
+
+   Copy only the top ~8 frames, or just the rule letters.
+   
+
+TODO: only need to copy if since entered any rule
+     (reset at enter rule that is, and copy if upodated max))
+
+
+4. **`rule_nalt()` is a linear scan on every `ST_TRY`.**
+
+   Precompute `nalt[26]` at load.
+
+
+
+5. **Every step does `rule[cur->rule][cur->alt]`.**
+
+   That is a double indirection, which is expensive on cc65. Cache the
+   alt pointer in the frame.
+
+TODO: yes, just *alt++, end at 0
+   (do we have and end pointer in the array?)
+
+
+
+6. **`push()` does `memset(prod_cap)` for nothing.**
+
+   `cap_val` and `force_addr` are guarded by `prod_n`. Only `\g` reads
+   unguarded.
+
+TODO: ok, let's try without?
+
+
+7. **Symbol lookup is a linear `strcmp` scan, repeated per alt.**
+
+   The same identifier is re-matched and re-looked-up in each
+   backtracked alt. Cache the last identifier by start position. Add a
+   1-byte hash to `Symbol` to skip most `strcmp`s. Keep a
+   `func_sym[vec]` table so `sym_func()` isn't a
+   scan. `match_param_decl` and `params_done` also loop over all
+   symbols.
+
+
+TODO: one byte hash yes
+
+
+8. **cc65's `fgetc` is slow and unbuffered per call.**
+
+   Fill `line_buf` with `fread` in 128–256 byte chunks inside
+   `line_fetch()`. This still honors your "unbounded input" rule.
+
+TODO: I though we did this already since we have a buffer?
+
+
+9. **Small items:**
+
+   - Make `line_need()` a macro, `(line_pos < line_len || line_fetch())`.
+   - Use `memmove` in `line_commit`.
+   - Use `memcpy` in `capture_commit`.
+   - Test literals first in `step()`, before the `\` chain.
+   - Replace the `strchr` in `emitop2` with a switch.
+
+## Memory and code bloat
+
+- **Captures are the biggest waste.**
+
+  Text is copied up the stack on every commit (O(n × depth)). Frame 0
+  only flushes at the very end, so nearly the whole source is buffered
+  in RAM. If the echo is only a debug feature, gate `capture_add` on
+  `verbose` and drop the `putchar` path. That removes `cap_room`, the
+  64 buffers and the copy loops.
+
+
+- **Strip debug output:**
+
+  `-DNOVLOG` removes the `vlog` call sites (varargs call sites are fat
+  on cc65). `fprintf`/`vfprintf` pull in cc65's printf engine, a few
+  KB by itself. Put `report_reject`, the verbose dumps, and the hex
+  dump behind `#ifdef DEBUG`, and use `fputs` plus a tiny `utoa` for
+  the rest.
+
+- **Types:**
+
+  use `uchar` instead of `int`/`word` for `ok`, `rc`, loop counters,
+  and `enum SymbolType` (an enum is 2 bytes on cc65). 16-bit math
+  costs a lot of code on 6502.
+
+- **Symbols:**
+
+  one `malloc` per name (plus the 4-byte heap header) and one `free`
+  per truncate. Use a bump-allocated name pool and save its mark with
+  `nsym_save`. Truncation then becomes a pointer reset.
+  
+- **`build_blob` makes a second full copy of the image.**
+
+  It also repeats the `gen_memadd` memcpys. Compute the sizes, then
+  `fwrite` header, vectors, consts, fp, code, and data in
+  sequence. This removes the `malloc(need)`, the copies, and the
+  post-hoc vector fixup.
+
+- **Static buffers are large:**
+
+  `bin` (4 KB), `data_pool` (2 KB), `const_pool`, `vectors`, plus
+  `uchar buf[512]` on the stack in `match_str_const`. Shrink them to
+  what test.c needs.
+
+- **Compiler flags:**
+
+  `-Oirs -Cl` (static locals) is often a large win on cc65. Nothing
+  here is recursive, so it's safe. Also check the map file (`-m`) to
+  see what actually dominates the 31 KB.
+
+I'd start with 1, 2 and the captures item (the biggest speed win and
+the biggest memory/size win), then `-DNOVLOG` and `-Cl`. I can draft
+any of these as patches that follow your editing rules.
+
+
+
+Your instinct is right about the code, but the allocations come from
+somewhere else.
+
+**What your idea fixes:**
+
+  `cur->x` on cc65 goes through a pointer (load ptr, `ldy #off`, `lda
+  (ptr),y`). A global `Frame cur;` compiles `cur.x` to a plain
+  absolute `lda cur+off`. That is smaller and several times faster per
+  access, and the step loop is full of them. It also removes the
+  `realloc` pointer rebase in `push()`.
+
+**Where the allocations really come from:**
+
+  frames don't allocate per alt. They sit in `stack[]`, which is
+  `realloc`'d only when depth crosses 8, 16, and so on. The churn is:
+
+- `sym_add` and `sym_truncate` doing a `malloc`/`free` per name on
+    every backtracked declaration. The name pool I suggested fixes this.
+- `capture[]` growing by `realloc` and never shrinking.
+
+**The catch:**
+
+  a copy replaces the pointer bump. Today a push is a pointer
+  increment plus a `memset` of 20 bytes. With a global `cur`, every
+  push copies `cur` into `stack[sp-1]` and every pop copies it
+  back. If `Frame` stays at about 56 bytes, that is roughly 400+
+  cycles per push/pop pair, which could cancel the gain. Rules that
+  fail on their first literal, which is most of them, would pay it
+  hardest. So the design needs two changes:
+
+1. **Split the frame into hot and cold.**
+   - **Hot, global and copied (about 20 bytes):**
+
+   rule, alt, state, `ip`, `save`, `cap_save`, `nsym_save`,
+   `code_save`, `scope_save`, `slot_save`.
+
+
+   - **Cold, never copied:**
+
+   `prod_cap[10]`, `prod_n`, `patch[4]`, `mark`, `arg_i`, `npatch`,
+   `func_vec`, `result`. These live in a per-depth array and are
+   reached through a pointer (`ccur`) that moves only on push and
+   pop. Only the production/capture code touches them.
+
+2. **Store `ip` as a `uchar *`
+
+   into the alt instead of `rule`/`alt`/`ip` indexes.** This removes
+   the `rule[cur->rule][cur->alt]` double lookup and the `alt[cur->ip
+   + k]` indexing.
+
+Combine this with the first-literal filter from earlier, so a doomed
+alt never pushes at all.
+
+**Things that will bite when you convert:**
+
+- The parent frame becomes `stack[sp-1]`, not `cur[-1]`. This affects
+  `\k` (it reads the parent's `func_vec`, so use `ccur[-1]`).
+
+- `\C` zeroes `save` over all frames. Loop over `stack[0..sp-2]` and
+  also set `cur.save = 0`.
+
+- `note_progress` reads each frame's `rule` and `alt`. The top frame
+  is in `cur`, the rest are in `stack`.
+
+- On a failed pop, restore `cur = stack[--sp - 1]` before setting
+  `ST_FAIL`. On a successful pop, read the child's `result` before
+  restoring.
+
+**Cheaper experiment first:**
+
+compile with `-Or` and `#pragma register-vars(on)` and declare
+`register Frame *cur`. cc65 can then keep the pointer in zero
+page. That saves a few bytes per access with no restructuring, so you
+can measure how much of the win you get before doing the full split.
+
+I can sketch the `step()`/`push()`/pop rewrite for the hot/cold
+version if you want to try it.
+
+
+Yes, make it a compile-time flag. "Size 0" won't work cleanly:
+`cap_room` would still run and `FAIL` or loop, and the arrays and copy
+code would stay in the binary. A `NOCAPTURE` flag removes all of it.
+
+Capture is the biggest RAM user in the program. Text is copied up
+through the frames, and frame 0 flushes only at the end, so nearly the
+whole source is held in memory.
+
+**1. Replace the capture block** (the arrays, `cap_room`,
+  `capture_add`, `capture_commit`):
+
+```c
+#ifdef NOCAPTURE
+
+  // no capture: nothing buffered, nothing echoed to stdout
+  // (keep the argument evaluated: eat() relies on line_pos++ inside it)
+  #define capture_add(c)      ((void)(c))
+  #define capture_commit(f)   ((void)0)
+  #define CAP_LEN(i)          0
+  #define CAP_SET(i, v)       ((void)0)
+
+#else
+
+  // ... existing capture[], cap_len[], cap_max[], cap_room(),
+  //     capture_add(), capture_commit() unchanged ...
+
+  #define CAP_LEN(i)          cap_len[i]
+  #define CAP_SET(i, v)       (cap_len[i] = (v))
+
+#endif
+```
+
+The `eat()` line is the one to watch. It is
+`capture_add(line_buf[line_pos++])`, and the macro must still evaluate
+its argument or the parser stops advancing.
+
+**2. Change the other uses to the macros:**
+- `frame_mark`: `cur->cap_save = CAP_LEN(sp - 1);`
+- `frame_rewind`: `CAP_SET(sp - 1, cur->cap_save);`
+- `push`: `CAP_SET(sp, 0);`
+- `ST_OK` in `step()`: wrap the whole `if (verbose >= 1 && cap_len[sp
+  - 1] > 0) { ... }` block in `#ifndef NOCAPTURE`. The `-v` SRC
+  display needs capture.
+- `shutdown`: wrap the `free(capture[i])` and `cap_len`/`cap_max`
+  resets in `#ifndef NOCAPTURE`.
+
+Build with `-DNOCAPTURE -DNOVLOG`.
+
+**Two effects to expect:** the source echo on stdout disappears, and
+  `-v` shows GEN lines but no SRC lines. The echo seems to be debug
+  output, since the real output is the `.ivm` file. I haven't checked
+  whether anything else reads it.
+
+**Other RAM to trim for the sim65 test:**
+
+- `bin[]` is 4 KB by default (`MAX_BIN_LEN`). Size it to your real
+  output.
+
+- `data_pool` is 2 KB, `const_pool` and `vectors` are 128 and 64
+  entries, and `match_str_const` puts a 512-byte buffer on the stack.
+
+- `Frame` is about 56 bytes, so 64 frames is up to 3.5 KB. Lower
+  `MAX_STACK` if your deepest nesting allows.
+
+- `line_buf` only shrinks at `\C`, so make sure the grammar commits
+  after each statement, or it holds the whole file.
+
+If it still runs out after `NOCAPTURE`, the sim65 map file or
+`__HEAPSIZE__`/`__STACKSIZE__` settings will show whether it is the
+heap or the static segments.

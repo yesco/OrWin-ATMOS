@@ -44,6 +44,8 @@
 // Explicit stack — no recursive match.
 //
 // capture == text held until alternative commits (then printed / flushed).
+//   -DNOCAPTURE: no capture at all (no echo to stdout, no -v SRC lines),
+//   saves the capture buffers and their code: big RAM win on small targets.
 
 
 // EDING INSTRUCTION (don't remove!)
@@ -222,9 +224,25 @@ static uchar sp;
 static Frame *cur;
 
 // capture: hold matched text until alt commits (grows)
+// NOCAPTURE: nothing is held; the macros keep the call sites unchanged
+//   (capture_add still evaluates its argument: eat() does line_pos++ in it)
+#ifdef NOCAPTURE
+
+  #define capture_add(c)     ((void)(c))
+  #define capture_commit(f)  ((void)0)
+  #define CAP_LEN(i)         0
+  #define CAP_SET(i, v)      ((void)0)
+
+#else
+
 static uchar *capture[MAX_STACK];
 static word  cap_len[MAX_STACK];
 static word  cap_max[MAX_STACK];
+
+  #define CAP_LEN(i)         cap_len[i]
+  #define CAP_SET(i, v)      (cap_len[i] = (v))
+
+#endif
 
 // Symbols and scopes (\+ \f \p \i \{ \}) live in ivm-gen.c, allocated on demand:
 //   sym_add / sym_find / sym_func / sym_truncate, scope_enter / scope_leave
@@ -362,6 +380,8 @@ static void line_commit(void) {
   line_pos = 0;
 }
 
+#ifndef NOCAPTURE
+
 // make room for one more byte in capture[i]
 static void cap_room(word i) {
   word nm;
@@ -387,6 +407,8 @@ static void capture_add(uchar c) {
   capture[i][cap_len[i]++] = c;
 }
 
+#endif
+
 // consume one source char into the capture
 static void eat(void) {
   capture_add(line_buf[line_pos++]);
@@ -396,6 +418,8 @@ static void eat(void) {
 static void eat_n(uchar n) {
   while (n--) eat();
 }
+
+#ifndef NOCAPTURE
 
 static void capture_commit(uchar frame) {
   word p, i;
@@ -415,6 +439,8 @@ static void capture_commit(uchar frame) {
   }
   cap_len[frame] = 0;
 }
+
+#endif
 
 static void note_progress(void) {
   uchar i;
@@ -1413,7 +1439,7 @@ static void frame_mark(void) {
   cur->ip = 0;
   cur->save = line_pos;
   cur->save_abs = abs_pos();
-  cur->cap_save = cap_len[sp - 1];
+  cur->cap_save = CAP_LEN(sp - 1);
   cur->nsym_save = nsym;
   cur->scope_save = scope_depth;
   cur->slot_save = next_slot;
@@ -1441,7 +1467,7 @@ static void push(uchar r, uchar state) {
   if (r == 'B' - 'A' && sp > 0 && cur->rule == 'P' - 'A')
     main_offset = bin_ptr;
 
-  cap_len[sp] = 0;
+  CAP_SET(sp, 0);
   cur = sp ? cur + 1 : stack;
   sp++;
 
@@ -1465,7 +1491,7 @@ static void restore_scope(void) {
 // back to the start of the current alt: input, capture, code, productions
 static void frame_rewind(void) {
   line_pos = cur->save;
-  cap_len[sp - 1] = cur->cap_save;
+  CAP_SET(sp - 1, cur->cap_save);
   code_len = cur->code_save;
   cur->prod_n = 0;
   cur->npatch = 0;
@@ -1524,6 +1550,7 @@ static int step(void) {
       fprintf(stderr, "]\n");
       fflush(stderr);
     }
+#ifndef NOCAPTURE
     if (verbose >= 1 && cap_len[sp - 1] > 0) {
       word i;
       // -v: SRC for K/B/P only; -vv: all rules + tags
@@ -1545,6 +1572,7 @@ static int step(void) {
         fflush(stderr);
       }
     }
+#endif
 
     capture_commit(sp - 1);
     {
@@ -1836,7 +1864,9 @@ static void init(char *bnf_path, char *src_path) {
 }
 
 static void shutdown(void) {
+#ifndef NOCAPTURE
   uchar i;
+#endif
 
   if (src_fp) {
     fclose(src_fp);
@@ -1845,12 +1875,14 @@ static void shutdown(void) {
   free(line_buf);
   line_buf = NULL;
 
+#ifndef NOCAPTURE
   for (i = 0; i < MAX_STACK; i++) {
     free(capture[i]);
     capture[i] = NULL;
     cap_len[i] = 0;
     cap_max[i] = 0;
   }
+#endif
 
   free_rules();
 

@@ -1,16 +1,19 @@
 # dadada
 
-name= $1
+name=$1
+echo "NAME: $name"
 
-cl65 -t sim6502 -Oirs -o parse.sim parse.c \
-  && sim65 -c parse.sim tpi.bnf $name.p
+rm parse.sim parse-run.sim $name.ivm 2>/dev/null
 
-cl65 -DRUN -t sim6502 -Oirs -o parse-run.sim parse.c \
-  && sim65 -c parse-run.sim tpi.bnf sim $name.p
+
+cl65 -DNOCAPTURE -t sim6502 -Oirs -o parse.sim parse.c | exit 1
+cl65 -DRUN -t sim6502 -Oirs -o parse-run.sim parse.c | exit 1
+
+sim65 -c parse.sim c.bnf $name.c
 
 echo
 
-ls -ugGlf parse.sim parse-run.sim
+ls -ugGlf parse.sim parse-run.sim $name.ivm
 echo
 echo "=== parse.c: `./wcode parse.c` LOC ==="
 echo

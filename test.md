@@ -140,3 +140,23 @@ need better dispatch!
 
 - asm: 8927-6482 = 2445 bytes
 - C: 10953-6482 = 4471 bytes...
+
+
+## oscar64
+
+anecdotes (from oscar64)
+
+*Dhrystone Data Breakdown:*
+
+The project's documentation outlines the trade-offs using the
+Dhrystone benchmark:
+
+- Native Code: 8,952 Bytes | 442 iterations/sec
+• Bytecode: 10,993 Bytes | 94 iterations/sec
+
+In this scenario, the bytecode binary is actually 2,041 bytes larger
+and 4.7x slower. The benchmark logic itself translates into tight
+native sequences that Oscar64 optimizes effectively. When you force
+those operations through a VM stream—compounded by the inclusion of
+the interpreter kernel—the bytecode setup loses on both performance
+and size metrics.
