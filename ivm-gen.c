@@ -492,8 +492,7 @@ uchar *build_blob(int *out_len) {
 
   // Const pool: Nevm installs pool[i] → mem[constidx+i].
   // Slot constidx+i holds const_pool[nconst-1-i] (bytecode uses CONST_TOP-i).
-  // Reloc: data-relative offset | 0x8000 (bit15 marks string/data ptr).
-  // Integers stay plain values. Loader strips 0x8000 and resolves.
+  // Reloc: data-relative offset | 0x8000 (bit15). Loader resolves to ptr/soft_heap.
   h.con = (word)(p - body);
   for (i = 0; i < (int)nconst; i++) {
     uchar j = (uchar)(nconst - 1 - i);

@@ -246,7 +246,7 @@ unsigned long countops = 0;
 
 
 // No fixed global image buffer — load_blob/finalise malloc.
-uchar *g_loaded; /* blob base while running */
+uchar *g_loaded; // blob base while running
 
 
 // ===========================================================================
@@ -373,8 +373,8 @@ Process* Nevm(uchar *loaded) {
   p->h.mem = p->mem;
   p->h.acc = 0;
 
-  // Install constants into process mem[] (PAR = mem[idx] only).
-  // Bit15 set => relocatable data-relative offset (string etc.).
+  // Install constants: pool[i] → mem[constidx+i].
+  // Bit15 => data-relative string/offset; resolve for host soft_heap or 6502 abs ptr.
   if (bh->constidx != 255 && bh->memsz > bh->constidx) {
     word *pool;
     word nc = bh->memsz - bh->constidx;
@@ -383,7 +383,6 @@ Process* Nevm(uchar *loaded) {
     pool = (word *)(unsigned)bh->con;
 #else
     pool = (word *)(loaded + bh->con);
-    /* Host: strings live in soft_heap; copy data section once */
     if (bh->data && bh->len > bh->data) {
       word n = (word)(bh->len - bh->data);
       if (n > SOFT_HEAP_MAX) n = SOFT_HEAP_MAX;
@@ -395,13 +394,12 @@ Process* Nevm(uchar *loaded) {
       word v = pool[i];
       if (v & (word)0x8000) {
         word off = (word)(v & (word)0x7fff);
-#ifdef __CC65__
-        /* absolute pointer into image data (hdr.data already +base if relocated) */
-        v = (word)(bh->data + off);
-#else
-        /* soft_heap offset (data copied at 0) */
-        v = off;
-#endif
+        #ifdef __CC65__
+          // hdr.data is absolute after relocate(); ASM P/' use real pointers
+          v = (word)(bh->data + off);
+        #else
+          v = off; // soft_heap offset
+        #endif
       }
       p->mem[bh->constidx + i] = v;
     }

@@ -36,9 +36,13 @@ int main(void) {
   printf("%s", world); // op: LvvP
   putchar('!');        // op: O!
   putchar('\n');       // op: N
-
-  printf("\"%s\" has %d characters\n",
-    mylen, my_strlen(mylen));
-
+ 
+  //printf("\"%s\" has %d characters\n", mylen, my_strlen(mylen));
+  putchar('"');
+  fputs(mylen, stdout);
+  printf("\" has ");
+  printf("%d ", my_strlen(mylen));
+  printf("characters\n");
+  
   return 42;
 }

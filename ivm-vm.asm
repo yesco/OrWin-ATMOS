@@ -32,7 +32,7 @@ ALTCODE=0
 .importzp       _ivm_fptab, _ivm_callv
 
 .import         _opmul, _opdiv, _opmod, _opputnum
-.import         _putchar
+.import         _putchar, _getchar
 
 FR_RET  = 0
 FR_VAL  = 1
@@ -58,35 +58,35 @@ displo:
         .byte   <op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31
         .byte   <op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31
         .byte   <op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31
-        .byte   <op_sp, <op_bang, <op_str, <op_bad, <op_bad, <op_mod, <op_and, <op_ri
+        .byte   <op_sp, <op_bang, <op_str, <op_hash, <op_dollar, <op_mod, <op_and, <op_ri
         .byte   <op_idxl, <op_idxs, <op_mul, <op_add, <op_wi, <op_sub, <op_dot, <op_div
         .byte   <op_0, <op_1to7, <op_1to7, <op_1to7, <op_1to7, <op_1to7, <op_1to7, <op_1to7
-        .byte   <op_8, <op_9, <op_bad, <op_semi, <op_lt, <op_eq, <op_gt, <op_not
-        .byte   <op_at, <op_bad, <op_B, <op_bad, <op_bad, <op_bad, <op_bad, <op_G
-        .byte   <op_bad, <op_I, <op_J, <op_bad, <op_L, <op_bad, <op_N, <op_O
-        .byte   <op_P, <op_Q, <op_bad, <op_S, <op_bad, <op_U, <op_bad, <op_bad
-        .byte   <op_X, <op_bad, <op_Z, <op_shl, <op_bad, <op_shr, <op_xor, <op_bad
-        .byte   <op_bad, <op_bad, <op_bad, <op_bad, <op_bad, <op_bad, <op_bad, <op_bad
-        .byte   <op_bad, <op_bad, <op_bad, <op_bad, <op_l, <op_bad, <op_bad, <op_bad
-        .byte   <op_bad, <op_q, <op_r, <op_s, <op_bad, <op_bad, <op_bad, <op_w
-        .byte   <op_bad, <op_bad, <op_bad, <op_shlm, <op_or, <op_shrm, <op_bnot, <op_bad
+        .byte   <op_8, <op_9, <op_colon, <op_semi, <op_lt, <op_eq, <op_gt, <op_not
+        .byte   <op_at, <op_A, <op_B, <op_C, <op_D, <op_E, <op_F, <op_G
+        .byte   <op_H, <op_I, <op_J, <op_K, <op_L, <op_M, <op_N, <op_O
+        .byte   <op_P, <op_Q, <op_R, <op_S, <op_T, <op_U, <op_V, <op_W
+        .byte   <op_X, <op_Y, <op_Z, <op_shl, <op_bslash, <op_shr, <op_xor, <op__
+        .byte   <op_tick, <op_a, <op_b, <op_c, <op_d, <op_e, <op_f, <op_g
+        .byte   <op_h, <op_i, <op_j, <op_k, <op_l, <op_m, <op_n, <op_o
+        .byte   <op_p, <op_q, <op_r, <op_s, <op_t, <op_u, <op_v, <op_w
+        .byte   <op_x, <op_y, <op_z, <op_shlm, <op_or, <op_shrm, <op_bnot, <op_del
 disphi:
         .byte   >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31
         .byte   >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31
         .byte   >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31
         .byte   >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31
-        .byte   >op_sp, >op_bang, >op_str, >op_bad, >op_bad, >op_mod, >op_and, >op_ri
+        .byte   >op_sp, >op_bang, >op_str, >op_hash, >op_dollar, >op_mod, >op_and, >op_ri
         .byte   >op_idxl, >op_idxs, >op_mul, >op_add, >op_wi, >op_sub, >op_dot, >op_div
         .byte   >op_0, >op_1to7, >op_1to7, >op_1to7, >op_1to7, >op_1to7, >op_1to7, >op_1to7
-        .byte   >op_8, >op_9, >op_bad, >op_semi, >op_lt, >op_eq, >op_gt, >op_not
-        .byte   >op_at, >op_bad, >op_B, >op_bad, >op_bad, >op_bad, >op_bad, >op_G
-        .byte   >op_bad, >op_I, >op_J, >op_bad, >op_L, >op_bad, >op_N, >op_O
-        .byte   >op_P, >op_Q, >op_bad, >op_S, >op_bad, >op_U, >op_bad, >op_bad
-        .byte   >op_X, >op_bad, >op_Z, >op_shl, >op_bad, >op_shr, >op_xor, >op_bad
-        .byte   >op_bad, >op_bad, >op_bad, >op_bad, >op_bad, >op_bad, >op_bad, >op_bad
-        .byte   >op_bad, >op_bad, >op_bad, >op_bad, >op_l, >op_bad, >op_bad, >op_bad
-        .byte   >op_bad, >op_q, >op_r, >op_s, >op_bad, >op_bad, >op_bad, >op_w
-        .byte   >op_bad, >op_bad, >op_bad, >op_shlm, >op_or, >op_shrm, >op_bnot, >op_bad
+        .byte   >op_8, >op_9, >op_colon, >op_semi, >op_lt, >op_eq, >op_gt, >op_not
+        .byte   >op_at, >op_A, >op_B, >op_C, >op_D, >op_E, >op_F, >op_G
+        .byte   >op_H, >op_I, >op_J, >op_K, >op_L, >op_M, >op_N, >op_O
+        .byte   >op_P, >op_Q, >op_R, >op_S, >op_T, >op_U, >op_V, >op_W
+        .byte   >op_X, >op_Y, >op_Z, >op_shl, >op_bslash, >op_shr, >op_xor, >op__
+        .byte   >op_tick, >op_a, >op_b, >op_c, >op_d, >op_e, >op_f, >op_g
+        .byte   >op_h, >op_i, >op_j, >op_k, >op_l, >op_m, >op_n, >op_o
+        .byte   >op_p, >op_q, >op_r, >op_s, >op_t, >op_u, >op_v, >op_w
+        .byte   >op_x, >op_y, >op_z, >op_shlm, >op_or, >op_shrm, >op_bnot, >op_del
 
 .code
 
@@ -468,14 +468,18 @@ op_semi:
 	;; (/ (- 2732460 2729364) 2732460.0)
 	
 
-;;; return acc
+;;; return acc (C: if fp==FP_MAIN goto done)
 op_X:   FIXIPC
 
-;;; TODO: inline FIXIPC no function call for ALTCODE=1 !
+;;;  TODO: FFS I don't want to waste 7 cycles on every function call
+	
+        lda     _ivm_fp
+        cmp     #FP_MAIN
+        beq     jmp_done
 
 	;; -- linear load
 	;; (/ (- 2752774 2713089) 2752774.0) 1.4% ;; ALTCODE= 0 TOTAL
-	
+
         ;; restore IPC from FR_RET:0
         ldy     _ivm_fp
         lda     (_ivm_memlo),y
@@ -485,14 +489,14 @@ op_X:   FIXIPC
         sta     _ivm_ipc+1
 
         ;; restore FP from FR_PREV
-	iny
-	iny
+        iny
+        iny
         lda     (_ivm_memlo),y
         sta     _ivm_fp
 
-        ;; new IPC, reset messed up Y
+	;; new IPC
         ldy     #0
-        
+
         jmp     xnext
 
 
@@ -619,7 +623,7 @@ op_w:   PARAX
         sta     (tmp_lo),y
         jmp     pnext
 
-;;; 'xx  ACC = *(uchar*)ptr;  ptr++   (ptr lives in slot xx)
+;;; tick - 'xx  ACC = *(uchar*)ptr;  ptr++   (ptr lives in slot xx)
 op_ri:  USEY
         PARY                        ; Y = slot
         tya
@@ -647,7 +651,7 @@ op_ri:  USEY
         sta     (_ivm_memhi),y
         jmp     pnext
 
-;;; ,xx  *(uchar*)ptr = ACC;  ptr++
+;;; comma - ,xx  *(uchar*)ptr = ACC;  ptr++
 op_wi:  USEY
         PARY
         tya
@@ -1090,6 +1094,15 @@ op_dot: USEY
 
         jmp     ynext
 
+;;; getchar(ACC) - opcode 'K'
+op_K:	USEY
+	jsr    	_getchar
+	sta     _ivm_acc
+	lda     #0
+	sta     _ivm_acc+1
+	
+	jmp     ynext
+	
 ;;; newline
 op_N:   USEY
 	lda     #10
@@ -1098,12 +1111,19 @@ op_N:   USEY
 
         jmp     ynext
 
-;;; putchar ACC lo (or PAR?) — opcode 'O'
-op_O:   USEY
-	lda     _ivm_acc
+;;; putchar(ACC) — opcode 'E'
+op_E:   USEY
+        lda     _ivm_acc
         jsr     _putchar
 
         jmp     ynext
+
+;;; 'O:' - inline putchar
+op_O:   USEY
+	lda     (_ivm_ipc),y
+        jsr     _putchar
+
+        jmp     pnext
 
 
 ;;; TOOD: P print string from ACC
@@ -1117,7 +1137,7 @@ op_P:
 
 	;; ipc++
         inc     _ivm_acc
-        bne     strlp
+        bne     :-
         inc     _ivm_acc+1
         bne     :-
 :	
@@ -1237,8 +1257,67 @@ shrm_st:
 
 ;;; unknown: print % + op + NL, halt
 ;;; op is in X from dispatch (do not use _ivm_op)
+;;; undefined opcodes — named aliases of op_bad
+op_hash:
+op_dollar:
+op_colon:
+
+op_A:
+op_C:
+op_D:
+
+;; TODO: free
+op_F:
+	
+op_H:
+
+;;; TODO: malloc
+op_M:
+
+op_R:
+op_T:
+
+op_V:
+op_W:
+
+op_Y:
+
+op_bslash:
+op__:
+op_tick:
+
+;;; TODO: single opcode save local
+op_a:
+op_b:
+op_c:
+op_d:
+op_e:
+op_f:
+op_g:
+op_h:
+
+op_i:
+op_j:
+op_k:
+
+op_m:
+op_n:
+op_o:
+op_p:
+
+op_t:
+op_u:
+op_v:
+
+;;; TODO: call library routine (see ivm.c)
+op_x:
+op_y:
+op_z:
+
+op_del:
+
 op_bad:	FIXIPC
-;;; TODO: print address Y ? and byte code value
+;;; TODO: print address, and byte code value
         lda     #10
         jsr     _putchar
 
