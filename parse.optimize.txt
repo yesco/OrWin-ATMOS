@@ -289,18 +289,38 @@ Build with `-DNOCAPTURE -DNOVLOG`.
 
 **Other RAM to trim for the sim65 test:**
 
+
+
 - `bin[]` is 4 KB by default (`MAX_BIN_LEN`). Size it to your real
   output.
+
+TODO: we need to write an blocky arena allocator that is either
+variable sized (size=0) or guarantees multiples of size allocations
+so that we have stable pointers. No need memcopy/stream but can have.
+
+TODO: I think it's 2KB data_pool during compilation should just be an arena, doesn't
+even need to be contiguous (only for run)!
+
+TODO: emit is costly with the constant check if at end. I think can
+replace with bzero before start and put $ff at last 5 bytes.
+if emit() read the byte before and refuses to overwrite non-0!
+
 
 - `data_pool` is 2 KB, `const_pool` and `vectors` are 128 and 64
   entries, and `match_str_const` puts a 512-byte buffer on the stack.
 
+TODO: data_pool during compilation should just be an arena, doesn't
+even need to be contiguous!
+
 - `Frame` is about 56 bytes, so 64 frames is up to 3.5 KB. Lower
   `MAX_STACK` if your deepest nesting allows.
+
+TODO: I think it's 29 bytes on 6502 cc65? So each gorwth
+is about 8*29 bytes. I think \C should collapse most stack
+entries as it also get's rid of input buffer, however it crashes
+if added before each K in the C rule.
 
 - `line_buf` only shrinks at `\C`, so make sure the grammar commits
   after each statement, or it holds the whole file.
 
-If it still runs out after `NOCAPTURE`, the sim65 map file or
-`__HEAPSIZE__`/`__STACKSIZE__` settings will show whether it is the
-heap or the static segments.
+TODO: is this still true, or was this with old CAPTURE?
