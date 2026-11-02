@@ -16,17 +16,22 @@
 // - Blocks themselves stay small (DARENA_BLOCK_BYTES payload target)
 // - On modern system, just have larger MAX_BLOCKS
 
+// Code size:
+// - 3617 bytes ==== too big!!!
+
+
+
 // EDITING INSTRUCTIONS:
 // - do NOT change indentation, formatting and comments; keep the style
 // - only USE // comments
 // - do not change lines not directly related to the change at hand
 // - do NOT remove TODO and other comments, they are docs!
 
-#include <stdio.h>
+//#include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
-#include <assert.h>
+//#include <assert.h>
 
 #ifndef UCHAR
   #define UCHAR
@@ -41,14 +46,19 @@ typedef struct DaBlock {
 } DaBlock;
 
 #ifdef __CC65__
+
   // On limited system
-  #define DARENA_BLOCKS       32
+  #define DARENA_BLOCKS         32
+  #define DARENA_BLOCK_BYTES    64
+
 #else
+
   // On larger systems
-  #define DARENA_BLOCKS       1024
+  #define DARENA_BLOCKS        256
+  #define DARENA_BLOCK_BYTES  1024
+
 #endif
 
-#define DARENA_BLOCK_BYTES   64
 
 typedef struct Darena {
   size_t max;        // highest index
@@ -81,6 +91,15 @@ Darena *darena(size_t z) {
   d->bz  = sizeof(DaBlock) + bn * zz;
 
   return d;
+}
+
+void dafree(Darena *d) {
+  size_t j;
+
+  for(j = 0; j < DARENA_BLOCKS; j++)
+    free(d->blocks[j]);
+      
+  free(d);
 }
 
 // Allocate a fresh physical block that starts at logical index 'start'.
@@ -218,18 +237,19 @@ int main(void) {
     uchar *p2 = daptr(d, i);
     uchar *p3 = daptr(d, i+1);
 
-    assert(p1 == p2);
+//    assert(p1 == p2);
     
-    printf("%5zu: %p\n", i, (void *)daptr(d, i));
-    if (p3 - p1 != z) printf("-- new block -- d= %ld\n", p3-p1);
+    //printf("%5zu: %p\n", i, (void *)daptr(d, i));
+    //if (p3 - p1 != z) printf("-- new block -- d= %ld\n", p3-p1);
   }
-  puts("ok");
+//  puts("ok");
 
 
 
 // TODO: verify that we can find exactly same data we put in!
 
 
+  dafree(d);
 
   return 0;
 }
