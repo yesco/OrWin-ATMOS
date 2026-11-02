@@ -127,7 +127,7 @@ again:
 
     // keep every even starter; the odd ones are now covered by the
     // doubled span of the preceding entry (they become part of its chain) 
-    for (j = 2; j < DARENA_BLOCKS; j += 2) {
+    for (j = 0; j < DARENA_BLOCKS; j += 2) {
       DaBlock *even = d->blocks[j];
       DaBlock *odd  = d->blocks[j+1];
 
@@ -148,6 +148,10 @@ again:
         d->blocks[j+1] = NULL;
       }
     }
+    
+    // slide the surviving (even) starters down
+    for (j = 2; j < DARENA_BLOCKS; j += 2)
+      d->blocks[j/2] = d->blocks[j];
     
     memset(d->blocks + DARENA_BLOCKS/2, 0,
       (DARENA_BLOCKS/2) * sizeof(DaBlock *));
@@ -220,6 +224,12 @@ int main(void) {
     if (p3 - p1 != z) printf("-- new block -- d= %ld\n", p3-p1);
   }
   puts("ok");
+
+
+
+// TODO: verify that we can find exactly same data we put in!
+
+
 
   return 0;
 }
