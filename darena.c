@@ -6,6 +6,7 @@
 // - efficency on 6502
 // - every allocation ~80 bytes (or smaller)
 // - fixed-size table of starter block pointers
+// - unlimited, unexpected growth in available memory
 // - next chains
 // - fixed blocks[DARENA_BLOCKS] table of starter pointers
 // - Each starter heads a singly-linked chain of small DaBlocks
@@ -13,8 +14,9 @@
 // - When the table would overflow we double div and compact the table
 //   (the “shrink”)
 // - Blocks themselves stay small (DARENA_BLOCK_BYTES payload target)
+// - On modern system, just have larger MAX_BLOCKS
 
-// INSTRUCTIONS:
+// EDITING INSTRUCTIONS:
 // - do NOT change indentation, formatting and comments; keep the style
 // - only USE // comments
 // - do not change lines not directly related to the change at hand
@@ -38,8 +40,14 @@ typedef struct DaBlock {
   uchar           bytes[];
 } DaBlock;
 
-//#define DARENA_BLOCKS       32
-#define DARENA_BLOCKS       1024
+#ifdef __CC65__
+  // On limited system
+  #define DARENA_BLOCKS       32
+#else
+  // On larger systems
+  #define DARENA_BLOCKS       1024
+#endif
+
 #define DARENA_BLOCK_BYTES   64
 
 typedef struct Darena {
@@ -54,6 +62,10 @@ typedef struct Darena {
 } Darena;
 
 
+// TODO: consider a more advanced variant
+//   where you can give size hint and MAX_BLCOKS
+//   is set to accomondate it wihtout linear search overhead.
+//
 Darena *darena(size_t z) {
   size_t zz = z ? z : 1;
   size_t bn = DARENA_BLOCK_BYTES / zz;
