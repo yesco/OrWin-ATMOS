@@ -11,7 +11,8 @@
 //   #= //      line comment (to newline); no end token
 //              default if no #=: Pascal { }
 //   A-Z        call rule
-//   \<         tail-recurse current rule (reset ip/alt, keep frame)
+//   \>         set restart point for later \< (inside current rule)
+//   \<         tail-recurse to last \> (or start of rule if none)
 //   \C         commit: drop line buffer up to current point
 //   \i         ident in scope (must be declared by \+)
 //   \+         ident declare (match + add to current scope)
@@ -1597,11 +1598,25 @@ static int step(void) {
     ok = 1;
     adv = 2;      // bytes of the BNF alt used by this escape
 
+    if (e == '>') {
+      // \> : record restart point (ip after this escape)
+      cur->mark = cur->ip + 2;
+      vlog("  mark %c @ip %u\n", 'A' + cur->rule, cur->mark);
+      cur->ip += adv;
+      return 1;
+    }
     if (e == '<') {
-      // tail-recurse: restart alts at current input, keep capture
-      frame_mark();
-      cur->state = ST_TRY;
-      vlog("  tail %c @%u\n", 'A' + cur->rule, abs_pos());
+      // \< : tail-recurse to last \> (or start of rule if none)
+      // keep captures / frame; only reset alt matching position
+      if (cur->mark) {
+        cur->ip = cur->mark;
+        cur->state = ST_RUN;
+        vlog("  tail> %c @ip %u\n", 'A' + cur->rule, cur->ip);
+      } else {
+        frame_mark();
+        cur->state = ST_TRY;
+        vlog("  tail %c @%u\n", 'A' + cur->rule, abs_pos());
+      }
       return 1;
     }
 

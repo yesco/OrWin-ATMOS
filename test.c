@@ -156,6 +156,11 @@ int TestOps(int dummy) {
     return 0; // Return dummy/default value for function type matching Pascal wrapper
 }
 
+void TestPrios(void) {
+  printf("3 + 4 * 5 = "); printf("%u\n", 3 + 4 * 5);
+  printf("5 * 4 + 3 = "); printf("%u\n", 5 * 4 + 3);
+}
+
 int TestWrites(void) {
     printf("--TestWrites\n");
     printf("abc\n");
@@ -292,6 +297,10 @@ int main(void) {
     printf("%u\n", TestOps(666));
 
     printf("%u\n", TestWrites());
+    
+    // TODO: even void funs need to be assigned, lol
+    alpha= TestPrios();
+    //(void)TestPrios();
     
     return 0;
 }
