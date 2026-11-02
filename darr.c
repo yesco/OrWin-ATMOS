@@ -46,6 +46,8 @@
 
 #endif
 
+#define DARR_CHAIN  8   // max length of a next-chain
+
 
 typedef struct Darr {
   struct Darr *next;
@@ -80,51 +82,59 @@ Darr *darr(size_t z) {
 }
 
 void dfree(Darr *d) {
-  Darr *next, *p;
-  
+  Darr *next;
+
+  if (!d) return;
+
   dfree(d->super);
 
   // free next list
-  p= d;
-  do {
-    next = p->next;
-    free(p);
-  } while (p = next);
-      
-  // Free yourself!
-  free(d);
+  while (d) {
+    next = d->next;
+    free(d);
+    d = next;
+  }
 }
 
 void* dptr(Darr *d, size_t i) {
-  size_t bi, offset;
+  size_t bi, local;
   Darr *super, **sp;
 
   if (d == NULL) return NULL;
 
-  offset = i * d->z;
-  bi = offset / DARR_BYTES;
+  bi = i / d->bn;           // which logical block
+  local = i % d->bn;        // element inside that block
 
-  // overflow: use super index
-  if (bi >= 8) {
+  // overflow: use super index (groups of DARR_CHAIN blocks)
+  if (bi >= DARR_CHAIN) {
+    size_t g = bi / DARR_CHAIN;     // which group
+    size_t b = bi % DARR_CHAIN;     // block inside the group
+
     super = d->super;
     if (!super) super = d->super = darr(sizeof(Darr*));
     // get node recusively, could do by loop, and depth counter
-    sp= dptr(super, bi - 8);
+    sp = dptr(super, g);
     if (sp == NULL) return NULL;
-    if (*sp == NULL) *sp= darr(d->z);
+    if (*sp == NULL) *sp = darr(d->z);
     if (*sp == NULL) return NULL;
-    d= *sp;
-    offset= offset % DARR_BYTES;
+
+    // now walk the chosen group’s next-chain
+    d = *sp;
+    bi = b;
   }
 
-  // find local block
-  while(bi && --bi && d->next) d= d->next;
+  // find local block inside the (at most DARR_CHAIN) next-chain
+  while (bi > 0) {
+    if (!d->next) {
+      // grow (one step)
+      // TODO: assumes linear access to grow...
+      if (!d->next) return NULL;
+    }
+    d = d->next;
+    bi--;
+  }
 
-  // grow (one step)
-  // TODO: assumes linear access to grow...
-  if (!bi) d = d->next = darr(d->z);
-
-  return d->bytes + offset;
+  return d->bytes + local * d->z;
 }
 
 #if 0
@@ -138,8 +148,8 @@ void* dpush(Darr* d, void* p) {
 // ------------------------------------------------------------------ 
 int main(void) {
   size_t i;
-  size_t z= 10;
-//  size_t z= 1;
+//  size_t z= 10;
+  size_t z= 1;
   Darr *d = darr(z);
 
   if (!d) return 1;
@@ -147,15 +157,15 @@ int main(void) {
   puts("go");
 
   // quick check that the same index always returns the same pointer
-  for (i = 0; i < 20; i++) {
+  for (i = 0; i < 2000; i++) {
     uchar *p1 = dptr(d, i);
     uchar *p2 = dptr(d, i);
     uchar *p3 = dptr(d, i+1);
 
-//    assert(p1 == p2);
+    assert(p1 == p2);
     
-    printf("%5zu: %p\n", dptr(d, i));
-    if (p3 - p1 != z) printf("-- new block -- d= %ld\n", (long)(p3-p1));
+    printf("%5zu: %p\n", i, (void *)dptr(d, i));
+    if (p3 - p1 != (ptrdiff_t)z) printf("-- new block -- d= %ld\n", (long)(p3-p1));
   }
   puts("ok");
 
