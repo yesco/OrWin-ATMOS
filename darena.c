@@ -2,10 +2,28 @@
 //
 // (C) 2026 Jonas S Karlsson (jsk@yesco.org)
 
+// Requirements:
+// - efficency on 6502
+// - every allocation ~80 bytes (or smaller)
+// - fixed-size table of starter block pointers
+// - next chains
+// - fixed blocks[DARENA_BLOCKS] table of starter pointers
+// - Each starter heads a singly-linked chain of small DaBlocks
+// - div is the number of logical items covered by one top-level entry
+// - When the table would overflow we double div and compact the table
+//   (the “shrink”)
+// - Blocks themselves stay small (DARENA_BLOCK_BYTES payload target)
+
+// INSTRUCTIONS:
+// - do NOT change indentation, formatting and comments; keep the style
+// - only USE // comments
+// - do not change lines not directly related to the change at hand
+// - do NOT remove TODO and other comments, they are docs!
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
-
+#include <string.h>
 #include <assert.h>
 
 #ifndef UCHAR
@@ -16,81 +34,140 @@
 
 typedef struct DaBlock {
   struct DaBlock *next;
-  size_t offset;
-  uchar bytes[];
+  size_t          offset;   // first logical index this physical block covers
+  uchar           bytes[];
 } DaBlock;
 
-#define DARENA_BLOCKS 32
-#define DARENA_BLOCK_BYTES 64
-  
+#define DARENA_BLOCKS       32
+#define DARENA_BLOCK_BYTES  64
+
 typedef struct Darena {
-  size_t n;
-  size_t z;
-  size_t az;
-  size_t bz;
-  size_t bn;
-  size_t div;
+  size_t max;        // highest index
+  size_t z;          // bytes per element
+  size_t bn;         // elements that fit in one physical block
+  size_t div;        // elements covered by one top-level blocks[] entry
+  size_t bz;         // total malloc size of one DaBlock
 
-  DaBlock* current;
-  DaBlock* end;
-
-  DaBlock* blocks[DARENA_BLOCKS];
+  DaBlock *current;
+  DaBlock *blocks[DARENA_BLOCKS];
 } Darena;
 
-Darena* darena(size_t z) {
-  size_t zz= z? z: 1;
-  size_t bn= DARENA_BLOCK_BYTES/(zz);
-  Darena* d= calloc(1, sizeof(Darena));
+
+Darena *darena(size_t z) {
+  size_t zz = z ? z : 1;
+  size_t bn = DARENA_BLOCK_BYTES / zz;
+  Darena *d = calloc(1, sizeof(Darena));
 
   if (!d) return NULL;
 
-  d->z= zz;
-  // TODO: mimimize waste
-  if (bn<=1) bn= 4; // we be damned
-  d->div= d->bn= bn;
-  d->az= sizeof(DaBlock) + bn * (z? z: 1);
+  if (bn < 4) bn = 4; // keep blocks from becoming tiny
+
+  d->z   = zz;
+  d->bn  = bn;
+  d->div = bn; // initially one physical block per top-level slot */
+  d->bz  = sizeof(DaBlock) + bn * zz;
 
   return d;
 }
 
-uchar* dptr(Darena* d, size_t i) {
-  uchar j;
-  size_t bi, offset;
-  DaBlock* b;
+// Allocate a fresh physical block that starts at logical index 'start'.
+static DaBlock *dablock(Darena *d, size_t start) {
+  DaBlock *b = calloc(1, d->bz);
 
- again:
+  if (!b) return NULL;
 
-  bi= i / d->div;
-  if (bi < d->bn) b= (bi < d->bn)?( d->blocks[bi]): NULL;
-  else {
-    // shrink
-    d->div*= 2;
-    for(j= 2; j < DARENA_BLOCKS; j+= 2)
-      d->blocks[j/2]= d->blocks[j];
-    memset(d->blocks + DARENA_BLOCKS/2, 0, DARENA_BLOCKS * sizeof(void*));
+  b->offset = start;
+  return b;
+}
 
-    assert(!"Not ready yet");
-    goto again;
-  }  
 
-  if (!b) {
-    b= d->blocks[bi]= calloc(d->bz, 1);
-    b->offset= bi * d->div;
+uchar *daptr(Darena *d, size_t i) {
+  size_t bi, local, start;
+  DaBlock *b, *prev;
+
+again:
+  bi = i / d->div;
+
+  // ---- top-level table full → double coverage and compact ---- 
+  if (bi >= DARENA_BLOCKS) {
+    size_t j;
+
+    d->div *= 2;
+
+    // keep every even starter; the odd ones are now covered by the
+    // doubled span of the preceding entry (they become part of its chain) 
+    for (j = 2; j < DARENA_BLOCKS; j += 2)
+      d->blocks[j/2] = d->blocks[j];
+
+    memset(d->blocks + DARENA_BLOCKS/2, 0,
+           (DARENA_BLOCKS/2) * sizeof(DaBlock *));
+
+    goto again; // recompute bi with the new div
   }
 
-  offset= (i % d->div) * d->z;
-  // TODO: follow b->next links till right block
+  // ---- obtain / create the starter block for this bi ----
+  b = d->blocks[bi];
+  if (!b) {
 
-  d->current= b;
-  return (uchar*)((uchar*)&(b->bytes) + offset);
+    // lazy allocated first time accessed
+    start = bi * d->div;
+    b = d->blocks[bi] = dablock(d, start);
+    if (!b) return NULL;
+
+  }
+
+  // ---- walk the chain until we reach the block that owns 'i' ----
+  local = i - b->offset;        // index relative to this starter
+  prev  = NULL;
+
+  while (local >= d->bn) {
+    prev = b;
+    if (!b->next) {
+
+      // append a new physical block
+      size_t next_start = b->offset + d->bn;
+
+      b->next = dablock(d, next_start);
+      if (!b->next) return NULL;
+
+    }
+
+    b = b->next;
+    local = i - b->offset;
+  }
+
+  d->current = b;
+  if (i > d->max) d->max= i;
+  
+  return b->bytes + local * d->z;
+}
+
+void* dapush(Darena* d, void* p) {
+  void* ptr= daptr(d, d->max+1);
+  
+  return ptr? memcpy(ptr, p, d->z): NULL;
 }
   
+// ------------------------------------------------------------------ 
 int main(void) {
-  uchar i;
-  Darena* d= darena(10);
-  
-  for(i=0; i<100; i++)
-    printf("%5d: %p\n", i, dptr(d, i));
+  size_t i;
+  size_t z= 10;
+//  size_t z= 1;
+  Darena *d = darena(z);
+  if (!d) return 1;
+
+  // quick check that the same index always returns the same pointer
+  for (i = 0; i < 2000; i++) {
+    uchar *p1 = daptr(d, i);
+    uchar *p2 = daptr(d, i);
+    uchar *p3 = daptr(d, i+1);
+
+    assert(p1 == p2);
+    
+    printf("%5zu: %p\n", i, (void *)daptr(d, i));
+    if (p3 - p1 != z) printf("-- new block -- d= %ld\n", p3-p1);
+  }
+  puts("ok");
 
   return 0;
 }
