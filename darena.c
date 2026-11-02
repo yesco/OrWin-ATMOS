@@ -38,8 +38,9 @@ typedef struct DaBlock {
   uchar           bytes[];
 } DaBlock;
 
-#define DARENA_BLOCKS       32
-#define DARENA_BLOCK_BYTES  64
+//#define DARENA_BLOCKS       32
+#define DARENA_BLOCKS       1024
+#define DARENA_BLOCK_BYTES   64
 
 typedef struct Darena {
   size_t max;        // highest index
@@ -85,6 +86,24 @@ uchar *daptr(Darena *d, size_t i) {
   size_t bi, local, start;
   DaBlock *b, *prev;
 
+// TODO: a bit messy - diblock(d, i) 
+//   would hide this offset
+//   couild hide the doubling
+//   and searching the blocks
+
+  // same block?
+  // z= 1 : (/ 59039922 56089594.0) -  5.3% faster
+  // z=10 : (/ 79150591 64422046.0) - 23.9% faster
+  // (/ 2000 6) = 333 blocks (/ 333 16) = 20 in list
+#if 1
+  if (d->current) {
+    local = d->current->offset;
+    if (local <= i && i < local + d->bn) {
+      b= d->current; goto skipit;
+    }
+  }
+#endif
+
 again:
   bi = i / d->div;
 
@@ -96,11 +115,30 @@ again:
 
     // keep every even starter; the odd ones are now covered by the
     // doubled span of the preceding entry (they become part of its chain) 
-    for (j = 2; j < DARENA_BLOCKS; j += 2)
-      d->blocks[j/2] = d->blocks[j];
+    for (j = 2; j < DARENA_BLOCKS; j += 2) {
+      DaBlock *even = d->blocks[j];
+      DaBlock *odd  = d->blocks[j+1];
 
+      if (odd) {
+
+        // append the whole odd chain onto the even chain
+        if (!even) {
+
+          d->blocks[j] = odd; // nothing there yet
+
+        } else {
+
+          DaBlock *tail = even;
+          while (tail->next) tail = tail->next;
+          tail->next = odd;
+
+        }
+        d->blocks[j+1] = NULL;
+      }
+    }
+    
     memset(d->blocks + DARENA_BLOCKS/2, 0,
-           (DARENA_BLOCKS/2) * sizeof(DaBlock *));
+      (DARENA_BLOCKS/2) * sizeof(DaBlock *));
 
     goto again; // recompute bi with the new div
   }
@@ -116,6 +154,8 @@ again:
 
   }
 
+ skipit:
+  
   // ---- walk the chain until we reach the block that owns 'i' ----
   local = i - b->offset;        // index relative to this starter
   prev  = NULL;
