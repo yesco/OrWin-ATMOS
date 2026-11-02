@@ -1,0 +1,1 @@
+./oscar -DOSCAR64 -ep -Os darr.c ; ls -l darr.prg

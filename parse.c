@@ -109,6 +109,11 @@
 
 // CONFIGURATION
 
+#define MAIN
+
+// (- 26871 26002) = 869
+#include "darr.c"
+
 #define MAX_BIN_LEN 4096
 #define MAX_SLOTS 255
 

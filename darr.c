@@ -11,9 +11,43 @@
 // - limited next chains: 8 (configurable)
 // - it's using a logartihmic spill-pointer
 
-// Code size:
-// - xxx 3617 bytes ==== too big!!!
+// Code size on 6502 (compile with minimal on ccc65)
+// - darr.c compiled to about 869 bytes.
 
+// A hybrid growable array is implemented that
+// guarantees permanent element addresses while
+// employing only a single fixed-size block type.
+//
+// Each block carries a short next-chain whose
+// maximum length is a small constant (here 8).
+// When a chain would overflow, a recursively
+// defined super-directory, itself composed of
+// identical blocks, is used. The very first
+// block is never relocated or replaced. There
+// is no initial super-block or directory
+// until it needs to spill.
+//
+// By bounding the next-chain and making the
+// directory recursive and homogeneous, the
+// structure obtains logarithmic depth, constant
+// block size, and permanent pointers while
+// remaining suitable for tightly constrained
+// environments. No previously published structure
+// appears to cover this exact combination.
+//
+// The design sits between two classical
+// families. An unrolled linked list (chunked
+// linked list) also uses uniform blocks and
+// preserves addresses, yet random access costs
+// linear time in the number of blocks. A
+// segment array (segmented list, Xar,
+// levelwise-allocated pile) offers O(1)
+// indexing and stable pointers, but its
+// segments grow exponentially and therefore
+// violate the single-block-type constraint.
+// Ordinary chunked vectors keep uniform chunks
+// yet store their directory in a conventional
+// dynamic array that may be reallocated.
 
 
 // EDITING INSTRUCTIONS:
@@ -22,11 +56,16 @@
 // - do not change lines not directly related to the change at hand
 // - do NOT remove TODO and other comments, they are docs!
 
-#include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
-#include <assert.h>
+
+// for figuring out compile size
+//#define MINIMAL
+#ifndef MINIMAL
+  #include <stdio.h>
+  #include <assert.h>
+#endif
 
 #ifndef UCHAR
   #define UCHAR
@@ -97,7 +136,7 @@ void dfree(Darr *d) {
 }
 
 void* dptr(Darr *d, size_t i) {
-  size_t bi, local;
+  size_t bi, local, g, b;
   Darr *super, **sp;
 
   if (d == NULL) return NULL;
@@ -107,13 +146,13 @@ void* dptr(Darr *d, size_t i) {
 
   // overflow: use super index (groups of DARR_CHAIN blocks)
   if (bi >= DARR_CHAIN) {
-    size_t g = bi / DARR_CHAIN;     // which group
-    size_t b = bi % DARR_CHAIN;     // block inside the group
+    g = bi / DARR_CHAIN;     // which group
+    b = bi % DARR_CHAIN;     // block inside the group
 
     super = d->super;
     if (!super) super = d->super = darr(sizeof(Darr*));
     // get node recusively, could do by loop, and depth counter
-    sp = dptr(super, g);
+    sp = dptr(super, g-1);
     if (sp == NULL) return NULL;
     if (*sp == NULL) *sp = darr(d->z);
     if (*sp == NULL) return NULL;
@@ -146,7 +185,11 @@ void* dpush(Darr* d, void* p) {
 #endif
 
 // ------------------------------------------------------------------ 
+
+#ifndef MAIN
+
 int main(void) {
+#ifndef MINIMAL
   size_t i;
 //  size_t z= 10;
   size_t z= 1;
@@ -154,26 +197,37 @@ int main(void) {
 
   if (!d) return 1;
 
+  #ifndef MINIMIAL
   puts("go");
-
+  #endif
+  
   // quick check that the same index always returns the same pointer
   for (i = 0; i < 2000; i++) {
     uchar *p1 = dptr(d, i);
     uchar *p2 = dptr(d, i);
     uchar *p3 = dptr(d, i+1);
 
+    #ifndef MINIMAL
     assert(p1 == p2);
     
+#ifdef OSCAR64
+    printf("%5u: %04x\n", i, (void *)dptr(d, i));
+#else
     printf("%5zu: %p\n", i, (void *)dptr(d, i));
+#endif
     if (p3 - p1 != (ptrdiff_t)z) printf("-- new block -- d= %ld\n", (long)(p3-p1));
+    #endif
   }
+  #ifndef MINIMAL
   puts("ok");
-
+  #endif
 
 // TODO: verify that we can find exactly same data we put in!
 
 
   dfree(d);
-
+#endif
   return 0;
 }
+
+#endif
