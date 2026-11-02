@@ -11,8 +11,8 @@
 //   #= //      line comment (to newline); no end token
 //              default if no #=: Pascal { }
 //   A-Z        call rule
-//   \>         set restart point for later \< (inside current rule)
-//   \<         tail-recurse to last \> (or start of rule if none)
+//   \>         (load-time) mark current alt as jump target for \<
+//   \<         tail-recurse: to \> alt if any, else restart whole rule
 //   \C         commit: drop line buffer up to current point
 //   \i         ident in scope (must be declared by \+)
 //   \+         ident declare (match + add to current scope)
@@ -224,6 +224,7 @@ typedef struct {
   uchar npatch;       // pending forward jumps (\x pushes, \y pops)
   word patch[4];
   word mark;          // \m loop start (for \z)
+  word restart;       // \> restart ip for \< (0 = full rule restart)
 } Frame;
 
 // grows on demand (8 frames at a time, up to MAX_STACK)
@@ -1269,6 +1270,8 @@ static void free_rules(void) {
 }
 
 // escapes that stay "\c" in the blob (all others become the plain char c)
+// note: '>' is handled specially in build_one_rule (not stored)
+//       '<' may become \x with x=1..31 (alt jump) or stay as \<
 static int esc_kept(uchar e) {
   if (isdigit(e) || e == ' ' || e == '\\') return 1;
   return strchr("insSCcfhvge<d+{}[]#=aptrlxywmzkz", e) != NULL;
@@ -1278,10 +1281,12 @@ static void build_one_rule(uchar r, char *rhs) {
   char *p;
   uchar *blob, **altp, e, depth;
   word a, bi, na, alt_starts[64];
+  uchar taildest;   // 1-based alt index for \> / \< (0 = none yet)
 
   // expand \| and \c (not specials) into blob; keep \i \n \s \C \< \d \+ \{ \}
+  // \> is not stored; it only updates taildest
+  // \< becomes \x (x=1..31) = jump to alt x-1, or plain \< if no \> yet
   // build contiguous string with 0 separators between alts.
-  // output is never longer than rhs (+ final 0), so no counting pass is needed
   blob = malloc(strlen(rhs) + 2);
   if (!blob) FAIL("out of memory (rule)");
   free(blobs[r]);
@@ -1291,10 +1296,27 @@ static void build_one_rule(uchar r, char *rhs) {
   bi = 0;
   na = 0;
   depth = 0;
+  taildest = 0;
   alt_starts[na++] = 0;
   for (p = rhs; *p; p++) {
     if (*p == '\\' && p[1]) {
       e = p[1];
+      if (e == '>') {
+        // \> : set jump target to current alt (1-based); do not store
+        taildest = (uchar)na;   // na is already the current alt count
+        p++;
+        continue;
+      }
+      if (e == '<') {
+        // \< : if we have a \> target, emit \x (x=1..31); else keep \<
+        blob[bi++] = '\\';
+        if (taildest && taildest < 32)
+          blob[bi++] = taildest;  // 1..31
+        else
+          blob[bi++] = '<';       // full rule restart
+        p++;
+        continue;
+      }
       if (esc_kept(e))
         blob[bi++] = '\\';
       blob[bi++] = e;
@@ -1463,6 +1485,7 @@ static void push(uchar r, uchar state) {
   cur->arg_i = 0;
   cur->npatch = 0;
   cur->mark = 0;
+  cur->restart = 0;
   cur->result = 0;
 
   memset(cur->prod_cap, 0, sizeof(cur->prod_cap));
@@ -1598,25 +1621,19 @@ static int step(void) {
     ok = 1;
     adv = 2;      // bytes of the BNF alt used by this escape
 
-    if (e == '>') {
-      // \> : record restart point (ip after this escape)
-      cur->mark = cur->ip + 2;
-      vlog("  mark %c @ip %u\n", 'A' + cur->rule, cur->mark);
-      cur->ip += adv;
+    if (e == '<') {
+      // plain \< : full rule restart (sequences, no \> in this rule)
+      frame_mark();
+      cur->state = ST_TRY;
+      vlog("  tail %c @%u\n", 'A' + cur->rule, abs_pos());
       return 1;
     }
-    if (e == '<') {
-      // \< : tail-recurse to last \> (or start of rule if none)
-      // keep captures / frame; only reset alt matching position
-      if (cur->mark) {
-        cur->ip = cur->mark;
-        cur->state = ST_RUN;
-        vlog("  tail> %c @ip %u\n", 'A' + cur->rule, cur->ip);
-      } else {
-        frame_mark();
-        cur->state = ST_TRY;
-        vlog("  tail %c @%u\n", 'A' + cur->rule, abs_pos());
-      }
+    if (e >= 1 && e <= 31) {
+      // \x (x=1..31) from load-time \> : jump to alt x-1
+      cur->alt = e - 1;
+      cur->ip = 0;
+      cur->state = ST_TRY;
+      vlog("  tail>%u %c @%u\n", (unsigned)(e - 1), 'A' + cur->rule, abs_pos());
       return 1;
     }
 
