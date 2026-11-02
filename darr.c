@@ -54,8 +54,8 @@ typedef struct Darr {
   struct Darr *super;
 
   // size_t  max;    // highest index
-  uchar z;           // bytes per element
-  uchar bn;         // elements that fit in one physical block
+  size_t z;          // bytes per element
+  size_t bn;         // elements that fit in one physical block
 
   uchar bytes[];
 } Darr;
@@ -127,7 +127,7 @@ void* dptr(Darr *d, size_t i) {
   while (bi > 0) {
     if (!d->next) {
       // grow (one step)
-      // TODO: assumes linear access to grow...
+      d->next = darr(d->z);
       if (!d->next) return NULL;
     }
     d = d->next;
