@@ -1,4 +1,4 @@
-# Usage: ./pc [test-char]   # defaults to test(.p)
+# Usage: ./pc [test-char]   # defaults to test(.c)
 
 if [ -z "$1" ]; then
     name="test"
@@ -7,7 +7,8 @@ else
 fi
 
 
-clang -DRUN parse.c && time ./a.out c.bnf $name.c
+clang -DVERBOSE -DRUN parse.c && time ./a.out -v c.bnf $name.c
+
 echo
 echo "=== $name.c: `./wcode $name.c` LOC ==="
 echo "=== parse.c: `./wcode parse.c` LOC ==="
