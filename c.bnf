@@ -37,8 +37,39 @@ K=if (E)[?G\x] K else[0?G\x\w\y] K[\y]
 |for (\i=E[S\1]; \1<=E[S\t]; \1++)[\mi\1\5\x] K[n\z\y]
 |for (\i=E[S\1]; \1<E[\e]; \1++)[\mi\1\5\x] K[n\z\y]
 
+# counting-down-to-zero (very common in C)
+#   for (i = N; i; i--)     and   for (i = N; i > 0; i--)
+# both execute the body N times when N > 0 and leave i == 0
+|for (\i=E[S\1]; \1;\i--)[\mj\1\x] K[m\z\y]
+|for (\i=E[S\1]; \1>0;\i--)[\mj\1\x] K[m\z\y]
+|for (\i=E[S\1]; \1>=1;\i--)[\mj\1\x] K[m\z\y]
+
+# for (i = N; i--; )            // N times
+# for (i = N; i-- > 0; )        // - same -
+# for (i = N; --i; )            // N-1 times!
+# ...
+#|for (\i=E[S\1];\1--;)      [\mj\1\x] K[m\z\y]
+#|for (\i=E[S\1];\1-->0;)    [\mj\1\x] K[m\z\y]
+#|for (\i=E[S\1];--\1;)      [\mj\1\x] K[m\z\y]
+#|for (\i=E[S\1];\1;\i--)    [\mj\1\x] K[m\z\y]
+#|for (\i=E[S\1];\1>0;\i--)  [\mj\1\x] K[m\z\y]
+
+# counting-down-to-zero with classic ops (no j/m)
+# body runs N times for N>0, i ends at 0
+# for (i = N; i--; )          and  for (i = N; i-->0; )
+|for (\i=E[S\1];\1--;)[\mL\1G\x] K[J\1B\z\y]
+|for (\i=E[S\1];\1-->0;)[\mL\1G\x] K[J\1B\z\y]
+# for (i = N; --i; )          (runs N-1 times — keep if you want it)
+|for (\i=E[S\1];--\1;)[\mL\1G\x] K[J\1B\z\y]
+# for (i = N; i; i--)         and  for (i = N; i>0; i--)
+|for (\i=E[S\1];\1;\i--)[\mL\1G\x] K[J\1B\z\y]
+|for (\i=E[S\1];\1>0;\i--)[\mL\1G\x] K[J\1B\z\y]
+
+
+
 |for (\i=E[S\1];[\m]E[?G\x];\i++) K[I\4B\z\y]
 |for (\i=E[S\1];[\m]E[?G\x];\i--) K[J\4B\z\y]
+
 |for (E;[\m]E[?G\x];E) K[B\z\y]
 
 |while ([\m]E)[?G\x] K[B\z\y]
