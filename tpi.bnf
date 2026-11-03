@@ -28,7 +28,13 @@ C=K\<|
 K=if E[?G\x] then K else[0?G\x\w\y] K[\y]|if E[?G\x] then K[\y]
 |for \i:=E[S\1] to E[S\t] do[\mL\1-\4G\x] K[I\1B\z\y]
 |writeln();[N]|writeln(JW);[N]|write();|write(JW);
-|new(\i)\#02;[L\2M\1]|dispose(\i);[F\1]|freemem(\i);[F\1]|getmem(\i,E);[M\1]|setlength(\i,E)\#02;[*\3M\1]
+
+|new(\i)\#02;[L\2M\1]
+|dispose(\i);[F\1]
+|freemem(\i);[F\1]
+|getmem(\i,E);[M\1]
+|setlength(\i,E)\#02;[*\3M\1]
+
 |B|;
 |\i^:=E;[!\1]
 |\i\[S\]:=E;[)\1\2]
