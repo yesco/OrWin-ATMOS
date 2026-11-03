@@ -863,6 +863,8 @@ ivmvar run_ivm(Process *p) {
  xnext:
   op = *zp.ipc++;
 
+  COUNT(op);
+  
   // fused load 0..31 — before table (opcode itself is the slot)
   // TODO: maybe faster, but slows everything else down!
   // TODO: make it a label jump after test
@@ -925,9 +927,6 @@ ivmvar run_ivm(Process *p) {
 
 #else
 
-
-  COUNT(op);
-  
   switch (op) {
 
   #define Z(c)         case (c):
