@@ -142,6 +142,36 @@
   #include "ivm-print.c"
 #endif
 
+#ifdef ANIMATE_STACK
+
+static uchar max_sp;    // deepest the stack got (frames)
+
+// call right AFTER sp was incremented
+static void anim_push(uchar r) {
+  if (sp > max_sp) max_sp = sp;
+  eputc('A' + r);
+  fflush(ERROUT);
+}
+
+// call right BEFORE sp is decremented: back over the letter, blank it, back again
+static void anim_pop(void) {
+  fputs("\b \b", ERROUT);
+  fflush(ERROUT);
+}
+
+static void anim_report(void) {
+  eprintf("\nstack: max depth %u of %u frames (%u bytes of Frame)\n",
+          (unsigned)max_sp, (unsigned)MAX_STACK,
+          (unsigned)(max_sp * sizeof(Frame)));
+}
+
+#else
+
+  #define anim_push(r) ((void)0)
+  #define anim_pop()   ((void)0)
+  #define anim_report() ((void)0)
+
+#endif
 
 // CONFIGURATION
 
@@ -1514,6 +1544,7 @@ static void push(uchar r, uchar state) {
 
   cur = sp ? cur + 1 : stack;
   sp++;
+  anim_push(r);
 
   cur->rule = r;
   cur->func_vec = 0xff;
@@ -1557,6 +1588,7 @@ static int step(void) {
     nalt = rule_nalt(cur->rule);
     if (cur->alt >= nalt) {
       vlog("fail %c (no alt) @%u\n", 'A' + cur->rule, abs_pos());
+      anim_pop();
       sp--;
       cur--;
       if (sp == 0) return -1;
@@ -1599,6 +1631,7 @@ static int step(void) {
 
     {
       word child_res = cur->result;
+      anim_pop();
       sp--;
       cur--;
       if (sp == 0) return 0;
@@ -1953,6 +1986,7 @@ int main(int argc, char **argv) {
       fail_msg = (char *)err;
     #endif
 
+    anim_report();
     eprintf("\n%%ERROR: %s\n", fail_msg);
     if (fail_file) eprintf("  file: %s\n", fail_file);
     report_reject();
@@ -1987,7 +2021,8 @@ int main(int argc, char **argv) {
     rc = run(10000);
   } while (rc == 1);
 
-
+  anim_report();
+  
   // consistency check
   if (rc) FAIL("syntax error");
 
