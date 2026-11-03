@@ -78,10 +78,15 @@ int primes() {
 }
 
 int main() {
-  int i, sum = 0, n = 10;
+  int i, sum, n;
+
+  sum = 0;
+  n = 10;
+  
+//    sum += primes();
   
   for(i = 0; i <= n; i++)
-    sum += primes();
+    sum = sum + primes();
   
   printf("SUM "); printf("%u ", n); printf("times = ");
   printf("%u\n", sum);

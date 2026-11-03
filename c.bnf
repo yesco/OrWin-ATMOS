@@ -73,6 +73,7 @@ K=if (E)[?G\x] K else[0?G\x\w\y] K[\y]
 #|for (\i=E[S\1]; [\m]E[?G\x]; \i+=\i[U\1\2]) K[B\z\y]
 |for (\i=E[S\1]; [\m]E[?G\x]; \i+=\i[U\1\2]) K[B\z\y]
 
+|for (\i=E[S\1]; \1<=E[S\t]; \1++) [\mi\1\5\x] K [n\z\y]
 
 |while ([\m]E) [?G\x] K[B\z\y]
 
