@@ -1,10 +1,10 @@
-# -- BNF for C → IVM (char / char* / putchar / printf)
+# -- BNF for C → IVM engine
 
 # - comment spec
 #= /* */
 #= //
 
-# - program starts with P
+# - Program starts with P
 P=D
 
 D=#include <\+.h>\n\<
@@ -12,7 +12,7 @@ D=#include <\+.h>\n\<
 |#include <\+.c>\n\<
 |V\<|F\<|
 
-# Declarations with optional initializer: char *h = "Hello";  char spc = 32;
+# - Declarations with optional initializer: char *h = "Hello";  char spc = 32;
 V=T M;
 M=\+=S[\g]U|\+=E[S\1]U|\+U|
 # TODO: deep recursion might be bad...
@@ -29,36 +29,57 @@ Q=,A|
 B={ \{ C } \}
 C=V\<|K\<|
 
-# statements — keywords / specific forms first
+# - Statements — keywords / specific forms first
 K=if (E)[?G\x] K else[0?G\x\w\y] K[\y]
 |if (E)[?G\x] K[\y]
+
+# - Loops
 |for (\i=E[S\1]; \1<=E[S\t]; \1++)[\mL\1-\4G\x] K[I\1B\z\y]
 |for (\i=E[S\1]; \1<E[\e]; \1++)[\mL\1-\4G\x] K[I\1B\z\y]
 |for (\i=E[S\1];[\m]E[?G\x];\i++) K[I\4B\z\y]
 |for (\i=E[S\1];[\m]E[?G\x];\i--) K[J\4B\z\y]
 |for (E;[\m]E[?G\x];E) K[B\z\y]
+
 |while ([\m]E)[?G\x] K[B\z\y]
+
+# - Input / Output
 |putchar('\\n');[N]
 |putchar(\d);[O\c1]
 |putchar(\i);[L\1E]
 |putchar(E);[E]
-|printf("%s",\i);[L\1P]
-|fputs("["]\S,stdout);
-|fputs(\i,stdout);[\1P]
+
 |puts("["]\S);[N]
 |puts(\i);[\1PN]
+
+|fputs("["]\S,stdout);
+|fputs(\i,stdout);[\1P]
+
+|printf("%s",\i);[L\1P]
+|printf("%d",E);[.]
+|printf("%u",E);[.]
+
 |printf("%u\\n",E);[.N]
 |printf("%d\\n",E);[.N]
+
 |printf("%u\ ",E);[.O ]
 |printf("%d\ ",E);[.O ]
-|printf("%d",E);[.]
+
+|printf(\i);[L\1P]
+
+# - TODO: lol?
 |printf("%u%u%u\\\\n",E,E,E);[...N]
 |printf("%u%u%u",E,E,E);[...]
-|printf(\i);[L\1P]
 |printf("\\"%s\\" has %d characters\\n",\i,\i(Z)[\v]);[S\tL\1P" has \#00L\3.N]
 |printf(JW);
-|return E;[X]|return;[Q]
+
+# - Return
+|return E;[X]
+|return;[Q]
+
+# - Block
 |B|;
+
+# - Assignments
 |* \i=E;[!\1]
 |\i\[S\]=E;[)\1\2]
 |\i=0;[Z\1]
@@ -75,17 +96,32 @@ K=if (E)[?G\x] K else[0?G\x\w\y] K[\y]
 W=,J\<|
 J="%u\\\\n"|"%d\\\\n"|"%s\\\\n"|"%s"|"%u "|"%d "|"%u"|"%d"|"["]\S|E[.]
 
+# - Expressions
+
 E=RO[]|S[\l1]O[]
 
-# - function call
+# - Function call (TODO: void calls, no assign return)
 R=\i(Z)[\v]
-|* \i++['\1]
-|* \i[@\1]
-|\i\[S\][(\1\2]|(E)[]|! E[?]
 
-# \c = char lit, \s = string const, \d = number
+# - Dereferencing points
+#   *charptr++ (TODO: block for intptr, put guard/other gen)
+|* \i++['\1]
+#   *intptr    (TODO: block for charptr, put guard/other gen)
+|* \i[@\1]
+
+|\i\[S\][(\1\2]
+
+# - Parens
+|(E)[]
+
+# - Not
+|! E[?]
+
+# - Simple Expression: \c = char lit, \s = string const, \d = number
 S=\d|sizeof(T)\z|sizeof(\i)\z|\s|\i
 
+# - List of expressions (limited, TODO: get rid of?)
+# TODO: think it'll parse E twice?
 Z=E,[S\k]\<|E|
 
 O=
