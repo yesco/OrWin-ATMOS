@@ -161,13 +161,16 @@
 //? a-h - save local param (h needed, meaning ACC?)
 //? ijk - indexing stuff?
 //  l   - load byte from slot
-//? mn  -
+//? m   -
+//  n   - next loop (together with ij ind/dec-for)
 //? op  - 
-//? qr  -
+//  q   - quit program
+//  r   - read byte (c@)
 //  s   - save byte in slot (reset hibit)
 //? t   -
 //? u   - similar U ? or not need
-//? vw
+//? v
+//  w   - write byte (c!)
 //  xyz - call library functions w 2..4 args
 
 //  [ - shift left variable steps "[vv]
@@ -764,6 +767,8 @@ ivmvar run_ivm(Process *p) {
 
   register uchar op; // register => zp on cc65: 2% faster!
   
+  register uchar* tpc; // temporary pc (used by ij mn)
+  
   // load process head → ZP global
   memcpy(&zp, &p->h, sizeof(zp));
   zp.mem = p->mem;
@@ -1016,6 +1021,42 @@ ZL(op_str, '"')  while (*zp.ipc) putchar(*zp.ipc++);
 ZL(op_G,   'G')  if ((int16_t)zp.acc > 0)
                    zp.ipc += *zp.ipc;   goto pnext;
 ZL(op_B,   'B')  zp.ipc -= *zp.ipc;     goto pnext;
+
+// TODO: finalize, experimental loop ops
+//
+// 4#8  <<set v>> <<set u>> loop: Lvv -uu G<end> ... B<loop> end:
+//
+// 2#6-7 <<set v>> <<set u>> ret: <jump i test>  ...  ivvuu<ret>
+//
+// THIS:
+// 2#6   <<set v>> <<set u>> loop: ivvuu<end> ... j<loop>
+//
+
+// loop: FOR i u end
+ZL(op_i,   'i')  zp.acc = zp.mem[zp.ipc[0]];
+                 if (zp.acc <= zp.mem[zp.ipc[1]])
+                   zp.ipc += 3;               goto xnext; // 3 args
+                 zp.ipc += zp.ipc[2];         goto pnext;
+// NEXT loop
+ZL(op_n,   'n')  tpc = zp.ipc - *zp.ipc;
+                 zp.acc = ++zp.mem[tpc[0]];
+                 if (zp.acc > zp.mem[tpc[1]]) goto pnext; // 1 arg
+                 zp.ipc = tpc + 3;            goto xnext; // 3 args
+
+// loop:      for(i= ...; i; i--) ...
+ZL(op_j,   'j')  zp.acc = zp.mem[zp.ipc[0]];
+                 if (zp.acc)
+                   zp.ipc += 2;               goto xnext; // 2 args
+                 zp.ipc += zp.ipc[2];         goto pnext;
+// NEXT loop
+ZL(op_m,   'm')  tpc = zp.ipc - *zp.ipc;
+                 zp.acc = ++zp.mem[tpc[0]];
+                 if (!zp.acc)                 goto pnext; // 1 arg
+                 zp.ipc = tpc + 2;            goto xnext; // 2 args
+
+
+
+
 
 // optimized counting up loops (pascal style): Ivv <uu Goo (6) => Yvvuuoo (4)
 ZL(op_Y,   'Y')  if (   (zp.acc = ++zp.mem[*zp.ipc])
