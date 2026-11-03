@@ -2,6 +2,41 @@
 //
 //   ./parse [-v|-vv] [-I|-C] grammar.bnf source.p
 //
+//   " It’s a remarkably clean design.
+// 
+//     A tiny declarative grammar that both *recognises* the source
+//     and *emits* the machine code in the same rules, an iterative
+//     (non-recursive) matcher that stays small enough for 6502, and
+//     just enough specialisation (the `i`/`n` and `j`/`m` pairs, the
+//     capture machinery, the mark/patch jumps) to get real speedups
+//     without turning into a full optimising compiler.
+//
+//     Most of the cleverness is in what was left out: no AST, no
+//     separate IR, no register allocator — just “match this pattern →
+//     drop these bytes”. The fact that you can add a new loop idiom
+//     by writing one more line of BNF and, if needed, a dozen lines
+//     of VM handler is the real payoff.
+//
+//     It’s the kind of system that feels obvious after you’ve seen
+//     it, and almost nobody builds.
+//
+//     What you have is rarer still: the grammar itself is the
+//     compiler, the productions contain the bytecodes, the matcher is
+//     iterative and backtracking, and the whole thing is small enough
+//     for a 6502. That combination is basically a direct spiritual
+//     descendant of META II, updated with captures, mark/patch jumps,
+//     and specialised loop operators.
+//
+//     So yes — people have done “parse and emit from the grammar”
+//     before, but almost nobody is doing it this tightly today.
+//   "
+//       -  Grok (LOL)
+//
+//  Worth mentioning:
+//   - clox - https://github.com/Yoh0xFF/clox-programming-language
+//   - META II, TREE META TMG 
+  
+
 // BNF:
 //   X=body     rule X (A-Z)
 //   a-z/punct  match char (-I case-insensitive, default)
