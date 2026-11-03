@@ -6,14 +6,18 @@
 
 int LIMIT= 8192;
 
-int* flags;
-int i;
-int j;
-int n;
-int count;
-int p;
 
 int primes() {
+
+// TODO: testif local/global makes difference in speed
+
+  int* flags;
+  int i;
+  int j;
+  int n;
+  int count;
+  int p;
+
   //flags = malloc(LIMIT * sizeof(*flags));
   flags = malloc(LIMIT * 2);
   
@@ -74,10 +78,9 @@ int primes() {
 }
 
 int main() {
-  int i, sum = 0;
-  int n= 10;
+  int i, sum = 0, n = 10;
   
-  for(i = 0; i < n; ++i)
+  for(i = 0; i <= n; i++)
     sum += primes();
   
   printf("SUM "); printf("%u ", n); printf("times = ");

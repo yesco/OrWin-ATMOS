@@ -65,12 +65,14 @@ K=if (E)[?G\x] K else[0?G\x\w\y] K[\y]
 |for (\i=E[S\1];\1;\i--)   [\mL\1G\x] K[J\1B\z\y]
 |for (\i=E[S\1];\1>0;\i--) [\mL\1G\x] K[J\1B\z\y]
 
-
-
 |for (\i=E[S\1]; [\m]E[?G\x] ;\i++) K[I\4B\z\y]
 |for (\i=E[S\1]; [\m]E[?G\x] ;\i--) K[J\4B\z\y]
 
 |for (E; [\m] E [?G\x] ;E) K[B\z\y]
+
+#|for (\i=E[S\1]; [\m]E[?G\x]; \i+=\i[U\1\2]) K[B\z\y]
+|for (\i=E[S\1]; [\m]E[?G\x]; \i+=\i[U\1\2]) K[B\z\y]
+
 
 |while ([\m]E) [?G\x] K[B\z\y]
 
