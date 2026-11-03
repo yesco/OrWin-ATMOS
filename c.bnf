@@ -34,17 +34,8 @@ K=if (E)[?G\x] K else[0?G\x\w\y] K[\y]
 |if (E)[?G\x] K[\y]
 
 # - Loops
-# test.c - 1490 (old)
-#|for (\i=E[S\1]; \1<=E[S\t]; \1++)[\mL\1-\4G\x] K[I\1B\z\y]
-#|for (\i=E[S\1]; \1<E[\e]; \1++)[\mL\1-\4G\x] K[I\1B\z\y]
-
-# test.c - error on '\' byte code
-#|for (\i=E[S\1]; \1<=E[S\t]; \1++)[\mi\1\t\x] K[n\z\y]
-#|for (\i=E[S\1]; \1<E[\e]; \1++)[\mi\1\t\x] K[n\z\y]
-
-# test.c - 
-|for (\i=E[S\1]; \1<=E[S\t]; \1++)[\mi\1\t\x] K[n\z\y]
-|for (\i=E[S\1]; \1<E[\e]; \1++)[\mi\1\t\x] K[n\z\y]
+|for (\i=E[S\1]; \1<=E[S\t]; \1++)[\mi\1\5\x] K[n\z\y]
+|for (\i=E[S\1]; \1<E[\e]; \1++)[\mi\1\5\x] K[n\z\y]
 
 |for (\i=E[S\1];[\m]E[?G\x];\i++) K[I\4B\z\y]
 |for (\i=E[S\1];[\m]E[?G\x];\i--) K[J\4B\z\y]
@@ -65,14 +56,16 @@ K=if (E)[?G\x] K else[0?G\x\w\y] K[\y]
 |fputs(\i,stdout);[\1P]
 
 |printf("%s",\i);[L\1P]
+
+|printf("%u\ ",E);[.O ]
+|printf("%d\ ",E);[.O ]
+
 |printf("%d",E);[.]
 |printf("%u",E);[.]
 
 |printf("%u\\n",E);[.N]
 |printf("%d\\n",E);[.N]
 
-|printf("%u\ ",E);[.O ]
-|printf("%d\ ",E);[.O ]
 
 |printf(\i);[L\1P]
 
