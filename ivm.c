@@ -199,11 +199,7 @@
 #include <assert.h>
 
 
-#define COUNTOPS
 
-#ifdef COUNTOPS 
-unsigned long countops = 0;
-#endif
 
 
 #ifndef IVMVARTYPE
@@ -217,6 +213,72 @@ unsigned long countops = 0;
   typedef unsigned char   uchar;
   typedef uint16_t        word;
 #endif
+
+
+//#define COUNTOPS
+
+#ifdef COUNTOPS
+// host only; fine when profiling ./ivm-count
+unsigned long countops = 0;
+
+unsigned long opcount[256] = {0};
+unsigned long paircount[256][256] = {0};
+
+unsigned char last_op = 0;
+unsigned char last_valid = 0;
+
+#define COUNT(o) count(o)
+
+void count(uchar o) {
+  countops++;
+  opcount[o]++;
+  if (last_valid) paircount[last_op][o]++;
+  last_op = o;
+  last_valid = (o & 0x80) || !strchr("GBinjmYdQ;X", o);
+}
+    
+// Call after any control-flow change so the next op does not form a pair
+#define COUNT_RESET() do { last_valid = 0; } while (0)
+
+void REPORT_COUNTS() {
+  int i, j;
+  unsigned long total = countops ? countops : 1;
+
+  printf("\n=== COUNTOPS report (%lu ops) ===\n", countops);
+  printf("%10s %7s  %-8s  NOTABLE PAIRS (>10%% of this op)\n",
+    "COUNT", "PERC%", "---OP---");
+
+  for (i = 0; i < 256; i++) {
+    if (!opcount[i]) continue;
+
+    printf("%10lu %6.2f%%  ", opcount[i], 100.0 * opcount[i] / total);
+
+    printf("0x%02X ", i);
+    if (i >= 32 && i < 127 && i != ' ') printf("'%c'", i);
+    else                                printf("   ");
+
+    // pairs that start with this op
+    for (j = 0; j < 256; j++) {
+      if (paircount[i][j] * 10 > opcount[i]) {   // >10%
+        printf("  %c%c:%.0f%%",
+          (i>=32&&i<127)?i:'?',
+          (j>=32&&j<127)?j:'?',
+          100.0 * paircount[i][j] / opcount[i]);
+      }
+    }
+    printf("\n");
+
+  }
+}
+
+#else
+
+  #define COUNT(o)      ((void)0)
+  #define COUNT_RESET() ((void)0)
+
+  #define REPORT_COUNTS ((void)0)
+
+#endif // COUNTOPS 
 
 
 
@@ -864,9 +926,7 @@ ivmvar run_ivm(Process *p) {
 #else
 
 
-#ifdef COUNTOPS
-  countops++;
-#endif
+  COUNT(op);
   
   switch (op) {
 
@@ -1230,6 +1290,8 @@ int run_file(char* filename) {
     free(img);
     #ifdef COUNTOPS
       printf("countops: %ld\n", countops);
+      REPORT_COUNTS();
+      return 1;
     #endif
     return r;
   }
