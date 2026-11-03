@@ -98,7 +98,7 @@ J="%u\\\\n"|"%d\\\\n"|"%s\\\\n"|"%s"|"%u "|"%d "|"%u"|"%d"|"["]\S|E[.]
 
 # - Expressions
 
-E=RO[]|S[\l1]O[]
+E=RO|S[\l1]O
 
 # - Function call (TODO: void calls, no assign return)
 R=\i(Z)[\v]
@@ -112,7 +112,7 @@ R=\i(Z)[\v]
 |\i\[S\][(\1\2]
 
 # - Parens
-|(E)[]
+|(E)
 
 # - Not
 |! E[?]
@@ -126,7 +126,7 @@ Z=E,[S\k]\<|E|
 
 O=
 |<<[S\t]R[[\a1]\<
-|>>[S\t]R[]\a1]\<
+|>>[S\t]R\a1]\<
 |!=[S\t]R[=\a1?]\<
 |==[S\t]R[=\a1]\<
 |+[S\t]R[+\a1]\<
