@@ -1024,6 +1024,11 @@ ZL(op_B,   'B')  zp.ipc -= *zp.ipc;     goto pnext;
 
 // Loop ops (save 6 bytes per *counting* loop)
 
+// - ivm test.c - 37% faster with FOR-ops
+//       (/ 9844950 7211499.0) 37% faster (1.365173870231418)
+// - ivm-vm.asm - 18% faster with FOR-ops
+//       (/ 2893598 2449567.0) 18% faster (1.1812691794100754)
+
 // loop: FOR i u end
 ZL(op_i,   'i')  zp.acc = zp.mem[zp.ipc[0]];
                  if (zp.acc <= zp.mem[zp.ipc[1]]) {

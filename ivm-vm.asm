@@ -972,7 +972,7 @@ gskip:
 	iny
         jmp     xnext           ; both paths: consume delta
 
-.else
+.else ; !ALT_CODE
 	
 op_G:
         FIXIPC                  ; ipc at delta, Y=0
@@ -1001,11 +1001,10 @@ op_G:
 gskip:
         jmp     pnext           ; both paths: consume delta
 
-.endif
+
+.endif ; !ALT_CODE
 	
 	
-
-
 op_B:
         FIXIPC                  ; Y=0
         sty     savey
@@ -1019,7 +1018,7 @@ op_B:
 :
         jmp     pnext
 
-
+	
 
 ;;; ------------------------------------------------------------
 ;;; i v u oo   — counting-up for test (at top)
@@ -1027,6 +1026,136 @@ op_B:
 ;;;   if (acc <= mem[u])  ipc += 3;          // enter body
 ;;;   else                ipc += 2 + oo;     // exit (G-style)
 ;;; ------------------------------------------------------------
+
+;;; ------------------------------------------------------------
+;;; n delta  — next of counting-up for
+;;;   tpc = ipc - delta + 1     ; → address of the 'i'
+;;;   acc = ++mem[tpc[1]]       ; v
+;;;   if (acc > mem[tpc[2]]) fall out
+;;;   else ipc = tpc + 4        ; body
+;;; ------------------------------------------------------------
+
+
+;;; (- 9345 6577) = 2768 enabled OPFOR=2
+;;; (- 9201 6577) = 2624 OPFOR=0
+;;; (- 2768 2624) = 144 bytes (x 2 for j m)
+
+
+OPFOR=2
+;OPFOR=0
+
+.if (OPFOR=2) .and (ALTCODE=0)
+
+;;; TODO: only works if 
+;;; latest complete from grok - works
+
+op_i:
+        ldy     #0
+        sty     savey
+
+        lda     (_ivm_ipc),y        ; v
+        tay
+        LOAD_SLOT_Y                 ; acc = mem[v]
+
+        ldy     #1
+        lda     (_ivm_ipc),y        ; u
+        tay
+
+        ; acc <= mem[u] ?
+        lda     _ivm_acc
+        cmp     (_ivm_memlo),y
+        lda     _ivm_acc+1
+        sbc     (_ivm_memhi),y
+        bcc     i_enter             ; acc <  mem[u]
+        bne     i_exit              ; acc >  mem[u]
+        ; equal → enter
+i_enter:
+        lda     _ivm_ipc
+        clc
+        adc     #3
+        sta     _ivm_ipc
+        bcc     :+
+        inc     _ivm_ipc+1
+:
+        jmp     xnext
+
+i_exit:
+        ldy     #2
+        lda     (_ivm_ipc),y        ; oo
+        clc
+        adc     #2
+        adc     _ivm_ipc
+        sta     _ivm_ipc
+        bcc     :+
+        inc     _ivm_ipc+1
+:
+        jmp     pnext
+
+
+;;; n delta
+op_n:
+        ldy     #0
+        sty     savey
+
+        ; tpc = ipc - delta + 1  → points at the 'i' opcode
+        lda     _ivm_ipc
+        sec
+        sbc     (_ivm_ipc),y
+        sta     tmp_lo
+        lda     _ivm_ipc+1
+        sbc     #0
+        sta     tmp_hi
+        inc     tmp_lo
+        bne     :+
+        inc     tmp_hi
+:
+
+        ; Y = slot v  (code byte at tpc+1)
+        ldy     #1
+        lda     (tmp_lo),y
+        tay
+
+        ; ++mem[v] → acc  (same shape as op_I)
+        clc
+        lda     (_ivm_memlo),y
+        adc     #1
+        sta     (_ivm_memlo),y
+        sta     _ivm_acc
+        lda     (_ivm_memhi),y
+        adc     #0
+        sta     (_ivm_memhi),y
+        sta     _ivm_acc+1
+
+        ; Y = slot u  (code byte at tpc+2)
+        ldy     #2
+        lda     (tmp_lo),y
+        tay
+
+        ; if (acc > mem[u]) fall out
+        lda     (_ivm_memlo),y
+        cmp     _ivm_acc
+        lda     (_ivm_memhi),y
+        sbc     _ivm_acc+1
+        bcc     n_exit              ; mem[u] < acc → exit
+
+        ; continue: ipc = tpc + 4
+        lda     tmp_lo
+        clc
+        adc     #4
+        sta     _ivm_ipc
+        lda     tmp_hi
+        adc     #0
+        sta     _ivm_ipc+1
+        jmp     xnext
+
+n_exit:
+        jmp     pnext
+
+	
+.endif ; OPFOR=2
+	
+.if OPFOR=1
+
 op_i:
         FIXIPC                  ; Y = 0, ipc at first operand
         sty     savey
@@ -1097,15 +1226,9 @@ i_exit:
                                 ; actually the +2 already skipped v+u,
                                 ; pnext will skip one more — adjust if needed
 
-.endif
+.endif ; ALTCODE
 	
-;;; ------------------------------------------------------------
-;;; n delta  — next of counting-up for
-;;;   tpc = ipc - delta + 1     ; → address of the 'i'
-;;;   acc = ++mem[tpc[1]]       ; v
-;;;   if (acc > mem[tpc[2]]) fall out
-;;;   else ipc = tpc + 4        ; body
-;;; ------------------------------------------------------------
+	
 op_n:
         FIXIPC
         sty     savey
@@ -1195,11 +1318,13 @@ n_exit:
         jmp     pnext           ; consume the last (already added) byte? 
                                 ; actually the +2 already skipped v+u,
                                 ; pnext will skip one more — adjust if needed
+.endif ; ALTCODE
 
-.endif
+.endif ; OPFOR=1
+	
 
-
-
+;;; TODO:
+	
 ;;; j v oo   — zero-test form
 ;;; m delta  — next (does --)
 ;;; (same structure, lengths 3 / 1)
@@ -1483,6 +1608,11 @@ op_h:
 op_j:
 op_k:
 
+.if (OPFOR=0) .or (ALTCODE=1)
+op_i:	
+op_n:	
+.endif
+	
 op_m:
 op_o:
 op_p:
@@ -1498,7 +1628,8 @@ op_z:
 
 op_del:
 
-op_bad:	FIXIPC
+op_bad:
+	FIXIPC
 ;;; TODO: print address, and byte code value
         lda     #10
         jsr     _putchar
