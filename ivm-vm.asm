@@ -23,7 +23,6 @@ TRACE=0
 ;; ALTCODE: 1.5 % faster...
 ALTCODE=0
 ;ALTCODE=1
-	
 
 .export         _run_ivm_asm
 
@@ -1021,6 +1020,201 @@ op_B:
         jmp     pnext
 
 
+
+;;; ------------------------------------------------------------
+;;; i v u oo   — counting-up for test (at top)
+;;;   acc = mem[v]
+;;;   if (acc <= mem[u])  ipc += 3;          // enter body
+;;;   else                ipc += 2 + oo;     // exit (G-style)
+;;; ------------------------------------------------------------
+op_i:
+        FIXIPC                  ; Y = 0, ipc at first operand
+        sty     savey
+
+;PARAX ???
+        ;; load v → acc  (and keep slot in tmp_lo)
+        lda     (_ivm_ipc),y    ; v
+        sta     tmp_lo
+        tay
+        LOAD_SLOT_Y             ; acc = mem[v]
+
+        ;; get Y = u
+        ldy     #1
+        lda     (_ivm_ipc),y    ; u slot
+        tay
+
+	;; acc <= mem[u]
+        lda     _ivm_acc
+        cmp     (_ivm_memlo),y
+        lda     _ivm_acc+1
+        sbc     (_ivm_memhi),y
+
+        bcc     i_enter         ; acc <  mem[u]
+        bne     i_exit          ; acc >  mem[u]
+        ;; equal → also enter
+
+.if ALTCODE
+i_enter:
+        ;; ipc += 3  (skip v u oo) → body
+	iny
+	iny
+	iny
+
+	jmp     xnext
+
+i_exit:
+	;; ipc += 2 + oo   (from current pos = v)
+	iny
+	;; pretend we're executing 'G' (or jr) !
+	jmp     gyes
+
+.else
+i_enter:
+        ;; ipc += 3  (skip v u oo) → body
+        clc
+
+        lda     _ivm_ipc
+        adc     #3
+        sta     _ivm_ipc
+        bcc     :+
+        inc     _ivm_ipc+1
+:
+        jmp     xnext
+
+i_exit:
+        ;; ipc += 2 + oo   (from current pos = v)
+        clc
+        ldy     #2
+        lda     (_ivm_ipc),y    ; oo
+
+        adc     #2
+        adc     _ivm_ipc
+        sta     _ivm_ipc
+        bcc     :+
+        inc     _ivm_ipc+1
+:
+        jmp     pnext           ; consume the last (already added) byte? 
+                                ; actually the +2 already skipped v+u,
+                                ; pnext will skip one more — adjust if needed
+
+.endif
+	
+;;; ------------------------------------------------------------
+;;; n delta  — next of counting-up for
+;;;   tpc = ipc - delta + 1     ; → address of the 'i'
+;;;   acc = ++mem[tpc[1]]       ; v
+;;;   if (acc > mem[tpc[2]]) fall out
+;;;   else ipc = tpc + 4        ; body
+;;; ------------------------------------------------------------
+op_n:
+        FIXIPC
+        sty     savey
+
+        ;; tpc = ipc - *ipc + 1
+        lda     _ivm_ipc
+	sec
+        sbc     (_ivm_ipc),y    ; - delta
+        sta     tmp_lo
+        lda     _ivm_ipc+1
+        sbc     #0
+        sta     tmp_hi
+        ;; +1
+        inc     tmp_lo
+        bne     :+
+        inc     tmp_hi
+:
+
+	;; acc = (tmp_lo) Y=0 still
+	PARY
+
+	lda     (tmp_lo),y	; lo
+	clc
+	adc     #1
+	sta     _ivm_acc
+	tax
+	
+	iny
+	lda     (tmp_lo),y	; hi
+	adc     #0
+	sta     _ivm_acc
+
+	;;  Y=1
+	PARY
+
+	;; acc <= mem[u]
+	txa
+	cmp     (_ivm_memlo),y
+	lda     _ivm_acc+1
+	sbc     (_ivm_memhi),y
+	
+	bcc     n_enter
+	bne     n_exit
+	
+        ;; equal → also enter
+
+.if ALTCODE
+n_enter:
+	lda     tmp_lo
+	sta     _ivm_ipc
+	lda     tmp_hi
+	sta     _ivm_ipc+1
+
+	;; ipc += 2 + oo   (from current pos = v)
+	ldy     #1
+	;; pretend we're executing 'B' (or jr) !
+	jmp     op_B
+
+n_exit:
+	jmp     pnext
+	
+.else
+n_enter:
+        ;; ipc += 3  (skip v u oo) → body
+        clc
+
+        lda     _ivm_ipc
+        adc     #3
+        sta     _ivm_ipc
+        bcc     :+
+        inc     _ivm_ipc+1
+:
+        jmp     xnext
+
+n_exit:
+        ;; ipc += 2 + oo   (from current pos = v)
+        clc
+        ldy     #2
+        lda     (_ivm_ipc),y    ; oo
+
+        adc     #2
+        adc     _ivm_ipc
+        sta     _ivm_ipc
+        bcc     :+
+        inc     _ivm_ipc+1
+:
+        jmp     pnext           ; consume the last (already added) byte? 
+                                ; actually the +2 already skipped v+u,
+                                ; pnext will skip one more — adjust if needed
+
+.endif
+
+
+
+;;; j v oo   — zero-test form
+;;; m delta  — next (does --)
+;;; (same structure, lengths 3 / 1)
+;;; ------------------------------------------------------------
+;op_j:
+        ; analogous to op_i but only one limit test (acc != 0)
+        ; enter: ipc += 2
+        ; exit:  ipc += 1 + oo
+
+;op_m:
+        ; analogous to op_n but -- and length 3
+	
+	
+
+
 ;;; NOP - SPACE
 op_sp:  jmp     xnext
 
@@ -1286,12 +1480,10 @@ op_f:
 op_g:
 op_h:
 
-op_i:
 op_j:
 op_k:
 
 op_m:
-op_n:
 op_o:
 op_p:
 
