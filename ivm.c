@@ -1037,22 +1037,22 @@ ZL(op_i,   'i')  zp.acc = zp.mem[zp.ipc[0]];
                  if (zp.acc <= zp.mem[zp.ipc[1]]) {
                    zp.ipc += 3;               goto xnext; } // 3 args
                  zp.ipc += 2 + zp.ipc[2];     goto pnext; // skip
-// NEXT loop
+// NEXT loop ++
 ZL(op_n,   'n')  tpc = zp.ipc - *zp.ipc;
-                 zp.acc = ++zp.mem[tpc[0]];
-                 if (zp.acc > zp.mem[tpc[1]]) goto pnext; // 1 arg
-                 zp.ipc = tpc + 4;            goto xnext; // 3 args back
+                 zp.acc = ++zp.mem[tpc[1]]; 
+                 if (zp.acc > zp.mem[tpc[2]]) goto pnext; // fall out
+                 zp.ipc = tpc + 4;            goto xnext;
 
 // loop:      for(i= ...; i; i--) ... (down)
 ZL(op_j,   'j')  zp.acc = zp.mem[zp.ipc[0]];
                  if (zp.acc) {
                    zp.ipc += 2;               goto xnext; } // 2 args
                  zp.ipc += 1 + zp.ipc[2];     goto pnext; // skip
-// NEXT loop
-ZL(op_m,   'm')  tpc = zp.ipc - *zp.ipc;
-                 zp.acc = --zp.mem[tpc[0]];
-                 if (!zp.acc)                 goto pnext; // 1 arg
-                 zp.ipc = tpc + 3;            goto xnext; // 2 arg back
+// NEXT loop --
+ZL(op_m,   'm')  tpc = zp.ipc - *zp.ipc; // points at 'j'
+                 zp.acc = --zp.mem[tpc[1]];
+                 if (!zp.acc)                 goto pnext;
+                 zp.ipc = tpc + 3;            goto xnext;
 
 
 // optimized counting up loops (pascal style): Ivv <uu Goo (6) => Yvvuuoo (4)
