@@ -7,6 +7,7 @@
 #ifndef UCHAR
 #define UCHAR
 typedef unsigned char uchar;
+typedef uint16_t       word;
 #endif
 
 #ifndef IVM_PRINT_C
@@ -22,6 +23,7 @@ static void ivm_print_one(FILE *fp, const uchar *code, unsigned len, unsigned *p
   unsigned i = *pi;
 
   if (i >= len) return;
+  
   c = code[i];
 
   if (c == '"') {

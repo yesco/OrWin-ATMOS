@@ -106,7 +106,12 @@ K=if (E)[?G\x] K else[0?G\x\w\y] K[\y]
 |printf("%u%u%u\\\\n",E,E,E);[...N]
 |printf("%u%u%u",E,E,E);[...]
 |printf("\\"%s\\" has %d characters\\n",\i,\i(Z)[\v]);[S\tL\1P" has \#00L\3.N]
-|printf(JW);
+
+
+|printf(E);[P]
+
+# - TODO: vararg printf?
+#|printf(JW);
 
 # - Return
 |return E;[X]

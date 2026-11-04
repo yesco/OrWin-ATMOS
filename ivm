@@ -1,4 +1,4 @@
-rm ivm.sim ivm-novim.sim
+rm ivm.sim ivm-novim.sim 2>/dev/null
 
 name=$1
 name="${name%.ivm}"

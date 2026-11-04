@@ -386,6 +386,44 @@ typedef struct Process {
 } Process;
 
 
+
+#ifdef TRACE
+  #undef TRACE
+  #define TRACE(proc, p) trace(proc, p)
+
+// blob base while running (already in ivm.c)
+extern uchar *g_loaded;
+
+#include "ivm-print.c"
+
+void trace(Process *proc, uchar *ipc) {
+  word off_blob;
+  word off_code;
+  BlobHeader *h = &proc->h.hdr;
+
+  if (!g_loaded || !ipc) {
+    printf("\n????: (no base)\n");
+    return;
+  }
+
+  off_blob = (word)(ipc - g_loaded);
+  off_code = (word)(ipc - (g_loaded + h->code));
+
+  printf("\n%04X (code+%04X): %02x %02x %02x %02x  %c  \t",
+         off_blob, off_code,
+         ipc[0], ipc[1], ipc[2], ipc[3],
+         (ipc[0] >= 32 && ipc[0] < 127) ? ipc[0] : ' ');
+
+  unsigned* i = 0;
+  ivm_print_one(stdout, ipc, 255, &i);
+}
+
+
+#else
+  #define TRACE(proc, p) (void)0
+#endif
+
+
 // Relocate blob-relative offsets to absolute pointers (cc65/6502 only).
 // Header layout: main,code,call,fp,con,data are offsets;
 // memsz, constidx, xslot are NOT offsets (must not be walked as pointers).
@@ -861,6 +899,8 @@ ivmvar run_ivm(Process *p) {
 
 
  xnext:
+  TRACE(p, zp.ipc);
+
   op = *zp.ipc++;
 
   COUNT(op);

@@ -1,0 +1,16 @@
+rm ivm.x 2>/dev/null
+
+name=$1
+name="${name%.ivm}"
+
+clang -DTRACE -g ivm.c -o ivm.x || exit 1
+
+time ./ivm.x $name.ivm | tee $name.count
+
+echo
+echo
+ls -ugGlf ivm.x $name.ivm 2>/dev/null
+echo
+echo "=== ivm.c: `./wcode ivm.c` LOC ==="
+echo
+

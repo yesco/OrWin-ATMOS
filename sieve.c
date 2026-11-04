@@ -55,10 +55,10 @@ int primes() {
     }
   }
 
-  printf("LIMIT %u\n", LIMIT);
-  printf("primes %u\n", count);
+  printf("LIMIT "); printf("%u\n", LIMIT);
+  printf("primes "); printf("%u\n", count);
 
-  // print last few primes as a sanity check
+  // print last new primes as a sanity check
   n = 0;
   printf("last: ");
   for (i = LIMIT - 1; i > 1; i--) {
