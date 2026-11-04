@@ -5,7 +5,7 @@ name="${name%.ivm}"
 
 clang -DTRACE -g ivm.c -o ivm.x || exit 1
 
-time ./ivm.x $name.ivm | tee $name.count
+time ./ivm.x $name.ivm
 
 echo
 echo
