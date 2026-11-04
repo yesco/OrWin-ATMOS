@@ -34,8 +34,8 @@ K=if (E)[?G\x] K else[0?G\x\w\y] K[\y]
 |if (E)[?G\x] K[\y]
 
 # - Loops
-|for (\i=E[S\1]; \1<=E[S\t]; \1++) [\mi\1\5\x] K [n\z\y]
-|for (\i=E[S\1]; \1<E[\e]; \1++)   [\mi\1\5\x] K [n\z\y]
+|for (\i=E[S\1]; \1<=E[S\t];  \1++) [\mi\1\5\x] K [n\z\y]
+|for (\i=E[S\1]; \1<E[\eS\t]; \1++) [\mi\1\5\x] K [n\z\y]
 
 # counting-down-to-zero (very common in C)
 #   for (i = N; i; i--)     and   for (i = N; i > 0; i--)
@@ -111,7 +111,9 @@ K=if (E)[?G\x] K else[0?G\x\w\y] K[\y]
 
 |putz("["]\S);
 |putz(E);[P]
+|putnl(E);[.N]
 |putn(E);[.O ]
+|nl();[N]
 
 # - TODO: vararg printf?
 #|printf(JW);

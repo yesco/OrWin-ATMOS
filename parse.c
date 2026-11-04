@@ -1293,29 +1293,85 @@ static int match_str_const(void) {
 
 
 static int match_num(void) {
-  word v, ty;
-  uchar ch;
+  word ty;
+  uchar c;
+  uchar base = 10;
+  word v = 0;
+  uchar n = 0;
+ 
+  //const char digits[]= "0123456789ABCDE";
 
   skip_ws();
   if (!line_need()) return 0;
 
+  // base 0x 0b 0o
+  if (line_buf[line_pos] == '0') {
+
+    // TODO: this is stupid, everywhere, skip_ws() shoiuld position
+    //   and set global nextc
+    line_pos++;
+    // TODO: this should be a FAIL inside if out of chars
+    if (!line_need()) return 0;
+    c = line_buf[line_pos];
+
+    switch(c) {
+    case 'x': base = 16; break;
+    case 'o': base =  8; break;
+    case 'b': base =  2; break;
+    default: line_pos-= 2; break; // digit hopefully, tested later
+    }
+
+    line_pos++;
+    // TODO: this should be a FAIL inside if out of chars
+    if (!line_need()) return 0;
+  }
+  
   if (line_buf[line_pos] == '\'') {
+
     // character literal 'x' / '\n' / ... → small integer const
     line_pos++;
-    if (!next_body_char(&ch)) return 0;
+    if (!next_body_char(&c)) return 0;
     if (!line_need() || line_buf[line_pos] != '\'') return 0;
     line_pos++;
-    v = ch;
+    v = c;
     ty = TY_CHAR;
+
   } else {
-    if (!isdigit(line_buf[line_pos])) return 0;
-    v = 0;
-    while (line_need() && isdigit(line_buf[line_pos])) {
-      v = v * 10 + (line_buf[line_pos] - '0');
-      eat();
-    }
+    // parse number (or cont of 0...)
+    do {
+
+      if (!line_need()) break; 
+
+      // TODO: negative!
+      
+      c = toupper(line_buf[line_pos]);
+      
+      // Convert character to its numeric value based on base
+      if (isdigit(c)) {
+        c -= '0';
+      } else if (c >= 'A' && c <= 'F') {
+        c = c - 'A' + 10;
+      } else {
+        // Not a valid alphanumeric digit
+        break; 
+      }
+
+      // Ensure the digit fits the current base (e.g., '8' in octal is invalid)
+      if (c >= base) {
+        break;
+      }
+
+      n++;
+      v = v * base + c;
+      eat(); // Assumes this increments line_pos
+    } while(1);
+
+    // If no digits were successfully parsed, it's a failure
+    if (n == 0) return 0;
+    
     ty = TY_WORD;
   }
+
   note_progress();
   record_capture(MAKE_CAP(const_slot(v), ty));
   return 1;
