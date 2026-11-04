@@ -1,0 +1,1 @@
+time ./oscar -DOSCAR64 -Oz -ep ivm.c

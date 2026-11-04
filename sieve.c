@@ -32,7 +32,7 @@ int primes() {
 
   for (i = 2; i < LIMIT; i++) {
 
-    printf("%u ", i);
+    //printf("%u ", i);
     
     if (flags[i]) {
 

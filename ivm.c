@@ -217,6 +217,18 @@
 
 //#define COUNTOPS
 
+// TODO: just ifndef 6502 or if "onhost"
+#ifdef __CC65__
+  // nothing
+#else
+  #ifdef OSCAR64
+    #define register 
+  #else
+    #define HOST
+    #define SOFT_HEAP
+  #endif
+#endif
+
 #ifdef COUNTOPS
 // host only; fine when profiling ./ivm-count
 unsigned long countops = 0;
@@ -285,7 +297,8 @@ void REPORT_COUNTS() {
 // Host soft-heap: ivmvar is often 16-bit and cannot hold a real malloc pointer.
 // We store an offset into soft_heap as the "pointer" value on non-cc65.
 // On cc65/6502, M/F/@/!/(/) use real addresses.
-#ifndef __CC65__
+#ifdef SOFT_HEAP
+
   #ifndef SOFT_HEAP_MAX
     #define SOFT_HEAP_MAX 32768   // addresses are 16-bit ivmvar: 64K is the hard limit
   #endif
@@ -300,14 +313,59 @@ void REPORT_COUNTS() {
   // what was tried and jump to the badptr: label in run_ivm().
   unsigned long ivm_bad_addr;
   unsigned ivm_bad_n;
+
   #define CHKP(a, n) do { \
       unsigned long a_ = (unsigned long)(a); \
       if (a_ < SOFT_BASE || a_ + (n) > soft_top) { \
         ivm_bad_addr = a_; ivm_bad_n = (n); goto badptr; } \
     } while (0)
+
+ivmvar ivm_zalloc(word n) {
+  // keep 16-bit access aligned
+  n = (n + 1) & ~1u; 
+
+  if (!n) {
+
+    return 0; // NULL
+
+  } else if (soft_top + n > SOFT_HEAP_MAX) {
+
+    printf("\n[IVM] M: out of soft heap (want %u, used %u of %u)\n",
+      n, (unsigned)soft_top, (unsigned)SOFT_HEAP_MAX);
+    return 0; // NULL
+
+  } else {
+
+    ivmvar r = (ivmvar)soft_top;
+    memset(soft_heap + soft_top, 0, n);
+    soft_top += n;
+    return  r;
+
+  }
+}
+
+void ivm_free(ivmvar p) {
+  // soft-heap is bump-only; just drop the reference
+  // TODO: fix, use handles?
+  return;
+  (void)p;
+}
+
+
+
 #else
+
   #define IVM_PTR(addr) ((ivmvar *)(unsigned)(addr))
   #define CHKP(a, n) ((void)0)
+
+ivmvar ivm_zalloc(word n) {
+  return (ivmvar)(unsigned)calloc(n, 1);
+}
+
+void ivm_free(ivmvar p) {
+  free((void *)(unsigned)p);
+}
+ 
 #endif
 
 // --- limits
@@ -406,7 +464,7 @@ typedef struct Process {
 // ===========================================================================
 // HOST DEBUG SUPPORT: consistency check + break into the debugger
 // ===========================================================================
-#ifndef __CC65__
+#ifdef HOST
 
 #include <signal.h>
 
@@ -425,16 +483,16 @@ static void ivm_panic(Process *proc, const char *why, const uchar *ipc) {
 
   printf("\n[IVM CHECK] %s\n", why);
   printf("  g_loaded  %p  len %u  code %u  main %u  data %u\n",
-         (void *)g_loaded, h->len, h->code, h->main, h->data);
+    (void *)g_loaded, h->len, h->code, h->main, h->data);
   printf("  ipc       %p  (blob offset %ld)\n",
-         (const void *)ipc, (long)(ipc - g_loaded));
+    (const void *)ipc, (long)(ipc - g_loaded));
   printf("  zp.ipc    %p  zp.fp %d  zp.acc %u\n",
-         (void *)zp.ipc, (int)zp.fp, (unsigned)zp.acc);
+    (void *)zp.ipc, (int)zp.fp, (unsigned)zp.acc);
   printf("  proc      %p  proc->h.mem %p  zp.mem %p  memsz %u  constidx %u\n",
-         (void *)proc, (void *)proc->h.mem, (void *)zp.mem, h->memsz, h->constidx);
+    (void *)proc, (void *)proc->h.mem, (void *)zp.mem, h->memsz, h->constidx);
   printf("  soft_heap %p  soft_top %u  max %u  base %u\n",
-         (void *)soft_heap, (unsigned)soft_top, (unsigned)SOFT_HEAP_MAX,
-         (unsigned)SOFT_BASE);
+    (void *)soft_heap, (unsigned)soft_top, (unsigned)SOFT_HEAP_MAX,
+    (unsigned)SOFT_BASE);
   printf("  last bad access: addr %lu  len %u\n", ivm_bad_addr, ivm_bad_n);
   fflush(stdout);
   IVM_BREAK();
@@ -575,7 +633,8 @@ Process* Nevm(uchar *loaded) {
   p->h.mem = p->mem;
   p->h.acc = 0;
 
-#ifndef __CC65__
+  // TODO: move out to INIT_SOFT_HEAP(); ?
+#ifdef SOFT_HEAP
   // host soft heap: [0..SOFT_BASE) unused (0 == NULL), then the blob's data
   // section (strings), then whatever M allocates. Always (re)initialised.
   soft_top = SOFT_BASE;
@@ -594,21 +653,26 @@ Process* Nevm(uchar *loaded) {
     word *pool;
     word nc = bh->memsz - bh->constidx;
     word i;
-#ifdef __CC65__
-    pool = (word *)(unsigned)bh->con;
-#else
-    pool = (word *)(loaded + bh->con);
-#endif
+
+    #ifndef SOFT_HEAP
+      pool = (word *)(unsigned)(bh->con);
+    #else
+      pool = (word *)(loaded + bh->con);
+    #endif
+
     for (i = 0; i < nc; i++) {
       word v = pool[i];
+
       if (v & (word)0x8000) {
         word off = (word)(v & (word)0x7fff);
-        #ifdef __CC65__
+
+        #ifndef SOFT_HEAP
           // hdr.data is absolute after relocate(); ASM P/' use real pointers
           v = (word)(bh->data + off);
         #else
           v = off + SOFT_BASE; // soft_heap offset (0 is NULL)
         #endif
+
       }
       p->mem[bh->constidx + i] = v;
     }
@@ -1028,40 +1092,57 @@ ivmvar run_ivm(Process *p) {
     static void *vt[128];
     static uchar inited;
     if (!inited) {
+      // TODO: just one big static array assign? (or doesn't work cc65?)
       // build once in a local table, then memcpy → static (no per-op ifdefs)
       void *t[128];
       uchar k;
+
       for (k = 0; k < 128; k++) t[k] = &&op_unk;
-      t['q'] = &&op_q;   t['Q'] = &&op_Q;   t['X'] = &&op_X;
-      t[';'] = &&op_semi;
+
+      t['q'] = &&op_q;   t['Q'] = &&op_Q;   t['X'] = &&op_X;   t[';'] = &&op_semi;
+
       t['8'] = &&op_8;
       t['1'] = &&op_17;   t['2'] = &&op_17;  t['3'] = &&op_17;
       t['4'] = &&op_17;   t['5'] = &&op_17;  t['6'] = &&op_17; t['7'] = &&op_17;
+
       t['+'] = &&op_add;  t['-'] = &&op_sub; t['*'] = &&op_mul;
       t['/'] = &&op_div;  t['%'] = &&op_mod;
       t['&'] = &&op_and;  t['|'] = &&op_or;  t['^'] = &&op_xor;
       t['['] = &&op_shl;  t[']'] = &&op_shr;
       t['{'] = &&op_shlm; t['}'] = &&op_shrm;
+
       t['L'] = &&op_L;    t['S'] = &&op_S;   t['Z'] = &&op_Z;
       t['l'] = &&op_l;    t['s'] = &&op_s;
+
+      t['I'] = &&op_I;    t['J'] = &&op_J;   t['U'] = &&op_U;
+
       t['M'] = &&op_M;    t['F'] = &&op_F;
       t['@'] = &&op_at;   t['!'] = &&op_bang;
       t['r'] = &&op_r;    t['w'] = &&op_w;
       t['\'']= &&op_ri;   t[','] = &&op_wi;
       t['('] = &&op_idxl; t[')'] = &&op_idxs;
-      t['I'] = &&op_I;    t['J'] = &&op_J;   t['U'] = &&op_U;
+
+      t['i'] = &&op_i;    t['n'] = &&op_n;   
+
       t['<'] = &&op_lt;   t['='] = &&op_eq;  t['>'] = &&op_gt;
-      t[' '] = &&op_sp;
-      t['0'] = &&op_0;    t['9'] = &&op_9;
       t['?'] = &&op_not;  t['~'] = &&op_bnot;
+
+      t[' '] = &&op_sp;
+
+      t['0'] = &&op_0;    t['9'] = &&op_9;
+
       t['K'] = &&op_K;    t['E'] = &&op_E;   t['N'] = &&op_N;
       t['P'] = &&op_P;    t['O'] = &&op_O;   t['W'] = &&op_W;
       t['.'] = &&op_dot;  t['"'] = &&op_str;
+
       t['G'] = &&op_G;    t['B'] = &&op_B;
+
       t['x'] = &&op_x;    t['y'] = &&op_y;   t['z'] = &&op_z;
+
       memcpy(vt, t, sizeof(vt));
       inited = 1;
     }
+
     if (op & 0x80) goto op_hibit;
     goto *vt[op];
   }
@@ -1139,7 +1220,7 @@ ZL(op_bang,'!')  CHKP(PAR, 2); *IVM_PTR(PAR) = zp.acc; goto pnext;
 ZL(op_l,   'l')  zp.acc = *(char*)(zp.mem+*zp.ipc); goto pnext;
 ZL(op_s,   's')  zp.mem[*zp.ipc] = zp.acc & 0xff;   goto pnext;
 
-#ifdef __CC65__
+#ifndef SOFT_HEAP
 ZL(op_r,   'r')  zp.acc = *IVM_PTR(PAR) & 0xff; goto pnext;
 ZL(op_w,   'w')  *IVM_PTR(PAR) = zp.acc & 0xff; goto pnext;
 #else
@@ -1149,7 +1230,7 @@ ZL(op_w,   'w')  CHKP(PAR, 1); soft_heap[PAR] = (uchar)zp.acc; goto pnext;
 #endif
 
 // string (char) pointer walkers
-#ifdef __CC65__
+#ifndef SOFT_HEAP
 ZL(op_ri,  '\'') zp.acc = *(uchar*)(PAR++); goto pnext;
 ZL(op_wi,  ',' ) *(uchar*)(PAR++) = zp.acc; goto pnext;
 #else
@@ -1167,45 +1248,11 @@ ZL(op_idxs,')')
     IVM_PTR(PAR)[zp.mem[zp.ipc[1]]] = zp.acc;
     zp.ipc += 2; goto xnext; // 2 args
 
-
  
 // Memmory heap
-ZL(op_M,   'M')
-    // operand = slot of pointer var; ACC = size in bytes
-    {
-      unsigned n = (unsigned)zp.acc;
-      #ifdef __CC65__
-        zp.mem[*zp.ipc] = (ivmvar)(unsigned)calloc(n, 1);
-      #else
-        // TODO: "halloc" - make a function
-        n = (n + 1) & ~1u;                      // keep 16-bit access aligned
-        if (!n) {
-          zp.mem[*zp.ipc] = 0;                  // NULL
-        } else if (soft_top + n > SOFT_HEAP_MAX) {
-          printf("\n[IVM] M: out of soft heap (want %u, used %u of %u)\n",
-                 (unsigned)zp.acc, (unsigned)soft_top, (unsigned)SOFT_HEAP_MAX);
-          zp.mem[*zp.ipc] = 0;                  // NULL: every later access traps
-        } else {
-          zp.mem[*zp.ipc] = (ivmvar)soft_top;
-          memset(soft_heap + soft_top, 0, n);
-          soft_top += n;
-        }
-      #endif
-      zp.acc = zp.mem[*zp.ipc];
-    }
-    goto pnext;
-
-
-ZL(op_F,   'F')
-    // operand = slot of pointer var; free and clear
-    #ifdef __CC65__
-      free((void *)(unsigned)zp.mem[*zp.ipc]);
-    #else
-      // soft-heap is bump-only; just drop the reference
-    #endif
-    zp.mem[*zp.ipc] = 0;
-    goto pnext;
-
+// operand = slot of pointer var; ACC = size in bytes
+ZL(op_M,   'M') zp.acc = zp.mem[*zp.ipc] = ivm_zalloc(zp.acc); goto pnext;
+ZL(op_F,   'F') ivm_free(PAR); zp.mem[*zp.ipc] = 0;            goto pnext;
 
 ZL(op_I,   'I')  zp.acc = ++zp.mem[*zp.ipc]; goto pnext;
 ZL(op_J,   'J')  zp.acc = --zp.mem[*zp.ipc]; goto pnext;
@@ -1227,7 +1274,8 @@ ZL(op_K,   'K')  zp.acc = getchar();    goto xnext;
 ZL(op_E,   'E')  putchar(zp.acc);       goto xnext;
 ZL(op_N,   'N')  putchar('\n');         goto xnext;
 ZL(op_P,   'P')
-  #ifndef __CC65__
+  // TODO: one macro
+  #ifdef SOFT_HEAP
     CHKP(zp.acc, 1);
     printf("%s", (char *)(soft_heap + (unsigned)zp.acc));
   #else
@@ -1236,16 +1284,18 @@ ZL(op_P,   'P')
   goto xnext;
 ZL(op_O,   'O')  putchar(*zp.ipc);      goto pnext; // inline char
 ZL(op_W,   'W')  printf("%u", PAR);     goto pnext;
-// TODO: T printing string ? Type w length (from index)
 ZL(op_dot, '.')  printf("%u", zp.acc);  goto xnext;
 ZL(op_str, '"')  while (*zp.ipc) putchar(*zp.ipc++);
                                         goto pnext;
+// TODO: T printing string ? Type w length (from index)
+
 
 ZL(op_G,   'G')  if ((int16_t)zp.acc > 0)
                    zp.ipc += *zp.ipc;   goto pnext;
 ZL(op_B,   'B')  zp.ipc -= *zp.ipc;     goto pnext;
 
-// Loop ops (save 6 bytes per *counting* loop)
+
+// -- Loop ops (save 6 bytes per *counting* loop)
 
 // - ivm test.c - 37% faster with FOR-ops
 //       (/ 9844950 7211499.0) 37% faster (1.365173870231418)
@@ -1277,12 +1327,6 @@ ZL(op_m,   'm')  tpc = zp.ipc - *zp.ipc + 1;
 
 
   
-// optimized counting up loops (pascal style): Ivv <uu Goo (6) => Yvvuuoo (4)
-ZL(op_Y,   'Y')  if (   (zp.acc = ++zp.mem[*zp.ipc])
-                     <= zp.mem[zp.ipc[1]] ) {
-                               zp.ipc += 3; goto xnext; // 3 args
-                 } else  zp.ipc += *zp.ipc; goto pnext;
-// TODO: counting up
 
 ZL(op_x,   'x')  zp.acc= sys(1, zp.acc, zp.ipc); zp.ipc+= 1; goto xnext;
 ZL(op_y,   'y')  zp.acc= sys(2, zp.acc, zp.ipc); zp.ipc+= 2; goto xnext;
@@ -1336,7 +1380,7 @@ L(op_hibit)
 
   goto done;   // unknown opcode falls out of the switch
 
-#ifndef __CC65__
+#ifdef SOFT_HEAP
  badptr:
   {
     char why[80];
@@ -1384,6 +1428,7 @@ uchar *load_blob(const char *path, int *out_len) {
   }
 
   // read size from header without trusting a fixed MAX
+  memset(&hdr, 0, sizeof(hdr));
   if ((int)fread(&hdr, 1, sizeof(hdr), f) != (int)sizeof(hdr)) {
     printf("short header %s\n", path);
     goto err;
@@ -1392,7 +1437,8 @@ uchar *load_blob(const char *path, int *out_len) {
   // magic check
   if (hdr.magic[0] != 'I' || hdr.magic[1] != 'V'
     || hdr.magic[2] != 'M' || hdr.magic[3] != 0) {
-    printf("not an IVM file: %s\n", path);
+    printf("load_blob: not an IVM file: %s (%02x%02x%02x%02x)\n",
+      path, hdr.magic[0], hdr.magic[1], hdr.magic[2], hdr.magic[3]);
     goto err;
   }
 
@@ -1478,10 +1524,17 @@ int run_file(char* filename) {
 
 
 #ifndef MAIN
-int main(int argc, char** argv) {
 
+#ifdef OSCAR64
+int main(void) {
+  int argc = 2;
+  const char* argv[]= {"ivm", "test.ivm", NULL};
+#else
+int main(int argc, char** argv) {
+#endif
+  
   if (argc==2)
-    return run_file(argv[1]);
+    return run_file((char*)argv[1]);
 
   return 1;
 }
