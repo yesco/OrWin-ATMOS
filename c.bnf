@@ -110,8 +110,15 @@ K=if (E)[?G\x] K else[0?G\x\w\y] K[\y]
 
 |printf(E);[P]
 
+|putz("["]\S);
+|putz(E);[P]
+|putn(E);[.O ]
+
 # - TODO: vararg printf?
 #|printf(JW);
+
+# - a dummy catch all - WRONG!
+|printf("["]\S, E);[.]
 
 # - Return
 |return E;[X]

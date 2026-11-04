@@ -34,6 +34,7 @@ static void ivm_print_one(FILE *fp, const uchar *code, unsigned len, unsigned *p
       if (i >= len) break;
       c = code[i];
     } while (c != 0 && i < len);
+    // TODO: hmmm?
     if (i < len && code[i] == 0) {
       fputs("\\0\n", fp);
       i++;
@@ -65,7 +66,7 @@ static void ivm_print_one(FILE *fp, const uchar *code, unsigned len, unsigned *p
   }
 
   if (c > ' ' && c < 127) {
-    if ((c == 'U' || c == '(' || c == ')') && i + 2 < len) {
+    if ((c == 'U' || c == '(' || c == ')' || c == 'i') && i + 2 < len) {
       fprintf(fp, "%c%02x%02x ", c, code[i + 1], code[i + 2]);
       *pi = i + 3;
       return;

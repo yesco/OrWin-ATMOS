@@ -32,6 +32,8 @@ int primes() {
 
   for (i = 2; i < LIMIT; i++) {
 
+    printf("%u ", i);
+    
     if (flags[i]) {
 
       count++;
@@ -55,12 +57,14 @@ int primes() {
     }
   }
 
-  printf("LIMIT "); printf("%u\n", LIMIT);
-  printf("primes "); printf("%u\n", count);
+  putz("LIMIT ");
+  printf("%u\n", LIMIT);
+  putz("primes ");
+  printf("%u\n", count);
 
   // print last new primes as a sanity check
   n = 0;
-  printf("last: ");
+  putz("last: ");
   for (i = LIMIT - 1; i > 1; i--) {
     if (flags[i]) {
       printf("%u ", i);
@@ -70,7 +74,7 @@ int primes() {
       }
     }
   }
-  printf("\n");
+  putchar('\n');
 
   free(flags);
   
@@ -88,7 +92,7 @@ int main() {
   for(i = 0; i <= n; i++)
     sum = sum + primes();
   
-  printf("SUM "); printf("%u ", n); printf("times = ");
+  putz("SUM "); printf("%u ", n); putz("times = ");
   printf("%u\n", sum);
   
   return sum;

@@ -409,13 +409,23 @@ void trace(Process *proc, uchar *ipc) {
   off_blob = (word)(ipc - g_loaded);
   off_code = (word)(ipc - (g_loaded + h->code));
 
-  printf("\n%04X (code+%04X): %02x %02x %02x %02x  %c  \t",
+  // if there is any process output the line will not be aligned!
+  
+  printf("\t%04X (code+%04X): %02x %02x %02x %02x  %c   ",
          off_blob, off_code,
          ipc[0], ipc[1], ipc[2], ipc[3],
          (ipc[0] >= 32 && ipc[0] < 127) ? ipc[0] : ' ');
 
-  unsigned* i = 0;
-  ivm_print_one(stdout, ipc, 255, &i);
+  putchar('\t');
+  unsigned i = 0;
+  ivm_print_one(stdout, ipc, 69, &i);
+
+  // output of actual variable values!
+  putchar('\t');
+  for(int j = 1; j < i; ++j) 
+    printf(" %5d ", proc->mem[ipc[j]]);
+
+  putchar('\n');
 }
 
 
@@ -1135,9 +1145,10 @@ ZL(op_i,   'i')  zp.acc = zp.mem[zp.ipc[0]];
                  zp.ipc += 2 + zp.ipc[2];     goto pnext; // skip
 // NEXT loop ++
 ZL(op_n,   'n')  tpc = zp.ipc - *zp.ipc + 1;
+                 TRACE(p, tpc);
                  zp.acc = ++zp.mem[tpc[1]]; 
                  if (zp.acc > zp.mem[tpc[2]]) goto pnext; // fall out
-                 zp.ipc = tpc + 4;            goto pnext; // body
+                 zp.ipc = tpc + 4;            goto xnext; // body
 
 // loop:      for(i= ...; i; i--) ... (down)
 ZL(op_j,   'j')  zp.acc = zp.mem[zp.ipc[0]];
