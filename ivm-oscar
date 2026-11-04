@@ -1,1 +1,10 @@
-time ./oscar -DOSCAR64 -Oz -ep ivm.c
+#
+# maybe try build c1541 disk:
+# - http://ch.archive.ubuntu.com/ubuntu/ubuntu/ubuntu/pool/universe/c/cc1541/cc1541_4.2.orig.tar.gz
+
+
+name="$1"
+
+time ./oscar -DOSCAR64 -DFILENAME=$name.ivm -tm=c64 -f=$name.ivm -d64=game.d64 -ep ivm.c
+
+#time ./oscar -DOSCAR64 -DFILENAME=$name.ivm -Oz -ep ivm.c

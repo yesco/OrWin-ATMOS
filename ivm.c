@@ -1528,7 +1528,7 @@ int run_file(char* filename) {
 #ifdef OSCAR64
 int main(void) {
   int argc = 2;
-  const char* argv[]= {"ivm", "test.ivm", NULL};
+  const char* argv[]= {"ivm", #FILENAME, NULL};
 #else
 int main(int argc, char** argv) {
 #endif
