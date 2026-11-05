@@ -1,7 +1,6 @@
 rm ivm-print.x 2>/dev/null
 
-name=$1
-name="${name%.ivm}"
+name="$1"
 
 clang -g ivm-print.c -o ivm-print.x || exit 1
 echo

@@ -207,7 +207,18 @@ void ivm_dump_blob(FILE *fp, const uchar *blob, unsigned len) {
   h.con      = ivm_rd16(blob + 18);
   h.data     = ivm_rd16(blob + 20);
 
-  if (h.len == 0 || h.len > len)
+    if (blob[0] != 'I' || blob[1] != 'V' || blob[2] != 'M' || blob[3] != 0) {
+    fprintf(fp, "ivm_dump_blob: not an IVM blob (magic %02x %02x %02x %02x",
+            blob[0], blob[1], blob[2], blob[3]);
+    if (blob[0] >= 32 && blob[0] < 127 && blob[1] >= 32 && blob[1] < 127)
+      fprintf(fp, " = '%c%c..'", blob[0], blob[1]);
+    fprintf(fp, ").\n");
+    fprintf(fp, "  Expected binary .ivm from the compiler (e.g. test-nums.ivm),\n");
+    fprintf(fp, "  not a source/script file.\n");
+    return;
+  }
+
+if (h.len == 0 || h.len > len)
     h.len = (word)len;
 
   fprintf(fp, "--- IVM BLOB dump (%u bytes) ---\n", (unsigned)h.len);
@@ -264,7 +275,7 @@ void ivm_dump_blob(FILE *fp, const uchar *blob, unsigned len) {
         ivm_dump_str_preview(fp, blob, h.len, h.data, w);
         fputc('\n', fp);
       } else {
-        fprintf(fp, "%04x  C  constant%02u: %04x  (%u)\n",
+        fprintf(fp, "%04x  C  consta%02u:   %04x  (%u)\n",
                 off, nconst, w, (unsigned)w);
       }
       nconst++;
@@ -374,8 +385,17 @@ int main(int argc, char **argv) {
   path = argv[1];
   f = fopen(path, "rb");
   if (!f) {
-    perror(path);
-    return 1;
+    // try path.ivm
+    char alt[512];
+
+    snprintf(alt, sizeof(alt), "%s.ivm", path);
+    f = fopen(alt, "rb");
+    if (f)
+      path = alt;
+    else {
+      perror(argv[1]);
+      return 1;
+    }
   }
 
   // - get size for malloc
