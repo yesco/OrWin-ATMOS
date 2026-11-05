@@ -189,7 +189,7 @@ word  data_len = 0;
 uchar add_const_raw(unsigned int v, uchar reloc) {
   uchar i, addr;
 
-  // dedup only non-reloc (integer) values; string offsets are unique by content
+  // dedup only non-reloc (integer) values
   if (!reloc) {
     for (i = 0; i < (uchar)nconst; i++)
       if (!const_is_reloc[i] && const_pool[i] == v)
@@ -493,45 +493,43 @@ uchar *build_blob(int *out_len) {
 
   p = body + sizeof(GenBlobHeader);
 
+
+
+
   h.call = gen_memadd(body, &p, 0, (word)(nv * sizeof(word)));
   gen_memadd(body, &p, &zero, sizeof(zero));
 
-  // Ensure real constant 0 exists (for 3+0 etc.)
-  // TODO: is this just same as an early add_const(0); //?
-  // TODO: how does it get the right slot (just after string pointers?)
+  // constant 0 in pool
   {
     uchar has0 = 0;
     int ii;
-
-    for (ii = 0; ii < nconst; ii++)
+    for (ii = 0; ii < (int)nconst; ii++)
       if (!const_is_reloc[ii] && const_pool[ii] == 0) { has0 = 1; break; }
-
     if (!has0)
       add_const(0);
   }
 
-  // Const pool: pure 16-bit values (no flag bits in the payload).
-  // Slot constidx+i holds const_pool[nconst-1-i] (bytecode uses CONST_TOP-i).
-  //
-  // After the words: reloc list = count byte + packed indices of string
-  // offsets (same order as the words). Host install uses it to add
-  // SOFT_BASE; 6502 single reloc walk will replace this later.
-  h.con = p - body;
-  for (i = 0; i < nconst; i++) {
-    j = nconst - 1 - i;
-    v = const_pool[j];
-    memcpy(p, &v, sizeof(word));
-    p += sizeof(word);
+  // Const pool pure values (reverse order). String offsets pure data-relative.
+  // Reloc list after words: host and 6502 install use it to add base.
+  // (Single-walk layout without list needs consecutive string slots; TODO.)
+  h.con = (word)(p - body);
+  {
+    int ii;
+    for (ii = 0; ii < (int)nconst; ii++) {
+      uchar j = (uchar)(nconst - 1 - ii);
+      v = const_pool[j];
+      memcpy(p, &v, sizeof(word));
+      p += sizeof(word);
+    }
   }
-  // copying (relocating constants, sliding them down in "mem" slots)
   {
     uchar *countp = p++;
     uchar n = 0;
-
-    for (i = 0; i < nconst; i++) {
-      j = nconst - 1 - i;
+    int ii;
+    for (ii = 0; ii < (int)nconst; ii++) {
+      uchar j = (uchar)(nconst - 1 - ii);
       if (const_is_reloc[j]) {
-        *p++ = i;
+        *p++ = (uchar)ii;
         n++;
       }
     }

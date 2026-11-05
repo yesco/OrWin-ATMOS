@@ -257,8 +257,8 @@ void REPORT_COUNTS() {
   unsigned long total = countops ? countops : 1;
 
   printf("\n=== COUNTOPS report (%lu ops) ===\n", countops);
-  printf("%10s %7s  %-8s  NOTABLE PAIRS (>10%% of this op)\n",
-    "COUNT", "PERC%", "---OP---");
+  printf("%10s %7s  %-12s  NOTABLE PAIRS (>10%% of this op)\n",
+    "COUNT", "PERC%", "----OP----");
 
   for (i = 0; i < 256; i++) {
     if (!opcount[i]) continue;
@@ -266,8 +266,8 @@ void REPORT_COUNTS() {
     printf("%10lu %6.2f%%  ", opcount[i], 100.0 * opcount[i] / total);
 
     printf("0x%02X ", i);
-    if (i >= 32 && i < 127 && i != ' ') printf("'%c'", i);
-    else                                printf("   ");
+    if (i >= 32 && i < 127 && i != ' ') printf("   %c   ", i);
+    else                                printf("       ");
 
     // pairs that start with this op
     for (j = 0; j < 256; j++) {
@@ -584,16 +584,13 @@ void trace(Process *proc, uchar *ipc) {
 // Relocate blob-relative offsets to absolute pointers (cc65/6502 only).
 // Header layout: main,code,call,fp,con,data are offsets;
 // memsz, constidx, xslot are NOT offsets (must not be walked as pointers).
-// Call table at offset `call` ends with 0000.
-// BUG FIX: old while(*v) from blob start stopped at xslot==0 and never
-// relocated the call vectors → JSR jumped to a tiny offset → IPC in junk.
+// Reloc region: header main..data, call vectors, string offsets, then 0000.
+// 0000 is constant 0 and terminates the walk.
 void relocate(uchar *base) {
   BlobHeader *h;
   word *v;
 
   h = (BlobHeader *)base;
-  // Reloc words are contiguous from main through call table until 0000.
-  // memsz/constidx/magic/len sit before main and are not touched.
   v = &h->main;
 #ifdef __CC65__
   while (*v) {
@@ -647,14 +644,18 @@ Process* Nevm(uchar *loaded) {
   }
 #endif
 
-  // Install constants: pure 16-bit values, no flag bits in the payload.
-  // After the const words: [count][idx...] reloc list for string offsets.
-  // Host adds SOFT_BASE to those; 6502 will use the single reloc walk later.
-  if (bh->constidx != 255 && bh->memsz > bh->constidx) {
+
+
+
+
+
+  // Pure copy of const words, then reloc list: [count][idx...] at pool+nconst.
+  // nconst = CONST_TOP - constidx + 1. Do not use (fp-con)/2 as nconst —
+  // that includes the list bytes and misaligns relocs.
+  if (bh->con && bh->constidx != 255) {
     word *pool;
     uchar *relocs;
-    word nc;
-    word i;
+    word nc, i;
     uchar nreloc, ri;
 
 #ifndef SOFT_HEAP
@@ -663,21 +664,7 @@ Process* Nevm(uchar *loaded) {
     pool = (word *)(loaded + bh->con);
 #endif
 
-    // Const words run until the reloc list; section ends at h.fp.
-    // Reloc list sits immediately after the nconst words. We recover nconst
-    // as (h.fp - h.con)/2 is too large (includes list). Use memsz-constidx
-    // only as upper bound; the list count byte tells us where values end
-    // once we know nconst. Simpler: copy all words up to h.fp, then apply
-    // reloc list that starts at pool+nconst. We need nconst = number of
-    // pure const words. Store it implicitly: the reloc list count is at
-    // the first byte after the words. Walk from h.con; the number of const
-    // slots in use is (CONST_TOP - constidx + 1) roughly = nconst.
-    nc = (word)(253 - bh->constidx + 1);  // CONST_TOP - constidx + 1
-    if (bh->fp > bh->con) {
-      word maxw = (word)((bh->fp - bh->con) / sizeof(word));
-      if (nc > maxw) nc = maxw;
-    }
-
+    nc = (word)(253 - bh->constidx + 1); // CONST_TOP - constidx + 1
     for (i = 0; i < nc; i++)
       p->mem[bh->constidx + i] = pool[i];
 
@@ -685,17 +672,17 @@ Process* Nevm(uchar *loaded) {
     nreloc = *relocs++;
     for (ri = 0; ri < nreloc; ri++) {
       uchar idx = relocs[ri];
+      word off;
       if (idx >= nc) continue;
-      {
-        word off = p->mem[bh->constidx + idx];
+      off = p->mem[bh->constidx + idx];
 #ifdef SOFT_HEAP
-        p->mem[bh->constidx + idx] = off + SOFT_BASE;
+      p->mem[bh->constidx + idx] = (word)(off + SOFT_BASE);
 #else
-        p->mem[bh->constidx + idx] = (word)(bh->data + off);
+      p->mem[bh->constidx + idx] = (word)(bh->data + off);
 #endif
-      }
     }
   }
+
   return p;
 }
 
