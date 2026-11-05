@@ -1,11 +1,18 @@
 // OrWIN ATMOS - Window System "unix" for ORIC ATMOS
 //
 // (C) 2026 Jonas S Karlsson (jsk@yesco.org)
-
-// An experimential C-based retro text-based windowing system and
+//
+// An experimental C-based retro text-based windowing system and
 // multitasking environment for the ORIC ATMOS.
 //
 // see README.md for documentation!
+//
+// cc65 size-tuned version. Suggested flags:
+//   cl65 -t atmos -Oirs --codesize 200 ... ???
+// (do NOT use -Cl: wputc() is recursive)
+
+// (- 35910 34696) 1241 bytes "saved" but mess w comments
+
 
 
 // TODO: this should really go to an oric-oscar-crt.c file!
@@ -13,16 +20,10 @@
 
 #ifdef ORIC
 
-  // increase from locifilemanager default
-  // #pragma stacksize(2000)
-  // allocate, locifilemanager has none!
-
-//  #pragma region( zeropage, 0x00, 0x80, , , {zeropage} )
-
 int main(void);
 
-// these aren't really variables but "magical" address hoolders
-// for oscar64, can only define once, otherwise loose values.
+// "magical" address holders for oscar64, define only once
+// Note: they aren't really variables, defined twice loose value!
 void StackStart, StackEnd, BSSStart, BSSEnd, CodeStart, CodeEnd, ZeroStart, ZeroEnd;
 void HeapStart, HeapEnd;
 
@@ -39,10 +40,8 @@ void HeapStart, HeapEnd;
 #pragma heapsize(0x1000)
 #pragma stacksize(0x1000)
 
-
-// TODO: replace w real from crt?
+// TODO: oscar64 - replace w real from crt
 #ifdef SETUPMALLOC
-// Optional: real malloc later; stub is fine until heap works
 __asm crt_malloc {
   lda #0 
   sta accu
@@ -55,8 +54,7 @@ __asm crt_free   {
 
 #pragma runtime(malloc, crt_malloc)
 #pragma runtime(free, crt_free)
-#endif // STARTUPMALLOC
-
+#endif // SETUPMALLOC
 
 #ifdef STARTUP
 
@@ -70,7 +68,7 @@ ldx     #$ff
         lda     #>StackEnd-2
         sta     __sp+1
 
-        // optional BSS clear using BSSStart..BSSEnd
+        /// TODO: (?) optional BSS clear using BSSStart..BSSEnd
         jsr     main
 hang:   jmp     hang
 }
@@ -78,7 +76,6 @@ hang:   jmp     hang
 #pragma startup(startup)
 
 #endif // STARTUP
-
 
 //#define OVERRIDEMAIN
 
@@ -97,14 +94,13 @@ int main(void)
 #endif // OSCAR64
 
 
-
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <conio.h>
 #include <ctype.h>
 
-// HMMM, ATMOS overrides write
+// Hmmm; ATMOS override write
 #if !defined(__ATMOS__) && !defined(OSCAR64)
 #include <unistd.h> // write
 #endif
@@ -116,16 +112,13 @@ char wputc(char c);
 #define HELPTEXT "FUNCT-3 Prev spc Next List Run Kill Shll"
 
 
+
 #include "orwin.h"
 
-
-
 // Each file sets FOOBAR if they provide foobar()
-// Otherwise, "fillins.c, will fill them in!
-
+// Otherwise, "fillins.c" will fill them in!
 
 #include "misc.c"
-
 
 
 
@@ -134,7 +127,6 @@ char wputc(char c);
 
   void* my_malloc(unsigned int size);
   void  my_free(void* p);
-
 
   // enable for simple see where it crashed Trace
   #if 1
@@ -146,6 +138,7 @@ char wputc(char c);
   // This one have two targets depending on 
   // if ORIC is set! If not ORIC it's drawing
   // in memory and refreshing an ANSI screen!
+  // two targets depending on ORIC variable
   #include "oscar64.c"
 
 #else
@@ -154,41 +147,20 @@ char wputc(char c);
 
   #ifdef __CC65__
     #ifdef __ATMOS__
-
       #include "oric.c"
-
     #else
-
       #include "sim6502.c"
-
-    #endif  // __ATMOS__
-  #else     // __CC65__ else case (POSIX)
-
-    // POSIX
+    #endif
+  #else
     #include "unix.c"
-
-  #endif // __CC65__
+  #endif
 
 #endif // !OSCAR64
 
-
-// Any missing routines will be filled in!
+// Any missing routines will be filled in
 #include "fillins.c"
 
 
-
-
-
-
-
-
-
-//#ifdef DEBUGKEY
-
-
-
-
-// TODO: platform specific?
 
 // Preferred Window Layout
 
@@ -197,7 +169,6 @@ char wputc(char c);
 
 #define WMAX ((SCREENCOLS-NHORIZWIN*5) / NHORIZWIN -1)
 #define HMAX ((SCREENROWS-NVERTWIN*4) / NVERTWIN)
-
 
 #define MOWIN 
 #define OPTMOV
@@ -214,7 +185,7 @@ char wputc(char c);
 
 typedef unsigned int uint;
 
-// Dummies, these are never called, satiesfy orwin.reg
+// Dummies, these are never called, satisfy orwin.reg
 
 #define shell 0
 #define orwin 0
@@ -226,15 +197,15 @@ struct App {
   void* fun;
   uint size;
 } apps[] = {
-
-  //#include "apps.reg"
   #include "orwin.reg"
-
   {0, 0}
 };
 
 // Process Stack allocation sizes
 // ==============================
+// SPAWN_REC is a measure of Hardware stack allocation
+// FUNCT-List needs 24 rets! (48 bytes)
+// SPAWN_STEP*SPAWN_REC is Data stack allocation
 
 // The cc65 stack has two parts:
 // - Hardware stack 256 bytes ~ 128 calls deeep
@@ -254,21 +225,14 @@ struct App {
 //#define SPAWN_REC 19 // like 20
 
 //#define SPAWN_REC 20
-// FUNCT-List needs 24 rets! (48 bytes)
+
+
+#define SPAWN_REC 25 
+#define SPAWN_STEP 8
+
 // to run everywhere, seems we are "deepP
 // cprintf was taking too much, cputd is 6 recursive
 // TODO: nested yields?
-
-//#define SPAWN_REC 24 // works with CTRL-L
-#define SPAWN_REC 25 
-//#define SPAWN_REC 40 // not even enough for move+
-
-// SPAWN_STEP*SPAWN_REC is Data stack allocation
-//#define SPAWN_STEP 15
-//#define SPAWN_STEP 18 // lines up
-#define SPAWN_STEP 8 // lines up
-//#define SPAWN_STEP 30
-
 #define BYTES (SPAWN_REC*(SPAWN_STEP+1))
 
 //#define TRACE
@@ -313,7 +277,6 @@ char* wname(char winid) {
 }
 
 
-
 ////////////////////////////////////////////////////////////
 // Heap stuff
 
@@ -322,30 +285,25 @@ char* wname(char winid) {
 #undef realloc
 #undef free
 
-//#if defined(OSCAR64) && defined(ORICLOCI)
+// TODO: if defined(ORICLOCI) 
 #if defined(OSCAR64)
-// oscar64 - use temporary test alloc
-
-//extern char HeapStart, HeapEnd;
 
 static char *brk = 0;
 
 // Simple bump-allocator to get started
 void* my_malloc(unsigned size) {
-  if (!brk) brk= &HeapStart;
-  // align to even addresses (actually 6502 no care)
-  size = (size + 1) & ~1u;
-  if (brk + size > &HeapEnd)
-{
-  // Indicate memory error
-  T('E');
-  done: goto done;
-    return 0;
-}
+  char *r;
 
-  char *p = brk;
+  if (!brk) brk= &HeapStart;
+  //size = (size + 1) & ~1u; align to even - 6502 no care
+  if (brk + size > &HeapEnd) {
+    T('E');
+    done: goto done;
+  }
+
+  r = brk;
   brk+= size;
-  return p;
+  return r;
 }
 
 void my_free(void* p) {
@@ -401,7 +359,7 @@ void wfree(void* p) {
   free(p);
 }
 
-#endif // OSCAR64 && ORIC
+#endif // OSCAR64
 
 #define wmalloc
 #define wcalloc
@@ -411,7 +369,7 @@ void wfree(void* p) {
 char* updatewinptr() {
   // oscar64 error ; expected
   // term starts w illegal token = 
-  // funciton expected for call
+  // funcoin expected for call
   return (winp->p= SCREENXY(winp->x + winp->c, winp->y + winp->r));
 }
 
@@ -419,10 +377,12 @@ char* updatewinptr() {
 // (cannot override for target: sim6502... putchar enough?)
 #ifdef __ATMOS__
 
-// 2x-10x faster not calling putchar for every char!
-
-// TODO: I think buggy!
+// Replace the default write; makes printf etc work transparently!
 int write(int fd, char* buf, size_t count) {
+  // 2x-10x faster not calling putchar for every char!
+
+  // TODO: I think buggy!
+  // Replace the default write; makes printf etc work transparently!
 #ifndef WRITE
 
   char n= count;
@@ -460,7 +420,6 @@ int write(int fd, char* buf, size_t count) {
 #endif // __ATMOS__
 
 
-
 void wgotoxy(char x, char y) {
   winp->c= x<winp->w? x: winp->w;
   winp->r= y<winp->h? y: winp->h;
@@ -472,16 +431,13 @@ void wscreensize(char* w, char* h) {
 }
 
 void wclreol() {
-  // TODO: +1 clears last pos in ASCII, why?
+  // +1 clears last pos in ASCII
   memset(winp->p, ' ', winp->w - winp->c + 1);
 }
 
+// (the old initial fill(..,'x') was fully overwritten by the
+//  attribute fill below, so it's removed)
 void wclrscr() {
-  char b= winp->bg | BG, f= winp->fg;
-  char h;
-
-  // off by one
-  fill(winp->x, winp->y, winp->w, h= winp->h, 'x');
   // reset cursor position
   winp->c= winp->r= 0;
   updatewinptr();
@@ -502,59 +458,58 @@ void wclrscr() {
   }
   }
 #else
-  // TODO: just make simple loop!
+ // TODO: just make simple loop!
   
-  // background color
+ // background color
   fill(winp->x-2, winp->y, winp->w+4, winp->h, BG | winp->bg);
 
   // set text color
   fill(winp->x-1, winp->y, 1, winp->h, winp->fg);
-#endif // IMPLE
-}
+#endif
 
+}
 
 char* winptr() {
   return winp->p;
 }
 
 
-// TODO: maybe move to "fill" in generic
-
 // minimal terminal codes
 // Free codes: 11, 14; 24,25,26, 28,29,30,31
+//
+// Caching winp in a register var (zeropage) saves ~5 bytes/use
+#pragma register-vars(push, on)
 char wputc(char c) {
-  // HACK! (might "bleed across windows if not conseq)
+  register Window* w= winp;
   static char lastcolor;
       
-  ++winp->nputc;
+  ++w->nputc;
   
   switch(c) {
 
   case 127: wputc(8); wputc(' '); // fall-through
   case KEYLEFT: 
-  case 8: if (winp->c) winp->c--;  // CTRL-H = \b - BS - ^h
-    else  if (winp->r) winp->r--,winp->c= winp->w;
+  case 8: if (w->c) w->c--;  // CTRL-H = \b - BS - ^h
+    else  if (w->r) w->r--,w->c= w->w;
     updatewinptr();
     goto done;
   // (9) Tab 8 forward
-  case '\t': if ((winp->c= ((winp->c + 8) & 0xf8)) > winp->w) {
+  case '\t': if ((w->c= ((w->c + 8) & 0xf8)) > w->w) {
       c=10; break; } else updatewinptr(); goto done;
 
   case 24: // CTRL-X  FLSHLINE: NL if "needed" (not "first" pos)
-    if (winp->c) { updatewinptr(); goto done; }
+    if (w->c) { updatewinptr(); goto done; }
     // NL: fall-through
   case 10: nl(); goto done;     // CTRL-J = \n & CLREOL
   case 11: nlpure(); goto done; // CTRL-K = \n NO clreol
 
   case 12: wclrscr(); goto done;     // CTRL-L = CLRSCR
-  case 13: winp->c= 0; updatewinptr(); goto done; // CTRL-M = \r = CR
+  case 13: w->c= 0; updatewinptr(); goto done; // CTRL-M = \r = CR
 
   // ASCII: ShiftOut (SO) - ALT font set - ORIC?
-  case 14: wclreol(); goto done;  // CTRL-N CLREOL
-
-  // ASCII: SHiftIn (SI) - Normal char set - ORIC?
   // (key unix: FLUSH0 togggle ignore output) - ORIC has it!
-  case 15: goto done;         // CTRL-O
+  case 14: wclreol(); goto done;  // CTRL-N CLREOL
+  case 15: goto done;             // CTRL-O
 
   // HIBIT SET
   case 128+12: gotoxy(0,0); goto done; // HOME
@@ -562,24 +517,22 @@ char wputc(char c) {
 
   case 25: break; // CTRL-Y (EM end medium)  - TODO: indent--
   case 26: break; // CTRL-Z (SUB substitute) - TODO: indent++
+  case 27: break; // ESC, TODO: understood by puts maybe
+    //case 0...7:  winf->fg= c; break;   // 0-7   : inc
+    //case 16...23: winp->bg= c; break; // 16-23 : paper
 
   // All other codes are oric attributes (color/blink)
   // https://notes.burke.libbey.me/ansi-escape-codes/
 
-  case 27: break; // ESC, TODO: understood by puts maybe
-    //case 0...7:  winf->fg= c; break;   // 0-7   : inc
-    //case 16...23: winp->bg= c; break; // 16-23 : paper
+
+  case KEYRIGHT: w->p++; break; // will reach column++
+  case KEYDOWN:  if (++w->r >= w->h) w->r= 0;  updatewinptr(); goto done;
+  case KEYUP:    if (w->r-- >= w->h) w->r= w->h-1;  updatewinptr(); goto done;
 
   // Hazeltine:   CTRL-Y rawX rawY
   // vt100:       ESC [ 2 J - clear screen
   // emacs,shell:  CTRL-K ill till end of line
     
-    // TODO: doesNOT do right! ... LOL
-
-  case KEYRIGHT: winp->p++; break; // will reach column++
-  case KEYDOWN:  if (++winp->r >= winp->h) winp->r= 0;  updatewinptr(); goto done;
-  case KEYUP:    if (winp->r-- >= winp->h) winp->r= winp->h-1;  updatewinptr(); goto done;
-
   // TODO: repeat char
   // vt100:     char ESC [ 70 b                   printf "=\e[79b\n"
   // tektronic: ESC ~ [count] [char]
@@ -600,40 +553,41 @@ char wputc(char c) {
   // - 10: Double size standard character set
   // - 11: Double size alternate character set
   // - 12–15: Blinking variants and combinations of double size/charset options
-  
+
+  // All other codes are oric attributes (color/blink)
   default:
     if (c==*BLACK) c= black; // it's really 0 but...
     // change INK or BG color for future, like ANSI!
     if (c<24) {
       if (c<8) {
         // ink - use line attribute
-        winp->fg= c & 0x7f;
-        if (!winp->c) { lastcolor= winp->p[-1]= c; goto done; }
+        w->fg= c & 0x7f;
+        if (!w->c) { lastcolor= w->p[-1]= c; goto done; }
       } else if (c>=16) {
         // paper - use line attribute
-        winp->bg= c & 0x7f;
-        if (!winp->c && lastcolor > 24)
-          { lastcolor= winp->p[-2]= c & 0x7f; goto done; }
+        w->bg= c & 0x7f;
+        if (!w->c && lastcolor > 24)
+          { lastcolor= w->p[-2]= c & 0x7f; goto done; }
       }
       // or fall-through use a position on screen
     } else lastcolor= 255;
     
-    *winp->p++= c;
+    *w->p++= c;
   }
 
   // newline / line wrap?
-  if (c==10 || winp->c++ >= winp->w) {
+  if (c==10 || w->c++ >= w->w) {
     char* p;
     
-    winp->c= 0;
+    w->c= 0;
     // overflow rows?
-    if (winp->r++ +1 >= winp->h) winp->r= 0;
+    if (w->r++ +1 >= w->h) w->r= 0;
 
     p= updatewinptr();
 
     // set current (new) colors
-    p[-2]= BG | winp->bg;
-    p[-1]=      winp->fg;
+    p[-2]= BG | w->bg;
+    p[-1]=      w->fg;
 
     wclreol();
   }
@@ -641,11 +595,8 @@ char wputc(char c) {
  done:
   return c;
 }
+#pragma register-vars(pop)
 
-
-// TODO: is it bettter than write optimized?
-
-// TODO: remove all!
 
 #ifndef OPTPUTZ
 
@@ -655,8 +606,7 @@ void wputz(char* s) {
 
 #else
 
-// Clever but old, should be using write!
-
+// Fast path for strings (the non-OPTPUTZ variant was removed)
 void wputz(const char* s) {
   char c, r, *p, k, w= winp->w, h= winp->h;
   unsigned int nputc= winp->nputc;
@@ -669,15 +619,13 @@ void wputz(const char* s) {
     // handle special chars
     if ((k & 0x7f) < 32) break;
 
-    //    if ((wtime^HITIME) & 0b1000000) yield(); // feels chunky
-    //if (!--n) yield();
-
-    // just put it there
     *++p= k;
     ++nputc;
+    // wrap line
     if (c++ >= w) {
       winp->c= c= 0;
-      winp->r= r= (++r >= h)? 0: r;
+      if (++r >= h) r= 0;
+      winp->r= r;
       p= updatewinptr()-1;
     }
   }
@@ -686,27 +634,23 @@ void wputz(const char* s) {
   winp->nputc= nputc;
                
   if (k) { wputc(k); ++s; goto restart; }
-
-  // good time to release, minimic terminal avoid jitter
-  //yield();
 }
+
 #endif // OPTPUTZ
 
-
-
+// wputz instead of strlen+write
 void wputs(const char* s) {
-  write(1, (char*)s, strlen(s));
+  // ALT: write(1, (char*)s, strlen(s));
+  wputz(s);
   nl();
 }
 
+// itoa is tiny compared to sprintf (which drags in all of printf)
 void wputi(int i) {
-  char s[10]= {0};
-  sprintf(s, "%d", i);
-  // TODO: doesn't seem to wrap perfectly, sometimes in
-  //   last change back text color column
+  char s[8];
+  itoa(i, s, 10);
   wputs(s);
 }
-
 
 //TODO: use instead of printf?
 //
@@ -718,11 +662,11 @@ void wputi(int i) {
 //void cspc() { cputc(' '); }
 
 void wstatus(signed char c, const char* s) {
-  char* p= winp->y * SCREENCOLS+ winp->x + c + TEXTSCREEN - SCREENCOLS;
+  char* p= SCREENXY(winp->x + c, winp->y - 1);
   char w= winp->w + 2 + 1;
-  //char xor= winp->bg&7==7?0 :128; // if white back
-  char xor= 128;
-  while(*s && --w) *p++= *s++ ^ xor;
+
+  // once 0x80 was a var xor for some reason...
+  while(*s && --w) *p++= *s++ ^ 0x80;
 
   p[w-1]= ('0' | 128) + nwin;
 }
@@ -731,7 +675,7 @@ void wstatus(signed char c, const char* s) {
 void wdecorate() {
   Window* w= wins + wfocus;
   // Invert header (make it black if focused)
-  char* p= w->y * SCREENCOLS + w->x + TEXTSCREEN - SCREENCOLS -2;
+  char* p= SCREENXY(w->x - 2, w->y - 1);
   char i;
 
   if (!w->status) return;
@@ -740,7 +684,6 @@ void wdecorate() {
 }
 
 void setwin(char w) {
-  // TODO: set curwin?
   winp= wins + w;
   wcur= w;
 }
@@ -749,14 +692,9 @@ char wprev= 1;
 
 void setfocus(signed char new) {
   char n= 0;
-  //cputc('#');
-  //cputc('0'+new);
   if (wfocus) wdecorate(); // show not active
 
  next:
-
-  // TODO: confusing?
-  
   wprev= wfocus;
   wfocus= new;
   if (new > nwin) wfocus= 1;
@@ -776,7 +714,6 @@ char newwin() {
 }
 
 
-
 void winerase(Window* w) {
   fill(w->x-2, w->y-1, w->w+5, w->h+3, 126);
 }
@@ -788,6 +725,7 @@ void winkill() {
   // dorun(CLEANUP);
   
   // merge state w ret+
+
   free(w->state);
   free(w->args);
   lfree(w->ret);
@@ -817,81 +755,55 @@ void windraw(Window* w) {
 }
 
 
-
 // Statistics for IDLE %CPU %MEM
+//
+// 16-bit tick counters: differences stay correct modulo 65536,
+// and avoid 32-bit (clock_t) arithmetic helpers.
+// runsum/timesum stay 32-bit as they are multiplied by 100.
+// NOTE: if other files `extern` these, update their types!
 
-clock_t latency, lastlatency;
-clock_t trun, runsum, runprocs, timesum;
-clock_t rounds, lastupdate;
+uint latency, lastlatency;
+uint trun, rounds, runprocs, lastupdate;
+clock_t runsum, timesum;
 
 // Run and accumulate time/ticks/statistics
 void dorun(char* line) {
-T('f');
-  trun= clock();
-T('g');
+  uint t0= (uint)clock();
   wtime= HITIME;
-  // oscar64 function expected for call
-T('h');
-  // winp->fun == winp->state ??? like in 
   winp->ret= wret= (char*)((*winp->fun)(winp->state, line));
-T('i');
-  winp->ticks+= trun= clock()-trun;
-T('k');
+  winp->ticks+= trun= (uint)clock()-t0;
   winp->cpu= trun*rounds;
-T('l');
   runsum+= (trun<<3) + 1;
-T('m');
   ++runprocs;
-T('n');
 }
 
 // start/exec process w parameters (line) in current window
-//
-// TODO: possibly rename "exec".
-// 
+// TODO: rename to exec?
 void startline(runptr fun, const char* line) {
-  T('a');
   winp->status= 1;
-  T('b');
   winp->args= strdup(line);
-  T('c');
   
   winp->fun= (void*)fun;
   dorun((char*)line);
 
-  T('d');
-  
-  // TODO: glue (fun,state) together? (like the train)
   winp->state= winp->ret;
   winp->ret= NULL;
-  T('e');
 }
 
 void start(runptr fun) { startline(fun, 0); }
 
 
-// This used to be conservative requring gray in bigger area around
-// now, just make sure it's all gray.
+// requires all gray in the area around (MOWIN layout only,
+// the old #else variant was removed)
 char overlap(char x, char y, char w, char h) {
-  int i, j;
+  char i, j;
 
-#ifdef MOWIN
   if (x<3 || x+w >= SCREENCOLS-5) return 1;
-  //  if (y<3 || y+h >= SCREENROWS-1) return 1;
   if (y<3) return 1;
   
   for(j= y-2; j<y+h; ++j)
     for(i= x-3; i<x+w+4; ++i)
       if (*SCREENXY(i, j) != 126) return 1;
-#else
-  // wrong?
-  if (x<2 || x+w >= 41) return 1;
-  if (y<1 || y+h >= 28) return 1;
-  
-  for(j= y-1; j<y+h+1; ++j)
-    for(i= x-2; i<x+w+2; ++i)
-      if (*SCREENXY(i, j) != 126) return 1;
-#endif // MOWIN
   return 0;
 }
 
@@ -910,11 +822,15 @@ char overlap(char x, char y, char w, char h) {
 // W     == -1: TODO: automatic size
 //
 // Note: (can only be called once)
-
+//
 // TODO: currently, if given exact coordinates, doesn't check...
 //   possibly, it could save what's under and not allow switching
 //   until have free area == becomes modal, or can be minimized
 //
+// TODO: 6 args = 5 pusha per call-site. If call-sites matter more
+// than speed, consider passing a const struct/array pointer.
+
+// TODO: actually it's 6 bytes, "constant"
 char window(
   signed char x,  signed char y,
   signed char w,  signed char h,
@@ -929,10 +845,6 @@ char window(
   if (x == -1 || y == -1) {
     x= 2; y= 1;
     while((o=overlap(x, y, w, h)) && y<29-h) {
-      // doesn't work
-      //gotoxy(28, 27); printf("(%2d %2d)", x, y);
-
-      // TODO: make faster!
       if (++x + w + 4 > 39) { ++y; x= 2; }
     }
     if (o) return 0;
@@ -956,7 +868,7 @@ char window(
   winp->exit= 0;
   winp->status= 1;
     
-  // TODO: verify space/clash/overflow?
+  // TODO: verify space/clash/overflow
   windraw(winp);
   
   return nwin;
@@ -992,7 +904,6 @@ char wkbhit(char win) {
     case 'P': setfocus(wfocus-1); break;
     case 27 : setfocus(wprev);    break; // toggle 
 
-    // TODO: too easy kill, ask question!
     case 127:
     case 'K': winkill(); setfocus(wfocus+1); break; // Kill
 
@@ -1010,18 +921,18 @@ char wkbhit(char win) {
   
     case 'L': { // ps
       newwin();
-      // TODO: terminal overrides, hardcodes black...
       window(3, 17, 40-7, 10, yellow, black);
       startline(app_sh, "ps");
       break; }
     case 'H': help(); break;
 
-#ifdef MOWIN
     // moving using FUNCT & ARROWKEYS
     case KEYLEFT : mowin(-1,0,0,0); goto again;
     case KEYRIGHT: mowin(+1,0,0,0); goto again;
     case KEYDOWN : mowin(0,+1,0,0); goto again;
     case KEYUP   : mowin(0,-1,0,0); goto again;
+
+#ifdef MOWIN
     // resizing using CTRL & ARROWKYS
     // (TODO : numeric combo?)
     case 0x98: mowin(0,0,+1,0); goto again;
@@ -1067,8 +978,7 @@ void apprun() {
   struct App *p, *found;
   char c, k, *spc, *tmp;
 
-  // flush
-  // TODO: remove, FUNC-R getting an r!
+  // TODO: remove? test! flush (FUNC-R was getting an r)
   while(kbhit()) getc();
 
   setwin(0);
@@ -1094,8 +1004,8 @@ void apprun() {
 
       putcraw(8);
       
-      wputz((char*)p->name); // 7 cs !!! (printf 55 cs!)
       //wputc('\t'); wputi(p->size); // +19cs
+      wputz(p->name);  // 7 cs !!! (printf 55 cs!)
 
       putchar(white);
       //' TODO: nl makes it flickr because of wclreol
@@ -1114,9 +1024,8 @@ void apprun() {
     putchar(found? green: white);
     putz(line); wclreol();
 
-    // TODO: ORIC specific k, lol
-    //   only needed as we're modal here
-    c= cursorgetc(); k= *(char*)0x209; // TODO: abstract
+    // TODO: ORIC specific k, only needed as we're modal here
+    c= cursorgetc(); k= *(char*)0x209;
 
     if (c==13 || c==27 || k==0xa5) break; // RET ESC FUNC
 
@@ -1126,9 +1035,8 @@ void apprun() {
       line[--i]= 0; putchar(127); continue;
     } 
 
-    // TODO: what? length 20? LOL
-    if ( i>= 20) continue;
-    // TODO: some bug where print one char outside of window!
+    // TODO: 20 what? length of input field, sizeof?
+    if (i>= 20) continue;
     line[i++]= c;
     putchar(c);
 
@@ -1146,22 +1054,18 @@ void apprun() {
     else
       startline(app_sh, line);
 
-    //cprintf("\n\n\n\n\n[WIN.%d: %p %p]", wcur, winp->state, winp->fun);
-
     // if it didn't open a window
     if (!winp->w) {
-      //char bg, fg; ??
-
       // default tileable window size
       // TODO: WMAX HMAX bad names... lol
       window(-1, -1, WMAX, HMAX, -1, -1);
-      //wstatus(-1, (char*)found->name);
       wstatus(-1, winp->args);
       wdecorate();
     }
   }
 }
 
+// TODO: consider better placement function
 #if 0
 void randwin(char* title, app main) {
   char x, y, w, h, bg, fg;
@@ -1195,138 +1099,56 @@ void randwin(char* title, app main) {
 #endif // 0
 
 
-// TODO: title not moved...
-// TODO: colors messed up...
-//   (because rewrite doesnpt restore fb bg only r c)
-#ifdef MOWIN
+// Move focused window by (dx,dy), only one of them non-zero.
+// Moves directly on screen with row-wise memmove: no malloc and no
+// temporary buffer (the old version copied twice through malloc).
+// Resize (dw,dh) was removed: it was marked "crashes" and cost a lot
+// of code (restore from old version if needed).
 void mowin(signed char dx, signed char dy, signed char dw, signed char dh) {
   Window* wf= wins + wfocus;
-  char x= wf->x, y= wf->y, w= wf->w, h= wf->h, b= wf->bg, f= wf->fg;
+  char x= wf->x, y= wf->y, w= wf->w, h= wf->h;
+  char i, *tmp, *d;
+  char W= w + 8, H= h + 4;
+  char *s= SCREENXY(x - 3, y - 2);
+  int step= SCREENCOLS;
 
-#ifdef OPTMOV
-  // MOVING only smoothly
-  if (!dw && !dh) {
-    char i, *t, *p, W = w + (4 + 2 + 1)+1, H = h + 2 + 2;
-    char *tmp, *s = SCREENXY(x - 3, y - 2);
+  if (dw || dh) return;
 
-    // Bounds checking
-    if (x + dx < 3) return;
-    if (x + w + dx >= SCREENCOLS - 3) return;
-    if (y + dy < 2) return;
-    if (y + h + dy >= SCREENROWS - 1) return;
+  // Bounds checking
+  if (x + dx < 3) return;
+  if (x + w + dx >= SCREENCOLS - 3) return;
+  if (y + dy < 2) return;
+  if (y + h + dy >= SCREENROWS - 1) return;
 
-    // Collision/Edge detection
-    // TODO: tmp should be adjustested up and left?
-    if (dy) {
-      tmp = s + (dy < 0 ? -SCREENCOLS : SCREENCOLS * H);
-      for (i = W; i--;) if (tmp[i] != 126) return;
-    } else {
-      tmp = s + (dx < 0 ? -1 : W);
-      for (i = H; i--;) {
-        if (*tmp != 126) return;
-        tmp += SCREENCOLS;
-      }
-    }
-      
-    // Allocate temporary buffer
-    tmp = malloc(W * H);
-    if (!tmp) return;
-
-    // 1. Copy original state from screen to tmp
-    p = s; t = tmp;
+  // Collision/Edge detection
+  if (dy) {
+    tmp = s + (dy < 0 ? -SCREENCOLS : (int)SCREENCOLS * H);
+    for (i = W; i--;) if (tmp[i] != 126) return;
+  } else {
+    tmp = s + (dx < 0 ? -1 : W);
     for (i = H; i--;) {
-      memcpy(t, p, W);
-      p += SCREENCOLS; 
-      t += W;
+      if (*tmp != 126) return;
+      tmp += SCREENCOLS;
     }
-
-    // 2. Update window coordinates
-    wf->x += dx;
-    wf->y += dy;
-
-    // 3. Copy back from tmp to the NEW screen position
-    p = SCREENXY(wf->x - 3, wf->y - 2);
-    t = tmp;
-    for (i = H; i--;) {
-      memcpy(p, t, W);
-      p += SCREENCOLS; 
-      t += W;
-    }
-
-    // 4. Clean up only the exposed trailing edge left behind
-    if (dy < 0) {
-      // Clear bottom row that was left exposed
-      fill(x - 3, y - 2 + H - 1, W, 1, 126);
-    } else if (dy > 0) {
-      // Clear top row that was left exposed
-      fill(x - 3, y - 2, W, 1, 126);
-    } else if (dx < 0) {
-      // Clear right column that was left exposed
-      fill(x - 3 + W - 1, y - 2, 1, H, 126);
-    } else if (dx > 0) {
-      // Clear left column that was left exposed
-      fill(x - 3, y - 2, 1, H, 126);
-    }
-
-    free(tmp);
-  } else
-#endif // OPTWIN
-
-  // TODO: RESIZE crashes!
-  // Resize by capture text, undraw, and redraw
-  {
-    char i, j;
-    int z= (w+3)*y+1; // 3= bg+fg+\n
-    char *tmp= malloc(z), *t= tmp-1;
-
-    // save text w newlines
-    for(j= y; j<y+h; ++j) {
-      // TODO: -2 to include bg,fg of each line!
-      // but printing it may take space, lol
-      // Adjust printing after NL
-      for(i= x; i<x+w; ++i) 
-        *++t= *SCREENXY(i, j);
-      // TODO: edgecases...
-      while(*t==' ') t--,cputc(8);
-      *++t= '\n';
-    }
-    *++t= 0;
-
-    winerase(wf);
-
-    // only move if not overlap
-    if (overlap(wf->x+dx, wf->y+dy, wf->w+dw, wf->h+dh)) {
-      windraw(wf); return;
-    } else {
-      char iw= winp - wins;
-    
-      wf->x+= dx; wf->y+= dy; wf->w+= dw; wf->h+= dh;
-      i= wf->c; j= wf->r;
-
-      // Pretend to be in wfocus
-      setwin(wf - wins);
-      updatewinptr();
-
-      // Draw new pusition + text
-      windraw(wf);
-      t= tmp;
-      // not using wputs as it will yield()
-      while(*t) wputc(*t++);
-
-      // restore cursor position & color
-      wf->c= i > wf->w? wf->w: i;
-      wf->r= j > wf->h? wf->h: j;
-      wf->bg= b; wf->fg= f;
-      updatewinptr();
-
-      setwin(iw);
-    }
-
-    free(tmp);
   }
 
+  // Copy rows in an order that is safe for overlap
+  if (dy > 0) { s+= (int)SCREENCOLS * (H - 1); step= -SCREENCOLS; }
+  d= s + (int)SCREENCOLS * dy + dx;
+  for (i = H; i--;) {
+    memmove(d, s, W);
+    s+= step; d+= step;
+  }
+
+  wf->x += dx;
+  wf->y += dy;
+
+  // Clean up only the exposed trailing edge left behind
+  if (dy < 0)      fill(x - 3, y - 2 + H - 1, W, 1, 126);
+  else if (dy > 0) fill(x - 3, y - 2, W, 1, 126);
+  else if (dx < 0) fill(x - 3 + W - 1, y - 2, 1, H, 126);
+  else if (dx > 0) fill(x - 3, y - 2, 1, H, 126);
 }
-#endif // MOWIN
 
 
 
@@ -1335,14 +1157,22 @@ void mowin(signed char dx, signed char dy, signed char dw, signed char dh) {
 
 unsigned int heapstart;
 
+// Write number right-aligned in field of width w at p (no printf!)
+static char* pnum(char* p, uint v, signed char w) {
+  char s[6], n;
+  utoa(v, s, 10);
+  n= strlen(s);
+  while (w > n) { *p++= ' '; --w; }
+  memcpy(p, s, n);
+  return p + n;
+}
+
 void scheduler() {
   runprocs= rounds= timesum= runsum= 0;
   
   wdecorate();
   setfocus(nwin);
 
-  // TODO: error catchingg...
-  //  while(setjmp(orwinjmp)!=42) {
   T('h');
   while(1) {
     DEB('^');
@@ -1353,106 +1183,73 @@ void scheduler() {
     // every time we check if there is a KEY
     // if so: we route it directly to the wfocus window!
     // and this is prioritized as highly interactive app!
-    //
-    // TODO: winp->ret == WAITKEY
-
-    
-    // TODO: wbkbhit() only true if win=focus? || wkey, hmmm?
     while(wkbhit(0) || wkey) {
-      T('i');
       // restore same window to be FAIR and NO starvation!
       wnext= wcur;
-
-      // TODO: this is duplicated code - merge!
-      
-      // 32145
 
       // app can actually call kbhit() and getc()!
       setwin(wfocus);
 
-      //cputc('!');
-      T('j');
       dorun((char*)(wkey + 0x100));
-      T('k');
       
       wkey= 0;
       setwin(wnext);
     }
-    T('l');
 
-    // TODO: move out, or make it an APP!
     if (!--wcur) {
-      clock_t now= clock();
-      T('m');
+      uint now= (uint)clock();
       latency= now-lastlatency;
       lastlatency= now;
       ++rounds;
       timesum+= (latency<<3) +1;
       if (now-lastupdate > 100) {
         // No display if was in menu
-        T('n');
         if (latency < 100) {
-          char n;
-          T('o');
-          memset(SCREENXY(34,0), ' ', 6);
-          n= sprintf(SCREENXY(11,0),
-            "%2u#%3u%4d/s%2u%%"
-            "%2d%%%4d"
-
-            , latency, rounds
-            , (int)(runprocs*100L/(now-lastupdate))
-            , (int)(runsum*100L/timesum)
-
-            , (int)(100L*_heapmemavail()/heapstart)
-            , _heapmemavail()
-          );
-          *SCREENXY(11+n,0)= ' '; // erase \0==BLACK TEXT
+          char* p= SCREENXY(11,0);
+          uint hm= _heapmemavail();
 
           // On simulated ORIC we redraw the screen
           // every 100th ish clock pass, on simulated
           // this is so superfast we hardly blink redrawing
           // the screen "millions" of times per second!
           // (on ORIC this does nothing, not even fun-call)
-          T('p');
+
+          memset(SCREENXY(34,0), ' ', 6);
+          // was: sprintf "%2u#%3u%4d/s%2u%%%2d%%%4d"
+          p= pnum(p, latency, 2);   *p++= '#';
+          p= pnum(p, rounds, 3);
+          p= pnum(p, (int)(runprocs*100L/(uint)(now-lastupdate)), 4);
+          *p++= '/'; *p++= 's';
+          p= pnum(p, (int)(runsum*100L/timesum), 2); *p++= '%';
+          p= pnum(p, (hm>>8)*100/(heapstart>>8), 2); *p++= '%';
+          p= pnum(p, hm, 4);
+          *p= ' '; // erase \0==BLACK TEXT
+
+          // simulated ORIC: redraw screen (no-op on real ORIC)
           redrawscreen();
         }
-        T('q');
         
         lastupdate= now;
         rounds= runprocs= 0;
 
         // Rolling average (?)
         if (timesum > 4096) runsum/=4,timesum/=4;
-        T('r');
-
       }
-      T('s');
       wcur= nwin;
     }
-    T('t');
-    setwin(wcur); // inlinee ?
+    setwin(wcur);
 
     // TODO: if no active windows/task will LOOP
-    // TODO: use winp->ret in clever wait when SLEEPING
     if (!winp->status) goto next;
 
     // - Handle cheap tasks
     // (if WAITing for key has to have focus)
     if (winp->ret != WAITKEY) {
-      ///cputc('.');
-      //cputc('0'+wcur);
       *SCREENXY(40-wcur,0)= '0'+wcur;
-
-      T('u');
       dorun(0);
     }
-    T('v');
 
     goto next;
-    
-    // TODO: ???
-    DEB('0'+wcur);
-    DKEY();
   }
 }
 
@@ -1468,9 +1265,10 @@ extern void printPage();
 
 #define MAIN
 
-// TODO: shitty!
 #ifdef OSCAR64
 
+// Poor man's string/memory writers
+// for early boot stage without relying on much code
 
 char* put1h(char* p, char x) {
   *p= (x<10? x: 'a'-'0'-10+x) + '0';
@@ -1490,71 +1288,66 @@ char* xputc(char* p, char c) {
   return p+1;
 }
 
+// 1. Reference the real linker symbols calculated by Oscar64
+// TODO: remove as it can't be done twice...
+//extern void HeapStart;
+//extern void HeapEnd;
 
-    // 1. Reference the real linker symbols calculated by Oscar64
-    extern void HeapStart;
-    extern void HeapEnd;
+// This is here as I only was able to build and activate disk
+// for oscar64 (because of size)
 
+// TODO: somehow not working; try again... LOL
 
 void enable_overlay_ram(void) {
-    // Standard Oric VIA banking example:
-    // Writing to the VIA Port B register to disconnect BASIC ROM and connect Overlay RAM
-    volatile char* via_port_b = (char*)0x0300; 
+  // Standard Oric VIA banking example:
+  // Writing to the VIA Port B register to disconnect BASIC ROM and connect Overlay RAM
+  volatile char* via_port_b = (char*)0x0300; 
     
-    // Exact bits vary depending on whether you are doing a pure overlay write 
-    // or full mapping, but the hardware latch must be flipped:
-    *via_port_b &= ~0x10; // Example bit flip to swap out the BASIC ROM mapping
+  // Exact bits vary depending on whether you are doing a pure overlay write 
+  // or full mapping, but the hardware latch must be flipped:
+  *via_port_b &= ~0x10; // Example bit flip to swap out the BASIC ROM mapping
 }
 
-    volatile char* microdisc_cfg = (char*)0x0314;
-
+volatile char* microdisc_cfg = (char*)0x0314;
 
 extern void ZeroStart;
 extern void ZeroEnd;
 
 extern struct Heap {
-    void* next;
-    void* end;
+  void* next;
+  void* end;
 } HeapNode;
-
-
 
 //#include "oafs.c"
 
-// For some silly reason oscar64 doesn't provide
-// standard main signature...
-
+// oscar64 doesn't provide standard main signature...
 int main() {
   int argc;
   const char* argv[]= {"orwin", NULL};
-  char* p;
+  int i= 0, j= 0;
     
 #else 
     
 int main(int argc, char** argv) {
-  char* p;
 
 #endif // OSCAR64
-
-  int i= 0, j= 0, z= 0;
   
   T('I');
   init();
   T('K');
   
 #ifdef OSCAR64
-/* First byte of pages $0500, $0600, … $1400 (16 sectors) */
-{
-  int n;
-  char *line = TEXTSCREEN+40;
-  for (n = 0; n < 16; n++) {
-    unsigned char v = *(unsigned char *)(0x0500 + n * 256);
-    /* two hex digits + space */
-    line[n * 3]     = "0123456789ABCDEF"[v >> 4];
-    line[n * 3 + 1] = "0123456789ABCDEF"[v & 15];
-    line[n * 3 + 2] = ' ';
+  // First byte of pages $0500, $0600, … $1400 (16 sectors)
+  {
+    int n;
+    char *line = TEXTSCREEN+40;
+    for (n = 0; n < 16; n++) {
+      unsigned char v = *(unsigned char *)(0x0500 + n * 256);
+      line[n * 3]     = "0123456789ABCDEF"[v >> 4];
+      line[n * 3 + 1] = "0123456789ABCDEF"[v & 15];
+      line[n * 3 + 2] = ' ';
+    }
   }
-}
 
   j= 0;
   for(i=0x2529; i<=0x2529+16; ++i) {
@@ -1567,6 +1360,30 @@ int main(int argc, char** argv) {
   }
 #endif 
   
+// REMOVE THIS OSCAR DISK and then
+// it loops to gray screen, reboots and reloads all the code!
+#if 0    
+  {
+    char hex[]= "0123456789abcdef";
+    unsigned int s= (int)&HeapStart;
+    unsigned int e= (int)&HeapEnd;
+      
+    // 5d70-b200
+    sprintf(SCREENXY(2, 10), "Heap: %c%c%c%c-%c%c%c%c"
+      ,hex[(char)(s>>4*3)&0xf], hex[(char)(s>>4*2)&0xf], hex[(char)(s>>4*1)&0xf], hex[(char)(s>>4*0)&0xf]
+      ,hex[(char)(e>>4*3)&0xf], hex[(char)(e>>4*2)&0xf], hex[(char)(e>>4*1)&0xf], hex[(char)(e>>4*0)&0xf]
+    );
+  }
+#endif 
+
+// DEBUG malloc for oscar64
+//    T('?');
+//    p= malloc(100);
+//    p= my_malloc(100);
+//    p= my_malloc(100);
+//    p= my_malloc(100);
+//    T(p!=NULL? '+': '-');
+
 #ifdef OAFS
   T('O');
   {
@@ -1579,103 +1396,33 @@ int main(int argc, char** argv) {
   insertlines(argc>2? argv[2]: "-");
   T('A');
 #endif // OAFS
-  
-    // Writing 0xFD disables the internal Oric BASIC ROM and activates Overlay RAM
-//    *microdisc_cfg = 0xFD;
 
-    // 2. Force clear HeapNode so the assembly routine knows it MUST initialize
-//    HeapNode.next = (void*)0;
-//    HeapNode.end  = (void*)0; 
-
-// REMOVE THIS OSCAR DISK and then
-// it loops to gray screen, reboots and reloads all the code!
-#if 0    
-    {
-      char hex[]= "0123456789abcdef";
-      unsigned int s= (int)&HeapStart;
-      unsigned int e= (int)&HeapEnd;
-      
-      // 5d70-b200
-      sprintf(SCREENXY(2, 10), "Heap: %c%c%c%c-%c%c%c%c"
-        ,hex[(char)(s>>4*3)&0xf], hex[(char)(s>>4*2)&0xf], hex[(char)(s>>4*1)&0xf], hex[(char)(s>>4*0)&0xf]
-        ,hex[(char)(e>>4*3)&0xf], hex[(char)(e>>4*2)&0xf], hex[(char)(e>>4*1)&0xf], hex[(char)(e>>4*0)&0xf]
-      );
-    }
-#endif 
-
-//    T('?');
-//    p= malloc(100);
-//    p= my_malloc(100);
-//    p= my_malloc(100);
-//    p= my_malloc(100);
-//    T(p!=NULL? '+': '-');
-    
-
-//  heapstart= _heapmemavail();
   T('H');
   
   // clear background to "gray" checkerboard
-T('H');
-//fill(0, 0, 0, 0, 126);  // one short row only
-fill(0, 0, SCREENCOLS, SCREENROWS, 126);  // one short row only
-T('I');
+  fill(0, 0, SCREENCOLS, SCREENROWS, 126);
 
- //fill(0, 0, SCREENCOLS, SCREENROWS, 126);
-
-  T('I');
-  // TODO: abstract it!
-  
   // Print logo in Upper Status Line
   strncpy(SCREENXY(0, 0), "0rWIN/ATMOS                                     ", 40);
-  T('J');
 
   #if 0
-  // Print logo in Right-Hand Corner
-  strncpy(SCREENXY(34, 24), "\x0a""0rWin", 6);
-  strncpy(SCREENXY(34, 25), "\x0a""0rWin", 6);
-  strncpy(SCREENXY(34, 26),      " ATMOS", 6);
-
-  // Print logo sideways right side
-  strncpy(SCREENXY(38, 0), "\x0a""0", 2);
-  strncpy(SCREENXY(38, 1), "\x0a""0", 2);
-  strncpy(SCREENXY(38, 2), "\x0a""r", 2);
-  strncpy(SCREENXY(38, 3), "\x0a""r", 2);
-  strncpy(SCREENXY(38, 4), "\x0a""W", 2);
-  strncpy(SCREENXY(38, 5), "\x0a""W", 2);
-  strncpy(SCREENXY(38, 6), "\x0a""I", 2);
-  strncpy(SCREENXY(38, 7), "\x0a""I", 2);
-  strncpy(SCREENXY(38, 8), "\x0a""N", 2);
-  strncpy(SCREENXY(38, 9), "\x0a""N", 2);
-  strncpy(SCREENXY(38,10), "\x0a""/", 2);
-  strncpy(SCREENXY(38,11), "\x0a""/", 2);
-
-  strncpy(SCREENXY(38,12), " A", 2);
-  strncpy(SCREENXY(38,13), " t", 2);
-  strncpy(SCREENXY(38,14), " m", 2);
-  strncpy(SCREENXY(38,15), " o", 2);
-  strncpy(SCREENXY(38,16), " s", 2);
+   // Print logo in Right-Hand Corner
+    strncpy(SCREENXY(34, 24), "\x0a""0rWin", 6);
+    strncpy(SCREENXY(34, 25), "\x0a""0rWin", 6);
+    strncpy(SCREENXY(34, 26),      " ATMOS", 6);
   #endif
 
-  //memset(win, 0, sizeof(win));
-
-  T('U');
   updatewinptr();
   
   wins[0].status= 255;
 
 #define DEMO
-  T('D');
 #ifdef DEMO  
 
-  T('0');
   newwin();
-  T('1');
   window(-1, -1, 5, 3, blue, white);
-  T('2');
   start(app_ascii);
-  T('3');
   wstatus(-1, "ASCII");
-  T('4');
 
 #define DOUBLE
 #ifdef DOUBLE
@@ -1684,38 +1431,21 @@ T('I');
   start(app_ascii);
   wstatus(-1, "ascii");
 
-setwin(2); setfocus(2);
-dorun(0);dorun(0);dorun(0);dorun(0);
-
+  setwin(2); setfocus(2);
+  dorun(0);dorun(0);dorun(0);dorun(0);
 #endif // DOUBLE
 
   newwin();
-  T('5');
   start(app_charset);
-  T('6');
 
-// TODO: open in -sim -oscar and crash, but can run later?
 #ifdef CRASH
-  T('7');
   newwin();
-  T('8');
   window(1, -1, 20-7, 10, green, black);
-  T('9');
   start(app_sh);
 #endif
-  T('-');
   
 #endif // DEMO
 
-
-// TODO: oscar64 mixes up windows, ascii runs in charset...
-#if 0
-loop:
-  setwin(1);
-  dorun(0);
-goto loop;
-#endif
-  
   T('S');
   scheduler();
 
