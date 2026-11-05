@@ -215,6 +215,11 @@
 #endif
 
 
+#define MAIN
+
+#include "ivm-print.c"
+
+
 //#define COUNTOPS
 
 // TODO: just ifndef 6502 or if "onhost"
@@ -367,6 +372,16 @@ void ivm_free(ivmvar p) {
 }
  
 #endif
+
+
+
+// TODO: just for sieve (out of index problem)
+//#undef CHKP
+//#define CHKP(a, n) ((void)0)
+
+
+
+
 
 // --- limits
 #define MAX_SLOTS      255 // Last one not used, is error
@@ -537,8 +552,6 @@ static int ivm_check(Process *proc, const uchar *ipc) {
 
 // blob base while running (already in ivm.c)
 extern uchar *g_loaded;
-
-#include "ivm-print.c"
 
 void trace(Process *proc, uchar *ipc) {
   word off_blob;
@@ -1308,6 +1321,11 @@ ZL(op_B,   'B')  zp.ipc -= *zp.ipc;     goto pnext;
 // - ivm-vm.asm - 18% faster with FOR-ops
 //       (/ 2893598 2449567.0) 18% faster (1.1812691794100754)
 
+// TODO: 'u'  ==  "U n' stepper that combines:
+//     "Uiiss B<back> -> u<ss><back>    === 5 b -> 3 b !
+//     "Uiiss n<back> -> u<ss><back>"   === 5 b -> 3 b
+
+
 // loop: FOR i u end
 ZL(op_i,   'i')  zp.acc = zp.mem[zp.ipc[0]];
                  if (zp.acc <= zp.mem[zp.ipc[1]]) {
@@ -1529,7 +1547,7 @@ int run_file(char* filename) {
 }
 
 
-#ifndef MAIN
+#ifdef MAIN
 
 #ifdef OSCAR64
 int main(void) {

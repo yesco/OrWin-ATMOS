@@ -42,16 +42,14 @@ int primes() {
       // (i*i may exceed 16-bit for large LIMIT; use running j)
       if (i < 128) { // TODO: what 128???
         
-        for (j = i * i; j < LIMIT; j += i) {
-          flags[j] = 0;
-        }
+        //for (j = i * i; j < LIMIT; j += i) flags[j] = 0;
+        j = i * i; while(j < LIMIT) { flags[j] = 0; j += i; }
 
       } else {
 
         // for larger i, start at 2*i to avoid i*i overflow
-        for (j = i + i; j < LIMIT; j += i) {
-          flags[j] = 0;
-        }
+        //for (j = i + i; j < LIMIT; j += i) flags[j] = 0;
+        j = i + i; while(j < LIMIT) { flags[j] = 0; j += i; }
 
       }
     }
@@ -89,7 +87,7 @@ int main() {
   
 //    sum += primes();
   
-  for(i = 0; i <= n; i++)
+  for(i = 1; i <= n; i++)
     sum = sum + primes();
   
   putz("SUM "); printf("%u ", n); putz("times = ");

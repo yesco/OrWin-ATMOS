@@ -32,6 +32,9 @@ ALTCODE=0
 
 .import         _opmul, _opdiv, _opmod, _opputnum
 .import         _putchar, _getchar
+;.import         _malloc, _free
+.import         _ivm_zalloc, _ivm_free
+
 
 FR_RET  = 0
 FR_VAL  = 1
@@ -574,6 +577,51 @@ op_Z:   USEY
 ;;; Byte / pointer / indexed memory ops (added for C parity)
 ;;; ============================================================
 
+;;; Mvv - malloc - (TODO: zero clean" == calloc)
+op_M:   USEY
+
+	;; get and save var index
+	lda (_ivm_ipc),y
+	sta tmp_lo
+
+	;; load size
+	lda _ivm_acc
+	ldx _ivm_acc+1
+	
+	jsr _ivm_zalloc
+	
+	sta _ivm_acc
+	stx _ivm_acc+1
+	
+	ldy tmp_lo
+	sta (_ivm_memlo),y
+	txa
+	sta (_ivm_memhi),y
+	
+	jmp pnext
+
+;;; Fvv - free
+op_F:   USEY
+
+	;; get and save var index
+	lda (_ivm_ipc),y
+	tay
+
+	;; load pointer
+	lda (_ivm_memhi),y
+	tax
+	lda (_ivm_memlo),y
+	
+	jsr _ivm_free
+	
+	lda #0
+	sta (_ivm_memlo),y
+	sta (_ivm_memhi),y
+	
+	jmp pnext
+
+	
+
 ;;; lxx  ACC = low byte of slot xx  (hi := 0)
 op_l:   USEY
         PARY
@@ -581,6 +629,7 @@ op_l:   USEY
         sta     _ivm_acc
         lda     #0
         sta     _ivm_acc+1
+
         jmp     pnext
 
 ;;; sxx  slot xx := ACC & 0xff  (hi := 0)
@@ -590,6 +639,7 @@ op_s:   USEY
         sta     (_ivm_memlo),y
         lda     #0
         sta     (_ivm_memhi),y
+
         jmp     pnext
 
 ;;; rxx  ACC = *(uchar*)PAR
@@ -601,6 +651,7 @@ op_r:   PARAX                       ; A=addr_lo, X=addr_hi
         sta     _ivm_acc
         lda     #0
         sta     _ivm_acc+1
+
         jmp     pnext
 
 ;;; wxx  *(uchar*)PAR = ACC & 0xff
@@ -610,6 +661,7 @@ op_w:   PARAX
         ldy     #0
         lda     _ivm_acc
         sta     (tmp_lo),y
+
         jmp     pnext
 
 ;;; tick - 'xx  ACC = *(uchar*)ptr;  ptr++   (ptr lives in slot xx)
@@ -638,6 +690,7 @@ op_ri:  USEY
         sta     (_ivm_memlo),y
         lda     tmp_hi
         sta     (_ivm_memhi),y
+
         jmp     pnext
 
 ;;; comma - ,xx  *(uchar*)ptr = ACC;  ptr++
@@ -663,6 +716,7 @@ op_wi:  USEY
         sta     (_ivm_memlo),y
         lda     tmp_hi
         sta     (_ivm_memhi),y
+
         jmp     pnext
 
 ;;; @xx  ACC = *(ivmvar*)PAR     (word load via pointer in slot)
@@ -675,6 +729,7 @@ op_at:  PARAX
         iny
         lda     (tmp_lo),y
         sta     _ivm_acc+1
+
         jmp     pnext
 
 ;;; !xx  *(ivmvar*)PAR = ACC
@@ -687,6 +742,7 @@ op_bang: PARAX
         iny
         lda     _ivm_acc+1
         sta     (tmp_lo),y
+
         jmp     pnext
 
 ;;; (aa ii   ACC = base[index]   (word elements, index*=2)
@@ -728,6 +784,7 @@ op_idxl:
         ldy     savey
         iny
         iny
+
         jmp     xnext
 .else
         inc     _ivm_ipc
@@ -775,6 +832,7 @@ op_idxs:
         ldy     savey
         iny
         iny
+
         jmp     xnext
 .else
         inc     _ivm_ipc
@@ -783,6 +841,8 @@ op_idxs:
 :
         jmp     pnext
 .endif
+
+
 
 
 
@@ -1575,13 +1635,8 @@ op_A:
 op_C:
 op_D:
 
-;; TODO: free
-op_F:
-	
 op_H:
 
-;;; TODO: malloc
-op_M:
 
 op_R:
 op_T:

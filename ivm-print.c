@@ -22,7 +22,7 @@ typedef uint16_t       word;
 
 static int ivm_is_solo(uchar c) {
   if (islower((int)c)) return 1;
-  return strchr("#$(),.0123456789;<=>?ADEKNPQR~X", (int)c) != 0;
+  return strchr("#$(),.0123456789;?ADEKNPQR~X", (int)c) != 0;
 }
 
 static void ivm_print_one(FILE *fp, const uchar *code, unsigned len, unsigned *pi) {
@@ -266,7 +266,7 @@ if (h.len == 0 || h.len > len)
   if (h.con && h.con < h.len) {
     unsigned con_end = h.fp && h.fp > h.con ? h.fp : (h.code && h.code > h.con ? h.code : h.len);
     unsigned max_words = (con_end > h.con) ? (con_end - h.con) / 2 : 0;
-    uchar reloc_mark[256];
+    uchar *reloc_mark = malloc(256);
     unsigned nreloc = 0;
     unsigned ri;
 
@@ -277,7 +277,7 @@ if (h.len == 0 || h.len > len)
     if (nconst > max_words)
       nconst = max_words;
 
-    memset(reloc_mark, 0, sizeof(reloc_mark));
+    memset(reloc_mark, 0, 256);
 
     off = h.con + nconst * 2;
     if (off < con_end) {
@@ -300,8 +300,8 @@ if (h.len == 0 || h.len > len)
         ivm_dump_str_preview(fp, blob, h.len, h.data, w);
         fputc('\n', fp);
       } else {
-        fprintf(fp, "%04x  C  constant%02u: %04x  slot=%02x  (%u)\n",
-                off, i, w, slot, (unsigned)w);
+        fprintf(fp, "%04x  C  constant%02u: %04x  slot=%02x : %5u  $%04x\n",
+                off, i, w, slot, (unsigned)w, (unsigned)w);
       }
     }
 
@@ -330,6 +330,8 @@ if (h.len == 0 || h.len > len)
     } else {
       fprintf(fp, "-- reloc list: (none — no bytes between consts and fp) --\n");
     }
+
+    free(reloc_mark);
   }
 
   // ---- frame bases (bytes) ---- 
