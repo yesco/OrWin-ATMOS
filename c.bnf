@@ -107,6 +107,9 @@ K=if (E)[?G\x] K else[0?G\x\w\y] K[\y]
 |printf("\\"%s\\" has %d characters\\n",\i,\i(Z)[\v]);[S\tL\1P" has \#00L\3.N]
 
 
+# single string constant - common
+|printf("["]\S);
+
 |printf(E);[P]
 
 |putz("["]\S);

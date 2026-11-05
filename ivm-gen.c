@@ -231,7 +231,7 @@ word data_append(const uchar *bytes, word n) {
 // Returns the mem slot for the pointer const (like lit_addr for numbers).
 uchar add_string_const(const uchar *bytes, word n) {
   word off = data_append(bytes, n);
-  // value stored = offset within data section; pack will add h.data
+  // pure data-relative offset; single reloc walk comes with packing pass
   return add_const_raw((unsigned int)off, 1);
 }
 
@@ -259,7 +259,8 @@ uchar as_addr(uchar a) {
 }
 
 uchar lit_addr(unsigned int v) {
-  if (v == 0) return IMM0;
+  // Real const-pool entry for every value, including 0.
+  // (IMM0/IMM1 remain available as optional one-byte encodings later.)
   if (v == (unsigned int)-1) return IMM1;
   return add_const(v);
 }
@@ -469,7 +470,7 @@ uchar *build_blob(int *out_len) {
   uchar *body, *p;
   word zero = 0;
   unsigned need;
-  uchar nv;
+  uchar nv, j;
   int i;
   word v;
 
@@ -481,6 +482,7 @@ uchar *build_blob(int *out_len) {
   need = (unsigned)sizeof(GenBlobHeader)
        + (unsigned)nv * sizeof(word) + sizeof(word)
        + (unsigned)nconst * sizeof(word)
+       + 1 + (unsigned)nconst
        + (unsigned)nv
        + (unsigned)bin_ptr
        + 2 // _start: Vmain q
@@ -494,17 +496,46 @@ uchar *build_blob(int *out_len) {
   h.call = gen_memadd(body, &p, 0, (word)(nv * sizeof(word)));
   gen_memadd(body, &p, &zero, sizeof(zero));
 
-  // Const pool: Nevm installs pool[i] → mem[constidx+i].
+  // Ensure real constant 0 exists (for 3+0 etc.)
+  // TODO: is this just same as an early add_const(0); //?
+  // TODO: how does it get the right slot (just after string pointers?)
+  {
+    uchar has0 = 0;
+    int ii;
+
+    for (ii = 0; ii < nconst; ii++)
+      if (!const_is_reloc[ii] && const_pool[ii] == 0) { has0 = 1; break; }
+
+    if (!has0)
+      add_const(0);
+  }
+
+  // Const pool: pure 16-bit values (no flag bits in the payload).
   // Slot constidx+i holds const_pool[nconst-1-i] (bytecode uses CONST_TOP-i).
-  // Reloc: data-relative offset | 0x8000 (bit15). Loader resolves to ptr/soft_heap.
-  h.con = (word)(p - body);
-  for (i = 0; i < (int)nconst; i++) {
-    uchar j = (uchar)(nconst - 1 - i);
+  //
+  // After the words: reloc list = count byte + packed indices of string
+  // offsets (same order as the words). Host install uses it to add
+  // SOFT_BASE; 6502 single reloc walk will replace this later.
+  h.con = p - body;
+  for (i = 0; i < nconst; i++) {
+    j = nconst - 1 - i;
     v = const_pool[j];
-    if (const_is_reloc[j])
-      v = (word)(v | (word)0x8000);
     memcpy(p, &v, sizeof(word));
     p += sizeof(word);
+  }
+  // copying (relocating constants, sliding them down in "mem" slots)
+  {
+    uchar *countp = p++;
+    uchar n = 0;
+
+    for (i = 0; i < nconst; i++) {
+      j = nconst - 1 - i;
+      if (const_is_reloc[j]) {
+        *p++ = i;
+        n++;
+      }
+    }
+    *countp = n;
   }
 
   // Entry vector for _start: C "main" or Pascal program body (synth)

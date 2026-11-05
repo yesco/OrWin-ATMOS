@@ -647,34 +647,53 @@ Process* Nevm(uchar *loaded) {
   }
 #endif
 
-  // Install constants: pool[i] → mem[constidx+i].
-  // Bit15 => data-relative string/offset; resolve for host soft_heap or 6502 abs ptr.
+  // Install constants: pure 16-bit values, no flag bits in the payload.
+  // After the const words: [count][idx...] reloc list for string offsets.
+  // Host adds SOFT_BASE to those; 6502 will use the single reloc walk later.
   if (bh->constidx != 255 && bh->memsz > bh->constidx) {
     word *pool;
-    word nc = bh->memsz - bh->constidx;
+    uchar *relocs;
+    word nc;
     word i;
+    uchar nreloc, ri;
 
-    #ifndef SOFT_HEAP
-      pool = (word *)(unsigned)(bh->con);
-    #else
-      pool = (word *)(loaded + bh->con);
-    #endif
+#ifndef SOFT_HEAP
+    pool = (word *)(unsigned)(bh->con);
+#else
+    pool = (word *)(loaded + bh->con);
+#endif
 
-    for (i = 0; i < nc; i++) {
-      word v = pool[i];
+    // Const words run until the reloc list; section ends at h.fp.
+    // Reloc list sits immediately after the nconst words. We recover nconst
+    // as (h.fp - h.con)/2 is too large (includes list). Use memsz-constidx
+    // only as upper bound; the list count byte tells us where values end
+    // once we know nconst. Simpler: copy all words up to h.fp, then apply
+    // reloc list that starts at pool+nconst. We need nconst = number of
+    // pure const words. Store it implicitly: the reloc list count is at
+    // the first byte after the words. Walk from h.con; the number of const
+    // slots in use is (CONST_TOP - constidx + 1) roughly = nconst.
+    nc = (word)(253 - bh->constidx + 1);  // CONST_TOP - constidx + 1
+    if (bh->fp > bh->con) {
+      word maxw = (word)((bh->fp - bh->con) / sizeof(word));
+      if (nc > maxw) nc = maxw;
+    }
 
-      if (v & (word)0x8000) {
-        word off = (word)(v & (word)0x7fff);
+    for (i = 0; i < nc; i++)
+      p->mem[bh->constidx + i] = pool[i];
 
-        #ifndef SOFT_HEAP
-          // hdr.data is absolute after relocate(); ASM P/' use real pointers
-          v = (word)(bh->data + off);
-        #else
-          v = off + SOFT_BASE; // soft_heap offset (0 is NULL)
-        #endif
-
+    relocs = (uchar *)(pool + nc);
+    nreloc = *relocs++;
+    for (ri = 0; ri < nreloc; ri++) {
+      uchar idx = relocs[ri];
+      if (idx >= nc) continue;
+      {
+        word off = p->mem[bh->constidx + idx];
+#ifdef SOFT_HEAP
+        p->mem[bh->constidx + idx] = off + SOFT_BASE;
+#else
+        p->mem[bh->constidx + idx] = (word)(bh->data + off);
+#endif
       }
-      p->mem[bh->constidx + i] = v;
     }
   }
   return p;
