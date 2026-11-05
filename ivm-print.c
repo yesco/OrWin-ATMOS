@@ -258,28 +258,77 @@ if (h.len == 0 || h.len > len)
     nvec = 0;
   }
 
-  // ---- constants: from h.con to h.fp (or until code) ---- 
+  // ---- constants + reloc index list (must not hide blob metadata) ----
+  // Layout at h.con:
+  //   [nconst pure words] [count][idx0][idx1]...
+  // nconst from constidx (slots grow down from CONST_TOP=253).
+  // Reloc list marks which packed indices are string/data offsets.
   if (h.con && h.con < h.len) {
     unsigned con_end = h.fp && h.fp > h.con ? h.fp : (h.code && h.code > h.con ? h.code : h.len);
+    unsigned max_words = (con_end > h.con) ? (con_end - h.con) / 2 : 0;
+    uchar reloc_mark[256];
+    unsigned nreloc = 0;
+    unsigned ri;
 
-    fprintf(fp, "-- constants --\n");
-    nconst = 0;
-    off = h.con;
-    while (off + 1 < con_end) {
+    if (h.constidx <= 253)
+      nconst = (unsigned)(253 - h.constidx + 1);
+    else
+      nconst = max_words;
+    if (nconst > max_words)
+      nconst = max_words;
+
+    memset(reloc_mark, 0, sizeof(reloc_mark));
+
+    off = h.con + nconst * 2;
+    if (off < con_end) {
+      nreloc = blob[off];
+      if (off + 1 + nreloc > con_end)
+        nreloc = (con_end > off + 1) ? con_end - off - 1 : 0;
+      for (ri = 0; ri < nreloc; ri++) {
+        uchar idx = blob[off + 1 + ri];
+        reloc_mark[idx] = 1;
+      }
+    }
+
+    fprintf(fp, "-- constants (%u words @ %04x) --\n", nconst, h.con);
+    for (i = 0; i < nconst; i++) {
+      unsigned slot = (h.constidx <= 253) ? (unsigned)(h.constidx + i) : i;
+      off = h.con + i * 2;
       w = ivm_rd16(blob + off);
-      // string / data pointer? points into data section or small offset 
-      if (h.data && h.data < h.len &&
-          ((w >= h.data && w < h.len) ||
-           (w > 0 && w < (word)(h.len - h.data)))) {
-        fprintf(fp, "%04x  S  string%02u:   %04x", off, nconst, w);
+      if (reloc_mark[i]) {
+        fprintf(fp, "%04x  S  string%02u:   %04x  slot=%02x", off, i, w, slot);
         ivm_dump_str_preview(fp, blob, h.len, h.data, w);
         fputc('\n', fp);
       } else {
-        fprintf(fp, "%04x  C  consta%02u:   %04x  (%u)\n",
-                off, nconst, w, (unsigned)w);
+        fprintf(fp, "%04x  C  constant%02u: %04x  slot=%02x  (%u)\n",
+                off, i, w, slot, (unsigned)w);
       }
-      nconst++;
-      off += 2;
+    }
+
+    off = h.con + nconst * 2;
+    if (off < con_end) {
+      unsigned list_len = con_end - off;
+      fprintf(fp, "-- reloc list (%u bytes @ %04x) --\n", list_len, off);
+      fprintf(fp, "%04x  R  count:      %02x  (%u strings)\n",
+              off, blob[off], (unsigned)blob[off]);
+      for (ri = 0; ri < nreloc && (off + 1 + ri) < con_end; ri++) {
+        uchar idx = blob[off + 1 + ri];
+        fprintf(fp, "%04x  R  idx[%u]:     %02x  -> constant%02u",
+                off + 1 + ri, ri, idx, idx);
+        if (idx < nconst) {
+          w = ivm_rd16(blob + h.con + (unsigned)idx * 2);
+          fprintf(fp, "  val=%04x", w);
+          ivm_dump_str_preview(fp, blob, h.len, h.data, w);
+        }
+        fputc('\n', fp);
+      }
+      {
+        unsigned tail = off + 1 + nreloc;
+        if (tail < con_end)
+          fprintf(fp, "%04x  R  (tail %u bytes)\n", tail, con_end - tail);
+      }
+    } else {
+      fprintf(fp, "-- reloc list: (none — no bytes between consts and fp) --\n");
     }
   }
 

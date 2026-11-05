@@ -138,6 +138,9 @@
   typedef uint16_t word;
 #endif
 
+
+#define MAIN
+
 #ifdef VERBOSE
   #include "ivm-print.c"
 #endif
@@ -174,8 +177,6 @@ static void anim_report(void) {
 #endif
 
 // CONFIGURATION
-
-#define MAIN
 
 // (- 26871 26002) = 869
 #include "darr.c"
