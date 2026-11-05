@@ -1,8 +1,6 @@
 ## --- sieve benchmark ----
 ##
 ##
-## TODO: ./ivm gives wrong result!
-##
 ##
 # --- performance
 # - cc65          85204077 cycles         4194 bytes
@@ -18,7 +16,6 @@
 # cc65/osc : (/  85204077 21078607.0)        4.04x LOL!
 #
 # (+ 256 (* 2 7))
-
 
 # TODO: looking at sieve.bytes - maybe 20% savings possible...
 

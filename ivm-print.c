@@ -188,7 +188,6 @@ void ivm_dump_blob(FILE *fp, const uchar *blob, unsigned len) {
   unsigned off;
   unsigned i, nvec, nconst;
   word w;
-  const uchar *p;
 
   if (!blob || len < sizeof(IvmBlobHdr)) {
     fprintf(fp, "ivm_dump_blob: too short (%u)\n", len);

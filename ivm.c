@@ -217,7 +217,15 @@
 
 #define MAIN
 
-#include "ivm-print.c"
+// TODO: not needed???
+//#include "ivm-print.c"
+
+
+#define LOADCOMPILE
+
+#ifdef LOADCOMPILE
+  #include "ivm-loadcompile.c"
+#endif
 
 
 //#define COUNTOPS
@@ -1532,18 +1540,25 @@ static int run_loaded_blob(uchar *img, int len) {
 int run_file(char* filename) {
   int len;
   uchar *img= load_blob(filename, &len);
-
+  int r;
+  
   if (!img) return -1;
-  {
-    int r= run_loaded_blob(img, len);
-    free(img);
-    #ifdef COUNTOPS
-      printf("countops: %ld\n", countops);
-      REPORT_COUNTS();
-      return 1;
-    #endif
-    return r;
-  }
+  
+  #ifdef LOADCOMPILE
+    if (ivm_compile_blob(p, loaded))
+      return ivm_run_compiled();
+  #endif
+    
+  run_loaded_blob(img, len);
+  free(img);
+
+  #ifdef COUNTOPS
+    printf("countops: %ld\n", countops);
+    REPORT_COUNTS();
+    return 1;
+  #endif
+
+  return r;
 }
 
 
