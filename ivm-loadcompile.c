@@ -16,6 +16,9 @@
 #include <stdio.h>
 #include <string.h>
 
+// INSTRUCTION: Keep all OPS defined on 6502 here
+//   Don't randomly remove because not used "today"
+//   Example: DEX you removed, why?
 #define BRK   0x00
 #define ORAZ  0x05
 #define ORA   0x0D
@@ -68,16 +71,19 @@ extern void opdiv(void);
 extern void opmod(void);
 extern void ivm_zalloc(void);
 extern void ivm_free(void);
+
 #define REF(f) ((word)(unsigned long)(void *)(f))
 
-// zero-page scratch word (lo at tmp, hi at tmp+1) — single named base, not magic 0xfe elsewhere
-static uchar tmp = 0xfe;
+// zero-page scratch word (lo at tmp1, hi at tmp2) — single named base, not magic 0xfe elsewhere
+static uchar tmp1 = 0xfe;
+static uchar tmp2 = 0xff;
 
 static uchar *lc_out;
 static word   lc_at, lc_max;
 static word  *lc_map, lc_mapn, lc_mem;
 
 typedef struct { word at, bc_target; } LcFix;
+
 static LcFix lc_fix[256];
 static word  lc_nfix;
 
@@ -109,20 +115,27 @@ static void emit_load_ffff(void) { em2(LDAN, 0xff); em(TAX); }
 // ACC = ACC OP mem[s]  (ADC/SBC/AND/ORA/EOR abs).
 // CLC/SEC emitted by caller when needed (+/-). Reuse for logical ops too.
 static void emit_lohiop(uchar ins, uchar s) {
-  ema(ins, slotlo(s)); em(TAY);
+           ema(ins, slotlo(s)); em(TAY);
   em(TXA); ema(ins, slothi(s)); em(TAX);
   em(TYA);
 }
 
-static void emit_ax_to_tmp(void) {
-  em2(STAZ, tmp);
-  em2(STXZ, (uchar)(tmp + 1));
+static void emit_ax_to_tmp1(void) {
+  em2(STAZ, tmp1);
+  em2(STXZ, tmp2);
 }
+
+// INSTRUCTION:
+//   TODO: rewrite so it takes the relative bytecode value
+//     this routine can do all the mapping and translation to
+//     actual machine code address, as it's record for each
+//     bytecode
 
 static void emit_rel(uchar bop, word bc_target) {
   word at;
+
   em2(bop, 0);
-  at = (word)(lc_at - 1);
+  at = lc_at - 1;
   if (lc_nfix < 256) {
     lc_fix[lc_nfix].at = at;
     lc_fix[lc_nfix].bc_target = bc_target;
@@ -130,12 +143,16 @@ static void emit_rel(uchar bop, word bc_target) {
   }
 }
 
+// INSTRUCITON: pass in the vector table of resolved addresses
+// they are accessible from Proc structure? 
 word ivm_loadcompile(const uchar *code, word code_len,
-                     uchar *out, word out_max,
-                     word *map, word map_n,
-                     word mem_base) {
+  uchar *out, word out_max,
+  word *map, word map_n,
+  word mem_base)
+{
   const uchar *p, *end;
   word i, bc_pc;
+  uchar op;
 
   if (!code || !out || !map || code_len > map_n) return 0;
 
@@ -143,6 +160,7 @@ word ivm_loadcompile(const uchar *code, word code_len,
   lc_map = map; lc_mapn = map_n; lc_mem = mem_base;
   lc_nfix = 0;
 
+  // reset mapping to "slot not used"
   for (i = 0; i < code_len; i++)
     map[i] = 0xffff;
 
@@ -150,12 +168,14 @@ word ivm_loadcompile(const uchar *code, word code_len,
   end = code + code_len;
 
   while (p < end) {
-    uchar op;
 
+    // add current compiled address to mapping
+    // for each bytecode start pos
     bc_pc = (word)(p - code);
     if (bc_pc < lc_mapn)
       lc_map[bc_pc] = lc_at;
 
+    // next op
     op = *p++;
 
     // 0..31: fast load mem[op]
@@ -163,6 +183,7 @@ word ivm_loadcompile(const uchar *code, word code_len,
 
     // hibit: vector call ($C0+) or const-slot load
     if (op & 0x80) {
+      // TODO: zjr implementation
       if (op >= 0xC0) ema(JSR, 0); // TODO: vector table
       else emit_load_slot((uchar)(op & 0x7f));
       continue;
@@ -174,8 +195,12 @@ word ivm_loadcompile(const uchar *code, word code_len,
     switch (op) {
     // control
     case 'q': em(RTS); break;
+
+    // returns
     case 'Q': emit_load0(); // fall into return
     case 'X': case ';': em(RTS); break;
+
+    // constants
     case '0': emit_load0(); break;
     case '9': emit_load_ffff(); break;
 
@@ -227,100 +252,102 @@ word ivm_loadcompile(const uchar *code, word code_len,
 
     case 'r': {
       uchar s = PAR;
-      emit_load_slot(s); emit_ax_to_tmp();
-      em2(LDYN, 0); em2(LDAIY, tmp); em2(LDXN, 0);
+      emit_load_slot(s); emit_ax_to_tmp1();
+      em2(LDYN, 0); em2(LDAIY, tmp1); em2(LDXN, 0);
       break;
     }
     case 'w': {
       uchar s = PAR;
-      em(TAY); emit_load_slot(s); emit_ax_to_tmp();
-      em(TYA); em2(LDYN, 0); em2(STAIY, tmp);
+      em(TAY); emit_load_slot(s); emit_ax_to_tmp1();
+      em(TYA); em2(LDYN, 0); em2(STAIY, tmp1);
       break;
     }
 
     case '\'': {
       uchar s = PAR;
-      emit_load_slot(s); emit_ax_to_tmp();
-      em2(LDYN, 0); em2(LDAIY, tmp); em(PHA);
-      em2(LDAZ, tmp); em2(0x69, 1); em2(STAZ, tmp);
-      em2(LDAZ, (uchar)(tmp+1)); em2(0x69, 0); em2(STAZ, (uchar)(tmp+1));
-      em2(LDAZ, tmp); ema(STA, slotlo(s));
-      em2(LDAZ, (uchar)(tmp+1)); ema(STA, slothi(s));
+      emit_load_slot(s); emit_ax_to_tmp1();
+      em2(LDYN, 0); em2(LDAIY, tmp1); em(PHA);
+      em2(LDAZ, tmp1); em2(0x69, 1); em2(STAZ, tmp1);
+      em2(LDAZ, (uchar)(tmp2)); em2(0x69, 0); em2(STAZ, (uchar)(tmp2));
+      em2(LDAZ, tmp1); ema(STA, slotlo(s));
+      em2(LDAZ, (uchar)(tmp2)); ema(STA, slothi(s));
       em(PLA); em2(LDXN, 0);
       break;
     }
     // ,: *(uchar*)ptr = ACC; ptr++
     case ',': {
       uchar s = PAR;
-      em(TAY); emit_load_slot(s); emit_ax_to_tmp();
-      em(TYA); em2(LDYN, 0); em2(STAIY, tmp);
-      em2(LDAZ, tmp); em2(0x69, 1); em2(STAZ, tmp);
-      em2(LDAZ, (uchar)(tmp+1)); em2(0x69, 0); em2(STAZ, (uchar)(tmp+1));
-      em2(LDAZ, tmp); ema(STA, slotlo(s));
-      em2(LDAZ, (uchar)(tmp+1)); ema(STA, slothi(s));
+      em(TAY); emit_load_slot(s); emit_ax_to_tmp1();
+      em(TYA); em2(LDYN, 0); em2(STAIY, tmp1);
+      em2(LDAZ, tmp1); em2(0x69, 1); em2(STAZ, tmp1);
+      em2(LDAZ, (uchar)(tmp2)); em2(0x69, 0); em2(STAZ, (uchar)(tmp2));
+      em2(LDAZ, tmp1); ema(STA, slotlo(s));
+      em2(LDAZ, (uchar)(tmp2)); ema(STA, slothi(s));
       break;
     }
 
     // @: ACC = *(word*)mem[s]
     case '@': {
       uchar s = PAR;
-      emit_load_slot(s); emit_ax_to_tmp();
-      em2(LDYN, 0); em2(LDAIY, tmp); em(PHA);
-      em(INY); em2(LDAIY, tmp); em(TAX); em(PLA);
+      emit_load_slot(s); emit_ax_to_tmp1();
+      em2(LDYN, 0); em2(LDAIY, tmp1); em(PHA);
+      em(INY); em2(LDAIY, tmp1); em(TAX); em(PLA);
       break;
     }
     // !: *(word*)mem[s] = ACC
     case '!': {
       uchar s = PAR;
-      // AX=value, need *mem[s]=AX.  Save value, load ptr to tmp, store via (tmp),Y
+      // AX=value, need *mem[s]=AX.  Save value, load ptr to tmp1, store via (tmp1),Y
       em(TAY);                             // lo in Y
       em(TXA); em(PHA);                    // hi on stack
       em(TYA); em(PHA);                    // lo on stack
-      emit_load_slot(s); emit_ax_to_tmp();
-      em(PLA); em2(LDYN, 0); em2(STAIY, tmp);
-      em(INY); em(PLA); em2(STAIY, tmp);
+      emit_load_slot(s); emit_ax_to_tmp1();
+      em(PLA); em2(LDYN, 0); em2(STAIY, tmp1);
+      em(INY); em(PLA); em2(STAIY, tmp1);
       break;
     }
 
     // (: ACC = ((word*)base)[idx]
     case '(': {
       uchar base = PAR, idx = PAR;
-      // ptr = mem[base] + 2*mem[idx] into tmp, then word load
-      emit_load_slot(base); emit_ax_to_tmp();
+      // ptr = mem[base] + 2*mem[idx] into tmp1, then word load
+      emit_load_slot(base); emit_ax_to_tmp1();
       emit_load_slot(idx);
       em(ASL); em(TAY); em(TXA); em(ROL); em(TAX); em(TYA);
       em(CLC);
-      em2(ADCZ, tmp); em2(STAZ, tmp);
-      em(TXA); em2(ADCZ, (uchar)(tmp+1)); em2(STAZ, (uchar)(tmp+1));
-      em2(LDYN, 0); em2(LDAIY, tmp); em(PHA);
-      em(INY); em2(LDAIY, tmp); em(TAX); em(PLA);
+      em2(ADCZ, tmp1); em2(STAZ, tmp1);
+      em(TXA); em2(ADCZ, (uchar)(tmp2)); em2(STAZ, (uchar)(tmp2));
+      // load word into AX using ptr
+      em2(LDYN, 0); em2(LDAIY, tmp1); em(PHA);
+      em(INY); em2(LDAIY, tmp1); em(TAX); em(PLA);
       break;
     }
     // ): ((word*)base)[idx] = ACC
     case ')': {
       uchar base = PAR, idx = PAR;
       em(PHA); em(TXA); em(PHA);           // save ACC value
-      emit_load_slot(base); emit_ax_to_tmp();
+      emit_load_slot(base); emit_ax_to_tmp1();
       emit_load_slot(idx);
       em(ASL); em(TAY); em(TXA); em(ROL); em(TAX); em(TYA);
       em(CLC);
-      em2(ADCZ, tmp); em2(STAZ, tmp);
-      em(TXA); em2(ADCZ, (uchar)(tmp+1)); em2(STAZ, (uchar)(tmp+1));
+      em2(ADCZ, tmp1); em2(STAZ, tmp1);
+      em(TXA); em2(ADCZ, (uchar)(tmp2)); em2(STAZ, (uchar)(tmp2));
       em(PLA); em(TAX); em(PLA);           // ACC value A=lo X=hi? pull hi then lo if pushed lo,hi
       // pushed PHA lo; PHA hi → PLA hi; TAX; PLA lo
-      em2(LDYN, 0); em2(STAIY, tmp);
-      em(INY); em(TXA); em2(STAIY, tmp);
+      em2(LDYN, 0); em2(STAIY, tmp1);
+      em(INY); em(TXA); em2(STAIY, tmp1);
       break;
     }
 
     // ?: ACC = !ACC
     case '?':
-      em2(STXZ, tmp); em2(ORAZ, tmp);
+      em2(STXZ, tmp1); em2(ORAZ, tmp1);
       em2(BEQ, 6); em2(LDAN, 0); em2(LDXN, 0); em2(BEQ, 4);
       em2(LDAN, 1); em2(LDXN, 0);
       break;
     // ~: ACC = ~ACC
     case '~':
+      // INSTRUCITON: why the F did you remove op codes names? Don't use random consatnats!
       em2(0x49, 0xff); em(TAY); em(TXA); em2(0x49, 0xff); em(TAX); em(TYA);
       break;
 
@@ -328,16 +355,18 @@ word ivm_loadcompile(const uchar *code, word code_len,
     case 'G': {
       word rel = PAR;
       word dest = (word)((p - code) + rel);
-      em2(STAZ, tmp); em(TXA);
-      em2(BMI, 7); em2(ORAZ, tmp); em2(BEQ, 3);
+      em2(STAZ, tmp1); em(TXA);
+      em2(BMI, 7); em2(ORAZ, tmp1); em2(BEQ, 3);
+// TODO: does this take the instructions into account
       em(CLC); emit_rel(BCC, dest);
-      em2(LDAZ, tmp);
+      em2(LDAZ, tmp1);
       break;
     }
     // B: unconditional back  pc -= rel8
     case 'B': {
       word rel = PAR;
       word dest = (word)((p - code) - rel);
+// TODO: does this take CLC and BCC into account?
       em(CLC); emit_rel(BCC, dest);
       break;
     }
@@ -352,27 +381,37 @@ word ivm_loadcompile(const uchar *code, word code_len,
     case ' ': break; // spacer
 
     default: em(BRK); break; // unknown
+
     }
   }
 
+  // patching jumps
   for (i = 0; i < lc_nfix; i++) {
     word dest = lc_fix[i].bc_target;
     word mapped = 0xffff;
     word d;
     int rel;
+
     if (dest < lc_mapn) mapped = lc_map[dest];
+
+    // INSTRUCITON: describe semantcis of this
     if (mapped == 0xffff)
       for (d = dest; d < code_len && d < lc_mapn; d++)
         if (lc_map[d] != 0xffff) { mapped = lc_map[d]; break; }
+
     if (mapped == 0xffff) {
       printf("%%LOADCOMPILE: bad fixup %u\n", (unsigned)dest);
       return 0;
     }
+
+    // calulcate relative jump
     rel = (int)mapped - (int)(lc_fix[i].at + 1);
+
     if (rel < -128 || rel > 127) {
       printf("%%LOADCOMPILE: rel range %d\n", rel);
       return 0;
     }
+
     if (lc_fix[i].at < lc_max)
       lc_out[lc_fix[i].at] = (uchar)rel;
   }
