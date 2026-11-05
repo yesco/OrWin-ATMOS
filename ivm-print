@@ -1,0 +1,12 @@
+rm ivm-print.x 2>/dev/null
+
+name=$1
+name="${name%.ivm}"
+
+clang -g ivm-print.c -o ivm-print.x || exit 1
+echo
+echo
+./ivm-print.x $name
+echo
+echo
+
