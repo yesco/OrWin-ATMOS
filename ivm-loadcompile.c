@@ -11,6 +11,81 @@
 //
 // #define LOADCOMPILE 1
 
+
+/*
+
+INSTRUCTIONS: Keeps this section but keep updated for status
+
+### Call vectors — done
+
+Per your INSTRUCTION, `ivm_loadcompile` now takes the resolved vector table:
+
+```c
+word ivm_loadcompile(..., const word *callvec, uchar ncall);
+
+// $C0+v → JSR callvec[v]
+// if callvec[v]==0, site is recorded for later patch
+
+void ivm_loadcompile_resolve_vectors(callvec, ncall, vec_bc, map, out_org);
+void ivm_loadcompile_patch_calls(out, out_max, callvec, ncall);
+```
+
+Typical flow:
+
+1. Compile with `callvec=NULL` (JSRs recorded)
+2. `resolve_vectors`: `callvec[i] = out_org + map[vec_bc[i]]`
+3. `patch_calls` fills JSR absolute addresses
+
+---
+
+### What sieve still needs
+
+| Need | Status |
+|------|--------|
+| **Calls** `$C0` main→primes | **emit+resolve** (above) |
+| **Call frame** (fp, args, return) | **Missing** — plain `JSR`/`RTS` is not enough; VM call pushes frame / sets `fp` |
+| **Compares** `<` `=` `>` | **Missing** (`BRK`) — sieve is full of `i < LIMIT` |
+| **Loops** `i` / `n` (or only `G`/`B`) | **Partial** — `G`/`B` only; no `i`/`n`/`U` |
+| **Array** `(` `)` | Present (needs testing) |
+| **\* / /** | JSR helpers; still need **PARAX → zp_par** |
+
+Sieve is dominated by **`for` + compare + index + call to
+`primes`**. Without **`<`/`>`** and a **real call/return frame**, it
+will not run even with vectors patched.
+
+### Next concrete steps
+
+1. Emit **frame prologue/epilogue** (or shared `JSR call_helper` that
+matches `ivm-vm.asm` call) for `$C0+`
+
+2. Implement **`<` `=` `>`** → boolean in ACC (then `G` works)
+
+3. Confirm **`(` `)`** and **`M`/`F`** against soft-heap / 6502 memory
+model
+
+
+Simplyfy function calling code:
+- WHOLE code should start with NOP till you get odd address
+- emit a JMP (opocode, single byte)
+- now mark this location as subroutine addresses
+- each 2 bytes is a jump vector directly to each funciton
+- this is patched as we compie them in order, except the 0th which
+  is the "main"
+- for now, ingore the Pascall assign return value, but the slot is
+  still there
+- we don't need the fp, no need to save/restore, as we transpilie the
+  code knowing the fp already!
+- first in funciton: store AX to it's accumulator (fp+ accpos), fixed addresss
+- codes '1'..'7' can be resolved directly,to addresses,
+  as is '8' to first arg location
+- function use JSR (mark+2*vector)
+
+- implement '<' '=' and '>' please. '=' is trivial. '<' and '>' is just
+  subtraction and test not ==
+- 
+
+*/
+
 #ifdef LOADCOMPILE
 
 #include <stdio.h>
@@ -28,6 +103,7 @@
 #define AND_  0x2D
 #define BMI   0x30
 #define SEC   0x38
+#define EORN  0x49
 #define EOR   0x4D
 #define JMP   0x4C
 #define RTS   0x60
@@ -143,12 +219,16 @@ static void emit_rel(uchar bop, word bc_target) {
   }
 }
 
-// INSTRUCITON: pass in the vector table of resolved addresses
-// they are accessible from Proc structure? 
+// INSTRUCTION: pass in the vector table of resolved native addresses.
+// callvec[i] = absolute 6502 address of compiled body for vector i
+// (from blob call table: native = out_org + map[vec_bytecode_offset]).
+// If callvec is NULL or entry is 0, JSR site is recorded and can be
+// patched later with ivm_loadcompile_patch_calls().
 word ivm_loadcompile(const uchar *code, word code_len,
   uchar *out, word out_max,
   word *map, word map_n,
-  word mem_base)
+  word mem_base,
+  const word *callvec, uchar ncall)
 {
   const uchar *p, *end;
   word i, bc_pc;
@@ -159,6 +239,9 @@ word ivm_loadcompile(const uchar *code, word code_len,
   lc_out = out; lc_at = 0; lc_max = out_max;
   lc_map = map; lc_mapn = map_n; lc_mem = mem_base;
   lc_nfix = 0;
+  lc_ncalls = 0;
+  lc_callvec = callvec;
+  lc_ncall = ncall;
 
   // reset mapping to "slot not used"
   for (i = 0; i < code_len; i++)
@@ -183,9 +266,26 @@ word ivm_loadcompile(const uchar *code, word code_len,
 
     // hibit: vector call ($C0+) or const-slot load
     if (op & 0x80) {
-      // TODO: zjr implementation
-      if (op >= 0xC0) ema(JSR, 0); // TODO: vector table
-      else emit_load_slot((uchar)(op & 0x7f));
+      if (op >= 0xC0) {
+        uchar v = (uchar)(op - 0xC0);
+        word dest = 0;
+        word at;
+        if (lc_callvec && v < lc_ncall)
+          dest = lc_callvec[v];
+        ema(JSR, dest);
+        // operand lo sits at lc_at-2 after ema
+        at = (word)(lc_at - 2);
+        if (!dest && lc_ncalls < 128) {
+          lc_calls[lc_ncalls].at = at;
+          lc_calls[lc_ncalls].vec = v;
+          lc_ncalls++;
+        } else if (dest && at + 1 < lc_max) {
+          lc_out[at]     = (uchar)(dest & 0xff);
+          lc_out[at + 1] = (uchar)(dest >> 8);
+        }
+      } else {
+        emit_load_slot((uchar)(op & 0x7f));
+      }
       continue;
     }
 
@@ -348,7 +448,7 @@ word ivm_loadcompile(const uchar *code, word code_len,
     // ~: ACC = ~ACC
     case '~':
       // INSTRUCITON: why the F did you remove op codes names? Don't use random consatnats!
-      em2(0x49, 0xff); em(TAY); em(TXA); em2(0x49, 0xff); em(TAX); em(TYA);
+      em2(EORN, 0xff); em(TAY); em(TXA); em2(EORN, 0xff); em(TAX); em(TYA);
       break;
 
     // G: if ((int16_t)ACC > 0) pc += rel8
