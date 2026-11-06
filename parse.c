@@ -587,11 +587,33 @@ static void line_commit(void) {
   line_pos = 0;
 }
 
-// consume one source char
-#define eat()     (line_pos++)
+// the source char at line_pos (0 at EOF), always one char looked ahead
+static uchar nextc;
 
-// consume n source chars
-#define eat_n(n)  (line_pos += (n))
+// (re)load nextc from line_pos, refilling the buffer from the file if needed
+static void load_nextc(void) {
+  nextc = line_need() ? line_buf[line_pos] : 0;
+}
+
+// consume nextc
+static void skip(void) {
+  line_pos++;
+  load_nextc();
+}
+
+// consume n source chars (caller made sure they are buffered, see match_at)
+#define eat_n(n)  do { line_pos += (n); load_nextc(); } while (0)
+
+// if the next char is c: consume it, return 1
+static uchar got(uchar c) {
+  if (nextc != c) return 0;
+  skip();
+  return 1;
+}
+
+// match functions (return 0 = no match, normal backtracking): the next char
+// must be c, consume it, else "return 0" from the CALLING function
+#define EXPECT(c)  do { if (!got(c)) return 0; } while (0)
 
 #ifdef VERBOSE
 
@@ -900,15 +922,8 @@ static uchar *run_production(uchar *p) {
 
 
 static void skip_hspace(void) {
-  uchar c;
-
-  while (line_need()) {
-    c = line_buf[line_pos];
-    if (c == ' ' || c == '\t' || c == '\r')
-      eat();
-    else
-      break;
-  }
+  while (nextc == ' ' || nextc == '\t' || nextc == '\r')
+    skip();
 }
 
 // ---- skip whitespace and comments (configured from BNF via #= lines) ----
@@ -1003,10 +1018,10 @@ static void skip_ws(void) {
   for (;;) {
 
     // whitespace
-    while (line_need() && is_ws(line_buf[line_pos]))
-      eat();
+    while (is_ws(nextc))
+      skip();
     note_progress();
-    if (!line_need()) return;
+    if (!nextc) return;
 
     // try each configured comment style
     for (ci = 0; ci < ncomments; ci++) {
@@ -1018,16 +1033,16 @@ static void skip_ws(void) {
 
       if (cs->end_len == 0) {
         // line comment: to newline (keep the \n) or EOF
-        while (line_need() && line_buf[line_pos] != '\n')
-          eat();
+        while (nextc && nextc != '\n')
+          skip();
       } else {
         // block comment: to end marker
-        while (line_need()) {
+        while (nextc) {
           if (match_at(cs->end, cs->end_len)) {
             eat_n(cs->end_len);
             break;
           }
-          eat();
+          skip();
         }
       }
       note_progress();
@@ -1045,8 +1060,7 @@ static int match_newline(void) {
 
   skip_hspace();
   nnl = 0;
-  while (line_need() && line_buf[line_pos] == '\n') {
-    eat();
+  while (got('\n')) {
     nnl++;
     note_progress();
     skip_hspace();
@@ -1058,46 +1072,35 @@ static int match_newline(void) {
 
 
 static int match_lit(uchar want) {
-  uchar g;
 
   // bare space in a rule is a ws-gap (handled in step); \  matches one space
   if (want != ' ' && want != '\t')
     skip_ws();
-  if (!line_need()) return 0;
-  g = line_buf[line_pos];
   // -I: fold case for keyword/literal letters only (idents use strcmp)
   if (ignore_case && isalpha(want)) {
-    if (tolower(g) != tolower(want)) return 0;
-  } else if (g != want) {
+    if (tolower(nextc) != tolower(want)) return 0;
+  } else if (nextc != want) {
     return 0;
   }
-  eat();
+  skip();
   note_progress();
   return 1;
 }
 
 // match an identifier into id_buf
 static int match_ident_raw(void) {
-  uchar c;
   word n;
 
   skip_ws();
-  if (!line_need()) return 0;
-
-  c = line_buf[line_pos];
-  if (!isalpha(c))
+  if (!isalpha(nextc))
     return 0;
 
   n = 0;
-  while (line_need()) {
-    c = line_buf[line_pos];
-    // letter, digit, or underscore
-    if (isalnum(c) || c == '_') {
-      if (n + 1 < NAME_LEN)
-        id_buf[n++] = c;
-      eat();
-    } else
-      break;
+  // letter, digit, or underscore
+  while (isalnum(nextc) || nextc == '_') {
+    if (n + 1 < NAME_LEN)
+      id_buf[n++] = nextc;
+    skip();
   }
   id_buf[n] = 0;
   note_progress();
@@ -1106,22 +1109,14 @@ static int match_ident_raw(void) {
 
 // next non-blank source char after line_pos; nothing consumed or captured
 static uchar peek_char(void) {
-  word p, sv;
-  uchar c;
+  word sv = line_pos;
+  uchar sc = nextc, c;
 
-  sv = line_pos;
-  p = sv;
-  for (;;) {
-    line_pos = p;
-    if (!line_need()) {
-      c = 0;
-      break;
-    }
-    c = line_buf[p];
-    if (!is_ws(c)) break;
-    p++;
-  }
+  while (is_ws(nextc))
+    skip();
+  c = nextc;
   line_pos = sv;
+  nextc = sc;
   return c;
 }
 
@@ -1342,18 +1337,16 @@ static int decode_escape(uchar *out) {
   uchar c, v, i;
   char *s;
 
-  if (!line_need()) return 0;
-  c = line_buf[line_pos++];
+  if (!nextc) return 0;
+  c = nextc;
+  skip();
   if (c == '0') {
     *out = 0;
   } else if (c == 'x' || c == 'X') {
     v = 0;
-    for (i = 0; i < 2; i++) {
-      if (!line_need()) break;
-      c = line_buf[line_pos];
-      if (!isxdigit(c)) break;
-      v = (v << 4) + hexval(c);
-      line_pos++;
+    for (i = 0; i < 2 && isxdigit(nextc); i++) {
+      v = (v << 4) + hexval(nextc);
+      skip();
     }
     *out = v;
   } else {
@@ -1369,8 +1362,9 @@ static int decode_escape(uchar *out) {
 static int next_body_char(uchar *out) {
   uchar c;
 
-  if (!line_need()) return 0;
-  c = line_buf[line_pos++];
+  if (!nextc) return 0;
+  c = nextc;
+  skip();
   if (c == '\\')
     return decode_escape(out);
   *out = c;
@@ -1383,12 +1377,11 @@ static int next_body_char(uchar *out) {
 static int read_quoted_body(uchar delim, void (*put)(uchar c, void *ctx), void *ctx) {
   uchar c;
 
-  while (line_need() && line_buf[line_pos] != delim) {
+  while (nextc && nextc != delim) {
     if (!next_body_char(&c)) return 0;
     put(c, ctx);
   }
-  if (!line_need() || line_buf[line_pos] != delim) return 0;
-  line_pos++;
+  EXPECT(delim);
   note_progress();
   return 1;
 }
@@ -1410,7 +1403,6 @@ static void put_buf(uchar c, void *ctx) {
 }
 
 static int match_str_emit(void) {
-  if (!line_need()) return 0;
   if (!read_quoted_body('"', put_emit, 0)) return 0;
   emit(0);
   return 1;
@@ -1423,8 +1415,7 @@ static int match_str_const(void) {
   uchar slot;
 
   skip_ws();
-  if (!line_need() || line_buf[line_pos] != '"') return 0;
-  line_pos++;
+  EXPECT('"');
   sb.buf = buf; sb.n = 0; sb.max = sizeof(buf);
   if (!read_quoted_body('"', put_buf, &sb)) return 0;
   if (sb.n + 1 >= sb.max) return 0;
@@ -1441,77 +1432,56 @@ static int match_num(void) {
   uchar base = 10;
   word v = 0;
   uchar n = 0;
- 
-  //const char digits[]= "0123456789ABCDE";
 
   skip_ws();
-  if (!line_need()) return 0;
 
-  // base 0x 0b 0o
-  if (line_buf[line_pos] == '0') {
-
-    // TODO: this is stupid, everywhere, skip_ws() shoiuld position
-    //   and set global nextc
-    line_pos++;
-    // TODO: this should be a FAIL inside if out of chars
-    if (!line_need()) return 0;
-    c = line_buf[line_pos];
-
-    switch(c) {
-    case 'x': base = 16; break;
-    case 'o': base =  8; break;
-    case 'b': base =  2; break;
-    default: line_pos-= 2; break; // digit hopefully, tested later
-    }
-
-    line_pos++;
-    // TODO: this should be a FAIL inside if out of chars
-    if (!line_need()) return 0;
-  }
-  
-  if (line_buf[line_pos] == '\'') {
+  if (got('\'')) {
 
     // character literal 'x' / '\n' / ... → small integer const
-    line_pos++;
     if (!next_body_char(&c)) return 0;
-    if (!line_need() || line_buf[line_pos] != '\'') return 0;
-    line_pos++;
+    EXPECT('\'');
     v = c;
     ty = TY_CHAR;
 
   } else {
-    // parse number (or cont of 0...)
-    do {
 
-      if (!line_need()) break; 
+    // base prefix 0x 0b 0o; a lone leading 0 is just the digit 0
+    if (got('0')) {
+      n = 1;
+      if (nextc == 'x') base = 16;
+      else if (nextc == 'o') base = 8;
+      else if (nextc == 'b') base = 2;
+      if (base != 10) {
+        skip();
+        n = 0;      // need at least one digit after the prefix
+      }
+    }
+
+    // parse number (or cont of 0...)
+    for (;;) {
 
       // TODO: negative!
-      
-      c = toupper(line_buf[line_pos]);
-      
-      // Convert character to its numeric value based on base
-      if (isdigit(c)) {
+
+      // Convert character to its numeric value
+      c = toupper(nextc);
+      if (isdigit(c))
         c -= '0';
-      } else if (c >= 'A' && c <= 'F') {
+      else if (c >= 'A' && c <= 'F')
         c = c - 'A' + 10;
-      } else {
-        // Not a valid alphanumeric digit
-        break; 
-      }
+      else
+        break;
 
       // Ensure the digit fits the current base (e.g., '8' in octal is invalid)
-      if (c >= base) {
-        break;
-      }
+      if (c >= base) break;
 
       n++;
       v = v * base + c;
-      eat(); // Assumes this increments line_pos
-    } while(1);
+      skip();
+    }
 
     // If no digits were successfully parsed, it's a failure
     if (n == 0) return 0;
-    
+
     ty = TY_WORD;
   }
 
@@ -1767,6 +1737,7 @@ static void restore_scope(void) {
 // back to the start of the current alt: input, code, productions
 static void frame_rewind(void) {
   line_pos = cur->save;
+  load_nextc();
   code_len = cur->code_save;
   cur->prod_n = 0;
   cur->npatch = 0;
@@ -1961,7 +1932,7 @@ static int step(void) {
   skip_ws();
   if (!match_lit(c)) {
     vlog("  fail lit '%c' @%u got '%c'\n", c, abs_pos(),
-         line_need() ? line_buf[line_pos] : '?');
+         nextc ? nextc : '?');
     cur->state = ST_FAIL;
     return 1;
   }
@@ -2106,6 +2077,7 @@ static void init(char *bnf_path, char *src_path) {
   line_pos = 0;
   line_abs = 0;
   file_pos = 0;
+  load_nextc();     // prime nextc (reads the first source char)
   max_pos_abs = 0;
   far_sp = 0;
   stack = NULL;
@@ -2230,7 +2202,7 @@ int main(int argc, char **argv) {
 
   // OK
   skip_ws();
-  if (line_need()) FAIL("trailing input");
+  if (nextc) FAIL("trailing input");
 
   eprintf("--- ACCEPT ---\n");
 
