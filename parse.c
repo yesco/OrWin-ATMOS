@@ -319,14 +319,38 @@ static void sym_write_all(void) {
         if (wcnt[a] < 255) wcnt[a]++;
       }
       break;
-    case 'I': case 'J': case 'U':
+    case 'I': case 'J':
+      // rmw one slot
       if (pc < (word)bin_ptr) {
         uchar a = bin[pc++];
         if (r[a] < 255) r[a]++;
         if (wcnt[a] < 255) wcnt[a]++;
       }
       break;
-    case 'G': case 'B': case 'O':
+    case 'U':
+      // Uab: mem[a]+=mem[b] — two slots, both read; a written
+      if (pc + 1 < (word)bin_ptr) {
+        uchar a = bin[pc++], b = bin[pc++];
+        if (r[a] < 255) r[a]++;
+        if (r[b] < 255) r[b]++;
+        if (wcnt[a] < 255) wcnt[a]++;
+      }
+      break;
+    case 'i':
+      // i var limit rel — 3 args; var read (loop head)
+      if (pc + 2 < (word)bin_ptr) {
+        uchar a = bin[pc++];
+        uchar b = bin[pc++];
+        pc++; // rel
+        if (r[a] < 255) r[a]++;
+        if (r[b] < 255) r[b]++;
+      }
+      break;
+    case 'n':
+      // n back — 1 arg; target slot increment is dynamic; skip only
+      if (pc < (word)bin_ptr) pc++;
+      break;
+    case 'G': case 'B': case 'O': case 'W':
     case '+': case '-': case '*': case '/': case '%':
     case '&': case '|': case '^': case '[': case ']':
     case '{': case '}': case '<': case '=': case '>':
