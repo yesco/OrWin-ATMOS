@@ -1944,16 +1944,17 @@ static int step(void) {
 // run up to n steps
 // ~50-200 us/step on 6502 @ 1MHz → n=1000 ≈ 50-200 ms
 static int run(word n) {
-  word i;
   int rc = 1;
 
-  for (i = 0; i < n && rc == 1; i++)
-    rc = step();
-
-  // quit so run_ivm can stop
-  if (!rc) emit('q');
+  // 25961
+  do {
+    if (!step()) {
+      emit('q');
+      return 0;
+    }
+  } while (--n);
   
-  return rc;
+  return 1;
 }
 
 // "file:line: " prefix of an error line

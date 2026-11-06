@@ -467,13 +467,15 @@ uchar *build_blob(int *out_len) {
   } GenBlobHeader;
 
   GenBlobHeader h;
-  uchar *body, *p;
+  uchar *body, *p, *countp;
   word zero = 0;
   unsigned need;
-  uchar nv, j;
-  int i;
+  uchar nv, n, entry_vec;
+  int i, j;
   word v;
-
+  uchar has0;
+  uchar tramp[2];
+  
   // Pascal program body has main_offset but no FUNC vector — add one for _start
   nv = nvector;
   if (main_vec == (uchar)0xff && nv < (uchar)MAX_VECTORS)
@@ -500,68 +502,53 @@ uchar *build_blob(int *out_len) {
   gen_memadd(body, &p, &zero, sizeof(zero));
 
   // constant 0 in pool
-  {
-    uchar has0 = 0;
-    int ii;
-    for (ii = 0; ii < (int)nconst; ii++)
-      if (!const_is_reloc[ii] && const_pool[ii] == 0) { has0 = 1; break; }
-    if (!has0)
-      add_const(0);
-  }
+  has0 = 0;
+  for (i = 0; i < (int)nconst; i++)
+    if (!const_is_reloc[i] && const_pool[i] == 0) { has0 = 1; break; }
+
+  if (!has0) add_const(0);
 
   // Const pool pure values (reverse order). String offsets pure data-relative.
   // Reloc list after words: host and 6502 install use it to add base.
   // (Single-walk layout without list needs consecutive string slots; TODO.)
   h.con = (word)(p - body);
-  {
-    int ii;
-    for (ii = 0; ii < (int)nconst; ii++) {
-      uchar j = (uchar)(nconst - 1 - ii);
-      v = const_pool[j];
-      memcpy(p, &v, sizeof(word));
-      p += sizeof(word);
+  for (i = 0; i < (int)nconst; i++) {
+    j = (uchar)(nconst - 1 - i);
+    v = const_pool[j];
+    memcpy(p, &v, sizeof(word));
+    p += sizeof(word);
+  }
+  countp = p++;
+  n = 0;
+  for (i = 0; i < (int)nconst; i++) {
+    j = (uchar)(nconst - 1 - i);
+    if (const_is_reloc[j]) {
+      *p++ = (uchar)i;
+      n++;
     }
   }
-  {
-    uchar *countp = p++;
-    uchar n = 0;
-    int ii;
-    for (ii = 0; ii < (int)nconst; ii++) {
-      uchar j = (uchar)(nconst - 1 - ii);
-      if (const_is_reloc[j]) {
-        *p++ = (uchar)ii;
-        n++;
-      }
-    }
-    *countp = n;
-  }
+  *countp = n;
 
   // Entry vector for _start: C "main" or Pascal program body (synth)
-  {
-    uchar entry_vec;
-    if (main_vec != (uchar)0xff)
-      entry_vec = main_vec;
-    else {
-      // program \+; begin... has main_offset only — not a FUNC vector
-      entry_vec = nvector;
-      if (entry_vec < (uchar)MAX_VECTORS) {
-        vectors[entry_vec] = main_offset;
-        frame_base[entry_vec] = 0;
-      } else
-        entry_vec = 0;
-    }
-
-    h.fp   = gen_memadd(body, &p, frame_base, (word)nv);
-    h.code = gen_memadd(body, &p, bin, (word)bin_ptr);
-
-    // _start: call entry_vec, then q (X returns here — no FP_MAIN test)
-    {
-      uchar tramp[2];
-      tramp[0] = (uchar)(0xC0 | (entry_vec & 0x3f));
-      tramp[1] = 'q';
-      h.main = gen_memadd(body, &p, tramp, 2);
-    }
+  if (main_vec != (uchar)0xff)
+    entry_vec = main_vec;
+  else {
+    // program \+; begin... has main_offset only — not a FUNC vector
+    entry_vec = nvector;
+    if (entry_vec < (uchar)MAX_VECTORS) {
+      vectors[entry_vec] = main_offset;
+      frame_base[entry_vec] = 0;
+    } else
+      entry_vec = 0;
   }
+  
+  h.fp   = gen_memadd(body, &p, frame_base, (word)nv);
+  h.code = gen_memadd(body, &p, bin, (word)bin_ptr);
+
+  // _start: call entry_vec, then q (X returns here — no FP_MAIN test)
+  tramp[0] = (uchar)(0xC0 | (entry_vec & 0x3f));
+  tramp[1] = 'q';
+  h.main = gen_memadd(body, &p, tramp, 2);
 
   // Data section (strings); reloc consts index into this from 0
   h.data = gen_memadd(body, &p, data_pool, data_len);
