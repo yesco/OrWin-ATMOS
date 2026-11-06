@@ -284,9 +284,19 @@ static void sym_write_all(void) {
     fprintf(sym_fp, "%-5s  r=%u w=%u",
             tbuf, (unsigned)sym_r[s->address], (unsigned)sym_w[s->address]);
     for (v = 0; v < nvector; v++) {
+      uchar vsz;
+      word k;
       fb = frame_base[v];
-      sz = frame_sz[v] ? frame_sz[v] : 4;
-      if (s->address >= fb && s->address < (uchar)(fb + sz)) {
+      vsz = 0;
+      for (k = 0; k < nvector; k++) {
+        uchar ob = frame_base[k];
+        if (ob > fb) {
+          uchar gap = (uchar)(ob - fb);
+          if (!vsz || gap < vsz) vsz = gap;
+        }
+      }
+      if (!vsz) vsz = frame_sz[v] ? frame_sz[v] : 4;
+      if (s->address >= fb && s->address < (uchar)(fb + vsz)) {
         fprintf(sym_fp, "  V%02x", v);
         break;
       }
@@ -299,16 +309,18 @@ static void sym_write_all(void) {
     if (s->type != SYM_FUNC) continue;
     v = s->address;
     fb = frame_base[v];
-    sz = frame_sz[v];
+    // size = span to next higher frame_base, else tracked frame_sz / 4
+    sz = 0;
+    for (j = 0; j < nvector; j++) {
+      uchar ob = frame_base[j];
+      if (ob > fb) {
+        uchar gap = (uchar)(ob - fb);
+        if (!sz || gap < sz) sz = gap;
+      }
+    }
     if (!sz) {
-      hi = fb + 3;
-      for (j = 0; j < nsym; j++)
-        if (syms[j].type == SYM_VAR &&
-            syms[j].address >= fb &&
-            syms[j].address < (uchar)(fb + 64) &&
-            syms[j].address > hi)
-          hi = syms[j].address;
-      sz = (uchar)(hi - fb + 1);
+      // last frame in slot space: use tracked size from alloc_slot
+      sz = frame_sz[v] ? frame_sz[v] : 4;
     }
     fprintf(sym_fp, "%04x  V%02x  %-20s  fp=%02x  sz=%02x",
             (unsigned)vectors[v], v, s->name, fb, sz);
@@ -1243,6 +1255,9 @@ static int match_ident_func_decl(void) {
   s->scope = scope_depth + 1;
 
   frame_base[vec] = base;
+#ifdef SYMS
+  frame_sz[vec] = 4; // ret/val/prev/ACC at minimum
+#endif
   nvector++;
   last_func_vec = vec;
   pending_func_entry = vec;
