@@ -1,4 +1,9 @@
 # -- BNF for C → IVM engine
+# Arguments Block Cscopedeclstatements Declare E Func
+# Intcharetc Jprintone Kstatements Massvardecl O Program
+# Q,arguments RstartvalueofE S Type U,vardecl Var W,printitemJ Z H
+#
+# -- letters free: G L N X Y
 
 # - comment spec
 #= /* */
@@ -34,6 +39,19 @@ K=if (E)[?G\x] K else[0?G\x\w\y] K[\y]
 |if (E)[?G\x] K[\y]
 
 # - Loops
+|for (\i=0; [Z\1]   \1<=\d; \1++) [\mi\1\3\x] K [n\z\y]
+|for (\i=\d;[C\1\2] \1<=\d; \1++) [\mi\1\4\x] K [n\z\y]
+|for (\i=\i;[C\1\2] \1<=\d; \1++) [\mi\1\4\x] K [n\z\y]
+
+|for (\i=0; [Z\1]   \1<=\i; \1++) [\mi\1\3\x] K [n\z\y]
+|for (\i=\d;[C\1\2] \1<=\i; \1++) [\mi\1\4\x] K [n\z\y]
+|for (\i=\i;[C\1\2] \1<=\i; \1++) [\mi\1\4\x] K [n\z\y]
+
+|for (\i=0; [Z\1]   \1<\d[\eS\t]; \1++) [\mi\1\4\x] K [n\z\y]
+|for (\i=\d;[C\1\2] \1<\d[\eS\t]; \1++) [\mi\1\5\x] K [n\z\y]
+|for (\i=\i;[C\1\2] \1<\d[\eS\t]; \1++) [\mi\1\5\x] K [n\z\y]
+
+
 |for (\i=E[S\1]; \1<=E[S\t];  \1++) [\mi\1\5\x] K [n\z\y]
 |for (\i=E[S\1]; \1<E[\eS\t]; \1++) [\mi\1\5\x] K [n\z\y]
 
@@ -134,10 +152,11 @@ K=if (E)[?G\x] K else[0?G\x\w\y] K[\y]
 
 # - Block
 |B|;
+|H
 
 # - Assignments
 # Prefer specific forms (no peephole across jumps): COPY / Z / U / ...
-|\i+=\i;[U\1\2]
+H=\i+=\i;[U\1\2]
 |* \i=E;[!\1]
 |\i\[S\]=E;[)\1\2]
 |\i=0;[Z\1]
