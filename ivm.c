@@ -1138,6 +1138,7 @@ ivmvar run_ivm(Process *p) {
       t['{'] = &&op_shlm; t['}'] = &&op_shrm;
 
       t['L'] = &&op_L;    t['S'] = &&op_S;   t['Z'] = &&op_Z;
+      t['C'] = &&op_C;
       t['l'] = &&op_l;    t['s'] = &&op_s;
 
       t['I'] = &&op_I;    t['J'] = &&op_J;   t['U'] = &&op_U;
@@ -1235,6 +1236,14 @@ ZL(op_shrm,'}')  zp.mem[*zp.ipc] >>= zp.acc; goto pnext;
 ZL(op_L,   'L')  zp.acc = PAR;             goto pnext;
 ZL(op_S,   'S')  zp.mem[*zp.ipc] = zp.acc; goto pnext;
 ZL(op_Z,   'Z')  zp.mem[*zp.ipc] = 0;      goto pnext;
+
+// C dest src: mem[dest] = mem[src]; ACC = value  (simple assign without L+S)
+ZL(op_C,   'C')  {
+                   uchar d = zp.ipc[0], s = zp.ipc[1];
+                   zp.acc = zp.mem[d] = zp.mem[s];
+                   zp.ipc += 2;
+                 }
+                 goto xnext;
 
 // Memory ops - word raw using variable
 // TODO: why not use ACC???

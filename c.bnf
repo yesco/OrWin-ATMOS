@@ -136,13 +136,16 @@ K=if (E)[?G\x] K else[0?G\x\w\y] K[\y]
 |B|;
 
 # - Assignments
+# Prefer specific forms (no peephole across jumps): COPY / Z / U / ...
 |\i+=\i;[U\1\2]
 |* \i=E;[!\1]
 |\i\[S\]=E;[)\1\2]
 |\i=0;[Z\1]
 |\i=S+S;[L\2+\3S\1]
 |\i=S-S;[L\2-\3S\1]
-|\i=S;[L\2S\1]
+# C dest src — mem[dest]=mem[src]; ACC=value  (var=var, var=const-slot, var=string-slot)
+|\i=\i;[C\1\2]
+|\i=S;[C\1\2]
 |\i++;[I\1]
 |++\i;[I\1]
 |\i--;[J\1]

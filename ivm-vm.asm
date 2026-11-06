@@ -572,6 +572,35 @@ op_Z:   USEY
 
         jmp     pnext
 
+;;; C dest src — mem[dest]=mem[src]; ACC=value
+op_C:   lda     (_ivm_ipc),y
+        sta     tmp_hi              ; dest
+        iny
+	USEY
+        lda     (_ivm_ipc),y
+        tay                         ; src
+
+        lda     (_ivm_memlo),y
+        sta     tmp_lo
+        lda     (_ivm_memhi),y
+        tax                         ; hi
+
+        ldy     tmp_hi              ; dest
+        lda     tmp_lo
+        sta     (_ivm_memlo),y
+        sta     _ivm_acc
+        txa
+        sta     (_ivm_memhi),y
+        sta     _ivm_acc+1
+
+.if .not(ALTCODE)
+        inc     _ivm_ipc
+        bne     :+
+        inc     _ivm_ipc+1
+:
+.endif
+        jmp     pnext
+
 
 ;;; ============================================================
 ;;; Byte / pointer / indexed memory ops (added for C parity)
@@ -1101,13 +1130,13 @@ op_B:
 ;;; (- 2768 2624) = 144 bytes (x 2 for j m)
 
 
-OPFOR=2
+OPFOR=2 ;; new one works i,n only
 ;OPFOR=0
-
+;OPFOR=1 ;; hand coded maybve works for ALTCODE
+	
 .if (OPFOR=2) .and (ALTCODE=0)
 
-;;; TODO: only works if 
-;;; latest complete from grok - works
+;;; TODO: only works if NOT ALTCODE
 
 op_i:
         ldy     #0
@@ -1214,8 +1243,10 @@ n_exit:
 	
 .endif ; OPFOR=2
 	
-.if OPFOR=1
 
+.if OPFOR=1
+;;;  TODO: does it work?
+	
 op_i:
         FIXIPC                  ; Y = 0, ipc at first operand
         sty     savey
@@ -1632,7 +1663,6 @@ op_dollar:
 op_colon:
 
 op_A:
-op_C:
 op_D:
 
 op_H:
@@ -1684,6 +1714,8 @@ op_z:
 op_del:
 
 op_bad:
+	stx     tmp_lo      	; save op code
+	
 	FIXIPC
 ;;; TODO: print address, and byte code value
         lda     #10
@@ -1692,7 +1724,7 @@ op_bad:
         lda     #'%'
         jsr     _putchar
 
-        txa                     ; opcode still in X
+        lda     tmp_lo          ; op code
         jsr     _putchar
 
         lda     #10

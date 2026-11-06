@@ -76,7 +76,7 @@ static void ivm_print_one(FILE *fp, const uchar *code, unsigned len, unsigned *p
     }
 
     // 2 args
-    if ((c == 'U' || c == '(' || c == ')') && i + 2 < len) {
+    if ((c == 'C' || c == 'U' || c == '(' || c == ')') && i + 2 < len) {
       fprintf(fp, "%c%02x%02x ", c, code[i + 1], code[i + 2]);
       *pi = i + 3;
       return;
