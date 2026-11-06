@@ -130,9 +130,13 @@ Simplyfy function calling code:
 #define INY   0xC8
 #define BNE   0xD0
 #define BEQ   0xF0
+#define SBCZ  0xE5
 #define SBC   0xED
 #define INC_  0xEE
 #define DEC_  0xCE
+#define DEX   0xCA
+#define INX   0xE8
+#define NOP   0xEA
 #define ASL   0x0A
 #define ROL   0x2A
 #define PHA   0x48
@@ -162,6 +166,15 @@ typedef struct { word at, bc_target; } LcFix;
 
 static LcFix lc_fix[256];
 static word  lc_nfix;
+
+// jump vector table at start of code (word per vector)
+static word  lc_vecmark;      // offset in out[] of vector table
+static word  lc_out_org;      // absolute base of out[]
+static uchar lc_ncall;
+static uchar lc_cur_frame;    // frame_base of function being compiled
+static const uchar *lc_fbase; // frame_base[v]
+static const word  *lc_vec_bc;// bytecode entry pc per vector
+
 
 static void em(uchar b) {
   if (lc_at < lc_max) lc_out[lc_at] = b;
@@ -219,16 +232,23 @@ static void emit_rel(uchar bop, word bc_target) {
   }
 }
 
-// INSTRUCTION: pass in the vector table of resolved native addresses.
-// callvec[i] = absolute 6502 address of compiled body for vector i
-// (from blob call table: native = out_org + map[vec_bytecode_offset]).
-// If callvec is NULL or entry is 0, JSR site is recorded and can be
-// patched later with ivm_loadcompile_patch_calls().
+
+// Layout at out_org:
+//   [NOPs until out_org+lc_at is odd]
+//   JMP abs          ; 4C + vec[0] (main) — first vector word is JMP operand
+//   vecmark:         ; word per vector, patched when that function is compiled
+//   ...code...
+// Calls: JSR abs with address from vecmark+2*v (patched same way).
+// No runtime fp: slots use frame_base[v] known at transpile time.
+// Function entry: store AX to mem[frame_base[v]+FR_ACC] (arg home / ACC).
+#define FR_ACC 3
+
 word ivm_loadcompile(const uchar *code, word code_len,
   uchar *out, word out_max,
   word *map, word map_n,
   word mem_base,
-  const word *callvec, uchar ncall)
+  word out_org,
+  const word *vec_bc, const uchar *frame_base, uchar ncall)
 {
   const uchar *p, *end;
   word i, bc_pc;
@@ -239,26 +259,52 @@ word ivm_loadcompile(const uchar *code, word code_len,
   lc_out = out; lc_at = 0; lc_max = out_max;
   lc_map = map; lc_mapn = map_n; lc_mem = mem_base;
   lc_nfix = 0;
-  lc_ncalls = 0;
-  lc_callvec = callvec;
+  lc_out_org = out_org;
   lc_ncall = ncall;
+  lc_fbase = frame_base;
+  lc_vec_bc = vec_bc;
+  lc_cur_frame = frame_base ? frame_base[0] : 0;
 
-  // reset mapping to "slot not used"
   for (i = 0; i < code_len; i++)
     map[i] = 0xffff;
+
+  // NOP until odd absolute address
+  while (((out_org + lc_at) & 1) == 0)
+    em(NOP);
+
+  // JMP + vector table: JMP uses first word (main = vector 0)
+  em(JMP);
+  lc_vecmark = lc_at;
+  for (i = 0; i < ncall; i++) {
+    em(0); em(0); // patched at function entry
+  }
 
   p = code;
   end = code + code_len;
 
   while (p < end) {
-
-    // add current compiled address to mapping
-    // for each bytecode start pos
     bc_pc = (word)(p - code);
     if (bc_pc < lc_mapn)
       lc_map[bc_pc] = lc_at;
 
-    // next op
+    // function entry: patch vector word, set frame, store AX to ACC home
+    if (vec_bc && frame_base) {
+      for (i = 0; i < ncall; i++) {
+        if (vec_bc[i] == bc_pc) {
+          word abs = (word)(out_org + lc_at);
+          word at = (word)(lc_vecmark + i * 2);
+          if (at + 1 < lc_max) {
+            lc_out[at]     = (uchar)(abs & 0xff);
+            lc_out[at + 1] = (uchar)(abs >> 8);
+          }
+          lc_cur_frame = frame_base[i];
+          // first in function: mem[fp+FR_ACC] = AX (incoming arg / ACC home)
+          emit_store_slot((uchar)(lc_cur_frame + FR_ACC));
+          break;
+        }
+      }
+    }
+
     op = *p++;
 
     // 0..31: fast load mem[op]
@@ -269,19 +315,19 @@ word ivm_loadcompile(const uchar *code, word code_len,
       if (op >= 0xC0) {
         uchar v = (uchar)(op - 0xC0);
         word dest = 0;
-        word at;
-        if (lc_callvec && v < lc_ncall)
-          dest = lc_callvec[v];
+        // JSR to address held in vector table — emit JSR abs, patch from table word
+        // if already patched (function compiled earlier), use it; else 0 and leave for later
+        if (v < lc_ncall && lc_vecmark + v * 2 + 1 < lc_max) {
+          dest = (word)(lc_out[lc_vecmark + v * 2]
+                     | (lc_out[lc_vecmark + v * 2 + 1] << 8));
+        }
         ema(JSR, dest);
-        // operand lo sits at lc_at-2 after ema
-        at = (word)(lc_at - 2);
-        if (!dest && lc_ncalls < 128) {
-          lc_calls[lc_ncalls].at = at;
-          lc_calls[lc_ncalls].vec = v;
-          lc_ncalls++;
-        } else if (dest && at + 1 < lc_max) {
-          lc_out[at]     = (uchar)(dest & 0xff);
-          lc_out[at + 1] = (uchar)(dest >> 8);
+        // if dest still 0, record fixup: copy from vector table at end
+        if (!dest && lc_nfix < 256) {
+          // reuse LcFix: at = jsr operand, bc_target = 0x8000|v as tag
+          lc_fix[lc_nfix].at = (word)(lc_at - 2);
+          lc_fix[lc_nfix].bc_target = (word)(0x8000 | v);
+          lc_nfix++;
         }
       } else {
         emit_load_slot((uchar)(op & 0x7f));
@@ -309,12 +355,57 @@ word ivm_loadcompile(const uchar *code, word code_len,
     case 'S': emit_store_slot(PAR); break;
     case 'Z': emit_load0(); emit_store_slot(PAR); break;
 
+    // frame args: fixed addresses from frame_base (no runtime fp)
+    // '8' = first arg / ACC home at fp+FR_ACC
+    // '1'..'7' = fp+FR_ACC+(op-'0')
+    case '8': emit_load_slot((uchar)(lc_cur_frame + FR_ACC)); break;
+    case '1': case '2': case '3': case '4':
+    case '5': case '6': case '7':
+      emit_load_slot((uchar)(lc_cur_frame + FR_ACC + (op - '0')));
+      break;
+
     // arith / logic (emit_lohiop)
     case '+': em(CLC); emit_lohiop(ADC, PAR); break;
     case '-': em(SEC); emit_lohiop(SBC, PAR); break;
     case '&':          emit_lohiop(AND_, PAR); break;
     case '|':          emit_lohiop(ORA, PAR); break;
     case '^':          emit_lohiop(EOR, PAR); break;
+
+    // compares → boolean ACC (0 or 1). '=' trivial; '<'/'>' via subtract + sign/ne
+    case '=': {
+      uchar s = PAR;
+      em(SEC); emit_lohiop(SBC, s);           // ACC -= mem[s]
+      em2(STXZ, tmp1); em2(ORAZ, tmp1);       // Z if equal
+      em2(BEQ, 6);
+      em2(LDAN, 0); em2(LDXN, 0); em2(BEQ, 4);
+      em2(LDAN, 1); em2(LDXN, 0);
+      break;
+    }
+    case '<': {
+      uchar s = PAR;
+      em(SEC); emit_lohiop(SBC, s);           // ACC = ACC - mem[s]
+      // signed < : result negative → 1
+      em(TXA); em2(BMI, 6);
+      em2(LDAN, 0); em2(LDXN, 0); em2(BEQ, 4);
+      em2(LDAN, 1); em2(LDXN, 0);
+      break;
+    }
+    case '>': {
+      uchar s = PAR;
+      // ACC > mem  iff  mem < ACC  iff  !(ACC <= mem) — do mem-ACC via swap:
+      // compute mem[s]-ACC: load mem, subtract ACC
+      em2(STAZ, tmp1); em2(STXZ, tmp2);       // save ACC
+      emit_load_slot(s);
+      em(SEC);
+      em2(SBCZ, tmp1); em(TAY);
+      em(TXA); em2(SBCZ, tmp2); em(TAX);      // AX = mem - ACC
+      em(TYA);
+      // mem-ACC negative ⇒ mem < ACC ⇒ ACC > mem
+      em(TXA); em2(BMI, 6);
+      em2(LDAN, 0); em2(LDXN, 0); em2(BEQ, 4);
+      em2(LDAN, 1); em2(LDXN, 0);
+      break;
+    }
 
     // * / % — helpers as in ivm-vm.asm (ACC op PAR); TODO: PARAX into zp_par
     case '*': PAR; ema(JSR, REF(opmul)); break;
@@ -485,16 +576,31 @@ word ivm_loadcompile(const uchar *code, word code_len,
     }
   }
 
-  // patching jumps
+  // patch relative jumps and forward JSRs to vector table
   for (i = 0; i < lc_nfix; i++) {
     word dest = lc_fix[i].bc_target;
     word mapped = 0xffff;
     word d;
     int rel;
 
+    // tagged call fixup: 0x8000 | vector index → absolute from vec table
+    if (dest & 0x8000) {
+      uchar v = (uchar)(dest & 0x7f);
+      word at = lc_fix[i].at;
+      word abs = 0;
+      if (v < lc_ncall && lc_vecmark + v * 2 + 1 < lc_max)
+        abs = (word)(lc_out[lc_vecmark + v * 2]
+                  | (lc_out[lc_vecmark + v * 2 + 1] << 8));
+      if (at + 1 < lc_max) {
+        lc_out[at]     = (uchar)(abs & 0xff);
+        lc_out[at + 1] = (uchar)(abs >> 8);
+      }
+      continue;
+    }
+
     if (dest < lc_mapn) mapped = lc_map[dest];
 
-    // INSTRUCITON: describe semantcis of this
+    // if branch target landed mid-op, snap forward to next mapped bytecode pc
     if (mapped == 0xffff)
       for (d = dest; d < code_len && d < lc_mapn; d++)
         if (lc_map[d] != 0xffff) { mapped = lc_map[d]; break; }
@@ -504,7 +610,7 @@ word ivm_loadcompile(const uchar *code, word code_len,
       return 0;
     }
 
-    // calulcate relative jump
+    // relative branch: offset from byte after rel8 operand
     rel = (int)mapped - (int)(lc_fix[i].at + 1);
 
     if (rel < -128 || rel > 127) {
