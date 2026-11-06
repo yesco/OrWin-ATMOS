@@ -47,7 +47,7 @@ Typical flow:
 | **Compares** `<` `=` `>` | **Missing** (`BRK`) — sieve is full of `i < LIMIT` |
 | **Loops** `i` / `n` (or only `G`/`B`) | **Partial** — `G`/`B` only; no `i`/`n`/`U` |
 | **Array** `(` `)` | Present (needs testing) |
-| ** | JSR helpers; still need **PARAX → zp_par** |
+| **\* / /** | JSR helpers; still need **PARAX → zp_par** |
 
 Sieve is dominated by **`for` + compare + index + call to
 `primes`**. Without **`<`/`>`** and a **real call/return frame**, it
@@ -234,13 +234,12 @@ static void emit_rel(uchar bop, word bc_target) {
 
 
 // Layout at out_org:
-//   [NOPs until out_org+lc_at is odd]
-//   JMP abs          ; 4C + vec[0] (main) — first vector word is JMP operand
-//   vecmark:         ; word per vector, patched when that function is compiled
-//   ...code...
-// Calls: JSR abs with address from vecmark+2*v (patched same way).
-// No runtime fp: slots use frame_base[v] known at transpile time.
-// Function entry: store AX to mem[frame_base[v]+FR_ACC] (arg home / ACC).
+//   NOPs until odd address
+//   JMP + vec[0..n)   ; JMP operand is vec[0] (main), filled at main entry
+//   code...
+// No forward calls / recursion: callee is compiled first, so vec[v] is already set.
+// Call = JSR abs from vec[v]. No call fixup list.
+// Frames: frame_base[v] known at transpile; entry stores AX to fp+FR_ACC.
 #define FR_ACC 3
 
 word ivm_loadcompile(const uchar *code, word code_len,
@@ -305,7 +304,6 @@ word ivm_loadcompile(const uchar *code, word code_len,
       }
     }
 
-    // next op
     op = *p++;
 
     // 0..31: fast load mem[op]
@@ -316,20 +314,13 @@ word ivm_loadcompile(const uchar *code, word code_len,
       if (op >= 0xC0) {
         uchar v = (uchar)(op - 0xC0);
         word dest = 0;
-        // JSR to address held in vector table — emit JSR abs, patch from table word
-        // if already patched (function compiled earlier), use it; else 0 and leave for later
-        if (v < lc_ncall && lc_vecmark + v * 2 + 1 < lc_max) {
+        if (v < lc_ncall && lc_vecmark + v * 2 + 1 < lc_max)
           dest = (word)(lc_out[lc_vecmark + v * 2]
                      | (lc_out[lc_vecmark + v * 2 + 1] << 8));
-        }
+        // backward calls only: dest must already be filled at callee entry
+        if (!dest)
+          printf("%%LOADCOMPILE: call vec %u before definition\n", v);
         ema(JSR, dest);
-        // if dest still 0, record fixup: copy from vector table at end
-        if (!dest && lc_nfix < 256) {
-          // reuse LcFix: at = jsr operand, bc_target = 0x8000|v as tag
-          lc_fix[lc_nfix].at = (word)(lc_at - 2);
-          lc_fix[lc_nfix].bc_target = (word)(0x8000 | v);
-          lc_nfix++;
-        }
       } else {
         emit_load_slot((uchar)(op & 0x7f));
       }
@@ -577,31 +568,16 @@ word ivm_loadcompile(const uchar *code, word code_len,
     }
   }
 
-  // patch relative jumps and forward JSRs to vector table
+  // patch relative branches only (G/B). Calls need no fixups.
   for (i = 0; i < lc_nfix; i++) {
     word dest = lc_fix[i].bc_target;
     word mapped = 0xffff;
     word d;
     int rel;
 
-    // tagged call fixup: 0x8000 | vector index → absolute from vec table
-    if (dest & 0x8000) {
-      uchar v = (uchar)(dest & 0x7f);
-      word at = lc_fix[i].at;
-      word abs = 0;
-      if (v < lc_ncall && lc_vecmark + v * 2 + 1 < lc_max)
-        abs = (word)(lc_out[lc_vecmark + v * 2]
-                  | (lc_out[lc_vecmark + v * 2 + 1] << 8));
-      if (at + 1 < lc_max) {
-        lc_out[at]     = (uchar)(abs & 0xff);
-        lc_out[at + 1] = (uchar)(abs >> 8);
-      }
-      continue;
-    }
-
     if (dest < lc_mapn) mapped = lc_map[dest];
 
-    // if branch target landed mid-op, snap forward to next mapped bytecode pc
+    // mid-op target → snap forward to next op start
     if (mapped == 0xffff)
       for (d = dest; d < code_len && d < lc_mapn; d++)
         if (lc_map[d] != 0xffff) { mapped = lc_map[d]; break; }
@@ -611,14 +587,11 @@ word ivm_loadcompile(const uchar *code, word code_len,
       return 0;
     }
 
-    // relative branch: offset from byte after rel8 operand
     rel = (int)mapped - (int)(lc_fix[i].at + 1);
-
     if (rel < -128 || rel > 127) {
       printf("%%LOADCOMPILE: rel range %d\n", rel);
       return 0;
     }
-
     if (lc_fix[i].at < lc_max)
       lc_out[lc_fix[i].at] = (uchar)rel;
   }
