@@ -179,7 +179,7 @@ static void anim_report(void) {
 // CONFIGURATION
 
 // (- 26871 26002) = 869
-#include "darr.c"
+//#include "darr.c"
 
 #define MAX_BIN_LEN 4096
 #define MAX_SLOTS 255
@@ -224,13 +224,12 @@ static const char *fail_file;   // optional: file name for "cannot open"
 
 uchar *g_loaded;
 
-#define MAIN
-
 // host libc already has strndup/memmem — keep ivm library, avoid name clash
 
 #include <assert.h>
 #include <string.h>
 //#include <strings.h>
+
 
 #ifdef RUN
   #include "ivm.c"

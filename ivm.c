@@ -215,17 +215,12 @@
 #endif
 
 
-#define MAIN
-
-// TODO: not needed???
-//#include "ivm-print.c"
-
-
-#define LOADCOMPILE
+//#define LOADCOMPILE
 
 #ifdef LOADCOMPILE
   #include "ivm-loadcompile.c"
 #endif
+
 
 
 //#define COUNTOPS
@@ -1562,7 +1557,7 @@ int run_file(char* filename) {
 }
 
 
-#ifdef MAIN
+#ifndef MAIN
 
 #ifdef OSCAR64
 int main(void) {

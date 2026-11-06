@@ -47,7 +47,7 @@ Typical flow:
 | **Compares** `<` `=` `>` | **Missing** (`BRK`) — sieve is full of `i < LIMIT` |
 | **Loops** `i` / `n` (or only `G`/`B`) | **Partial** — `G`/`B` only; no `i`/`n`/`U` |
 | **Array** `(` `)` | Present (needs testing) |
-| **\* / /** | JSR helpers; still need **PARAX → zp_par** |
+| ** | JSR helpers; still need **PARAX → zp_par** |
 
 Sieve is dominated by **`for` + compare + index + call to
 `primes`**. Without **`<`/`>`** and a **real call/return frame**, it
@@ -305,6 +305,7 @@ word ivm_loadcompile(const uchar *code, word code_len,
       }
     }
 
+    // next op
     op = *p++;
 
     // 0..31: fast load mem[op]
