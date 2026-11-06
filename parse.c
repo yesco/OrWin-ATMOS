@@ -266,12 +266,85 @@ static void sym_open(const char *path) {
 }
 
 static void sym_write_all(void) {
-  word i, j;
-  uchar v, fb, sz, hi;
+  word i, j, pc;
+  uchar v, fb, sz, op;
   char tbuf[4];
   Symbol *s;
+  uchar r[256], wcnt[256];
+  uchar ccall[MAX_VECTORS];
+  word cmask[MAX_VECTORS];
 
   if (!sym_fp) return;
+
+  memset(r, 0, sizeof(r));
+  memset(wcnt, 0, sizeof(wcnt));
+  memset(ccall, 0, sizeof(ccall));
+  memset(cmask, 0, sizeof(cmask));
+
+  // Final bytecode only — emit-time note_* is inflated by backtracking
+  for (pc = 0; pc < (word)bin_ptr; ) {
+    op = bin[pc++];
+    if (op < 32) {
+      if (r[op] < 255) r[op]++;
+      continue;
+    }
+    if (op & 0x80) {
+      if (op >= 0xC0) {
+        uchar callee = (uchar)(op - 0xC0);
+        uchar caller = 0xff;
+        word at = (word)(pc - 1);
+        if (callee < MAX_VECTORS && ccall[callee] < 255)
+          ccall[callee]++;
+        for (i = 0; i < nvector; i++) {
+          word a = vectors[i], b = (word)bin_ptr;
+          for (j = 0; j < nvector; j++)
+            if (vectors[j] > a && vectors[j] < b) b = vectors[j];
+          if (at >= a && at < b) { caller = (uchar)i; break; }
+        }
+        if (caller != 0xff && callee < 16)
+          cmask[caller] |= (word)(1u << callee);
+      }
+      continue;
+    }
+    switch (op) {
+    case 'L':
+      if (pc < (word)bin_ptr) {
+        uchar a = bin[pc++];
+        if (r[a] < 255) r[a]++;
+      }
+      break;
+    case 'S': case 'Z':
+      if (pc < (word)bin_ptr) {
+        uchar a = bin[pc++];
+        if (wcnt[a] < 255) wcnt[a]++;
+      }
+      break;
+    case 'I': case 'J': case 'U':
+      if (pc < (word)bin_ptr) {
+        uchar a = bin[pc++];
+        if (r[a] < 255) r[a]++;
+        if (wcnt[a] < 255) wcnt[a]++;
+      }
+      break;
+    case 'G': case 'B': case 'O':
+    case '+': case '-': case '*': case '/': case '%':
+    case '&': case '|': case '^': case '[': case ']':
+    case '{': case '}': case '<': case '=': case '>':
+    case 'M': case 'F': case '@': case '!':
+    case 'r': case 'w': case 'l': case 's': case '\'': case ',':
+      if (pc < (word)bin_ptr) pc++;
+      break;
+    case '(': case ')':
+      if (pc + 1 < (word)bin_ptr) pc += 2;
+      break;
+    case '"':
+      while (pc < (word)bin_ptr && bin[pc]) pc++;
+      if (pc < (word)bin_ptr) pc++;
+      break;
+    default:
+      break;
+    }
+  }
 
   for (i = 0; i < nsym; i++) {
     s = &syms[i];
@@ -282,14 +355,12 @@ static void sym_write_all(void) {
     else if (s->scope == 0) fprintf(sym_fp, "global    ");
     else fprintf(sym_fp, "local     ");
     fprintf(sym_fp, "%-5s  r=%u w=%u",
-            tbuf, (unsigned)sym_r[s->address], (unsigned)sym_w[s->address]);
+            tbuf, (unsigned)r[s->address], (unsigned)wcnt[s->address]);
     for (v = 0; v < nvector; v++) {
-      uchar vsz;
-      word k;
+      uchar vsz = 0;
       fb = frame_base[v];
-      vsz = 0;
-      for (k = 0; k < nvector; k++) {
-        uchar ob = frame_base[k];
+      for (j = 0; j < nvector; j++) {
+        uchar ob = frame_base[j];
         if (ob > fb) {
           uchar gap = (uchar)(ob - fb);
           if (!vsz || gap < vsz) vsz = gap;
@@ -309,7 +380,6 @@ static void sym_write_all(void) {
     if (s->type != SYM_FUNC) continue;
     v = s->address;
     fb = frame_base[v];
-    // size = span to next higher frame_base, else tracked frame_sz / 4
     sz = 0;
     for (j = 0; j < nvector; j++) {
       uchar ob = frame_base[j];
@@ -318,12 +388,9 @@ static void sym_write_all(void) {
         if (!sz || gap < sz) sz = gap;
       }
     }
-    if (!sz) {
-      // last frame in slot space: use tracked size from alloc_slot
-      sz = frame_sz[v] ? frame_sz[v] : 4;
-    }
-    fprintf(sym_fp, "%04x  V%02x  %-20s  fp=%02x  sz=%02x",
-            (unsigned)vectors[v], v, s->name, fb, sz);
+    if (!sz) sz = frame_sz[v] ? frame_sz[v] : 4;
+    fprintf(sym_fp, "%04x  V%02x  %-20s  fp=%02x  sz=%02x  c=%u",
+            (unsigned)vectors[v], v, s->name, fb, sz, (unsigned)ccall[v]);
     for (j = 0; j < s->nparams; j++) {
       word k;
       for (k = 0; k < nsym; k++) {
@@ -340,9 +407,18 @@ static void sym_write_all(void) {
     fputc('\n', sym_fp);
   }
 
+  for (v = 0; v < nvector; v++) {
+    fprintf(sym_fp, "V%02x:", v);
+    for (j = 0; j < nvector && j < 16; j++)
+      if (cmask[v] & (word)(1u << j))
+        fprintf(sym_fp, " V%02x", j);
+    fputc('\n', sym_fp);
+  }
+
   fclose(sym_fp);
   sym_fp = 0;
 }
+
 #endif
 
 #define code_buf ((uchar *)bin)
