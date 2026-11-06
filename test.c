@@ -192,7 +192,7 @@ int main(void) {
   // Test: 16-Bit variable immediate assignment
   alpha = 7;
 
-  putz("alpha: "); putn(alpha); putchar("\n");
+  putz("alpha: "); putn(alpha); putchar('\n');
    
   putz("3+4: "); putn(3 + 4); putchar('\n');
 

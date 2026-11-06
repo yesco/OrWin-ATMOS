@@ -553,6 +553,10 @@ static int ivm_check(Process *proc, const uchar *ipc) {
   #undef TRACE
   #define TRACE(proc, p) trace(proc, p)
 
+#define MAIN
+#include "ivm-print.c"
+#undef MAIN
+
 // blob base while running (already in ivm.c)
 extern uchar *g_loaded;
 
