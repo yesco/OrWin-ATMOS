@@ -20,11 +20,6 @@ typedef uint16_t       word;
 
 // ---- bytecode pretty-printer (existing) ---- 
 
-static int ivm_is_solo(uchar c) {
-  if (islower((int)c)) return 1;
-  return strchr("#$(),.0123456789;?ADEKNPQR~X", (int)c) != 0;
-}
-
 static void ivm_print_one(FILE *fp, const uchar *code, unsigned len, unsigned *pi) {
   uchar c;
   unsigned i = *pi;
@@ -72,26 +67,36 @@ static void ivm_print_one(FILE *fp, const uchar *code, unsigned len, unsigned *p
   }
 
   if (c > ' ' && c < 127) {
-    if ((c == 'i' || c == 'j') && i + 2 < len) {
+
+    // 3 args
+    if ((c == 'i' || c == 'j') && i + 3 < len) {
       fprintf(fp, "%c%02x%02x%02x ", c, code[i + 1], code[i + 2], code[i + 3]);
       *pi = i + 4;
       return;
     }
+
+    // 2 args
     if ((c == 'U' || c == '(' || c == ')') && i + 2 < len) {
       fprintf(fp, "%c%02x%02x ", c, code[i + 1], code[i + 2]);
       *pi = i + 3;
       return;
     }
-    if (ivm_is_solo(c)) {
+
+    // 0 arg
+    if (strchr("#$(),.0123456789;?ADEKNPQR~X", c) != NULL) {
       fprintf(fp, "%c ", c);
       *pi = i + 1;
       return;
     }
+
+    // assume 1 arg
     if (i + 1 < len) {
       fprintf(fp, "%c%02x ", c, code[i + 1]);
       *pi = i + 2;
       return;
     }
+
+    // fallback at end
     fprintf(fp, "%c ", c);
     *pi = i + 1;
     return;
@@ -101,8 +106,10 @@ static void ivm_print_one(FILE *fp, const uchar *code, unsigned len, unsigned *p
   *pi = i + 1;
 }
 
-unsigned ivm_print_code_range(FILE *fp, const uchar *code, unsigned start,
-                              unsigned end, unsigned wrap) {
+unsigned ivm_print_code_range(
+  FILE *fp, const uchar *code, unsigned start,
+  unsigned end, unsigned wrap)
+{
   unsigned i = start;
   unsigned n = 0;
 
@@ -111,9 +118,16 @@ unsigned ivm_print_code_range(FILE *fp, const uchar *code, unsigned start,
   while (i < end) {
     unsigned before = i;
     uchar ch = code[i];
+
+    if (wrap && (strchr("ijnm", ch) != NULL)) {
+      fputc('\n', fp);
+      n = 0;
+    }
+      
     ivm_print_one(fp, code, end, &i);
     if (i <= before) i = before + 1;
-    if (wrap && (ch == 'N' || ch == ';' || ch == 'X' || ch == 'Q' || ++n >= wrap)) {
+
+    if (wrap && ((strchr("ijnmN;XQ", ch) != NULL) || ++n >= wrap)) {
       fputc('\n', fp);
       n = 0;
     }
