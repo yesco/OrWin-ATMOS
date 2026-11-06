@@ -72,7 +72,12 @@ static void ivm_print_one(FILE *fp, const uchar *code, unsigned len, unsigned *p
   }
 
   if (c > ' ' && c < 127) {
-    if ((c == 'U' || c == '(' || c == ')' || c == 'i') && i + 2 < len) {
+    if ((c == 'i' || c == 'j') && i + 2 < len) {
+      fprintf(fp, "%c%02x%02x%02x ", c, code[i + 1], code[i + 2], code[i + 3]);
+      *pi = i + 4;
+      return;
+    }
+    if ((c == 'U' || c == '(' || c == ')') && i + 2 < len) {
       fprintf(fp, "%c%02x%02x ", c, code[i + 1], code[i + 2]);
       *pi = i + 3;
       return;
