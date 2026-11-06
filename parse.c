@@ -195,8 +195,16 @@ static void anim_report(void) {
 
 
 // shared emit + real const addresses
+#ifdef SYMS
+static FILE *sym_fp;
+static uchar sym_r[256];
+static uchar sym_w[256];
+static void note_load(uchar addr)  { if (sym_r[addr] < 255) sym_r[addr]++; }
+static void note_store(uchar addr) { if (sym_w[addr] < 255) sym_w[addr]++; }
+#else
 static void note_load(uchar addr) { (void)addr; }
 static void note_store(uchar addr) { (void)addr; }
+#endif
 
 // FAIL: real (non-backtracking) errors. Message is printed ONCE where
 // setjmp is caught in main(), together with the source position.
@@ -218,6 +226,112 @@ static const char *fail_file;   // optional: file name for "cannot open"
 
 
 #include "ivm-gen.c"
+
+#ifdef SYMS
+static uchar frame_sz[MAX_VECTORS];
+
+static void sym_type_str(Symbol *s, char *buf) {
+  buf[0] = (char)(s->vtype ? s->vtype : 'w');
+  buf[1] = 0;
+  if (s->is_ptr) { buf[1] = '*'; buf[2] = 0; }
+}
+
+// stream one patch line when resolved — no arrays
+static void sym_patch(char kind, word at, word to, int rel, uchar vec) {
+  if (!sym_fp) return;
+  fprintf(sym_fp, "  %c   %04x    %04x    %+d", kind, at, to, rel);
+  if (vec != 0xff) fprintf(sym_fp, "     V%02x", vec);
+  fputc('\n', sym_fp);
+}
+
+static void sym_open(const char *path) {
+  char out[128];
+  word n = 0;
+  const char *base = path, *s, *dot = 0;
+  for (s = path; *s; s++)
+    if (*s == '/' || *s == '\\') base = s + 1;
+  for (s = base; *s && n < sizeof(out) - 5; s++) {
+    out[n++] = *s;
+    if (*s == '.') dot = out + n - 1;
+  }
+  if (dot) n = (word)(dot - out);
+  out[n++] = '.'; out[n++] = 's'; out[n++] = 'y'; out[n++] = 'm';
+  out[n] = 0;
+  memset(sym_r, 0, sizeof(sym_r));
+  memset(sym_w, 0, sizeof(sym_w));
+  memset(frame_sz, 0, sizeof(frame_sz));
+  sym_fp = fopen(out, "w");
+  if (sym_fp)
+    fprintf(sym_fp, "# %s\n# num  tag  name  scope  type  refs\n", out);
+}
+
+static void sym_write_all(void) {
+  word i, j;
+  uchar v, fb, sz, hi;
+  char tbuf[4];
+  Symbol *s;
+
+  if (!sym_fp) return;
+
+  for (i = 0; i < nsym; i++) {
+    s = &syms[i];
+    if (s->type != SYM_VAR) continue;
+    sym_type_str(s, tbuf);
+    fprintf(sym_fp, "  %02x  M  %-20s  ", s->address, s->name);
+    if (s->pidx) fprintf(sym_fp, "param     ");
+    else if (s->scope == 0) fprintf(sym_fp, "global    ");
+    else fprintf(sym_fp, "local     ");
+    fprintf(sym_fp, "%-5s  r=%u w=%u",
+            tbuf, (unsigned)sym_r[s->address], (unsigned)sym_w[s->address]);
+    for (v = 0; v < nvector; v++) {
+      fb = frame_base[v];
+      sz = frame_sz[v] ? frame_sz[v] : 4;
+      if (s->address >= fb && s->address < (uchar)(fb + sz)) {
+        fprintf(sym_fp, "  V%02x", v);
+        break;
+      }
+    }
+    fputc('\n', sym_fp);
+  }
+
+  for (i = 0; i < nsym; i++) {
+    s = &syms[i];
+    if (s->type != SYM_FUNC) continue;
+    v = s->address;
+    fb = frame_base[v];
+    sz = frame_sz[v];
+    if (!sz) {
+      hi = fb + 3;
+      for (j = 0; j < nsym; j++)
+        if (syms[j].type == SYM_VAR &&
+            syms[j].address >= fb &&
+            syms[j].address < (uchar)(fb + 64) &&
+            syms[j].address > hi)
+          hi = syms[j].address;
+      sz = (uchar)(hi - fb + 1);
+    }
+    fprintf(sym_fp, "%04x  V%02x  %-20s  fp=%02x  sz=%02x",
+            (unsigned)vectors[v], v, s->name, fb, sz);
+    for (j = 0; j < s->nparams; j++) {
+      word k;
+      for (k = 0; k < nsym; k++) {
+        if (syms[k].type != SYM_VAR || syms[k].pidx != j + 1) continue;
+        if (syms[k].address != s->param_slot[j] &&
+            !(j + 1 == s->nparams &&
+              syms[k].address == (uchar)(frame_base[v] + 3)))
+          continue;
+        sym_type_str(&syms[k], tbuf);
+        fprintf(sym_fp, "%s%s %s", j ? "," : "  ", tbuf, syms[k].name);
+        break;
+      }
+    }
+    fputc('\n', sym_fp);
+  }
+
+  fclose(sym_fp);
+  sym_fp = 0;
+}
+#endif
 
 #define code_buf ((uchar *)bin)
 #define code_len bin_ptr
@@ -561,7 +675,13 @@ static uchar alloc_slot(void) {
 
   s = next_slot;
   next_slot++;
-
+#ifdef SYMS
+  if (last_func_vec != 0xff) {
+    uchar fb = frame_base[last_func_vec];
+    uchar nsz = (uchar)(next_slot - fb);
+    if (nsz > frame_sz[last_func_vec]) frame_sz[last_func_vec] = nsz;
+  }
+#endif
   return s;
 }
 
@@ -676,6 +796,10 @@ static uchar *run_production(uchar *p) {
           w = cur->patch[--cur->npatch];
           if (code_len - (w + 1) > 255) FAIL("jump too far");
           code_buf[w] = code_len - (w + 1);
+#ifdef SYMS
+          sym_patch('F', (word)w, (word)code_len,
+                    (int)code_buf[w], last_func_vec);
+#endif
         }
         break;
 
@@ -698,6 +822,10 @@ static uchar *run_production(uchar *p) {
         w = code_len + 1 - cur->mark;
         if (w > 255) FAIL("loop body too large");
         emit(w);
+#ifdef SYMS
+        sym_patch('B', (word)(code_len - 1), (word)cur->mark,
+                  (int)w, last_func_vec);
+#endif
         break;
 
       // \k: param slot for the next call argument; frame above is the caller
@@ -1945,6 +2073,9 @@ static void report_reject(void) {
 static void init(char *bnf_path, char *src_path) {
 
   src_name = src_path;
+#ifdef SYMS
+  sym_open(src_name);
+#endif
   load_bnf(bnf_path);
 
   if (src_fp) fclose(src_fp);
@@ -2143,6 +2274,12 @@ int main(int argc, char **argv) {
           fwrite(blob, 1, (size_t)blen, of);
           fclose(of);
           eprintf("--- SAVED %s (%d bytes) ---\n", out, blen);
+#ifdef SYMS
+          if (sym_fp) {
+            sym_write_all();
+            eprintf("--- SAVED .sym ---\n");
+          }
+#endif
         } else
           eprintf("--- SAVE failed: %s ---\n", out);
       }

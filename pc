@@ -7,7 +7,7 @@ else
 fi
 
 
-clang -DVERBOSE -DRUN parse.c && time ./a.out -v c.bnf $name.c
+clang -DSYMS -DVERBOSE -DRUN parse.c && time ./a.out -v c.bnf $name.c
 
 echo
 echo "=== $name.c: `./wcode $name.c` LOC ==="
