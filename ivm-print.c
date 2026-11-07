@@ -205,7 +205,7 @@ static void ivm_dump_str_preview(
 void ivm_dump_blob(FILE *fp, const uchar *blob, unsigned len) {
   IvmBlobHdr h;
   unsigned off;
-  unsigned i, nvec, nconst;
+  unsigned i, nvec, nconst, code_len;
   word w;
 
   if (!blob || len < sizeof(IvmBlobHdr)) {
@@ -320,7 +320,7 @@ if (h.len == 0 || h.len > len)
   // ---- bytecode ---- 
   if (h.code && h.code < h.len) {
     unsigned code_end = h.data && h.data > h.code ? h.data : h.len;
-    unsigned code_len = code_end - h.code;
+    code_len = code_end - h.code;
 
     // pad note: prefer even start
     fprintf(fp, "-- bytecode (%u bytes @ %04x) --\n", code_len, h.code);
@@ -387,6 +387,11 @@ if (h.len == 0 || h.len > len)
   }
 
   fprintf(fp, "--- end blob ---\n");
+
+  fprintf(fp, "\n\n--- BYTECODE (%u bytes) ---\n", code_len);
+  ivm_print_code(fp, blob + h.code, code_len);
+  fputc('\n', fp);
+
 }
 
 #endif // IVM_PRINT_C

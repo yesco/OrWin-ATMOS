@@ -47,6 +47,12 @@ K=if (E)[?G\x] K else[0?G\x\w\y] K[\y]
 |for (\i=\d;[C\1\2] \1<=\i; \1++) [\mi\1\4\x] K [n\z\y]
 |for (\i=\i;[C\1\2] \1<=\i; \1++) [\mi\1\4\x] K [n\z\y]
 
+# TODO: - make same for vars, but can we really?
+#   need new op instead of 'i' (j is down) so 'k' maybe (and 'l')
+#   should rewrite so only 'n' is needed, it can figure out the
+#   op, and or run the same code (jump back and forth is ok)
+#   These are 144 bytes (i+n so should minimize, at slight cost)
+
 |for (\i=0; [Z\1]   \1<\d[\eS\t]; \1++) [\mi\1\4\x] K [n\z\y]
 |for (\i=\d;[C\1\2] \1<\d[\eS\t]; \1++) [\mi\1\5\x] K [n\z\y]
 |for (\i=\i;[C\1\2] \1<\d[\eS\t]; \1++) [\mi\1\5\x] K [n\z\y]

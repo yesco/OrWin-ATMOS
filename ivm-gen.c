@@ -69,6 +69,7 @@ void note_store(uchar addr);
 uint16_t vectors[MAX_VECTORS];
 uchar frame_base[MAX_VECTORS];
 uchar nvector;
+uchar next_slot; // low slots (globals/frames); grows up; parse drives this
 word main_offset;
 uchar main_vec;           // vector index of function "main", 0xff = none
 
@@ -200,7 +201,8 @@ uchar add_const_raw(unsigned int v, uchar reloc) {
 
   if (nconst >= MAX_CONSTS)
     IVM_GEN_FAIL("constant pool full");
-  if ((word)(CONST_TOP - nconst) < (word)FRAME_BASE)
+  // collide with real low-slot high-water (next_slot), not fixed FRAME_BASE
+  if ((uchar)(CONST_TOP - nconst) < next_slot)
     IVM_GEN_FAIL("constants collided with frames");
 
   // save value
@@ -305,22 +307,22 @@ uchar lit_addr(unsigned int v) {
 
 typedef enum { SYM_VAR, SYM_FUNC } SymbolType;
 
-// TDOO: shrink! 15 b now -> 10 bytes
+// ~15 bytes + name; shrink later to 10 bytes (pack flags into vtype etc.)
 typedef struct {
   char *name;          // malloc'd
   uchar address;       // VAR: slot   FUNC: vector index
 
-  // TODO: redundant? can just be macros
+  // FUNC layout helpers (also frame_base[vec] in the blob)
   uchar ret_slot;
   uchar ret_addr_slot; // FUNC: frame base
 
-  // TODO: thought I said to use hibit of vtype?
+  // TODO: put in vtype? is_ptr: prefer TY_PTR in typed captures; kept here for sym_find/decl
   uchar is_ptr;        // 1 if pointer type (still one cell)
   uchar vtype;         // TY_WORD ('w') or TY_CHAR ('c') — element type
 
   uchar scope;         // scope depth it was declared in
 
-  // TODO combine 0 = global var, n = parameter n (>0) 0x80 = function
+  // type + pidx: could pack (pidx>0 => param; FUNC=0x80 => function)
   SymbolType type;
   uchar pidx;          // parameter number + 1 (0 = not a parameter)
   uchar nparams;
@@ -469,7 +471,8 @@ void gen_func_entry(uchar v) {
     vectors[v] = (uint16_t)(v == main_vec ? main_offset : bin_ptr);
 }
 
-// TODO: write why it's doing this?
+// Append n bytes at *pp (copy src, or zero-fill if src==NULL).
+// Returns offset from base (section start in the blob). Advances *pp.
 static word gen_memadd(uchar *base, uchar **pp, const void *src, word n) {
   word off = (word)(*pp - base);
 
@@ -543,101 +546,159 @@ uchar *build_blob(int *out_len) {
     if (!const_is_reloc[i] && const_pool[i] == 0) { has0 = 1; break; }
   if (!has0) add_const(0);
 
-  // Reorder pool: [reloc strings][0][other ints]. Small mallocs only (cc65).
+  // Pack const image at h.con: [string data-offs...][0000][other ints].
+  // Map old slot -> new slot; rewrite only real slot *operands* in bin[]
+  // (not a blind scan — that could hit opcodes / G-rel / string bytes).
   {
-    uint16_t *new_pool;
-    uchar *new_reloc;
-    uchar *map;       // old_slot byte -> new_slot
-    uchar nn = 0, n0 = nconst;
+    uchar *map; // old_slot -> new_slot
+    uchar nn = 0, n0 = nconst, os;
     int k;
+    word pc;
+    uchar op;
 
-    new_pool  = (uint16_t *)malloc((unsigned)(n0 + 1) * sizeof(uint16_t));
-    new_reloc = (uchar *)malloc((unsigned)(n0 + 1));
-    map       = (uchar *)malloc(256);
-    if (!new_pool || !new_reloc || !map)
+    map = (uchar *)malloc(256);
+    if (!map)
       IVM_GEN_FAIL("out of memory (const pack)");
 
-    for (i = 0; i < 256; i++) map[i] = (uchar)i;
+    // identity mapping
+    for (i = 0; i < 256; i++) map[i] = i;
 
-    // 1) reloc strings (offsets already non-zero via data pad)
-    for (i = 0; i < (int)n0; i++) {
-      if (!const_is_reloc[i]) continue;
-      new_pool[nn] = const_pool[i];
-      new_reloc[nn] = 1;
-      map[(uchar)(CONST_TOP - i)] = 0xff; // mark for fill below
-      nn++;
-    }
-    // 2) zero - works as end reloc mark, and 0!
-    new_pool[nn] = 0;
-    new_reloc[nn] = 0;
-    nn++;
-    // 3) other ints (!is_reloc)
-    for (i = 0; i < (int)n0; i++) {
-      if (const_is_reloc[i] || const_pool[i] == 0) continue;
-      new_pool[nn] = const_pool[i];
-      new_reloc[nn] = 0;
-      nn++;
-    }
-
-    // TODO: this mirrors loops above, why not done tegether?
-    //   or if not comment each loop's purpose!
+    // count packed length first (strings + zero + other ints)
+    for (i = 0; i < (int)n0; i++)
+      if (const_is_reloc[i]) nn++;
+    nn++; // zero
+    for (i = 0; i < (int)n0; i++)
+      if (!const_is_reloc[i] && const_pool[i] != 0) nn++;
 
     constidx = (uchar)(CONST_TOP - nn + 1);
     k = 0;
+    // fill map and write words straight into the blob (no new_pool copy)
+    h.con = (word)(p - body);
+
+    // reloc strings (read only const_pool[]; write LE words into blob)
     for (i = 0; i < (int)n0; i++) {
       if (!const_is_reloc[i]) continue;
-      map[(uchar)(CONST_TOP - i)] = (uchar)(constidx + k);
+      os = (uchar)(CONST_TOP - i);
+      map[os] = (uchar)(constidx + k);
+      v = const_pool[i];
+      p[0] = (uchar)v;
+      p[1] = (uchar)(v >> 8);
+      p += 2;
       k++;
     }
+    // zero — reloc walk end + real 0 constant
     for (i = 0; i < (int)n0; i++) {
       if (!const_is_reloc[i] && const_pool[i] == 0) {
         map[(uchar)(CONST_TOP - i)] = (uchar)(constidx + k);
         break;
       }
     }
+    p[0] = 0;
+    p[1] = 0;
+    p += 2;
     k++;
+    // other integer consts
     for (i = 0; i < (int)n0; i++) {
       if (const_is_reloc[i] || const_pool[i] == 0) continue;
-      map[(uchar)(CONST_TOP - i)] = (uchar)(constidx + k);
+      os = (uchar)(CONST_TOP - i);
+      map[os] = (uchar)(constidx + k);
+      v = const_pool[i];
+      p[0] = (uchar)v;
+      p[1] = (uchar)(v >> 8);
+      p += 2;
       k++;
     }
-
-    // INSTRUCTION: ANSWER if this is really safe?
-    //   we have a) inline strings b) relative jump offsets
-    // WTF ???
-    
-    // rewrite const slot operands in bytecode
-    for (i = 0; i < bin_ptr; i++) {
-      uchar b = bin[i];
-      uchar ns = map[b];
-
-      if (ns != b && b > (uchar)FRAME_BASE)
-        bin[i] = ns;
+    nconst = (uchar)k;
+    // refresh pool from what we packed (blob LE); reloc flags: [1..nstr) then 0
+    {
+      uchar nstr = 0;
+      uchar *q = body + h.con;
+      for (i = 0; i < (int)n0; i++)
+        if (const_is_reloc[i]) nstr++;
+      for (i = 0; i < (int)nconst; i++) {
+        const_pool[i] = (uint16_t)q[0] | ((uint16_t)q[1] << 8);
+        const_is_reloc[i] = (i < nstr) ? 1 : 0;
+        q += 2;
+      }
     }
 
-    // TODO: describe purpose of loop
-    nconst = nn;
-    for (i = 0; i < (int)nn; i++) {
-      const_pool[i] = new_pool[i];
-      const_is_reloc[i] = new_reloc[i];
-    }
+    // Remap slot operands only (walk opcodes; skip string bodies / rel bytes)
+    // TODO: this is brittle as we walk the bytecode in many places
+    //   should make an next_op function that skips ahead, to be
+    //   used by:
+    //    a) here
+    //    b) print
+    //    c) sym_write_all
+    //    d) any more places?
+    for (pc = 0; pc < (word)bin_ptr; ) {
+      op = bin[pc++];
+      if (op < 32) {
+        // short load of slot op — only remap if that slot moved
+        if (map[op] != op) bin[pc - 1] = map[op];
+        continue;
+      }
+      if (op & 0x80) continue; // call / hi-bit forms: not const slots
+      switch (op) {
+      case 'L': case 'S': case 'Z': case 'I': case 'J':
+      case 'C': // C dest src — two slot operands
+        if (op == 'C') {
+          if (pc < (word)bin_ptr) { bin[pc] = map[bin[pc]]; pc++; }
+          if (pc < (word)bin_ptr) { bin[pc] = map[bin[pc]]; pc++; }
+          break;
+        }
+        if (pc < (word)bin_ptr) { bin[pc] = map[bin[pc]]; pc++; }
+        break;
+      case 'U':
+        if (pc < (word)bin_ptr) { bin[pc] = map[bin[pc]]; pc++; }
+        if (pc < (word)bin_ptr) { bin[pc] = map[bin[pc]]; pc++; }
+        break;
+      case 'i':
+        if (pc + 2 < (word)bin_ptr) {
+          bin[pc] = map[bin[pc]];
+          bin[pc + 1] = map[bin[pc + 1]];
+          pc += 3;
+        }
+        break;
+      case 'n':
+        if (pc < (word)bin_ptr) pc++; // relative back only
+        break;
+      case 'G': case 'B': // relative jump distance, not a slot
+      case 'O': case 'W': // immediate char / print const? W uses PAR slot in some builds
+        if (pc < (word)bin_ptr) pc++;
+        break;
+      // One slot operand (PAR = mem[slot]) — must remap after const pack
+      case '+': case '-': case '*': case '/': case '%':
+      case '&': case '|': case '^': case '[': case ']':
+      case '{': case '}': case '<': case '=': case '>':
+      case 'M': case 'F': case '@': case '!':
+      case 'r': case 'w': case 'l': case 's': case '\'': case ',':
+        if (pc < (word)bin_ptr) { bin[pc] = map[bin[pc]]; pc++; }
+        break;
+      case '(': case ')':
+        if (pc + 1 < (word)bin_ptr) {
+          bin[pc] = map[bin[pc]]; // array base slot
+          pc += 2;
+        }
+        break;
+      case '"':
+        while (pc < (word)bin_ptr && bin[pc]) pc++;
+        if (pc < (word)bin_ptr) pc++;
+        break;
 
-    // TODO: describe purpose of loop
-    h.con = (word)(p - body);
-    for (i = 0; i < (int)nn; i++) {
-      v = new_pool[i];
-      memcpy(p, &v, sizeof(word));
-      p += sizeof(word);
+      default:
+        // TODO: give error! If you don't understand the op
+        //   something is wrong and you're going wrong
+        break;
+      }
     }
 
     free(map);
-    free(new_reloc);
-    free(new_pool);
   }
 
-  // TODO: 3 cases; explain them and if they occur and when
-  
-  // Entry vector for _start: C "main" or Pascal program body (synth)
+  // Entry for _start trampoline (call entry_vec then q):
+  // 1) main_vec set — normal C "main"
+  // 2) else synthesize vector for Pascal program body (main_offset only)
+  // 3) else entry_vec=0 if vector table full
   if (main_vec != (uchar)0xff)
     entry_vec = main_vec;
   else {

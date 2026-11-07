@@ -545,7 +545,8 @@ static uchar had_undef_func;       // sticky: it was a function call
 static word  undef_pos_abs;        // sticky: position of that ident
 
 static uchar last_func_vec; // function being declared by \f (for \p \r)
-static uchar next_slot; // next free slot index for \+ decls / temps
+
+uchar next_slot; // next free slot index for \+ decls / temps
 
 // const + bin from ivm-gen.c (code_buf/code_len macros)
 #define VAL_ACC  0xffff
@@ -606,7 +607,7 @@ static void eputc(uchar c) {
   #ifdef NOVLOG
     #define vlog(...) ((void)0)
   #else
-    #define vlog(...) do { if (verbose >= 2) eprintf(__VA_ARGS__); } while (0)
+    #define vlog(...) do { if (verbose >= 3) eprintf(__VA_ARGS__); } while (0)
   #endif
 
 // TODO: use or remove? prefer save bytes for cc65, use it if can
@@ -723,7 +724,7 @@ static uchar got(uchar c) {
 static void src_show(word from, word to) {
   uchar c;
 
-  if (verbose < 1) return;
+  if (verbose < 2) return;
 
   // the part before line_buf[0] was dropped by \C
   if (from < line_abs) from = line_abs;
@@ -1901,7 +1902,7 @@ static int step(void) {
     vlog("ok %c alt %u -> @%u\n", rch, cur->alt, abs_pos());
 #ifdef VERBOSE
     // -v: one GEN per statement (K), after alt commits
-    if (verbose >= 1 && code_len > cur->code_save && rch == 'K') {
+    if (verbose >= 2 && code_len > cur->code_save && rch == 'K') {
       eprintf(NORMAL "GEN:          [ ");
       ivm_print_code_range(ERROUT, code_buf, cur->code_save, code_len, 0);
       eprintf("]\n");
@@ -2322,6 +2323,7 @@ int main(int argc, char **argv) {
   ivm_print_code(ERROUT, code_buf, code_len);
   eputc('\n');
 
+  eprintf("--- HEXDUMP (%u bytes) ---\n", (unsigned)code_len);
   // dump hex
   for (i = 0; i < code_len; i++) {
     eprintf("%02x", code_buf[i]);
