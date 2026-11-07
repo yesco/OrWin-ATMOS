@@ -1509,18 +1509,27 @@ static int match_str_emit(void) {
 }
 
 // \s — constant string → data pool + relocatable pointer const
+// Static buffer: 512 on the 6502 stack blows the frame / corrupts parse.
+#ifndef STR_MATCH_MAX
+  #ifdef __CC65__
+    #define STR_MATCH_MAX 128
+  #else
+    #define STR_MATCH_MAX 512
+  #endif
+#endif
+static uchar str_match_buf[STR_MATCH_MAX];
+
 static int match_str_const(void) {
-  uchar buf[512];
   StrBuf sb;
   uchar slot;
 
   skip_ws();
   EXPECT('"');
-  sb.buf = buf; sb.n = 0; sb.max = sizeof(buf);
+  sb.buf = str_match_buf; sb.n = 0; sb.max = STR_MATCH_MAX;
   if (!read_quoted_body('"', put_buf, &sb)) return 0;
   if (sb.n + 1 >= sb.max) return 0;
-  buf[sb.n++] = 0;
-  slot = add_string_const(buf, sb.n);
+  str_match_buf[sb.n++] = 0;
+  slot = add_string_const(str_match_buf, sb.n);
   record_capture(MAKE_CAP(slot, TY_CHAR | TY_PTR));
   return 1;
 }

@@ -604,17 +604,22 @@ void trace(Process *proc, uchar *ipc) {
 // Relocate blob-relative offsets to absolute pointers (cc65/6502 only).
 // Header layout: main,code,call,fp,con,data are offsets;
 // memsz, constidx are NOT offsets (must not be walked as pointers).
-// Reloc region: header main..data, call vectors, string const words, then 0000.
-// 0000 is the real zero constant and terminates the walk. No reloc list.
+// Reloc region (one contiguous run of blob-relative words):
+//   header main..data, call vectors, string const words, 0000.
+// memsz/constidx sit BEFORE main and are never walked.
+// 0000 ends the walk and is the real zero constant.
 void relocate(uchar *base) {
   BlobHeader *h;
   word *v;
 
   h = (BlobHeader *)base;
+  // One contiguous reloc region starting at main (memsz/constidx sit before it
+  // and are NOT walked): header offsets, vectors, string const words, then 0000.
+  // Every word is blob-relative. 0000 ends the walk (also the real zero const).
   v = &h->main;
 #ifdef __CC65__
   while (*v) {
-    *v = *v + (word)base;
+    *v = (word)(*v + (word)base);
     v++;
   }
 #else
@@ -669,22 +674,24 @@ Process* Nevm(uchar *loaded) {
 
 
 
-  // Const image at h.con: [string offs...][0][ints...].
-  // Words before 0000 are relocatable (add SOFT_BASE / data base).
-  // 0000 is the real zero constant; ints after are pure values.
-  // No reloc-index list.
+  // Const image at h.con: [string blob-offs...][0000][ints...].
+  // CC65: relocate() already applied base — copy absolute words into mem[].
+  // Host SOFT_HEAP: file still blob-relative; data was copied to soft_heap at
+  // SOFT_BASE, so string pointer = SOFT_BASE + (blob_off - data).
+  // 0000 is real zero; ints after are pure values.
   if (bh->con && bh->constidx != 255) {
     word *pool;
     word nc, i;
     uchar seen0 = 0;
+    word data_off = bh->data;
 
-#ifndef SOFT_HEAP
-    pool = (word *)(unsigned)(bh->con);
+#ifdef __CC65__
+    pool = (word *)(unsigned)bh->con;
 #else
     pool = (word *)(loaded + bh->con);
 #endif
 
-    nc = (word)(253 - bh->constidx + 1); // CONST_TOP - constidx + 1
+    nc = (word)(253 - bh->constidx + 1);
     for (i = 0; i < nc; i++) {
       word w = pool[i];
       if (!seen0) {
@@ -693,9 +700,10 @@ Process* Nevm(uchar *loaded) {
           p->mem[bh->constidx + i] = 0;
         } else {
 #ifdef SOFT_HEAP
-          p->mem[bh->constidx + i] = (word)(w + SOFT_BASE);
+          p->mem[bh->constidx + i] =
+            (word)(SOFT_BASE + (w - data_off));
 #else
-          p->mem[bh->constidx + i] = (word)(bh->data + w);
+          p->mem[bh->constidx + i] = w;
 #endif
         }
       } else {

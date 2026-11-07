@@ -453,9 +453,9 @@ static word gen_memadd(uchar *base, uchar **pp, const void *src, word n) {
 
 // Build IVM image (magic IVM\0 + sections). Caller free().
 // Const pool keeps original index order (bytecode slots = CONST_TOP - i).
-// Relocatable string consts store a *data-relative* offset; the loader adds
-// (blob_base + h.data) to form a usable pointer. Integer consts are raw values.
-// Data section holds string bytes (and any other static data).
+// String consts are packed as blob-relative offsets to data (after fixup).
+// One reloc walk from header.main through vectors + strings stops at 0000.
+// Integer consts after 0000 are not relocated. Data bytes live at h.data.
 uchar *build_blob(int *out_len) {
 
   typedef struct {
@@ -475,8 +475,8 @@ uchar *build_blob(int *out_len) {
   uchar *body, *p;
   word zero = 0;
   unsigned need;
-  uchar nv, n, entry_vec;
-  int i, j;
+  uchar nv, entry_vec;
+  int i;
   word v;
   uchar has0;
   uchar tramp[2];
@@ -629,6 +629,17 @@ uchar *build_blob(int *out_len) {
 
   for (i = 0; i < nv; i++)
     ((word *)(body + h.call))[i] = (word)(vectors[i] + h.code);
+
+  // String const words were data-relative; convert to blob-relative so the
+  // single reloc walk (while *v) { *v += base }) works for vectors + strings.
+  // Layout at h.con: [string blob-offs...][0000][ints...]. 0000 ends the walk.
+  {
+    word *cw = (word *)(body + h.con);
+    while (*cw) {
+      *cw = (word)(*cw + h.data);
+      cw++;
+    }
+  }
 
   memcpy(body, &h, sizeof(h));
   if (out_len)
