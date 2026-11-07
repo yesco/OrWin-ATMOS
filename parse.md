@@ -139,6 +139,114 @@ BLOB ≈ 22
 input + BNF + tables + codegen buffers do.
 
 
+## darr.c - can it be used?
+
+### What `darr` is
+
+Homogeneous **chunked array** with:
+
+- Fixed payload per block: **`DARR_BYTES`** (64 on `__CC65__`, 256 on
+  host)
+- Element size **`z`**; `bn = max(4, DARR_BYTES/z)` elements per block
+- **`dptr(d, i)`** → stable address for element `i` (grows chain /
+  super as needed)
+- Chain length **`DARR_CHAIN` (8)**; then recursive **super**
+  directory of `Darr*`
+- **First block never moves** — pointers into elements stay valid
+- ~**869 bytes** code on cc65 (comment in file)
+
+API today: **`darr` / `dfree` / `dptr`** only. No length field, no `dpush`, no bulk copy (`#if 0` stub).
+
+---
+
+### Fit vs current parse / ivm-gen memory
+
+| Region | Good `darr`? | Notes |
+|--------|----------------|--------|
+| **`syms[]`**            | Yes | `z = sizeof(Symbol)`; stable `&syms[i]` matches “pointer until next grow” better than `realloc` |
+| **Parse `Frame` stack** | Yes | `z = sizeof(Frame)`; depth-indexed; no big `MAX_STACK` reserve |
+| **`bin[]` bytecode**    | Partial | Byte `z=1`; random `bin[i]` → `dptr`; **emit append** needs a cursor + `dptr(n)` |
+| **`const_pool` / `const_is_reloc`** | Yes | Small `z`; or one darr of pairs |
+| **`data_pool` strings** | Awkward | Append-only stream; want contiguous `memcpy` into blob — **chunking hurts** without `dmove` |
+| **`vectors` / `frame_base` / `ginit_*`** | Yes | Tiny; fixed MAX is fine; darr optional |
+| **`line_buf`**          | Awkward | Wants contiguous scan / `\C` memmove; chunked unless `dmove` |
+| **BNF `blobs[r]`**      | Possible | One darr per rule or one byte darr; load is sequential |
+| **`str_match_buf`**     | No need | Fixed small static is enough |
+
+So: **tables and stacks** map cleanly; **contiguous byte streams** (line, data_pool, final blob image) need extra help.
+
+---
+
+### Restrictions that matter for you
+
+1. **Not one linear buffer** — `memcpy(bin, …)` / walking
+`bin[0..len)` as a pointer range breaks; must index via `dptr` or copy
+out.
+
+2. **No stored length** — caller must track `bin_ptr`, `nsym`,
+`data_len`, etc.
+
+3. **`dptr` is O(chain / depth)** — fine for rare index; hot emit loop
+should cache “current block + offset”.
+
+4. **`size_t` / `calloc`** — fine on host; on 6502 keep `z` and
+indices in `word` if you slim the header later.
+
+5. **Element addresses permanent** — good for `Symbol *`; don’t assume
+**all** elements are contiguous.
+
+6. **Super directory** uses `darr(sizeof(Darr*))` — pointer-sized
+elements; OK on 6502 if heap works.
+
+---
+
+### `dmove` (what you’d want)
+
+Chunk-aware bulk transfer so pack/save doesn’t call `dptr` per byte:
+
+```text
+dmove_out(Darr *d, size_t i, size_t n, void *dst)  // darr → linear
+dmove_in (Darr *d, size_t i, size_t n, const void *src)  // linear → darr
+```
+
+Implementation sketch: while `n>0`, `p = dptr(d, i)`, `run = min(n, bn
+- i%bn)`, `memcpy`, advance. Same pattern for **blob build**: stream
+`bin` and `data` into the malloc’d image without ever requiring a
+single `bin[]` base.
+
+Optional: **`dlen`** or keep external counts only.
+
+---
+
+### One-shot replacement strategy (practical)
+
+1. **First:** `syms`, parse **`stack`/`Frame`** — drop
+  `realloc`/`MAX_STACK` reserve; biggest design win, little API pain.
+
+2. **Then:** `bin` as `darr(1)` + `bin_ptr` + cached block for
+   `emit()`.
+
+3. **Const/vector/ginit** — easy, low urgency.  
+
+4. **`data_pool` / `line_buf`** — only after **`dmove`** (or keep
+  small fixed/static buffers).
+
+5. **Output blob** — still one `malloc(need)` at end; fill with
+  `dmove_out` from darr regions.
+
+**Not** a drop-in for every `MAX_*` in one shot: anything that assumes
+  **`ptr + i` contiguous** needs a thin accessor or `dmove`.
+
+---
+
+### Verdict
+
+Yes — **easy for record tables and the parse stack**; **viable for
+bytecode** with a cursor; **not free for line/data/blob** until you
+have sequential **`dmove`**. Restrictions are exactly “stable slots,
+not a single arena.” That’s aligned with 6502 packing if hot paths
+cache the current chunk and cold paths use `dmove`.
+
 
 
 # Candidate Example Workloads
@@ -157,6 +265,7 @@ Sieve of Eratosthenes (e.g. primes to 8k–16k)
 Tight loops, byte array, counting + zero tests
 S, L, n/m, indexed loads/stores
 Integer matrix multiply (e.g. 16×16 or 32×32)
+
 Triple loop, lots of + / * / S
 Exactly the +S / S hot path you already see
 Checksum / CRC-16 over a buffer

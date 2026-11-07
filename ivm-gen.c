@@ -161,16 +161,17 @@ void emitop2(uchar op, uchar arg) {
 // Slot addresses (CONST_TOP - i) stay stable for bytecode; only the *packed*
 // order for the blob puts reloc entries first.
 // ---------------------------------------------------------------------------
-uint16_t const_pool[MAX_CONSTS];
+uint16_t const_pool    [MAX_CONSTS];
 uchar    const_is_reloc[MAX_CONSTS]; // 1 = value is offset into data section
-uchar nconst = 0;
-uchar constidx = 255; // lowest const slot; 255 = none
-uchar nreloc_const = 0; // how many reloc entries (for pack)
+uchar    nconst = 0;
+uchar    constidx = 255; // lowest const slot; 255 = none
+uchar    nreloc_const = 0; // how many reloc entries (for pack)
 
 // String / data pool (appended to blob at h.data)
 #ifndef MAX_DATA
   #define MAX_DATA 2048
 #endif
+
 uchar data_pool[MAX_DATA];
 word  data_len = 0;
 
@@ -181,6 +182,7 @@ word  data_len = 0;
 #define TY_WORD   ((word)(('w') << 8))   // 0x7700
 #define TY_CHAR   ((word)(('c') << 8))   // 0x6300
 #define TY_PTR    ((word)0x8000)         // pointer flag in bit 15
+
 #define CAP_SLOT(w)   ((uchar)((w) & 0xff))
 #define CAP_TYPE(w)   ((word)((w) & 0xff00))
 #define CAP_IS_PTR(w) (((w) & TY_PTR) != 0)
@@ -201,12 +203,16 @@ uchar add_const_raw(unsigned int v, uchar reloc) {
   if ((word)(CONST_TOP - nconst) < (word)FRAME_BASE)
     IVM_GEN_FAIL("constants collided with frames");
 
+  // save value
   const_pool[nconst] = (uint16_t)v;
   const_is_reloc[nconst] = reloc;
   if (reloc) nreloc_const++;
+
+  // give mem index
   addr = (uchar)(CONST_TOP - nconst);
   nconst++;
   constidx = addr;
+
   return addr;
 }
 
@@ -219,11 +225,14 @@ uchar add_const(unsigned int v) {
 // absolute data-section base at pack time → final value = data_base + off).
 word data_append(const uchar *bytes, word n) {
   word off;
+
   if ((word)(data_len + n) > MAX_DATA)
     IVM_GEN_FAIL("data pool full");
+
   off = data_len;
   memcpy(data_pool + data_len, bytes, n);
   data_len = (word)(data_len + n);
+
   return off;
 }
 
@@ -231,12 +240,14 @@ word data_append(const uchar *bytes, word n) {
 // Returns the mem slot for the pointer const (like lit_addr for numbers).
 uchar add_string_const(const uchar *bytes, word n) {
   word off;
+
   // offset 0 would look like reloc end — keep a pad byte so strings are non-zero
   if (data_len == 0) {
     data_pool[0] = 0;
     data_len = 1;
   }
   off = data_append(bytes, n);
+
   return add_const_raw((unsigned int)off, 1);
 }
 
@@ -294,18 +305,28 @@ uchar lit_addr(unsigned int v) {
 
 typedef enum { SYM_VAR, SYM_FUNC } SymbolType;
 
+// TDOO: shrink! 15 b now -> 10 bytes
 typedef struct {
   char *name;          // malloc'd
-  SymbolType type;
   uchar address;       // VAR: slot   FUNC: vector index
-  uchar nparams;
-  uchar param_slot[MAX_PARAMS];
+
+  // TODO: redundant? can just be macros
   uchar ret_slot;
   uchar ret_addr_slot; // FUNC: frame base
+
+  // TODO: thought I said to use hibit of vtype?
   uchar is_ptr;        // 1 if pointer type (still one cell)
   uchar vtype;         // TY_WORD ('w') or TY_CHAR ('c') — element type
+
   uchar scope;         // scope depth it was declared in
+
+  // TODO combine 0 = global var, n = parameter n (>0) 0x80 = function
+  SymbolType type;
   uchar pidx;          // parameter number + 1 (0 = not a parameter)
+  uchar nparams;
+
+  uchar param_slot[MAX_PARAMS];
+
 } Symbol;
 
 Symbol *syms;          // grows on demand
@@ -331,6 +352,7 @@ Symbol *sym_add(const char *name, SymbolType type, uchar address) {
   n = (word)(strlen(name) + 1);
   nm = (char *)malloc(n);
   if (!nm) IVM_GEN_FAIL("out of memory (symbol name)");
+
   memcpy(nm, name, n);
 
   s = &syms[nsym++];
@@ -344,6 +366,7 @@ Symbol *sym_add(const char *name, SymbolType type, uchar address) {
   s->vtype = 'w';
   s->scope = scope_depth;
   s->pidx = 0;
+
   return s;
 }
 
@@ -359,6 +382,7 @@ word sym_find(const char *name, uchar type, uchar local) {
     if ((type == SYM_ANY || s->type == type) && strcmp(s->name, name) == 0)
       return (word)(i - 1);
   }
+
   return SYM_NONE;
 }
 
@@ -369,6 +393,7 @@ word sym_func(uchar v) {
   for (i = nsym; i > 0; i--)
     if (syms[i - 1].type == SYM_FUNC && syms[i - 1].address == v)
       return (word)(i - 1);
+
   return SYM_NONE;
 }
 
@@ -425,15 +450,21 @@ void gen_reset(void) {
 }
 
 void gen_func_entry(uchar v) {
+  uchar i, s;
+  
   // main: emit deferred global inits first so they run on entry
   if (v == main_vec) {
-    uchar i;
     main_offset = (word)bin_ptr;
     for (i = 0; i < nginit; i++) {
-      emitop2('L', ginit_src[i]);
-      emitop2('S', ginit_slot[i]);
+      s= ginit_src[i];
+      if (s == IMM0) {
+        emitop2('Z', ginit_slot[i]);
+      } else {
+        emitop2('C', ginit_slot[i]); emit(ginit_src[i]);
+      }
     }
   }
+
   if (v < (uchar)MAX_VECTORS)
     vectors[v] = (uint16_t)(v == main_vec ? main_offset : bin_ptr);
 }
@@ -536,17 +567,20 @@ uchar *build_blob(int *out_len) {
       map[(uchar)(CONST_TOP - i)] = 0xff; // mark for fill below
       nn++;
     }
-    // 2) zero
+    // 2) zero - works as end reloc mark, and 0!
     new_pool[nn] = 0;
     new_reloc[nn] = 0;
     nn++;
-    // 3) other ints
+    // 3) other ints (!is_reloc)
     for (i = 0; i < (int)n0; i++) {
       if (const_is_reloc[i] || const_pool[i] == 0) continue;
       new_pool[nn] = const_pool[i];
       new_reloc[nn] = 0;
       nn++;
     }
+
+    // TODO: this mirrors loops above, why not done tegether?
+    //   or if not comment each loop's purpose!
 
     constidx = (uchar)(CONST_TOP - nn + 1);
     k = 0;
@@ -568,20 +602,27 @@ uchar *build_blob(int *out_len) {
       k++;
     }
 
+    // INSTRUCTION: ANSWER if this is really safe?
+    //   we have a) inline strings b) relative jump offsets
+    // WTF ???
+    
     // rewrite const slot operands in bytecode
     for (i = 0; i < bin_ptr; i++) {
       uchar b = bin[i];
       uchar ns = map[b];
+
       if (ns != b && b > (uchar)FRAME_BASE)
         bin[i] = ns;
     }
 
+    // TODO: describe purpose of loop
     nconst = nn;
     for (i = 0; i < (int)nn; i++) {
       const_pool[i] = new_pool[i];
       const_is_reloc[i] = new_reloc[i];
     }
 
+    // TODO: describe purpose of loop
     h.con = (word)(p - body);
     for (i = 0; i < (int)nn; i++) {
       v = new_pool[i];
@@ -594,6 +635,8 @@ uchar *build_blob(int *out_len) {
     free(new_pool);
   }
 
+  // TODO: 3 cases; explain them and if they occur and when
+  
   // Entry vector for _start: C "main" or Pascal program body (synth)
   if (main_vec != (uchar)0xff)
     entry_vec = main_vec;
@@ -621,12 +664,15 @@ uchar *build_blob(int *out_len) {
   h.memsz = CONST_TOP + 1; // compaction TODO
 
   h.constidx = constidx;
+
+  // magic header put first
   h.magic[0] = 'I';
   h.magic[1] = 'V';
   h.magic[2] = 'M';
   h.magic[3] = 0;
   h.len = p - body;
 
+  // set call vectors offset telative to blob start?
   for (i = 0; i < nv; i++)
     ((word *)(body + h.call))[i] = (word)(vectors[i] + h.code);
 
@@ -641,9 +687,11 @@ uchar *build_blob(int *out_len) {
     }
   }
 
+  // wrap it all up with header of offsets into it
   memcpy(body, &h, sizeof(h));
-  if (out_len)
-    *out_len = h.len;
+
+  if (out_len) *out_len = h.len;
+
   return body;
 }
 
