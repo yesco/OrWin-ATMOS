@@ -196,11 +196,11 @@ int main(void) {
    
   putz("3+4: "); putn(3 + 4); putchar('\n');
 
-  printf("Mul2(33): %u\n", Mul2(33));
+  printf("Mul2(33): "); printf("%u\n", Mul2(33));
 
-  printf("AddTen(7): %u\n", AddTen(7));
+  printf("AddTen(7): "); printf("%u\n", AddTen(7));
 
-  printf("Mul2(11)+Mul2(22): %u\n", Mul2(11) + Mul2(22));
+  printf("Mul2(11)+Mul2(22): "); printf("%u\n", Mul2(11) + Mul2(22));
 
   // Test: Complex math addition using our functional JSR routine
   beta = AddTen(Mul2(alpha) + 1) + Mul2(11);

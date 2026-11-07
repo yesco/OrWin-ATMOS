@@ -230,8 +230,13 @@ word data_append(const uchar *bytes, word n) {
 // Add a C string (already escaped, including trailing NUL) as a data constant.
 // Returns the mem slot for the pointer const (like lit_addr for numbers).
 uchar add_string_const(const uchar *bytes, word n) {
-  word off = data_append(bytes, n);
-  // pure data-relative offset; single reloc walk comes with packing pass
+  word off;
+  // offset 0 would look like reloc end — keep a pad byte so strings are non-zero
+  if (data_len == 0) {
+    data_pool[0] = 0;
+    data_len = 1;
+  }
+  off = data_append(bytes, n);
   return add_const_raw((unsigned int)off, 1);
 }
 
@@ -467,7 +472,7 @@ uchar *build_blob(int *out_len) {
   } GenBlobHeader;
 
   GenBlobHeader h;
-  uchar *body, *p, *countp;
+  uchar *body, *p;
   word zero = 0;
   unsigned need;
   uchar nv, n, entry_vec;
@@ -482,9 +487,8 @@ uchar *build_blob(int *out_len) {
     nv = (uchar)(nv + 1);
 
   need = (unsigned)sizeof(GenBlobHeader)
-       + (unsigned)nv * sizeof(word) + sizeof(word)
-       + (unsigned)nconst * sizeof(word)
-       + 1 + (unsigned)nconst
+       + (unsigned)nv * sizeof(word)
+       + (unsigned)(nconst + 1) * sizeof(word) // reloc.. + 0 + ints (0 may already be in pool)
        + (unsigned)nv
        + (unsigned)bin_ptr
        + 2 // _start: Vmain q
@@ -498,36 +502,97 @@ uchar *build_blob(int *out_len) {
 
 
 
+  // Call vectors only — no 0000 terminator. Reloc walk continues into
+  // string const words that follow, then stops at the 0000 zero const.
   h.call = gen_memadd(body, &p, 0, (word)(nv * sizeof(word)));
-  gen_memadd(body, &p, &zero, sizeof(zero));
 
-  // constant 0 in pool
+  // Ensure real 0 is in the pool (also terminates reloc walk in the image)
   has0 = 0;
   for (i = 0; i < (int)nconst; i++)
     if (!const_is_reloc[i] && const_pool[i] == 0) { has0 = 1; break; }
-
   if (!has0) add_const(0);
 
-  // Const pool pure values (reverse order). String offsets pure data-relative.
-  // Reloc list after words: host and 6502 install use it to add base.
-  // (Single-walk layout without list needs consecutive string slots; TODO.)
-  h.con = (word)(p - body);
-  for (i = 0; i < (int)nconst; i++) {
-    j = (uchar)(nconst - 1 - i);
-    v = const_pool[j];
-    memcpy(p, &v, sizeof(word));
-    p += sizeof(word);
-  }
-  countp = p++;
-  n = 0;
-  for (i = 0; i < (int)nconst; i++) {
-    j = (uchar)(nconst - 1 - i);
-    if (const_is_reloc[j]) {
-      *p++ = (uchar)i;
-      n++;
+  // Reorder pool: [reloc strings][0][other ints]. Small mallocs only (cc65).
+  {
+    uint16_t *new_pool;
+    uchar *new_reloc;
+    uchar *map;       // old_slot byte -> new_slot
+    uchar nn = 0, n0 = nconst;
+    int k;
+
+    new_pool  = (uint16_t *)malloc((unsigned)(n0 + 1) * sizeof(uint16_t));
+    new_reloc = (uchar *)malloc((unsigned)(n0 + 1));
+    map       = (uchar *)malloc(256);
+    if (!new_pool || !new_reloc || !map)
+      IVM_GEN_FAIL("out of memory (const pack)");
+
+    for (i = 0; i < 256; i++) map[i] = (uchar)i;
+
+    // 1) reloc strings (offsets already non-zero via data pad)
+    for (i = 0; i < (int)n0; i++) {
+      if (!const_is_reloc[i]) continue;
+      new_pool[nn] = const_pool[i];
+      new_reloc[nn] = 1;
+      map[(uchar)(CONST_TOP - i)] = 0xff; // mark for fill below
+      nn++;
     }
+    // 2) zero
+    new_pool[nn] = 0;
+    new_reloc[nn] = 0;
+    nn++;
+    // 3) other ints
+    for (i = 0; i < (int)n0; i++) {
+      if (const_is_reloc[i] || const_pool[i] == 0) continue;
+      new_pool[nn] = const_pool[i];
+      new_reloc[nn] = 0;
+      nn++;
+    }
+
+    constidx = (uchar)(CONST_TOP - nn + 1);
+    k = 0;
+    for (i = 0; i < (int)n0; i++) {
+      if (!const_is_reloc[i]) continue;
+      map[(uchar)(CONST_TOP - i)] = (uchar)(constidx + k);
+      k++;
+    }
+    for (i = 0; i < (int)n0; i++) {
+      if (!const_is_reloc[i] && const_pool[i] == 0) {
+        map[(uchar)(CONST_TOP - i)] = (uchar)(constidx + k);
+        break;
+      }
+    }
+    k++;
+    for (i = 0; i < (int)n0; i++) {
+      if (const_is_reloc[i] || const_pool[i] == 0) continue;
+      map[(uchar)(CONST_TOP - i)] = (uchar)(constidx + k);
+      k++;
+    }
+
+    // rewrite const slot operands in bytecode
+    for (i = 0; i < bin_ptr; i++) {
+      uchar b = bin[i];
+      uchar ns = map[b];
+      if (ns != b && b > (uchar)FRAME_BASE)
+        bin[i] = ns;
+    }
+
+    nconst = nn;
+    for (i = 0; i < (int)nn; i++) {
+      const_pool[i] = new_pool[i];
+      const_is_reloc[i] = new_reloc[i];
+    }
+
+    h.con = (word)(p - body);
+    for (i = 0; i < (int)nn; i++) {
+      v = new_pool[i];
+      memcpy(p, &v, sizeof(word));
+      p += sizeof(word);
+    }
+
+    free(map);
+    free(new_reloc);
+    free(new_pool);
   }
-  *countp = n;
 
   // Entry vector for _start: C "main" or Pascal program body (synth)
   if (main_vec != (uchar)0xff)
@@ -553,7 +618,8 @@ uchar *build_blob(int *out_len) {
   // Data section (strings); reloc consts index into this from 0
   h.data = gen_memadd(body, &p, data_pool, data_len);
 
-  h.memsz = CONST_TOP + 1;
+  h.memsz = CONST_TOP + 1; // compaction TODO
+
   h.constidx = constidx;
   h.magic[0] = 'I';
   h.magic[1] = 'V';

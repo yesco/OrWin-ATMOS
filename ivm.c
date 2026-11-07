@@ -603,9 +603,9 @@ void trace(Process *proc, uchar *ipc) {
 
 // Relocate blob-relative offsets to absolute pointers (cc65/6502 only).
 // Header layout: main,code,call,fp,con,data are offsets;
-// memsz, constidx, xslot are NOT offsets (must not be walked as pointers).
-// Reloc region: header main..data, call vectors, string offsets, then 0000.
-// 0000 is constant 0 and terminates the walk.
+// memsz, constidx are NOT offsets (must not be walked as pointers).
+// Reloc region: header main..data, call vectors, string const words, then 0000.
+// 0000 is the real zero constant and terminates the walk. No reloc list.
 void relocate(uchar *base) {
   BlobHeader *h;
   word *v;
@@ -669,14 +669,14 @@ Process* Nevm(uchar *loaded) {
 
 
 
-  // Pure copy of const words, then reloc list: [count][idx...] at pool+nconst.
-  // nconst = CONST_TOP - constidx + 1. Do not use (fp-con)/2 as nconst —
-  // that includes the list bytes and misaligns relocs.
+  // Const image at h.con: [string offs...][0][ints...].
+  // Words before 0000 are relocatable (add SOFT_BASE / data base).
+  // 0000 is the real zero constant; ints after are pure values.
+  // No reloc-index list.
   if (bh->con && bh->constidx != 255) {
     word *pool;
-    uchar *relocs;
     word nc, i;
-    uchar nreloc, ri;
+    uchar seen0 = 0;
 
 #ifndef SOFT_HEAP
     pool = (word *)(unsigned)(bh->con);
@@ -685,21 +685,22 @@ Process* Nevm(uchar *loaded) {
 #endif
 
     nc = (word)(253 - bh->constidx + 1); // CONST_TOP - constidx + 1
-    for (i = 0; i < nc; i++)
-      p->mem[bh->constidx + i] = pool[i];
-
-    relocs = (uchar *)(pool + nc);
-    nreloc = *relocs++;
-    for (ri = 0; ri < nreloc; ri++) {
-      uchar idx = relocs[ri];
-      word off;
-      if (idx >= nc) continue;
-      off = p->mem[bh->constidx + idx];
+    for (i = 0; i < nc; i++) {
+      word w = pool[i];
+      if (!seen0) {
+        if (w == 0) {
+          seen0 = 1;
+          p->mem[bh->constidx + i] = 0;
+        } else {
 #ifdef SOFT_HEAP
-      p->mem[bh->constidx + idx] = (word)(off + SOFT_BASE);
+          p->mem[bh->constidx + i] = (word)(w + SOFT_BASE);
 #else
-      p->mem[bh->constidx + idx] = (word)(bh->data + off);
+          p->mem[bh->constidx + i] = (word)(bh->data + w);
 #endif
+        }
+      } else {
+        p->mem[bh->constidx + i] = w;
+      }
     }
   }
 

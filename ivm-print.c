@@ -252,18 +252,14 @@ if (h.len == 0 || h.len > len)
   fprintf(fp, "%04x  H  con:        %04x\n", 18, h.con);
   fprintf(fp, "%04x  H  data:       %04x\n", 20, h.data);
 
-  // ---- call vectors until 0000 ---- 
+  // ---- call vectors (through h.con; no 0000 terminator) ----
   if (h.call < h.len) {
-    fprintf(fp, "-- vectors (until 0000) --\n");
+    unsigned vend = h.con && h.con > h.call ? h.con : h.len;
+    fprintf(fp, "-- vectors (then string consts / 0000) --\n");
     off = h.call;
     nvec = 0;
-    while (off + 1 < h.len) {
+    while (off + 1 < vend) {
       w = ivm_rd16(blob + off);
-      if (w == 0) {
-        fprintf(fp, "%04x  Z  0000          (end reloc)\n", off);
-        off += 2;
-        break;
-      }
       fprintf(fp, "%04x  V  vector%02u:   %04x", off, nvec, w);
       if (h.code && w >= h.code)
         fprintf(fp, "  code+%u", (unsigned)(w - h.code));
@@ -276,17 +272,11 @@ if (h.len == 0 || h.len > len)
     nvec = 0;
   }
 
-  // ---- constants + reloc index list (must not hide blob metadata) ----
-  // Layout at h.con:
-  //   [nconst pure words] [count][idx0][idx1]...
-  // nconst from constidx (slots grow down from CONST_TOP=253).
-  // Reloc list marks which packed indices are string/data offsets.
+  // ---- constants: [string offs...][0000][ints...] (no reloc list) ----
   if (h.con && h.con < h.len) {
     unsigned con_end = h.fp && h.fp > h.con ? h.fp : (h.code && h.code > h.con ? h.code : h.len);
     unsigned max_words = (con_end > h.con) ? (con_end - h.con) / 2 : 0;
-    uchar *reloc_mark = malloc(256);
-    unsigned nreloc = 0;
-    unsigned ri;
+    unsigned seen0 = 0;
 
     if (h.constidx <= 253)
       nconst = (unsigned)(253 - h.constidx + 1);
@@ -295,61 +285,26 @@ if (h.len == 0 || h.len > len)
     if (nconst > max_words)
       nconst = max_words;
 
-    memset(reloc_mark, 0, 256);
-
-    off = h.con + nconst * 2;
-    if (off < con_end) {
-      nreloc = blob[off];
-      if (off + 1 + nreloc > con_end)
-        nreloc = (con_end > off + 1) ? con_end - off - 1 : 0;
-      for (ri = 0; ri < nreloc; ri++) {
-        uchar idx = blob[off + 1 + ri];
-        reloc_mark[idx] = 1;
-      }
-    }
-
-    fprintf(fp, "-- constants (%u words @ %04x) --\n", nconst, h.con);
+    fprintf(fp, "-- constants (%u words @ %04x) [strings..|0|ints] --\n", nconst, h.con);
     for (i = 0; i < nconst; i++) {
       unsigned slot = (h.constidx <= 253) ? (unsigned)(h.constidx + i) : i;
       off = h.con + i * 2;
       w = ivm_rd16(blob + off);
-      if (reloc_mark[i]) {
-        fprintf(fp, "%04x  S  string%02u:   %04x  slot=%02x", off, i, w, slot);
-        ivm_dump_str_preview(fp, blob, h.len, h.data, w);
-        fputc('\n', fp);
+      if (!seen0) {
+        if (w == 0) {
+          seen0 = 1;
+          fprintf(fp, "%04x  C  zero:        0000  slot=%02x  (reloc end + real 0)\n",
+                  off, slot);
+        } else {
+          fprintf(fp, "%04x  S  string%02u:   %04x  slot=%02x", off, i, w, slot);
+          ivm_dump_str_preview(fp, blob, h.len, h.data, w);
+          fputc('\n', fp);
+        }
       } else {
         fprintf(fp, "%04x  C  constant%02u: %04x  slot=%02x : %5u  $%04x\n",
                 off, i, w, slot, (unsigned)w, (unsigned)w);
       }
     }
-
-    off = h.con + nconst * 2;
-    if (off < con_end) {
-      unsigned list_len = con_end - off;
-      fprintf(fp, "-- reloc list (%u bytes @ %04x) --\n", list_len, off);
-      fprintf(fp, "%04x  R  count:      %02x  (%u strings)\n",
-              off, blob[off], (unsigned)blob[off]);
-      for (ri = 0; ri < nreloc && (off + 1 + ri) < con_end; ri++) {
-        uchar idx = blob[off + 1 + ri];
-        fprintf(fp, "%04x  R  idx[%u]:     %02x  -> constant%02u",
-                off + 1 + ri, ri, idx, idx);
-        if (idx < nconst) {
-          w = ivm_rd16(blob + h.con + (unsigned)idx * 2);
-          fprintf(fp, "  val=%04x", w);
-          ivm_dump_str_preview(fp, blob, h.len, h.data, w);
-        }
-        fputc('\n', fp);
-      }
-      {
-        unsigned tail = off + 1 + nreloc;
-        if (tail < con_end)
-          fprintf(fp, "%04x  R  (tail %u bytes)\n", tail, con_end - tail);
-      }
-    } else {
-      fprintf(fp, "-- reloc list: (none — no bytes between consts and fp) --\n");
-    }
-
-    free(reloc_mark);
   }
 
   // ---- frame bases (bytes) ---- 
