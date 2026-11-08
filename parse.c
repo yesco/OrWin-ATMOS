@@ -801,8 +801,12 @@ static word cap_val(uchar n) {
   return (n <= cur->prod_n) ? cur->prod_cap[n] : 0;
 }
 
-// slots: globals, frames, params, locals and temps share one counter
-// (a failed alt gives its slots back, see restore_scope)
+// Slot layout:
+//   optimize==0: single bump next_slot from 0 (globals and frames intermixed)
+//   optimize!=0: REGISTER globals 0..31, other globals 32..95, frames >= FRAME_BASE (96)
+// Failed alts restore next_slot via slot_save (see restore_scope).
+static uchar pending_register; // set by \r after literal "register" in BNF
+
 static uchar alloc_slot(void) {
   uchar s;
 
@@ -817,6 +821,26 @@ static uchar alloc_slot(void) {
     if (nsz > frame_sz[last_func_vec]) frame_sz[last_func_vec] = nsz;
   }
 #endif
+  return s;
+}
+
+static uchar alloc_register_slot(void) {
+  uchar s;
+  if (next_reg >= 32) FAIL("too many REGISTER globals (max 32)");
+  s = next_reg++;
+  // keep intermixed bump above registers when !optimize
+  if (!optimize && next_slot <= s)
+    next_slot = (uchar)(s + 1);
+  return s;
+}
+
+static uchar alloc_global_slot(void) {
+  uchar s;
+  if (!optimize)
+    return alloc_slot();
+  if (next_glob >= FRAME_BASE)
+    FAIL("too many globals (32..95 full)");
+  s = next_glob++;
   return s;
 }
 
@@ -1310,18 +1334,28 @@ static int match_ident(void) {
 static int match_ident_decl(void) {
   uchar slot;
   word i;
+  uchar is_reg = pending_register;
+
+  pending_register = 0;
 
   if (!match_ident_raw()) return 0;
   i = sym_find(id_buf, SYM_VAR, 1);
   if (i != SYM_NONE)
     slot = syms[i].address;
   else {
-    slot = alloc_slot();
+    if (scope_depth == 0) {
+      if (is_reg)
+        slot = alloc_register_slot();
+      else
+        slot = alloc_global_slot();
+    } else
+      slot = alloc_slot();
     set_decl_type(sym_add(id_buf, SYM_VAR, slot));
   }
   record_capture(MAKE_CAP(slot, cur_type));
-  vlog("  decl '%s' scope %u slot %u type %c%s\n",
+  vlog("  decl '%s' scope %u slot %u%s type %c%s\n",
        id_buf, (unsigned)scope_depth, (unsigned)slot,
+       is_reg ? " REGISTER" : "",
        (char)(CAP_TYPE(cur_type) >> 8), CAP_IS_PTR(cur_type) ? "*" : "");
   return 1;
 }
@@ -1337,6 +1371,9 @@ static int match_ident_func_decl(void) {
 
   // frame: base+0 ret addr, +1 ret value (the function name), +2 prev fp,
   // +3 last param (JSR stores ACC there), +4.. other params, then locals
+  // optimize: frames start at FRAME_BASE (96), after global bands 0..95
+  if (optimize && next_slot < FRAME_BASE)
+    next_slot = FRAME_BASE;
   base = next_slot;
   if (base >= CONST_TOP - 40) FAIL("out of slots");
   next_slot = base + 4;
@@ -2015,7 +2052,16 @@ static int step(void) {
     else if (e == '+') ok = match_ident_decl();
     else if (e == 'f') ok = match_ident_func_decl();
     else if (e == 'p') ok = match_param_decl();
-    else if (e == 'r') ok = params_done();
+    else if (e == 'r') {
+      // global: after BNF "register\r" — mark next \+ as REGISTER (0..31)
+      // function: end parameter list (existing)
+      if (last_func_vec != 0xff)
+        ok = params_done();
+      else {
+        pending_register = 1;
+        ok = 1;
+      }
+    }
     else if (e == 'd') ok = match_num();
     else if (e == 'n') ok = match_newline();
     else if (e == 's') ok = match_str_const();
@@ -2200,7 +2246,10 @@ static void init(char *bnf_path, char *src_path) {
   undef_pos_abs = 0;
   last_undef[0] = 0;
   next_slot = 0;
+  pending_register = 0;
   gen_reset();
+  if (optimize)
+    next_slot = FRAME_BASE; // frames; globals use next_reg / next_glob
   nvector = 0;
 
   last_func_vec = 0xff;
@@ -2214,7 +2263,7 @@ static void init(char *bnf_path, char *src_path) {
 
 static void shutdown(void) {
 
-  fclose(src_fp);
+  if (src_fp) fclose(src_fp);
   src_fp = NULL;
 
   free(line_buf);
@@ -2242,11 +2291,14 @@ int main(int argc, char **argv) {
   
   verbose = 0;
   ignore_case = 1;
+  optimize = 0;
 
   // parse arguments
   for (i = 1; i < argc; i++) {
     if (strcmp(argv[i], "-v") == 0)
       verbose++;
+    else if (strcmp(argv[i], "-O") == 0)
+      optimize = 1;
     else if (strcmp(argv[i], "-I") == 0)
       ignore_case = 1;
     else if (strcmp(argv[i], "-C") == 0)
@@ -2258,7 +2310,7 @@ int main(int argc, char **argv) {
   }
 
   if (!bnf || !srcpath) {
-    eprintf("usage: %s [-v|-vv] [-I|-C] grammar.bnf source.p\n", argv[0]);
+    eprintf("usage: %s [-v|-vv] [-O] [-I|-C] grammar.bnf source.p\n", argv[0]);
     return 1;
   }
 

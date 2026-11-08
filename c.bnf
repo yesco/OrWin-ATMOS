@@ -17,8 +17,9 @@ D=#include <\+.h>\n\<
 |#include <\+.c>\n\<
 |V\<|F\<|
 
-# - Declarations with optional initializer: char *h = "Hello";  char spc = 32;
-V=T M;
+# - Declarations: optional register\r -> REGISTER slot 0..31
+#   -O: REGISTER 0..31, other globals 32..95, frames at 96+
+V=register\r T M;|T M;
 M=\+=S[\g]U|\+=E[S\1]U|\+U|
 # TODO: deep recursion might be bad...
 U=,M|

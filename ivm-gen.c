@@ -69,7 +69,12 @@ void note_store(uchar addr);
 uint16_t vectors[MAX_VECTORS];
 uchar frame_base[MAX_VECTORS];
 uchar nvector;
-uchar next_slot; // low slots (globals/frames); grows up; parse drives this
+uchar next_slot; // frames/locals bump (and all slots when !optimize)
+// optimize==0: intermixed layout from 0 (as before); short L if slot<32
+// optimize!=0: REGISTER 0..31, other globals 32..95, frames at FRAME_BASE (96)+
+uchar optimize;
+uchar next_reg;   // next REGISTER global (0..31)
+uchar next_glob;  // next normal global when optimize (32..95)
 word main_offset;
 uchar main_vec;           // vector index of function "main", 0xff = none
 
@@ -129,7 +134,8 @@ void emitop(uchar op) {
 }
 
 void emitop2(uchar op, uchar arg) {
-  if (op == 'L' && arg < 32)
+  // !optimize: short L for slots 0..31; optimize: always long (phase-1 "stupid")
+  if (op == 'L' && arg < 32 && !optimize)
     emit(arg); // one byte short-code
   else {
     emitop(op);
@@ -441,6 +447,8 @@ void gen_reset(void) {
   bin_ptr = 0;
   nconst = 0;
   constidx = 255;
+  next_reg = 0;
+  next_glob = 32;
   nreloc_const = 0;
   data_len = 0;
   pending_func_entry = 0xff;

@@ -1,0 +1,16 @@
+# Usage: ./pc [test-char]   # defaults to test(.c)
+
+if [ -z "$1" ]; then
+    name="test"
+else
+    name="$1"
+fi
+
+
+clang -DSYMS -DVERBOSE -DRUN parse.c && time ./a.out -v -O c.bnf $name.c
+
+echo
+echo "=== $name.c: `./wcode $name.c` LOC ==="
+echo "=== parse.c: `./wcode parse.c` LOC ==="
+echo "=== $name.c: `./wcode $name.c` LOC ==="
+echo
