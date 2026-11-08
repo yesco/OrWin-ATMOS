@@ -134,7 +134,7 @@
 //  @ - read from global address ACC
 //? A - car acc= acc[0] == @
 //  B - back jump "B03" = back 3 bytes
-//? C - cons(acc, $) - a variant of alloc cell and , ???
+//  C - copy ... cons(acc, $) - a variant of alloc cell and , ???
 //? D - cdr acc= acc[1] == 2 + @, LOL
 //  E - emit char = putchar(acc)
 //  F - free var, set it 0 "Fvv"
@@ -185,7 +185,8 @@
 //  } - shift ACC right "}nn"
 //
 //  ~ - inverse ACC (oric: gray)
-//? - TODO: NEXTPAGE: DEL not visible (oric: full block)
+//? - PON; (nop backwards for bench)
+//      TODO: NEXTPAGE: DEL not visible (oric: full block)
 //
 // $80-$bf (64) conditional relative jump (forward) get rid of G
 // $bf-$ff (64) subroutine calls (vectorized)
@@ -1199,6 +1200,8 @@ ivmvar run_ivm(Process *p) {
 #endif
 
 
+ZL(op_sp,  ' ')              goto xnext;
+
 // Quit: TODO: replace by syscall!
 ZL(op_q,   'q')              goto done;
 
@@ -1308,7 +1311,6 @@ ZL(op_lt,  '<')  zp.acc = zp.acc < PAR;  goto pnext;
 ZL(op_eq,  '=')  zp.acc = zp.acc == PAR; goto pnext;
 ZL(op_gt,  '>')  zp.acc = zp.acc > PAR;  goto pnext;
 
-ZL(op_sp,  ' ')                         goto xnext;
 ZL(op_0,   '0')  zp.acc = 0;            goto xnext;
 ZL(op_9,   '9')  zp.acc = 0xffff;       goto xnext;
 ZL(op_not, '?')  zp.acc = !zp.acc;      goto xnext;
@@ -1380,6 +1382,8 @@ ZL(op_m,   'm')  tpc = zp.ipc - *zp.ipc + 1;
 ZL(op_x,   'x')  zp.acc= sys(1, zp.acc, zp.ipc); zp.ipc+= 1; goto xnext;
 ZL(op_y,   'y')  zp.acc= sys(2, zp.acc, zp.ipc); zp.ipc+= 2; goto xnext;
 ZL(op_z,   'z')  zp.acc= sys(3, zp.acc, zp.ipc); zp.ipc+= 3; goto xnext;
+
+ZL(op_DEL,  127) goto xnext;
 
   #ifndef USE_LABELS
   default:

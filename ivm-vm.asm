@@ -1432,7 +1432,10 @@ n_exit:
 
 
 ;;; NOP - SPACE
-op_sp:  jmp     xnext
+op_sp:
+;	lda     '.'
+;	jsr     _putchar
+	jmp     xnext
 
 
 ;;; PAR ops that need C (mul/div/mod) — PAR already in _ivm_par

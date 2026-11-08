@@ -307,7 +307,7 @@ uchar lit_addr(unsigned int v) {
 
 typedef enum { SYM_VAR, SYM_FUNC } SymbolType;
 
-// ~15 bytes + name; shrink later to 10 bytes (pack flags into vtype etc.)
+// ~15 bytes + name; shrink later if needed (pack flags into vtype etc.)
 typedef struct {
   char *name;          // malloc'd
   uchar address;       // VAR: slot   FUNC: vector index
@@ -316,13 +316,13 @@ typedef struct {
   uchar ret_slot;
   uchar ret_addr_slot; // FUNC: frame base
 
-  // TODO: put in vtype? is_ptr: prefer TY_PTR in typed captures; kept here for sym_find/decl
+  // is_ptr: prefer TY_PTR in typed captures; kept here for sym_find/decl
   uchar is_ptr;        // 1 if pointer type (still one cell)
   uchar vtype;         // TY_WORD ('w') or TY_CHAR ('c') — element type
 
   uchar scope;         // scope depth it was declared in
 
-  // type + pidx: could pack (pidx>0 => param; FUNC=0x80 => function)
+  // type + pidx: could pack (pidx>0 => param; type==FUNC => function)
   SymbolType type;
   uchar pidx;          // parameter number + 1 (0 = not a parameter)
   uchar nparams;
@@ -559,9 +559,7 @@ uchar *build_blob(int *out_len) {
     map = (uchar *)malloc(256);
     if (!map)
       IVM_GEN_FAIL("out of memory (const pack)");
-
-    // identity mapping
-    for (i = 0; i < 256; i++) map[i] = i;
+    for (i = 0; i < 256; i++) map[i] = (uchar)i;
 
     // count packed length first (strings + zero + other ints)
     for (i = 0; i < (int)n0; i++)
@@ -575,7 +573,7 @@ uchar *build_blob(int *out_len) {
     // fill map and write words straight into the blob (no new_pool copy)
     h.con = (word)(p - body);
 
-    // reloc strings (read only const_pool[]; write LE words into blob)
+    // 1) reloc strings (read only const_pool[]; write LE words into blob)
     for (i = 0; i < (int)n0; i++) {
       if (!const_is_reloc[i]) continue;
       os = (uchar)(CONST_TOP - i);
@@ -586,7 +584,7 @@ uchar *build_blob(int *out_len) {
       p += 2;
       k++;
     }
-    // zero — reloc walk end + real 0 constant
+    // 2) zero — reloc walk end + real 0 constant
     for (i = 0; i < (int)n0; i++) {
       if (!const_is_reloc[i] && const_pool[i] == 0) {
         map[(uchar)(CONST_TOP - i)] = (uchar)(constidx + k);
@@ -597,7 +595,7 @@ uchar *build_blob(int *out_len) {
     p[1] = 0;
     p += 2;
     k++;
-    // other integer consts
+    // 3) other integer consts
     for (i = 0; i < (int)n0; i++) {
       if (const_is_reloc[i] || const_pool[i] == 0) continue;
       os = (uchar)(CONST_TOP - i);
@@ -623,13 +621,6 @@ uchar *build_blob(int *out_len) {
     }
 
     // Remap slot operands only (walk opcodes; skip string bodies / rel bytes)
-    // TODO: this is brittle as we walk the bytecode in many places
-    //   should make an next_op function that skips ahead, to be
-    //   used by:
-    //    a) here
-    //    b) print
-    //    c) sym_write_all
-    //    d) any more places?
     for (pc = 0; pc < (word)bin_ptr; ) {
       op = bin[pc++];
       if (op < 32) {
@@ -684,10 +675,7 @@ uchar *build_blob(int *out_len) {
         while (pc < (word)bin_ptr && bin[pc]) pc++;
         if (pc < (word)bin_ptr) pc++;
         break;
-
       default:
-        // TODO: give error! If you don't understand the op
-        //   something is wrong and you're going wrong
         break;
       }
     }

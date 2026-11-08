@@ -152,6 +152,10 @@ K=if (E)[?G\x] K else[0?G\x\w\y] K[\y]
 |return E;[X]
 |return;[Q]
 
+# - benchmarking dispatch
+|nop;[ ]
+|pon;[]
+
 # - Memory
 |free(\i);[F\1]
 |\i=malloc(E);[M\1]
