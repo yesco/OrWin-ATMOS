@@ -186,6 +186,7 @@ pnext:
         ldy     savey
         iny
         ;; if Y>=128 fold into ipc (matches comment above); else keep Y offset
+;;; TODO: 5-10% (2c spent testing here, maybe inject an fixop)
         bpl     xnext
         FIXIPC                  ; ipc += Y, Y := 0
         jmp     xnext
@@ -962,6 +963,7 @@ op_gt:  USEY
 ;;; Ixx  acc = ++mem[xx]
 op_I:   USEY
         PARY
+	;; (there is no inc (),y)
 
         ;; lo += 1
         clc
