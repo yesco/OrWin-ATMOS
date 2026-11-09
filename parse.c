@@ -547,9 +547,9 @@ static uchar ignore_case;   // default 1
 typedef struct {
   uchar rule;
 
-// alt + ip index into rule blob; cur is by-value Frame
-  uchar alt;
-  word ip; // TODO: or at least only 256 chars - cheap indexing
+// ap → current alt (NULL-terminated rule[r] list); ip into *ap
+  uchar **ap;
+  word ip;
 
   // -- UNDO INFO - when backtracking
   word save_abs;      // abs file pos at alt start (input rewind / commit floor)
@@ -825,11 +825,11 @@ static void note_progress(void) {
   if (n > MAX_STACK - 1) n = MAX_STACK - 1;
   for (i = 0; i < n; i++) {
     far_stack[i] = 'A' + stack[i].rule;
-    far_alt[i] = stack[i].alt;
+    far_alt[i] = (uchar)(stack[i].ap - rule[stack[i].rule]);
   }
   if (n < MAX_STACK) {
     far_stack[n] = 'A' + cur.rule;
-    far_alt[n] = cur.alt;
+    far_alt[n] = (uchar)(cur.ap - rule[cur.rule]);
     n++;
   }
   far_sp = n;
@@ -1888,21 +1888,12 @@ static int rule_defined(uchar r) {
   return rule[r] != NULL;
 }
 
-static word rule_nalt(uchar r) {
-  word n = 0;
-  uchar **ap = rule[r];
-
-  if (!ap) return 0;
-  while (ap[n]) n++;
-  return n;
-}
-
 // ---- stack ----
 
 // snapshot the input/code/scope state of the newest frame as the
 // start of an alt (used by push and by tail-recursion \<)
 static void frame_mark(void) {
-  cur.alt = 0;
+  cur.ap = rule[cur.rule];
   cur.ip = 0;
   cur.save_abs = abs_pos();
   cur.nsym_save = nsym;
@@ -1982,41 +1973,17 @@ static int frame_rewind(void) {
 // One unit of work. Returns 1 if more to do, 0 if parse finished (stack empty).
 // Flow: rule char vs source char → match / ws-case / hibit dispatch;
 // end of alt → accept (pop); mismatch → next alt; no alts → fail (pop).
-// State is only "where we are" (rule, alt, ip) — no ST_TRY/RUN/OK/FAIL phases.
+// State is only "where we are" (rule, ap, ip).
+// Fail / pop lives only at fail_alt — normal path just follows *ap and *src.
 static int step(void) {
   uchar *alt, *a;
   uchar c, e, rch;
   int ok;
-  word nalt, adv;
+  word adv;
 
   if (sp == 0) return 0;
 
-again:
-  nalt = rule_nalt(cur.rule);
-  if (cur.alt >= nalt) {
-    // rule failed — pop to parent
-    vlog("fail %c (no alt) @%u\n", 'A' + cur.rule, abs_pos());
-    anim_pop();
-    if (sp == 0) return 0;
-    sp--;
-    cur = stack[sp];
-    // parent continues as a failed element → next alt
-    if (!frame_rewind())
-      cur.alt = (uchar)rule_nalt(cur.rule);
-    else {
-      restore_scope();
-      cur.alt++;
-      cur.ip = 0;
-    }
-    goto again;
-  }
-
-  alt = rule[cur.rule][cur.alt];
-  if (!alt) {
-    cur.alt++;
-    goto again;
-  }
-
+  alt = *cur.ap;
   a = alt + cur.ip;
   c = *a;
 
@@ -2024,11 +1991,11 @@ again:
   if (!c) {
     rch = 'A' + cur.rule;
     if (rch == 'I')
-      cur_type = (cur.alt == 3) ? TY_CHAR : TY_WORD;
-    if (rch == 'T' && cur.alt < 2)
+      cur_type = ((uchar)(cur.ap - rule[cur.rule]) == 3) ? TY_CHAR : TY_WORD;
+    if (rch == 'T' && (uchar)(cur.ap - rule[cur.rule]) < 2)
       cur_type |= TY_PTR;
 
-    vlog("ok %c alt %u -> @%u\n", rch, cur.alt, abs_pos());
+    vlog("ok %c alt %u -> @%u\n", rch, (unsigned)(cur.ap - rule[cur.rule]), abs_pos());
 #ifdef VERBOSE
     if (verbose >= 2 && code_len > cur.code_save && rch == 'K') {
       eprintf(NORMAL "GEN:          [ ");
@@ -2100,10 +2067,16 @@ again:
     return 1;
   }
   if (c >= HIBIT(1) && c <= HIBIT(31)) {
-    cur.alt = c - HIBIT(1);
+    // jump to alt index without full rule restart
+    cur.ap = rule[cur.rule] + (c - HIBIT(1));
     cur.ip = 0;
-    frame_mark();
-    vlog("  tail>%u %c @%u\n", (unsigned)cur.alt, 'A' + cur.rule, abs_pos());
+    cur.save_abs = abs_pos();
+    cur.nsym_save = nsym;
+    cur.scope_save = scope_depth;
+    cur.slot_save = next_slot;
+    cur.code_save = code_len;
+    cur.prod_n = 0;
+    vlog("  tail>%u %c @%u\n", (unsigned)(c - HIBIT(1)), 'A' + cur.rule, abs_pos());
     return 1;
   }
 
@@ -2154,15 +2127,33 @@ again:
   return 1;
 
 fail_alt:
-  // next alternative of this rule
-  if (!frame_rewind()) {
-    cur.alt = (uchar)nalt;
-    goto again;
+  // next alt, or pop if none left / mark committed away
+  if (frame_rewind()) {
+    restore_scope();
+    cur.ap++;
+    cur.ip = 0;
+    if (*cur.ap) {
+      // still on this rule — mark for the new alt (input already at save)
+      cur.save_abs = abs_pos();
+      cur.nsym_save = nsym;
+      cur.scope_save = scope_depth;
+      cur.slot_save = next_slot;
+      cur.code_save = code_len;
+      cur.prod_n = 0;
+      return 1;
+    }
+  } else {
+    while (*cur.ap)
+      cur.ap++;
   }
-  restore_scope();
-  cur.alt++;
-  cur.ip = 0;
-  goto again;
+
+  // rule failed — pop to parent and fail that element's alt
+  vlog("fail %c (no alt) @%u\n", 'A' + cur.rule, abs_pos());
+  anim_pop();
+  if (sp == 0) return 0;
+  sp--;
+  cur = stack[sp];
+  goto fail_alt;
 }
 
 // run up to n steps
@@ -2216,7 +2207,7 @@ static void report_reject(void) {
 
     eprintf("EXPECTED: rule %c", r);
     r -= 'A';
-    if (rule_defined(r) && a < rule_nalt(r))
+    if (rule_defined(r) && rule[r][a])
     { eprintf(" alt %u \"", a); show_alt(rule[r][a]); eputc('"'); }
 
     eprintf("\n");
