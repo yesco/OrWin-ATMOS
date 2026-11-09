@@ -12,10 +12,10 @@
 # - Program starts with P
 P=D
 
-D=#include <\+.h>\n\<
-|#include "\+.h"\n\<
-|#include <\+.c>\n\<
-|V\<|F\<|
+D=#include <\+.h>\n\o\<
+|#include "\+.h"\n\o\<
+|#include <\+.c>\n\o\<
+|V\o\<|F\o\<|
 
 # - Declarations: optional register\r -> REGISTER slot 0..31
 #   -O: REGISTER 0..31, other globals 32..95, frames at 96+
@@ -28,12 +28,11 @@ U=,M|
 T=I *|I^*|I
 I=int|word|void|char
 
-F=T \f\{(A)\r B \}[X]
+F=\oT \f\{(A)\r B \}[X]\o
 A=T \pQ|void|
 Q=,A|
 
 B={ \{ C } \}
-#C=V\<|K\o\<|
 C=V\<|K\<|
 
 # - Statements — keywords / specific forms first

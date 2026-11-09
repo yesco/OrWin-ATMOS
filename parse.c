@@ -712,21 +712,37 @@ static word abs_pos(void) {
 
 // \C commit: discard buffer before line_pos
 static void line_commit(void) {
-  word i, rest;
+  word i, rest, drop;
 
   if (line_pos == 0) return;
 
+  drop = line_pos;
+
   // keep line numbers accurate without re-scanning the file
-  for (i = 0; i < line_pos; i++)
+  for (i = 0; i < drop; i++)
     if (line_buf[i] == '\n')
       line_no_base++;
 
-  rest = line_len - line_pos;
-  memmove(line_buf, line_buf + line_pos, rest);
+  rest = line_len - drop;
+  if (rest)
+    memmove(line_buf, line_buf + drop, rest);
 
-  line_abs = (word)(line_abs + line_pos);
+  line_abs = (word)(line_abs + drop);
   line_len = rest;
   line_pos = 0;
+
+  // Alt save = offset into line_buf. Shift by drop; clamp if in dropped prefix.
+  // (Zeroing all saves broke in-buffer backtrack and blew up with \o on 6502.)
+  for (i = 0; i < sp; i++) {
+    if (stack[i].save >= drop)
+      stack[i].save -= drop;
+    else
+      stack[i].save = 0;
+  }
+  if (cur.save >= drop)
+    cur.save -= drop;
+  else
+    cur.save = 0;
 }
 
 // the source char at line_pos (0 at EOF), always one char looked ahead
@@ -2162,15 +2178,8 @@ static int step(void) {
   }
 
   if (c == HIBIT('o')) {
-    // \o commit: drop buffer prefix; keep matching
+    // \o commit: drop buffer prefix; keep matching (saves adjusted in line_commit)
     line_commit();
-    // fix save positions relative to new buffer
-    {
-      uchar i;
-      for (i = 0; i < sp; i++)
-        stack[i].save = 0;
-      cur.save = 0;
-    }
   }
   else if (c == HIBIT('{')) scope_enter();
   else if (c == HIBIT('}')) scope_leave();
@@ -2400,11 +2409,14 @@ static void shutdown(void) {
   if (src_fp) fclose(src_fp);
   src_fp = NULL;
 
+  printf("\nLINEBUF: no_base=%u len=%u cap=%u pos=%u abs=%u file_pos=%u\n",
+    line_no_base, line_len, line_cap, line_pos, line_abs, (unsigned)file_pos);
+// shows garbage after valid
+//  printf("\n>>>>>LINEBUF>>>>\n%s\n<<<<<\n", line_buf);
+
   free(line_buf);
   line_buf = NULL;
 
-  printf("\nLINEBUF: no_base=%u len=%u cap=%u pos=%u abs=%u file_pos=%u\n",
-    line_no_base, line_len, line_cap, line_pos, line_abs, file_pos);
 
   free_rules();
 
