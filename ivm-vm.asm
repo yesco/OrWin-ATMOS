@@ -1150,43 +1150,26 @@ OPFOR=2 ;; new one works i,n only
 
 ;;; TODO: only works if NOT ALTCODE
 
+;;; ALL CHANGES:
+;;;   saves 24 bytes, lol
+;;;  (- 1 (/ 4866569 4926832.0)) = 1.2% faster !
+;;;  (- 1 (/ 4806464 4926832.0)) = 2.44% (upfront load ax)
 op_i:
-	jmp     op_i_cmp
+;;; This entry point is only used the first time.
+;;; During the loop it enters from op_n in op_i_step
+	;; load acc = mem[v]
+	USEY
+	PARY
+        LOAD_SLOT_Y
 
+	jmp     i_skip_load
+
+;;; Entry point from op_n! saves bytes
 op_i_step:
-
-.if 0
-;;; seems bigger...
-
-;;; TODO: silly to do, change at end dispatch instead?
-	inc     _ivm_ipc
-	bne     :+
-	inc     _ivm_ipc+1
-:	
-;;; 28 B  (+ 5 9 6 8)  (+ 9 18 24) = 51c
-	PARY 			; 5b 9c
-	LOAD_SLOT_Y		; 9b 18c
-	inc     _ivm_acc        ; 6b 
-	bne     :+
-	inc     _ivm_acc+1
-:	
-	;; TODO: SAVAXY ?
-	lda     _ivm_acc
-	sta     (_ivm_memlo),y 	; 5b ==> 23b
-	lda     _ivm_acc+1
-	sta     (_ivm_memhi),y
-.else
-;;; TODO: silly to do, change at end dispatch instead?
-	inc     _ivm_ipc
-	bne     :+
-	inc     _ivm_ipc+1
-:	
-
-;;; --- 25  46c
+;;; --- 25 b 46c
 
 	PARAX			; 10 B  21c
 
-	;; 15 B  25c
 	;; +1
 	clc
 	adc     #1
@@ -1197,21 +1180,12 @@ op_i_step:
 	sta     _ivm_acc
 	stx     _ivm_acc+1
 
-	;; TODO: SAVAXY ?
 	sta     (_ivm_memlo),y
 	txa
 	sta     (_ivm_memhi),y
 
-.endif
-
-jmp i_skip_load
-	
 ;;; We want to compare acc <= mem[u]
 op_i_cmp:
-	;; load AX
-	USEY
-	PARY
-        LOAD_SLOT_Y                 ; acc = mem[v]
 
 i_skip_load:	
         ldy     #1
@@ -1219,8 +1193,7 @@ i_skip_load:
         tay
 
 	;; acc <= mem[u] ?
-	;; NAH: NOT mem[u] < acc
-	
+	;; NAH: NOT( mem[u] < acc )
         lda     (_ivm_memlo),y
         cmp     _ivm_acc
         lda     (_ivm_memhi),y
@@ -1229,12 +1202,14 @@ i_skip_load:
 
 i_enter:
 	lda     #3
-
 	jmp     anext
+
 i_exit:
         ldy     #2
         lda     (_ivm_ipc),y        ; oo
 
+;;; TODO: can forward jumps be made to take this into account!
+;;; 7 B  7c (11c) - but only save during exit loop
         clc
 	adc     #3
 	bcc     :+
@@ -1242,7 +1217,9 @@ i_exit:
 :	
 	jmp     anext
 
-;;; n delta
+
+;;; (for) next - dispatches to a looping-step-compare op
+;;; like i<=N !j k<N
 op_n:
 	;; basically op_B except the jmp next
 	;; is shortcut to inside op_i
@@ -1256,10 +1233,11 @@ op_n:
         bcs     :+
         dec     _ivm_ipc+1
 :	
-	;; TODO: look at adjusting \m .. B so 
-	;;   no need add 1 (pnext)
+;;; TODO: look at adjusting \m .. B so 
+;;;   no need add 2
+;;; 7 B  7c (11c) TODO: used for EVERY LOOP!
 	clc
-	adc     #1
+	adc     #2 		; our own length!
 	bcc     :+
 	dec     _ivm_ipc+1
 :	
@@ -1273,8 +1251,10 @@ op_n:
 .endif ; OPFOR=2
 	
 
+
 .if OPFOR=1
 ;;;  TODO: does it work?
+;;; 	- no, it was mean to work for ALTCODE=1
 	
 op_i:
         FIXIPC                  ; Y = 0, ipc at first operand
