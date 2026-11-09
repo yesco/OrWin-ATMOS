@@ -243,8 +243,10 @@ xnext:
 .endmacro
 
 anext:	
+;;; 11 b  11c (18c)
 	clc
 	adc     _ivm_ipc
+	sta     _ivm_ipc
 	bcc     xnext
 	inc     _ivm_ipc+1
 	bne     xnext
@@ -1219,6 +1221,11 @@ i_skip_load:
         bcc     i_exit
 
 i_enter:
+.if 1
+	lda     #3
+
+	jmp     anext
+.else
         lda     _ivm_ipc
         clc
         adc     #3
@@ -1227,7 +1234,7 @@ i_enter:
         inc     _ivm_ipc+1
 :
         jmp     xnext
-
+.endif
 i_exit:
         ldy     #2
         lda     (_ivm_ipc),y        ; oo
