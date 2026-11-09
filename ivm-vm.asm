@@ -247,7 +247,6 @@ anext:
 	adc     _ivm_ipc
 	bcc     xnext
 	inc     _ivm_ipc+1
-:	
 	bne     xnext
 	
 ;; ----- consume 1-byte operand -----
@@ -1150,26 +1149,75 @@ OPFOR=2 ;; new one works i,n only
 ;;; TODO: only works if NOT ALTCODE
 
 op_i:
-;	USEY
-        ldy     #0
-        sty     savey
+	jmp     op_i_cmp
 
-        lda     (_ivm_ipc),y        ; v
-        tay
+op_i_step:
+	;PARAX Y+1
+;	USEY
+
+	inc     _ivm_ipc
+	bne     :+
+	inc     _ivm_ipc+1
+:	
+
+.if 0
+;;; probably less!
+	PARY 			; 5b
+	LOAD_SLOT_Y		; 9b
+	inc     _ivm_acc        ; 6b ==> 18
+	bne     :+
+	inc     _ivm_acc+1
+:	
+	;; TODO: SAVAXY ?
+	sta     (_ivm_memlo),y 	; 5b ==> 23b
+	txa
+	sta     (_ivm_memhi),y
+.else
+	inc     _ivm_ipc
+	bne     :+
+	inc     _ivm_ipc+1
+:	
+	PARAX
+
+	;; +1
+	clc
+	adc     #1
+	bcc     :+
+	inx
+:	
+
+	sta     _ivm_acc
+	stx     _ivm_acc+1
+
+	;; TODO: SAVAXY ?
+	sta     (_ivm_memlo),y
+	txa
+	sta     (_ivm_memhi),y
+jmp i_skip_load
+
+.endif
+	
+;;; We want to compare acc <= mem[u]
+op_i_cmp:
+	;; load AX
+	USEY
+	PARY
         LOAD_SLOT_Y                 ; acc = mem[v]
 
+i_skip_load:	
         ldy     #1
-        lda     (_ivm_ipc),y        ; u
+        lda     (_ivm_ipc),y
         tay
 
-        ; acc <= mem[u] ?
-        lda     _ivm_acc
-        cmp     (_ivm_memlo),y
-        lda     _ivm_acc+1
-        sbc     (_ivm_memhi),y
-        bcc     i_enter             ; acc <  mem[u]
-        bne     i_exit              ; acc >  mem[u]
-        ; equal → enter
+	;; acc <= mem[u] ?
+	;; NAH: NOT mem[u] < acc
+	
+        lda     (_ivm_memlo),y
+        cmp     _ivm_acc
+        lda     (_ivm_memhi),y
+        sbc     _ivm_acc+1
+        bcc     i_exit
+
 i_enter:
         lda     _ivm_ipc
         clc
@@ -1184,7 +1232,13 @@ i_exit:
         ldy     #2
         lda     (_ivm_ipc),y        ; oo
         clc
+
+	;; or just add 3 and xnext?
         adc     #2
+	bcc     :+
+        inc     _ivm_ipc+1
+:	
+
         adc     _ivm_ipc
         sta     _ivm_ipc
         bcc     :+
@@ -1195,66 +1249,21 @@ i_exit:
 
 ;;; n delta
 op_n:
-	FIXIPC
+	;; basically op_B except the jmp next
+	;; is shortcut to inside op_i
+        FIXIPC                  ; Y=0
 	USEY
-        ldy     #0
 
-        ; tmp-hi/lo = tpc = ipc - delta + 1  → points at the 'i' opcode
         lda     _ivm_ipc
         sec
         sbc     (_ivm_ipc),y
-        sta     tmp_lo
-        lda     _ivm_ipc+1
-        sbc     #0
-        sta     tmp_hi
-        inc     tmp_lo
-        bne     :+
-        inc     tmp_hi
-:
-
-        ; Y = slot v  (code byte at tpc+1)
-        ldy     #1
-        lda     (tmp_lo),y
-        tay
-
-        ; ++mem[v] → acc  (same shape as op_I)
-        clc
-        lda     (_ivm_memlo),y
-        adc     #1
-        sta     (_ivm_memlo),y
-        sta     _ivm_acc
-        lda     (_ivm_memhi),y
-        adc     #0
-        sta     (_ivm_memhi),y
-        sta     _ivm_acc+1
-
-        ; Y = slot u  (code byte at tpc+2)
-        ldy     #2
-        lda     (tmp_lo),y
-        tay
-
-        ; if (acc > mem[u]) fall out
-        lda     (_ivm_memlo),y
-        cmp     _ivm_acc
-        lda     (_ivm_memhi),y
-        sbc     _ivm_acc+1
-        bcc     n_exit              ; mem[u] < acc → exit
-
-        ; continue: ipc = tpc + 4
-        lda     tmp_lo
-        clc
-        adc     #4
         sta     _ivm_ipc
-        lda     tmp_hi
-        adc     #0
-        sta     _ivm_ipc+1
+        bcs     :+
+        dec     _ivm_ipc+1
+:
+;;; TODO: specialized dispatch
+	jmp     op_i_step
 
-        jmp     xnext
-
-n_exit:
-        jmp     pnext
-
-	
 .endif ; OPFOR=2
 	
 
