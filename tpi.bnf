@@ -14,8 +14,8 @@ M=\+:T;\<|
 F=function \f\{(A)\r:T;HB[;]\}
 A=\p:TQ|
 Q=,A|;A|
-T=^I|I
-I=integer|word
+T=^I\'^|I
+I=integer\'w|word\'w
 H=V|
 # N matches end; or end without re-parsing C
 N=end;|end

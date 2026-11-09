@@ -68,7 +68,7 @@
 //   \1..\9     match same ident as capture N (match_ident_same)
 //   \=n        result := capture n (no new capture)
 //   \#xx       result := hex const xx
-//   \'X        set type high-byte of result to X ('c'/'w'/'C'/'W')
+//   \'X        set type high-byte of result to X ('c'/'w'/'C'/'W'; \'^ = uppercase)
 //   \?X        fail unless result type high-byte is X
 //   \| \. etc  literal escaped char (not a directive)
 //
@@ -2039,19 +2039,6 @@ static int step(void) {
   // end of alt → accept (pop), parent advances past the call
   if (!c) {
     rch = 'A' + cur.rule;
-    // C-only: rule I (int|word|void|char) and T (I *|I^*|I) set cur_type
-    // from which alt succeeded. Pascal does not use these rules.
-    // TODO: replace with an explicit directive (e.g. \b) in the BNF
-    // so the type is declared in the grammar instead of hard-coded here.
-    if (rch == 'I' || rch == 'T') {
-      uchar **base = rule[cur.rule];
-      uchar an = (uchar)(cur.alts - base);
-      if (rch == 'I')
-        cur_type = (an == 3) ? TY_CHAR : TY_WORD;
-      else if (an < 2)
-        cur_type = (word)(toupper((uchar)(cur_type >> 8)) << 8);
-    }
-
     vlog("ok %c alt %u -> @%u\n", rch, (unsigned)(cur.alts - rule[cur.rule]), abs_pos());
 #ifdef VERBOSE
     if (verbose >= 2 && code_len > cur.code_save && rch == 'K') {
@@ -2141,9 +2128,15 @@ static int step(void) {
     adv = 3;
   }
   else if (c == HIBIT('\'')) {
-    // \'X: set type high-byte of result to X
+    // \'X: set type high-byte of result (and cur_type) to X
+    // \'^: uppercase current type (make it a pointer)
     if (!a[1]) FAIL("bad \\' in grammar");
-    cur.result = (cur.result & 0xff) | ((word)a[1] << 8);
+    {
+      uchar t = a[1];
+      if (t == '^') t = (uchar)toupper((uchar)(cur.result >> 8));
+      cur.result = (cur.result & 0xff) | ((word)t << 8);
+      cur_type = (word)t << 8;
+    }
     adv = 2;
   }
   else if (c == HIBIT('?')) {
