@@ -140,6 +140,7 @@ FIXINLINE=1
 	
 ;;; leaves Y=0
 .macro FIXIPC
+;;; 12 b - 15c
         tya
         clc
         adc     _ivm_ipc
