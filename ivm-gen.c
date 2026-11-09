@@ -229,7 +229,7 @@ uchar add_const(unsigned int v) {
 }
 
 // Append one byte to data_pool. Returns 0 if full.
-void data_putc(c) {
+void data_putc(char c) {
   if (data_len >= MAX_DATA)
     IVM_GEN_FAIL("data pool full");
   data_pool[data_len++] = c;

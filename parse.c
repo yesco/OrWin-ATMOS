@@ -692,37 +692,6 @@ static void v1_indent(void) {
 #define is_ws(c) isspace(c)
 
 
-// append one char from file into line_buf
-static void line_grow(uchar c) {
-  if (line_len + 1 >= line_cap) {
-    word ncap = line_cap ? (word)(line_cap * 2) : 256;
-    uchar *n = realloc(line_buf, ncap);
-
-    if (!n) FAIL("out of memory (line)");
-    line_buf = n;
-    line_cap = ncap;
-  }
-  line_buf[line_len++] = c;
-}
-
-// read ONE more char from the file onto the end of line_buf
-static int line_fetch(void) {
-  int ch;
-
-  if (!src_fp) return 0;
-  ch = fgetc(src_fp);
-  if (ch == EOF) return 0;
-  file_pos++;
-  line_grow(ch);
-  return 1;
-}
-
-// ensure at least one more char available at line_pos (read from file)
-static int line_need(void) {
-  if (line_pos < line_len) return 1;
-  return line_fetch();
-}
-
 static word abs_pos(void) {
   return (word)(line_abs + line_pos);
 }
@@ -749,9 +718,34 @@ static void line_commit(void) {
 // the source char at line_pos (0 at EOF), always one char looked ahead
 static uchar nextc;
 
-// (re)load nextc from line_pos, refilling the buffer from the file if needed
+// (re)load nextc from line_pos; grow/fetch from file when past end of buffer
 static void load_nextc(void) {
-  nextc = line_need() ? line_buf[line_pos] : 0;
+  int ch;
+  word ncap;
+  uchar *n;
+
+  // need: already buffered at line_pos?
+  if (line_pos < line_len) {
+    nextc = line_buf[line_pos];
+    return;
+  }
+
+  // fetch: one char from source file
+  if (!src_fp) { nextc = 0; return; }
+  ch = fgetc(src_fp);
+  if (ch == EOF) { nextc = 0; return; }
+  file_pos++;
+
+  // grow: expand line_buf if full
+  if (line_len + 1 >= line_cap) {
+    ncap = line_cap ? (word)(line_cap * 2) : 256;
+    n = realloc(line_buf, ncap);
+    if (!n) FAIL("out of memory (line)");
+    line_buf = n;
+    line_cap = ncap;
+  }
+  line_buf[line_len++] = (uchar)ch;
+  nextc = (uchar)ch;
 }
 
 // consume nextc
@@ -1208,17 +1202,25 @@ static void comments_set_default(void) {
   comments_add_from_line("{ }");
 }
 
-// True if line_buf[line_pos..] starts with s[0..len)
-// Must read past line_len even when line_pos < line_len (line_need alone is not enough).
+// True if source at line_pos starts with s[0..len). Does not consume.
+// Uses skip/load_nextc so fetch/grow lives in one place only.
 static int match_at(const char *s, uchar len) {
   uchar i;
+  word save;
 
   if (!len) return 0;
+  save = line_pos;
   for (i = 0; i < len; i++) {
-    while (line_pos + i >= line_len)
-      if (!line_fetch()) return 0;
-    if (line_buf[line_pos + i] != (uchar)s[i]) return 0;
+    if (!nextc || nextc != (uchar)s[i]) {
+      line_pos = save;
+      load_nextc();
+      return 0;
+    }
+    if (i + 1 < len)
+      skip();
   }
+  line_pos = save;
+  load_nextc();
   return 1;
 }
 
