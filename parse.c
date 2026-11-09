@@ -48,7 +48,7 @@
 //   A-Z        call rule
 //   \>         (load-time) mark current alt as jump target for \<
 //   \<         tail-recurse: to \> alt if any, else restart whole rule
-//   \C         commit: drop line buffer up to current point
+//   \o         cOmmit: drop line buffer up to current point
 //   \i         ident in scope (must be declared by \+)
 //   \+         ident declare (match + add to current scope)
 //   \f         declare function: name = ret-value cell of a new frame + vector
@@ -56,16 +56,17 @@
 //   \r         end of parameter list (no input): last param -> base+3
 //   \d         number
 //   \s         string
-//   \S         emit string bytes + \0 (opening " already matched)
+//   \u         emit string bytes + \0 (opening " already matched)
 //   \n         >=1 newline; eats surrounding horizontal space
 //   \{ \}      enter / leave scope (\} drops names added in scope)
-//   \| \c      literal | or other escaped char
+//   \| \.      literal | or other escaped char
 //   |          alternative (epsilon allowed)
 //   line '|'   continue previous rule (long alts)
 //   line '.'   end of rules section
 //   [ ... ]    production: after match, emit bytecode (tpi-style)
 //   \1..\9     in production: insert result byte from nth value match
 //              value matches: \i \+ \d and successful subrule calls
+//   \c3 \h3    lo hi byte of result 3
 //
 //   production only:
 //         \aN force addr
@@ -998,6 +999,7 @@ static uchar *run_production(uchar *p) {
       case HIBIT('t'): case HIBIT('e'):
         b = alloc_slot();
         if (e == HIBIT('e')) {
+          // TDOO: replace with better loop/test code-gen
           emitop2('S', b);
           emitop2('J', b);
         } else
@@ -1720,7 +1722,7 @@ static void build_one_rule(uchar r, char *rhs) {
   word a, bi, na, alt_starts[MAX_ALTS];
   uchar taildest;   // 1-based alt index for \> / \< (0 = none yet)
 
-  // directives (\i \n \s \C \< \d \+ \{ \}, rule calls, bare space, [ ]) get
+  // directives (\i \n \s \o \< \d \+ \{ \}, rule calls, bare space, [ ]) get
   // the hibit, quoted \| \c (not specials) become the plain char
   // \> is not stored; it only updates taildest
   // \< becomes HIBIT(x) (x=1..31) = jump to alt x-1, or HIBIT('<') if no \> yet
@@ -1752,9 +1754,6 @@ static void build_one_rule(uchar r, char *rhs) {
         // \< : with a \> target jump code 1..31, else full rule restart
         e = HIBIT(taildest && taildest < 32 ? taildest : '<');
       } else {
-        // \C \S would be the rule calls C S: store them as \o \u
-        if (e == 'C') e = 'o';
-        else if (e == 'S') e = 'u';
         if (is_dir(e)) e = HIBIT(e);
       }
     } else if (e == '|' && !inprod) {
@@ -2064,11 +2063,15 @@ static int step(void) {
   // literals (hibit clear) are matched right here: a whole run per step
   // (saved 67 bytes by c = *a)
   if (!(c & 0x80)) {
+
     for (;;) {
+
       if (nextc != c) {
         // not there: whitespace/comments may come first (not before a quoted
         // space/tab), or only the case differs (-I)
         if (c != ' ' && c != '\t') skip_ws();
+
+        // lowercase if not match and ignore_case
         if (nextc != c &&
             !(ignore_case && isalpha(c) && tolower(nextc) == tolower(c))) {
           vlog("  fail lit '%c' @%u got '%c'\n", c, abs_pos(),
@@ -2090,6 +2093,7 @@ static int step(void) {
 
     return 1;
   }
+
 
   // space in BNF = required ws gap: skip comments/whitespace, no input char consumed as literal
   if (c == HIBIT(' ')) {
@@ -2134,7 +2138,7 @@ static int step(void) {
   }
 
   if (c == HIBIT('o')) {
-    // \C commit: drop buffer prefix; keep matching
+    // \o commit: drop buffer prefix; keep matching
     line_commit();
     // fix save positions relative to new buffer
     {

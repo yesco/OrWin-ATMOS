@@ -107,11 +107,14 @@ K=if (E)[?G\x] K else[0?G\x\w\y] K[\y]
 |putchar(\i);[L\1E]
 |putchar(E);[E]
 
-|puts("["]\S);[N]
+|puts("["]\u);[N]
 |puts(\i);[\1PN]
 
-|fputs("["]\S,stdout);
+|fputs("["]\u,stdout);
 |fputs(\i,stdout);[\1P]
+
+# single string constant - common
+|printf("["]\u);
 
 |printf("%s",\i);[L\1P]
 
@@ -131,13 +134,9 @@ K=if (E)[?G\x] K else[0?G\x\w\y] K[\y]
 |printf("%u%u%u",E,E,E);[...]
 |printf("\\"%s\\" has %d characters\\n",\i,\i(Z)[\v]);[S\tL\1P" has \#00L\3.N]
 
-
-# single string constant - common
-|printf("["]\S);
-
 |printf(E);[P]
 
-|putz("["]\S);
+|putz("["]\u);
 |putz(E);[P]
 |putnl(E);[.N]
 |putn(E);[.O ]
@@ -147,7 +146,7 @@ K=if (E)[?G\x] K else[0?G\x\w\y] K[\y]
 #|printf(JW);
 
 # - a dummy catch all - WRONG!
-|printf("["]\S, E);[.]
+|printf("["]\u, E);[.]
 
 # - Return
 |return E;[X]
@@ -184,7 +183,7 @@ H=\i+=\i;[U\1\2]
 
 # - print support
 W=,J\<|
-J="%u\\\\n"|"%d\\\\n"|"%s\\\\n"|"%s"|"%u "|"%d "|"%u"|"%d"|"["]\S|E[.]
+J="%u\\\\n"|"%d\\\\n"|"%s\\\\n"|"%s"|"%u "|"%d "|"%u"|"%d"|"["]\u|E[.]
 
 # - Expressions
 
@@ -249,3 +248,44 @@ O=
 |>S[>\a1]\<
 |
 .
+
+
+-- Legend
+.   end of rules
+|   at line start = continue previous rule
+
+Tokens:
+  \i  ident in scope -> slot (call vector remembered in the frame for \v)
+  \+  declare ident -> slot
+  \f  declare function ident: name = ret-value cell of a new frame
+      (base+0 ret addr, +1 ret value, +2 prev fp, +3 last param) + vector index
+  \p  declare parameter: slot base+4+n
+  \r  end of params (no input): last param moves to base+3 (JSR stores ACC there)
+
+  \d  number -> const address (CONST_TOP down, via lit_addr)
+  \s  string (match only)
+  \u  emit string bytes + \0 (opening " already matched; ["] emits the " opcode)
+
+Control:
+  \o    commit, truncate input, no use backtrace beyond here
+  \{ \} scope  start end
+  \> \< tail-till-here tail-recurse rule (till \> or first alt)
+  \#xx  result := hex xx  (same as \d having matched that number)
+  \=n   result := capture n
+
+Generate:
+  [..]     production  (-v prints GEN only when alt commits)
+           a bare | inside [..] is literal, not an alternative separator
+           [] alone = no code, result := ACC
+  \1 - \9  capture byte (address slot index)
+  \aN      force address (spill ACC to temp, BEFORE the production's bytes)
+  \lN      load capture N into ACC (nothing if it already is ACC)
+  \t       allocate temp, emit its slot, record it as a capture
+  \v       emit 0xC0|vec for the function matched by \i in this rule
+  \k       emit param slot of the next call argument (rule Z)
+  \x       emit jump placeholder, push on patch stack
+  \y       patch top placeholder to jump to here    \w swap top two
+  \m       mark loop start    \z emit backward delta to the mark
+  \[ \]    emit a literal [ or ]
+
+  [;]      function return opcode (after body)
