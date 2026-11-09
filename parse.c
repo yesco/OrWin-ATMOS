@@ -537,6 +537,10 @@ static word line_abs;       // absolute file offset of line_buf[0]
 static long file_pos;       // ftell-style count of bytes read from file
 
 static word max_pos_abs;    // furthest absolute position
+// Snapshot of the matcher stack at the furthest source position reached.
+// Used ONLY for error reporting (not during matching).
+// far_stack[i] = rule letter ('A'+rule), far_alt[i] = alt index in that rule.
+// Updated in note_progress when abs_pos advances.
 static uchar far_stack[MAX_STACK];
 static uchar far_alt[MAX_STACK];
 static uchar far_sp;
@@ -547,9 +551,10 @@ static uchar ignore_case;   // default 1
 typedef struct {
   uchar rule;
 
-// ap → current alt (NULL-terminated rule[r] list); ip into *ap
-  uchar **ap;
-  word ip;
+// alts: pointer into the NULL-terminated rule[r] alt list
+// rip:  offset into *alts (rule instruction pointer)
+  uchar **alts;
+  word rip;
 
   // -- UNDO INFO - when backtracking
   word save_abs;      // abs file pos at alt start (input rewind / commit floor)
@@ -825,11 +830,11 @@ static void note_progress(void) {
   if (n > MAX_STACK - 1) n = MAX_STACK - 1;
   for (i = 0; i < n; i++) {
     far_stack[i] = 'A' + stack[i].rule;
-    far_alt[i] = (uchar)(stack[i].ap - rule[stack[i].rule]);
+    far_alt[i] = (uchar)(stack[i].alts - rule[stack[i].rule]);
   }
   if (n < MAX_STACK) {
     far_stack[n] = 'A' + cur.rule;
-    far_alt[n] = (uchar)(cur.ap - rule[cur.rule]);
+    far_alt[n] = (uchar)(cur.alts - rule[cur.rule]);
     n++;
   }
   far_sp = n;
@@ -1884,23 +1889,29 @@ static void load_bnf(const char *path) {
   free(acc);
 }
 
-static int rule_defined(uchar r) {
-  return rule[r] != NULL;
-}
-
 // ---- stack ----
 
 // snapshot the input/code/scope state of the newest frame as the
 // start of an alt (used by push and by tail-recursion \<)
-static void frame_mark(void) {
-  cur.ap = rule[cur.rule];
-  cur.ip = 0;
+// Snapshot undo info for the current alt. Does not change alts/rip.
+static void alt_mark(void) {
   cur.save_abs = abs_pos();
   cur.nsym_save = nsym;
   cur.scope_save = scope_depth;
   cur.slot_save = next_slot;
   cur.code_save = code_len;
   cur.prod_n = 0;
+}
+
+// Switch to alt n of the current rule (0 = first) and snapshot undo.
+// n == 255 means "step to the next alt" (after a failed one).
+static void goto_alt(uchar n) {
+  if (n == 255)
+    cur.alts++;
+  else
+    cur.alts = rule[cur.rule] + n;
+  cur.rip = 0;
+  alt_mark();
 }
 
 static void push(uchar r) {
@@ -1934,7 +1945,7 @@ static void push(uchar r) {
   cur.restart = 0;
   cur.result = 0;
   memset(cur.prod_cap, 0, sizeof(cur.prod_cap));
-  frame_mark();
+  goto_alt(0);
 }
 
 static void restore_scope(void) {
@@ -1983,19 +1994,27 @@ static int step(void) {
 
   if (sp == 0) return 0;
 
-  alt = *cur.ap;
-  a = alt + cur.ip;
+  alt = *cur.alts;
+  a = alt + cur.rip;
   c = *a;
 
   // end of alt → accept (pop), parent advances past the call
   if (!c) {
     rch = 'A' + cur.rule;
-    if (rch == 'I')
-      cur_type = ((uchar)(cur.ap - rule[cur.rule]) == 3) ? TY_CHAR : TY_WORD;
-    if (rch == 'T' && (uchar)(cur.ap - rule[cur.rule]) < 2)
-      cur_type |= TY_PTR;
+    // C-only: rule I (int|word|void|char) and T (I *|I^*|I) set cur_type
+    // from which alt succeeded. Pascal does not use these rules.
+    // TODO: replace with an explicit directive (e.g. \b) in the BNF
+    // so the type is declared in the grammar instead of hard-coded here.
+    if (rch == 'I' || rch == 'T') {
+      uchar **base = rule[cur.rule];
+      uchar an = (uchar)(cur.alts - base);
+      if (rch == 'I')
+        cur_type = (an == 3) ? TY_CHAR : TY_WORD;
+      else if (an < 2)
+        cur_type |= TY_PTR;
+    }
 
-    vlog("ok %c alt %u -> @%u\n", rch, (unsigned)(cur.ap - rule[cur.rule]), abs_pos());
+    vlog("ok %c alt %u -> @%u\n", rch, (unsigned)(cur.alts - rule[cur.rule]), abs_pos());
 #ifdef VERBOSE
     if (verbose >= 2 && code_len > cur.code_save && rch == 'K') {
       eprintf(NORMAL "GEN:          [ ");
@@ -2010,7 +2029,7 @@ static int step(void) {
       sp--;
       cur = stack[sp];
       record_capture(child_res);
-      cur.ip++;
+      cur.rip++;
     }
     return 1;
   }
@@ -2033,7 +2052,7 @@ static int step(void) {
       c = *++a;
       if (!c || (c & 0x80)) break;
     }
-    cur.ip = (word)(a - alt);
+    cur.rip = (word)(a - alt);
     return 1;
   }
 
@@ -2041,18 +2060,18 @@ static int step(void) {
   if (c == HIBIT(' ')) {
     skip_ws();
     note_progress();
-    cur.ip++;
+    cur.rip++;
     return 1;
   }
 
   if (c == HIBIT('[')) {
-    cur.ip = (word)(run_production(a + 1) - alt);
+    cur.rip = (word)(run_production(a + 1) - alt);
     return 1;
   }
 
   if (c >= HIBIT('A') && c <= HIBIT('Z')) {
     uchar r = c - HIBIT('A');
-    if (!rule_defined(r)) FAIL("rule not defined");
+    if (!rule[r]) FAIL("rule not defined");
     vlog("  call %c from %c @%u\n", c & 0x7f, 'A' + cur.rule, abs_pos());
     push(r);
     return 1;
@@ -2062,23 +2081,17 @@ static int step(void) {
   adv = 1;
 
   if (c == HIBIT('<')) {
-    frame_mark();
+    goto_alt(0);
     vlog("  tail %c @%u\n", 'A' + cur.rule, abs_pos());
     return 1;
   }
   if (c >= HIBIT(1) && c <= HIBIT(31)) {
-    // jump to alt index without full rule restart
-    cur.ap = rule[cur.rule] + (c - HIBIT(1));
-    cur.ip = 0;
-    cur.save_abs = abs_pos();
-    cur.nsym_save = nsym;
-    cur.scope_save = scope_depth;
-    cur.slot_save = next_slot;
-    cur.code_save = code_len;
-    cur.prod_n = 0;
+    // \> target: jump to that alt (1-based code stored as HIBIT(n))
+    goto_alt((uchar)(c - HIBIT(1)));
     vlog("  tail>%u %c @%u\n", (unsigned)(c - HIBIT(1)), 'A' + cur.rule, abs_pos());
     return 1;
   }
+
 
   if (c == HIBIT('o'))
     line_commit();
@@ -2123,28 +2136,20 @@ static int step(void) {
     goto fail_alt;
   }
   vlog("  ok \\%c @%u\n", c & 0x7f, abs_pos());
-  cur.ip += adv;
+  cur.rip += adv;
   return 1;
 
 fail_alt:
   // next alt, or pop if none left / mark committed away
   if (frame_rewind()) {
     restore_scope();
-    cur.ap++;
-    cur.ip = 0;
-    if (*cur.ap) {
-      // still on this rule — mark for the new alt (input already at save)
-      cur.save_abs = abs_pos();
-      cur.nsym_save = nsym;
-      cur.scope_save = scope_depth;
-      cur.slot_save = next_slot;
-      cur.code_save = code_len;
-      cur.prod_n = 0;
+    if (cur.alts[1]) {
+      goto_alt(255);   // step to next alt and snapshot
       return 1;
     }
   } else {
-    while (*cur.ap)
-      cur.ap++;
+    while (*cur.alts)
+      cur.alts++;
   }
 
   // rule failed — pop to parent and fail that element's alt
@@ -2207,8 +2212,11 @@ static void report_reject(void) {
 
     eprintf("EXPECTED: rule %c", r);
     r -= 'A';
-    if (rule_defined(r) && rule[r][a])
-    { eprintf(" alt %u \"", a); show_alt(rule[r][a]); eputc('"'); }
+    {
+      uchar **alts = rule[r];
+      if (alts && alts[a])
+      { eprintf(" alt %u \"", a); show_alt(alts[a]); eputc('"'); }
+    }
 
     eprintf("\n");
   }
@@ -2317,7 +2325,7 @@ static void init(char *bnf_path, char *src_path) {
   sym_reset();
 
   // get started with rule P
-  if (!rule_defined('P' - 'A')) FAIL("rule P missing");
+  if (!rule['P' - 'A']) FAIL("rule P missing");
   push('P' - 'A');
 }
 
@@ -2411,7 +2419,7 @@ int main(int argc, char **argv) {
     eprintf("--- rules ---\n");
     for (i = 0; i < NRULES; i++)
 
-      if (rule_defined(i)) {
+      if (rule[i]) {
         eprintf("%c =", 'A' + (int)i);
         for (a = 0; rule[i][a]; a++) {
           if (a) eprintf("|");
