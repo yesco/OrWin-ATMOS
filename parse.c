@@ -544,8 +544,6 @@ static uchar far_sp;
 static uchar verbose;       // 0 off, 1 compact, 2+ detail
 static uchar ignore_case;   // default 1
 
-enum { ST_TRY, ST_RUN, ST_OK, ST_FAIL };
-
 typedef struct {
   uchar rule;
 
@@ -559,8 +557,6 @@ typedef struct {
   word nsym_save;     // symbol count at alt entry (backtrack drops newer ones)
   uchar scope_save;   // scope_depth at alt entry
 
-// TODO: what values are legal and meaning?
-  uchar state;
   // production value captures \1..\9; result = rule value (word)
   // 0..254 slot, 0x80|idx const, 0xFFFF = ACC
   word prod_cap[10];
@@ -709,7 +705,6 @@ static word abs_pos(void) {
 
 // \o commit: drop buffer before line_pos; window starts at line_abs.
 // Does not touch frames. Rewind uses save_abs; if save_abs < line_abs, fail-fast.
-// This limits the buffersize to be large enough for largest function
 static void line_commit(void) {
   word i, rest, drop;
 
@@ -950,7 +945,7 @@ static word force_addr(uchar n) {
 
 
 // run production at p (first char after '['); returns after ']'
-// quiet: GEN is printed only when the owning alt commits (ST_OK)
+// quiet: GEN is printed only when the owning alt accepts (pop)
 static uchar *run_production(uchar *p) {
   uchar n, b, e, adv, cv, dest, src, *q;
   word w, f;
@@ -1917,7 +1912,7 @@ static void frame_mark(void) {
   cur.prod_n = 0;
 }
 
-static void push(uchar r, uchar state) {
+static void push(uchar r) {
   if (sp >= MAX_STACK) FAIL("stack overflow");
 
   if (sp >= stack_cap) {
@@ -1949,7 +1944,6 @@ static void push(uchar r, uchar state) {
   cur.result = 0;
   memset(cur.prod_cap, 0, sizeof(cur.prod_cap));
   frame_mark();
-  cur.state = state;
 }
 
 static void restore_scope(void) {
@@ -1984,225 +1978,157 @@ static int frame_rewind(void) {
 // ---- one step ----
 // estimated ~50-200us per step on 6502 @ 1MHz (dispatch + match)
 
+
+// One unit of work. Returns 1 if more to do, 0 if parse finished (stack empty).
+// Flow: rule char vs source char → match / ws-case / hibit dispatch;
+// end of alt → accept (pop); mismatch → next alt; no alts → fail (pop).
+// State is only "where we are" (rule, alt, ip) — no ST_TRY/RUN/OK/FAIL phases.
 static int step(void) {
   uchar *alt, *a;
-  uchar c, e, rch, st;
+  uchar c, e, rch;
   int ok;
   word nalt, adv;
 
   if (sp == 0) return 0;
 
-  st = cur.state;
-
-  // TRY ALTERNATIVES of CURRENT RULE
-  if (st == ST_TRY) {
-
-    // At end of RULE? => POP and continue caller
-    nalt = rule_nalt(cur.rule);
-    if (cur.alt >= nalt) {
-      vlog("fail %c (no alt) @%u\n", 'A' + cur.rule, abs_pos());
-      anim_pop();
-
-      if (sp == 0) return -1;
-      sp--;
-      cur = stack[sp]; // restore parent Frame
-
-      // parent's current alt failed: set ST_FAIL
-      //   restores pos, capture, code, scope, moves next alt
-      cur.state = ST_FAIL;
-
-      return 1;
+again:
+  nalt = rule_nalt(cur.rule);
+  if (cur.alt >= nalt) {
+    // rule failed — pop to parent
+    vlog("fail %c (no alt) @%u\n", 'A' + cur.rule, abs_pos());
+    anim_pop();
+    if (sp == 0) return 0;
+    sp--;
+    cur = stack[sp];
+    // parent continues as a failed element → next alt
+    if (!frame_rewind())
+      cur.alt = (uchar)rule_nalt(cur.rule);
+    else {
+      restore_scope();
+      cur.alt++;
+      cur.ip = 0;
     }
-
-    // undo and rest current ALT
-    if (!frame_rewind()) {
-      cur.state = ST_FAIL;
-      return 1;
-    }
-    cur.ip = 0;
-    cur.state = ST_RUN;
-
-    vlog("try %c alt %u @%u \"", 'A' + cur.rule, cur.alt, abs_pos());
-    #ifdef VERBOSE
-      if (verbose >= 3) show_alt(rule[cur.rule][cur.alt]);
-    #endif
-    vlog("\"\n");
-
-    return 1;
+    goto again;
   }
 
+  alt = rule[cur.rule][cur.alt];
+  if (!alt) {
+    cur.alt++;
+    goto again;
+  }
 
-  if (st == ST_OK) {
+  a = alt + cur.ip;
+  c = *a;
+
+  // end of alt → accept (pop), parent advances past the call
+  if (!c) {
     rch = 'A' + cur.rule;
-
-    // Type rules I and T set cur_type for subsequent \+/\p decls
-    if (rch == 'I') {
-      // alts: int=0, word=1, void=2 (word sized), char=3 (order in c.bnf)
+    if (rch == 'I')
       cur_type = (cur.alt == 3) ? TY_CHAR : TY_WORD;
-    }
-    if (rch == 'T') {
-      // T=I *|I^*|I  → alt 0/1 pointer, alt 2 plain
-      if (cur.alt < 2)
-        cur_type |= TY_PTR;
-    }
+    if (rch == 'T' && cur.alt < 2)
+      cur_type |= TY_PTR;
 
     vlog("ok %c alt %u -> @%u\n", rch, cur.alt, abs_pos());
-    #ifdef VERBOSE
-      // -v: one GEN per statement (K), after alt commits
-      if (verbose >= 2 && code_len > cur.code_save && rch == 'K') {
-        eprintf(NORMAL "GEN:          [ ");
-        ivm_print_code_range(ERROUT, code_buf, cur.code_save, code_len, 0);
-        eprintf("]\n");
-      }
-    #endif
-
-    // 
+#ifdef VERBOSE
+    if (verbose >= 2 && code_len > cur.code_save && rch == 'K') {
+      eprintf(NORMAL "GEN:          [ ");
+      ivm_print_code_range(ERROUT, code_buf, cur.code_save, code_len, 0);
+      eprintf("]\n");
+    }
+#endif
     {
       word child_res = cur.result;
-
       anim_pop();
       if (sp == 0) return 0;
       sp--;
-      cur = stack[sp]; // restore parent Frame
-
-      // parent records subrule result as next \n capture
+      cur = stack[sp];
       record_capture(child_res);
       cur.ip++;
-      cur.state = ST_RUN;
     }
     return 1;
   }
 
-  // current alt failed — next alt of same rule
-  if (st == ST_FAIL) {
-    // input mark committed away → no more alts can salvage this rule
-    if (!frame_rewind()) {
-      cur.alt = (uchar)rule_nalt(cur.rule);
-      cur.state = ST_TRY;
-      return 1;
-    }
-    restore_scope();
-    cur.alt++;
-    cur.ip = 0;
-    cur.state = ST_TRY;
-    return 1;
-  }
-
-  // ST_RUN
-  alt = rule[cur.rule][cur.alt];
-  a = alt + cur.ip;
-  if (!alt || (c = *a) == 0) {
-    cur.state = ST_OK;
-    return 1;
-  }
-
-  // literals (hibit clear) are matched right here: a whole run per step
-  // (saved 67 bytes by c = *a)
+  // --- literals (no hibit): rule char vs source ---
   if (!(c & 0x80)) {
-
     for (;;) {
-
       if (nextc != c) {
-        // not there: whitespace/comments may come first (not before a quoted
-        // space/tab), or only the case differs (-I)
         if (c != ' ' && c != '\t') skip_ws();
-
-        // lowercase if not match and ignore_case
         if (nextc != c &&
             !(ignore_case && isalpha(c) && tolower(nextc) == tolower(c))) {
           vlog("  fail lit '%c' @%u got '%c'\n", c, abs_pos(),
                nextc ? nextc : '?');
-          cur.state = ST_FAIL;
-          return 1;
+          goto fail_alt;
         }
       }
-
       skip();
       note_progress();
       vlog("  ok lit '%c' @%u\n", c, abs_pos());
-
       c = *++a;
       if (!c || (c & 0x80)) break;
     }
-
-    cur.ip = a - alt;
-
+    cur.ip = (word)(a - alt);
     return 1;
   }
 
-
-  // space in BNF = required ws gap: skip comments/whitespace, no input char consumed as literal
+  // --- hibit: space gap, production, rule call, escapes ---
   if (c == HIBIT(' ')) {
     skip_ws();
+    note_progress();
     cur.ip++;
     return 1;
   }
 
-  // bare [ ... ] = production (use \[ \] in BNF to match bracket chars)
   if (c == HIBIT('[')) {
-    cur.ip = run_production(a + 1) - alt;
+    cur.ip = (word)(run_production(a + 1) - alt);
     return 1;
   }
 
-  // rule call
   if (c >= HIBIT('A') && c <= HIBIT('Z')) {
     uchar r = c - HIBIT('A');
-
     if (!rule_defined(r)) FAIL("rule not defined");
     vlog("  call %c from %c @%u\n", c & 0x7f, 'A' + cur.rule, abs_pos());
-    push(r, ST_TRY);
+    push(r);
     return 1;
   }
 
   ok = 1;
-  adv = 1;      // bytes of the BNF alt used by this directive
+  adv = 1;
 
   if (c == HIBIT('<')) {
-    // plain \< : full rule restart (sequences, no \> in this rule)
     frame_mark();
-    cur.state = ST_TRY;
     vlog("  tail %c @%u\n", 'A' + cur.rule, abs_pos());
     return 1;
   }
   if (c >= HIBIT(1) && c <= HIBIT(31)) {
-    // jump code (x=1..31) from load-time \> : jump to alt x-1
     cur.alt = c - HIBIT(1);
     cur.ip = 0;
-    cur.state = ST_TRY;
+    frame_mark();
     vlog("  tail>%u %c @%u\n", (unsigned)cur.alt, 'A' + cur.rule, abs_pos());
     return 1;
   }
 
-  if (c == HIBIT('o')) {
-    // \o commit: drop buffer prefix; keep matching (rewinds fail if save_abs < line_abs)
+  if (c == HIBIT('o'))
     line_commit();
-  }
   else if (c == HIBIT('{')) scope_enter();
   else if (c == HIBIT('}')) scope_leave();
-
-  // \#xx: result := hex xx, same as \d having matched that number (no input)
   else if (c == HIBIT('#')) {
     if (!a[1] || !a[2]) FAIL("bad \\# in grammar");
     record_capture(const_slot(hex2(a + 1)));
     adv = 3;
   }
-
-  // \=n: result := capture n (no new capture recorded)
   else if (c == HIBIT('=')) {
     e = a[1] - '0';
     if (e >= 1 && e <= cur.prod_n)
       cur.result = cur.prod_cap[e];
     adv = 2;
   }
-
-  else if (c >= HIBIT('0') && c <= HIBIT('9')) ok = match_ident_same(c - HIBIT('0'));
+  else if (c >= HIBIT('0') && c <= HIBIT('9'))
+    ok = match_ident_same(c - HIBIT('0'));
   else if (c == HIBIT('i')) ok = match_ident();
   else if (c == HIBIT('+')) ok = match_ident_decl();
   else if (c == HIBIT('f')) ok = match_ident_func_decl();
   else if (c == HIBIT('p')) ok = match_param_decl();
   else if (c == HIBIT('r')) {
-    // global: after BNF "register\r" — mark next \+ as REGISTER (0..31)
-    // function: end parameter list (existing)
     if (last_func_vec != 0xff)
       ok = params_done();
     else {
@@ -2212,39 +2138,43 @@ static int step(void) {
   }
   else if (c == HIBIT('d')) ok = match_num();
   else if (c == HIBIT('n')) ok = match_newline();
-  else if (c == HIBIT('s')) ok = match_str(0); // \s string const
-  else if (c == HIBIT('u')) ok = match_str(1); // \u emit string inline
+  else if (c == HIBIT('s')) ok = match_str(0);
+  else if (c == HIBIT('u')) ok = match_str(1);
   else if (c == HIBIT('z')) {
-    // sizeof value from cur_type (after matching T)
     record_capture(MAKE_CAP(const_slot(
       (!CAP_IS_PTR(cur_type) && CAP_TYPE(cur_type) == TY_CHAR) ? 1 : 2), TY_WORD));
   }
-  // (other directives only mean something inside a production: no-op here)
 
   if (!ok) {
     vlog("  fail \\%c @%u\n", c & 0x7f, abs_pos());
-    cur.state = ST_FAIL;
-    return 1;
+    goto fail_alt;
   }
   vlog("  ok \\%c @%u\n", c & 0x7f, abs_pos());
   cur.ip += adv;
   return 1;
+
+fail_alt:
+  // next alternative of this rule
+  if (!frame_rewind()) {
+    cur.alt = (uchar)nalt;
+    goto again;
+  }
+  restore_scope();
+  cur.alt++;
+  cur.ip = 0;
+  goto again;
 }
 
 // run up to n steps
 // ~50-200 us/step on 6502 @ 1MHz → n=1000 ≈ 50-200 ms
 static int run(word n) {
-  int rc = 1;
-
-  // 25961
   do {
     if (!step()) {
       emit('q');
-      return 0;
+      return 0;   // done
     }
   } while (--n);
-  
-  return 1;
+  return 1;       // more work (time slice)
 }
 
 // "file:line: " prefix of an error line
@@ -2397,7 +2327,7 @@ static void init(char *bnf_path, char *src_path) {
 
   // get started with rule P
   if (!rule_defined('P' - 'A')) FAIL("rule P missing");
-  push('P' - 'A', ST_TRY);
+  push('P' - 'A');
 }
 
 static void shutdown(void) {
@@ -2411,7 +2341,7 @@ static void shutdown(void) {
     // shows garbage after valid
     printf("\n>>>>>LINEBUF>>>>\n%s\n<<<<<\n", line_buf);
   #endif
-    
+
   free(line_buf);
   line_buf = NULL;
 
