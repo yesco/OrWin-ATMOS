@@ -2403,6 +2403,9 @@ static void shutdown(void) {
   free(line_buf);
   line_buf = NULL;
 
+  printf("\nLINEBUF: no_base=%u len=%u cap=%u pos=%u abs=%u file_pos=%u\n",
+    line_no_base, line_len, line_cap, line_pos, line_abs, file_pos);
+
   free_rules();
 
   free(stack);
