@@ -1585,54 +1585,41 @@ static int read_c_char(uchar *out) {
   return 1;
 }
 
-// \s — constant string → data pool + relocatable pointer const
-// Static buffer: 512 on the 6502 stack blows the frame / corrupts parse.
-#ifndef STR_MATCH_MAX
-  #ifdef __CC65__
-    #define STR_MATCH_MAX 128
-  #else
-    #define STR_MATCH_MAX 512
-  #endif
-#endif
-static uchar str_match_buf[STR_MATCH_MAX];
-
 // \s / \S — quoted "..." string
-// emit_code=0 (\s): data pool + reloc pointer const (capture)
+// emit_code=0 (\s): write into data_pool + reloc pointer const (capture)
 // emit_code=1 (\S): emit bytes into bytecode + trailing 0
 static int match_str(uchar emit_code) {
   uchar c;
-  word n = 0;
+  word off = 0;
   uchar slot;
 
-  if (!emit_code)
+  if (!emit_code) {
     skip_ws();
+    off = data_string_start();
+  }
 
   EXPECT('"');
 
-  // Read till delim (' or ") 
-  // Consumes the closing delim. Returns 0 on failure.
   while (nextc && nextc != '"') {
     if (!read_c_char(&c)) return 0;
     if (emit_code)
       emit(c);
-    else {
-      if (n + 1 >= STR_MATCH_MAX) return 0;
-      str_match_buf[n++] = c;
-    }
+    else
+      data_putc(c);
   }
   EXPECT('"');
   note_progress();
 
-  // inline string
   if (emit_code) {
     emit(0);
     return 1;
   }
 
-  // constant
-  str_match_buf[n++] = 0;
-  slot = add_string_const(str_match_buf, n);
+  data_putc(0);
+  slot = add_string_reloc(off);
+
   record_capture(MAKE_CAP(slot, TY_CHAR | TY_PTR));
+
   return 1;
 }
 

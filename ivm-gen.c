@@ -228,34 +228,42 @@ uchar add_const(unsigned int v) {
   return add_const_raw(v, 0);
 }
 
-// Append bytes to data_pool; return offset from start of data section.
-// Then register a relocatable const whose value is that offset (filled with
-// absolute data-section base at pack time → final value = data_base + off).
-word data_append(const uchar *bytes, word n) {
-  word off;
-
-  if ((word)(data_len + n) > MAX_DATA)
+// Append one byte to data_pool. Returns 0 if full.
+void data_putc(c) {
+  if (data_len >= MAX_DATA)
     IVM_GEN_FAIL("data pool full");
-
-  off = data_len;
-  memcpy(data_pool + data_len, bytes, n);
-  data_len = (word)(data_len + n);
-
-  return off;
+  data_pool[data_len++] = c;
 }
 
-// Add a C string (already escaped, including trailing NUL) as a data constant.
-// Returns the mem slot for the pointer const (like lit_addr for numbers).
-uchar add_string_const(const uchar *bytes, word n) {
-  word off;
+#if 0
+// Append bytes; return offset of first byte (or FAIL if full).
+word data_append(const uchar *bytes, word n) {
+  word off = data_len;
+  word i;
 
-  // offset 0 would look like reloc end — keep a pad byte so strings are non-zero
+  if (data_len + n > MAX_DATA)
+    IVM_GEN_FAIL("data pool full");
+
+  // TODO: this used to be memcopy, someone changed :-(
+  for (i = 0; i < n; i++)
+    data_pool[data_len++] = bytes[i];
+  return off;
+}
+#endif // NOT USED (yet, maybe by array)
+
+// Start a string in the data pool.
+// Returns offset where the string will begin.
+word data_string_start(void) {
+  // Pad so offset 0 is never a string (0 ends the reloc walk). 
   if (data_len == 0) {
     data_pool[0] = 0;
     data_len = 1;
   }
-  off = data_append(bytes, n);
+  return data_len;
+}
 
+// Register a relocatable const pointing at data offset off (string start).
+uchar add_string_reloc(word off) {
   return add_const_raw((unsigned int)off, 1);
 }
 
