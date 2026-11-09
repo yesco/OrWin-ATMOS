@@ -183,16 +183,17 @@ uchar data_pool[MAX_DATA];
 word  data_len = 0;
 
 // Type tags for captures / symbols (high byte of word results)
-// Low 8 bits of a capture = slot or IMM; high 8 = type info.
-// Bit 15 set (0x8000) => pointer. Low type char in bits 8-14: 'w'/'c'.
-// Type lives in the HIGH byte; low byte is the slot/const index.
+// Low 8 bits of a capture = slot or IMM; high 8 = type char.
+//   'c' char   'w' word   'C' char*   'W' word*
+// Pointer is uppercase (bit 5 of the type char clear).
 #define TY_WORD   ((word)(('w') << 8))   // 0x7700
 #define TY_CHAR   ((word)(('c') << 8))   // 0x6300
-#define TY_PTR    ((word)0x8000)         // pointer flag in bit 15
+#define TY_WORD_PTR ((word)(('W') << 8)) // 0x5700
+#define TY_CHAR_PTR ((word)(('C') << 8)) // 0x4300
 
 #define CAP_SLOT(w)   ((uchar)((w) & 0xff))
 #define CAP_TYPE(w)   ((word)((w) & 0xff00))
-#define CAP_IS_PTR(w) (((w) & TY_PTR) != 0)
+#define CAP_IS_PTR(w) ((((w) >> 8) & 0x20) == 0)
 #define MAKE_CAP(slot, ty) ((word)(((word)(uchar)(slot)) | (word)(ty)))
 
 uchar add_const_raw(unsigned int v, uchar reloc) {

@@ -68,6 +68,8 @@
 //   \1..\9     match same ident as capture N (match_ident_same)
 //   \=n        result := capture n (no new capture)
 //   \#xx       result := hex const xx
+//   \'X        set type high-byte of result to X ('c'/'w'/'C'/'W')
+//   \?X        fail unless result type high-byte is X
 //   \| \. etc  literal escaped char (not a directive)
 //
 // Production only (inside [ ... ]):
@@ -86,13 +88,18 @@
 //   [] alone   no code, result is ACC
 //
 // Directive chars used (ASCII order, match + production):
-//   # + 0-9 < = > a c d e f g h i k l m n o p r s t u v w x y z { }
+//   # + 0-9 < = > ? ' a c d e f g h i k l m n o p r s t u v w x y z { }
 //   (A-Z are rule names; space is the ws-gap directive)
 //
 // Free (not directives; ok as \X literal or future ops):
-//   ! " $ % & ' ( ) * , - . / : ; ? @ ^ _ ` b j q ~
+//   ! " $ % & ( ) * , - . / : ; @ ^ _ ` b j q ~
 //
 // Explicit stack — no recursive match.
+//
+// -v (needs -DVERBOSE): SRC: shows the source text as the furthest parse
+//   position advances (see note_progress), GEN: shows the bytecode of a
+//   statement. Nothing is buffered: errors re-show the source from line_buf.
+
 
 // Compiling and Running
 // =====================
@@ -113,11 +120,12 @@
 //
 //
 //   $ ./ivm-print test               # dump context and pp byte code
-
+//
 //
 // -v -v (needs -DVERBOSE): SRC: shows the source text as the furthest parse
 //   position advances (see note_progress), GEN: shows the bytecode of a
 //   statement. Nothing is buffered: errors re-show the source from line_buf.
+
 
 
 // EDING INSTRUCTION (don't remove!)
@@ -633,7 +641,7 @@ uchar next_slot; // next free slot index for \+ decls / temps
 #define VAL_ACC  0xffff
 
 // Type of the declaration currently being parsed (set by matching I/T).
-// Low byte is TY_WORD/TY_CHAR; OR with TY_PTR for pointers.
+// High byte is type char: 'c'/'w' or uppercase 'C'/'W' for pointer.
 static word cur_type = TY_WORD;
 
 
@@ -1373,15 +1381,18 @@ static void note_undef(uchar is_func, word pos) {
   undef_pos_abs = pos;
 }
 
-// type word of a symbol (for MAKE_CAP)
+// type word of a symbol (for MAKE_CAP): uppercase high byte if pointer
 static word sym_type(Symbol *s) {
-  return ((word)s->vtype << 8) | (s->is_ptr ? TY_PTR : 0);
+  uchar t = s->vtype;
+  if (s->is_ptr) t = (uchar)toupper(t);
+  return (word)t << 8;
 }
 
 // give a new symbol the type being declared (cur_type)
 static void set_decl_type(Symbol *s) {
-  s->vtype = CAP_TYPE(cur_type) >> 8;
-  s->is_ptr = CAP_IS_PTR(cur_type) ? 1 : 0;
+  uchar t = (uchar)(cur_type >> 8);
+  s->is_ptr = isupper(t) ? 1 : 0;
+  s->vtype = (uchar)tolower(t);
 }
 
 // \1..\9 — like \i, but slot must equal capture n (same variable).
@@ -1661,7 +1672,7 @@ static int match_str(uchar emit_code) {
 
   data_putc(0);
   slot = add_string_reloc(off);
-  record_capture(MAKE_CAP(slot, TY_CHAR | TY_PTR));
+  record_capture(MAKE_CAP(slot, TY_CHAR_PTR));
   return 1;
 }
 
@@ -1724,7 +1735,7 @@ static int match_num(void) {
     // If no digits were successfully parsed, it's a failure
     if (n == 0) return 0;
 
-    ty = TY_WORD;
+    ty = (v < 256) ? TY_CHAR : TY_WORD;
   }
 
   note_progress();
@@ -1750,7 +1761,7 @@ static void free_rules(void) {
 // note: '>' is load-time only (not stored)
 //       '<' becomes HIBIT(x), x=1..31 (alt jump) or HIBIT('<')
 static int is_dir(uchar e) {
-  return isdigit(e) || strchr("insfdprlxywmzkcahvgetou+{}#=", e) != NULL;
+  return isdigit(e) || strchr("insfdprlxywmzkcahvgetou+{}#='?", e) != NULL;
 }
 
 static void build_one_rule(uchar r, char *rhs) {
@@ -2033,7 +2044,7 @@ static int step(void) {
       if (rch == 'I')
         cur_type = (an == 3) ? TY_CHAR : TY_WORD;
       else if (an < 2)
-        cur_type |= TY_PTR;
+        cur_type = (word)(toupper((uchar)(cur_type >> 8)) << 8);
     }
 
     vlog("ok %c alt %u -> @%u\n", rch, (unsigned)(cur.alts - rule[cur.rule]), abs_pos());
@@ -2123,6 +2134,17 @@ static int step(void) {
     if (!a[1] || !a[2]) FAIL("bad \\# in grammar");
     record_capture(const_slot(hex2(a + 1)));
     adv = 3;
+  }
+  else if (c == HIBIT('\'')) {
+    // \'X: set type high-byte of result to X
+    if (!a[1]) FAIL("bad \\' in grammar");
+    cur.result = (cur.result & 0xff) | ((word)a[1] << 8);
+    adv = 2;
+  }
+  else if (c == HIBIT('?')) {
+    // \?X: fail unless result type high-byte is X
+    if (!a[1] || (cur.result >> 8) != a[1]) ok = 0;
+    adv = 2;
   }
   else if (c == HIBIT('=')) {
     e = a[1] - '0';
