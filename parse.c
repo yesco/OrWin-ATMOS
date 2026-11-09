@@ -5,10 +5,10 @@
 //   " It’s a remarkably clean design.
 // 
 //     A tiny declarative grammar that both *recognises* the source
-//     and *emits* the machine code in the same rules, an iterative
+//     and *emits* the byte code in the same rules, an iterative
 //     (non-recursive) matcher that stays small enough for 6502, and
-//     just enough specialisation (the `i`/`n` and `j`/`m` pairs, the
-//     capture machinery, the mark/patch jumps) to get real speedups
+//     just enough specialisation (loop special codes, the capture
+//     machinery, the mark/patch jumps) to get real speedups
 //     without turning into a full optimising compiler.
 //
 //     Most of the cleverness is in what was left out: no AST, no
@@ -87,13 +87,35 @@
 //
 // Directive chars used (ASCII order, match + production):
 //   # + 0-9 < = > a c d e f g h i k l m n o p r s t u v w x y z { }
-// Free (not directives; ok as \X literal or future ops):
-//   ! " $ % & ' ( ) * , - . / : ; ? @ ^ _ ` b j q ~
 //   (A-Z are rule names; space is the ws-gap directive)
 //
-// Explicit stack — no recursive match.
+// Free (not directives; ok as \X literal or future ops):
+//   ! " $ % & ' ( ) * , - . / : ; ? @ ^ _ ` b j q ~
 //
-// -v (needs -DVERBOSE): SRC: shows the source text as the furthest parse
+// Explicit stack — no recursive match.
+
+// Compiling and Running
+// =====================
+// To use this to compile a program in PASCAL or C write this
+// 
+//   $ clang -g DSYMS -DVERBOSE -DRUN parse.c -o parse.x
+//
+//   $ ./parse.x -v c.bnf test.c              # ./pc test
+//
+//   $ ./parse.x -v tpi.bnf test.p            # ./p  test
+//
+// This will compile, show byte code, hexdump and some info.
+// It'll also write out test.ivm and test.sym.
+// 
+//   $ ./ivm test                     # run using C interpreter
+//
+//   $ ./ivm-asm test                 # run using asm interpreter
+//
+//
+//   $ ./ivm-print test               # dump context and pp byte code
+
+//
+// -v -v (needs -DVERBOSE): SRC: shows the source text as the furthest parse
 //   position advances (see note_progress), GEN: shows the bytecode of a
 //   statement. Nothing is buffered: errors re-show the source from line_buf.
 

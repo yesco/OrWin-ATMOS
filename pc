@@ -7,10 +7,12 @@ else
 fi
 
 
-clang -DSYMS -DVERBOSE -DRUN parse.c && time ./a.out -v c.bnf $name.c
+clang -DSYMS -DVERBOSE -DRUN parse.c -o parse.x && time ./parse.x -v c.bnf $name.c
 
 echo
 echo "=== $name.c: `./wcode $name.c` LOC ==="
 echo "=== parse.c: `./wcode parse.c` LOC ==="
 echo "=== $name.c: `./wcode $name.c` LOC ==="
+echo
+ls -l $name.c $name.ivm 2>/dev/null
 echo
