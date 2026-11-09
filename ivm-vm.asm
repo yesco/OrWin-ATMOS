@@ -1157,10 +1157,10 @@ op_i_step:
 	;PARAX Y+1
 ;	USEY
 
-	inc     _ivm_ipc
-	bne     :+
-	inc     _ivm_ipc+1
-:	
+;	inc     _ivm_ipc
+;	bne     :+
+;	inc     _ivm_ipc+1
+;:	
 
 .if 0
 ;;; probably less!
@@ -1244,11 +1244,18 @@ op_n:
 
         lda     _ivm_ipc
         sec
+	clc
+	ldy     #0
         sbc     (_ivm_ipc),y
-        sta     _ivm_ipc
         bcs     :+
         dec     _ivm_ipc+1
-:
+:	
+	clc
+	adc     #2
+	bcc     :+
+	dec     _ivm_ipc+1
+:	
+        sta     _ivm_ipc
 ;;; TODO: specialized dispatch
 	jmp     op_i_step
 
