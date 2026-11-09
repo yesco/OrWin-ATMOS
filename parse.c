@@ -46,37 +46,50 @@
 //   #= //      line comment (to newline); no end token
 //              default if no #=: Pascal { }
 //   A-Z        call rule
+//   |          alternative (epsilon allowed)
+//   line '|'   continue previous rule (long alts)
+//   line '.'   end of rules section
+//   [ ... ]    production: after match, emit bytecode
+//
+// Match directives (stored with hibit):
 //   \>         (load-time) mark current alt as jump target for \<
 //   \<         tail-recurse: to \> alt if any, else restart whole rule
-//   \o         cOmmit: drop line buffer up to current point
+//   \o         commit: drop line buffer up to current point
 //   \i         ident in scope (must be declared by \+)
 //   \+         ident declare (match + add to current scope)
 //   \f         declare function: name = ret-value cell of a new frame + vector
 //   \p         declare parameter (frame cell base+4+n); \r ends the list
-//   \r         end of parameter list (no input): last param -> base+3
-//   \d         number
-//   \s         string
-//   \u         emit string bytes + \0 (opening " already matched)
+//   \r         end of param list OR flag REGISTER after literal "register"
+//   \d         number / char literal
+//   \s         string const "..." → data pool + reloc pointer (capture)
+//   \u         emit string body + 0 into bytecode (opening " already matched)
 //   \n         >=1 newline; eats surrounding horizontal space
 //   \{ \}      enter / leave scope (\} drops names added in scope)
-//   \| \.      literal | or other escaped char
-//   |          alternative (epsilon allowed)
-//   line '|'   continue previous rule (long alts)
-//   line '.'   end of rules section
-//   [ ... ]    production: after match, emit bytecode (tpi-style)
-//   \1..\9     in production: insert result byte from nth value match
-//              value matches: \i \+ \d and successful subrule calls
-//   \c3 \h3    lo hi byte of result 3
+//   \1..\9     match same ident as capture N (match_ident_same)
+//   \=n        result := capture n (no new capture)
+//   \#xx       result := hex const xx
+//   \| \. etc  literal escaped char (not a directive)
 //
-//   production only:
-//         \aN force addr
-//         \lN load capture N (not if ACC)
-//         \t temp
-//         \v call opcode
-//         \k next call arg param slot
-//         \x \y \w jump placeholder / patch / swap
-//         \m \z loop mark / back
-//         \[ \] literal   [ ]    [] alone: no code, result is ACC
+// Production only (inside [ ... ]):
+//   \1..\9     emit slot/result byte from nth value capture
+//   \aN        force address of capture N
+//   \lN        load capture N if not ACC
+//   \cN \hN    lo / hi byte of const capture N
+//   \t         temp slot
+//   \e         end/temp helper (see run_production)
+//   \g         global init store
+//   \v         call opcode for matched function
+//   \k         next call-arg param slot
+//   \x \y \w   forward jump placeholder / patch / swap
+//   \m \z      loop mark / relative back
+//   \[ \]      literal [ ]
+//   [] alone   no code, result is ACC
+//
+// Directive chars used (ASCII order, match + production):
+//   # + 0-9 < = > a c d e f g h i k l m n o p r s t u v w x y z { }
+// Free (not directives; ok as \X literal or future ops):
+//   ! " $ % & ' ( ) * , - . / : ; ? @ ^ _ ` b j q ~
+//   (A-Z are rule names; space is the ws-gap directive)
 //
 // Explicit stack — no recursive match.
 //
@@ -1589,9 +1602,9 @@ static int read_c_char(uchar *out) {
   return 1;
 }
 
-// \s / \S — quoted "..." string
-// emit_code=0 (\s): write into data_pool + reloc pointer const (capture)
-// emit_code=1 (\S): emit bytes into bytecode + trailing 0
+// \s / \u — quoted "..." string
+// emit_code=0 (\s): match "..." → data_pool + reloc pointer const (capture)
+// emit_code=1 (\u): opening " already matched; emit body bytes + 0 into bytecode
 static int match_str(uchar emit_code) {
   uchar c;
   word off = 0;
@@ -1600,9 +1613,12 @@ static int match_str(uchar emit_code) {
   if (!emit_code) {
     skip_ws();
     off = data_string_start();
+    EXPECT('"');
+  } else if (nextc == '"') {
+    // opening " still in source (some rules only emit ["] without matching it)
+    skip();
   }
-
-  EXPECT('"');
+  // else: opening " already matched as a literal before \u
 
   while (nextc && nextc != '"') {
     if (!read_c_char(&c)) return 0;
@@ -1621,9 +1637,7 @@ static int match_str(uchar emit_code) {
 
   data_putc(0);
   slot = add_string_reloc(off);
-
   record_capture(MAKE_CAP(slot, TY_CHAR | TY_PTR));
-
   return 1;
 }
 
@@ -1708,10 +1722,9 @@ static void free_rules(void) {
   }
 }
 
-// \e is a directive (stored with the hibit) or just the quoted literal char e
-// note: '>' is handled specially in build_one_rule (not stored)
+// \e is a directive (stored with the hibit) or a quoted literal char e
+// note: '>' is load-time only (not stored)
 //       '<' becomes HIBIT(x), x=1..31 (alt jump) or HIBIT('<')
-//       o u are what \C \S are stored as
 static int is_dir(uchar e) {
   return isdigit(e) || strchr("insfdprlxywmzkcahvgetou+{}#=", e) != NULL;
 }
@@ -1951,6 +1964,17 @@ static void frame_rewind(void) {
   code_len = cur.code_save;
   cur.prod_n = 0;
   cur.npatch = 0;
+
+  // First emit of a function clears pending_func_entry and may emit main's
+  // deferred ginit. If this rewind drops that code, re-arm so the next emit
+  // runs gen_func_entry again (otherwise globals stay 0 and P sees NULL).
+  if (last_func_vec != 0xff) {
+
+    if (last_func_vec < MAX_VECTORS && vectors[last_func_vec] > code_len)
+      pending_func_entry = last_func_vec;
+    else if (last_func_vec == main_vec && main_offset >= code_len)
+      pending_func_entry = last_func_vec;
+  }
 }
 
 // ---- one step ----
@@ -2183,8 +2207,8 @@ static int step(void) {
   }
   else if (c == HIBIT('d')) ok = match_num();
   else if (c == HIBIT('n')) ok = match_newline();
-  else if (c == HIBIT('s')) ok = match_str(0); // const str
-  else if (c == HIBIT('u')) ok = match_str(1); // old \S = inline
+  else if (c == HIBIT('s')) ok = match_str(0); // \s string const
+  else if (c == HIBIT('u')) ok = match_str(1); // \u emit string inline
   else if (c == HIBIT('z')) {
     // sizeof value from cur_type (after matching T)
     record_capture(MAKE_CAP(const_slot(
