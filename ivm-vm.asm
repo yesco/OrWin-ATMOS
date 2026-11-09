@@ -1154,33 +1154,39 @@ op_i:
 	jmp     op_i_cmp
 
 op_i_step:
-	;PARAX Y+1
-;	USEY
-
-;	inc     _ivm_ipc
-;	bne     :+
-;	inc     _ivm_ipc+1
-;:	
 
 .if 0
-;;; probably less!
-	PARY 			; 5b
-	LOAD_SLOT_Y		; 9b
-	inc     _ivm_acc        ; 6b ==> 18
-	bne     :+
-	inc     _ivm_acc+1
-:	
-	;; TODO: SAVAXY ?
-	sta     (_ivm_memlo),y 	; 5b ==> 23b
-	txa
-	sta     (_ivm_memhi),y
-.else
+;;; seems bigger...
+
+;;; TODO: silly to do, change at end dispatch instead?
 	inc     _ivm_ipc
 	bne     :+
 	inc     _ivm_ipc+1
 :	
-	PARAX
+;;; 28 B  (+ 5 9 6 8)  (+ 9 18 24) = 51c
+	PARY 			; 5b 9c
+	LOAD_SLOT_Y		; 9b 18c
+	inc     _ivm_acc        ; 6b 
+	bne     :+
+	inc     _ivm_acc+1
+:	
+	;; TODO: SAVAXY ?
+	lda     _ivm_acc
+	sta     (_ivm_memlo),y 	; 5b ==> 23b
+	lda     _ivm_acc+1
+	sta     (_ivm_memhi),y
+.else
+;;; TODO: silly to do, change at end dispatch instead?
+	inc     _ivm_ipc
+	bne     :+
+	inc     _ivm_ipc+1
+:	
 
+;;; --- 25  46c
+
+	PARAX			; 10 B  21c
+
+	;; 15 B  25c
 	;; +1
 	clc
 	adc     #1
@@ -1195,9 +1201,10 @@ op_i_step:
 	sta     (_ivm_memlo),y
 	txa
 	sta     (_ivm_memhi),y
-jmp i_skip_load
 
 .endif
+
+jmp i_skip_load
 	
 ;;; We want to compare acc <= mem[u]
 op_i_cmp:
@@ -1242,22 +1249,26 @@ op_n:
         FIXIPC                  ; Y=0
 	USEY
 
+	ldy     #0
         lda     _ivm_ipc
         sec
-	clc
-	ldy     #0
         sbc     (_ivm_ipc),y
         bcs     :+
         dec     _ivm_ipc+1
 :	
+	;; TODO: look at adjusting \m .. B so 
+	;;   no need add 1 (pnext)
 	clc
-	adc     #2
+	adc     #1
 	bcc     :+
 	dec     _ivm_ipc+1
 :	
+
         sta     _ivm_ipc
-;;; TODO: specialized dispatch
+
+;;; TODO: specialized dispatch depending on receiver op!
 	jmp     op_i_step
+
 
 .endif ; OPFOR=2
 	
