@@ -1225,7 +1225,6 @@ i_enter:
 
 	jmp     anext
 i_exit:
-.if 1
         ldy     #2
         lda     (_ivm_ipc),y        ; oo
 
@@ -1235,24 +1234,6 @@ i_exit:
 	inc     _ivm_ipc+1
 :	
 	jmp     anext
-.else
-        ldy     #2
-        lda     (_ivm_ipc),y        ; oo
-        clc
-
-	;; or just add 3 and xnext?
-        adc     #2
-	bcc     :+
-        inc     _ivm_ipc+1
-:	
-
-        adc     _ivm_ipc
-        sta     _ivm_ipc
-        bcc     :+
-        inc     _ivm_ipc+1
-:
-        jmp     pnext
-.endif
 
 ;;; n delta
 op_n:
