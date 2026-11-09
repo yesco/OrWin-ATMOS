@@ -1142,6 +1142,7 @@ OPFOR=2 ;; new one works i,n only
 ;;; TODO: only works if NOT ALTCODE
 
 op_i:
+;	USEY
         ldy     #0
         sty     savey
 

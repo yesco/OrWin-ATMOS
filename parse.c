@@ -535,7 +535,7 @@ enum { ST_TRY, ST_RUN, ST_OK, ST_FAIL };
 typedef struct {
   uchar rule;
 
-// TODO: why not just use a pointer, now alt+cur->ip :-(
+// alt + ip index into rule blob; cur is by-value Frame
   uchar alt;
   word ip; // TODO: or at least only 256 chars - cheap indexing
 
@@ -567,14 +567,12 @@ typedef struct {
   word restart;       // \> restart ip for \< (0 = full rule restart)
 } Frame;
 
-// grows on demand (8 frames at a time, up to MAX_STACK)
+// stack[0..sp-1] = suspended parents; cur = active frame (by value).
+// Push/pop copy the whole Frame (cheaper on cc65 than many cur.field ops).
 static Frame *stack;
 static uchar stack_cap;
-static uchar sp;
-
-// newest frame == &stack[sp-1], cached: only push (grow/++) and pop (--)
-// change it. Valid only while sp > 0. Parent frame is cur[-1].
-static Frame *cur;
+static uchar sp;     // number of saved parents
+static Frame cur;    // working frame — access as cur.field (absolute on 6502)
 
 // Symbols and scopes (\+ \f \p \i \{ \}) live in ivm-gen.c, allocated on demand:
 //   sym_add / sym_find / sym_func / sym_truncate, scope_enter / scope_leave
@@ -808,7 +806,6 @@ static void src_show(word from, word to) {
 #endif
 
 static void note_progress(void) {
-  Frame *f;
   uchar i, n;
   word a = abs_pos();
 
@@ -818,13 +815,19 @@ static void note_progress(void) {
   src_show(max_pos_abs, a);
 #endif
   max_pos_abs = a;
+  // parents on stack, then active cur
   n = sp;
-  if (n > MAX_STACK) n = MAX_STACK;
-  far_sp = n;
-  for (f = stack, i = 0; i < n; i++, f++) {
-    far_stack[i] = 'A' + f->rule;
-    far_alt[i] = f->alt;
+  if (n > MAX_STACK - 1) n = MAX_STACK - 1;
+  for (i = 0; i < n; i++) {
+    far_stack[i] = 'A' + stack[i].rule;
+    far_alt[i] = stack[i].alt;
   }
+  if (n < MAX_STACK) {
+    far_stack[n] = 'A' + cur.rule;
+    far_alt[n] = cur.alt;
+    n++;
+  }
+  far_sp = n;
 }
 
 
@@ -850,19 +853,19 @@ static uchar const_slot(unsigned int v) {
 
 // record a value-producing match into \\1..\\9 of current frame
 static void record_capture(word val) {
-  uchar n = cur->prod_n;
+  uchar n = cur.prod_n;
 
   if (n < 9) {
-    cur->prod_n = ++n;
-    cur->prod_cap[n] = val;
+    cur.prod_n = ++n;
+    cur.prod_cap[n] = val;
   }
 
-  cur->result = val;
+  cur.result = val;
 }
 
 // capture n of the current frame (0 if there is none)
 static word cap_val(uchar n) {
-  return (n <= cur->prod_n) ? cur->prod_cap[n] : 0;
+  return (n <= cur.prod_n) ? cur.prod_cap[n] : 0;
 }
 
 // Slot layout:
@@ -921,15 +924,15 @@ static word force_addr(uchar n) {
   word v;
   uchar tmp;
 
-  if (n < 1 || n > cur->prod_n) return 0;
+  if (n < 1 || n > cur.prod_n) return 0;
 
-  v = cur->prod_cap[n];
+  v = cur.prod_cap[n];
   if (v != VAL_ACC) return CAP_SLOT(v);
 
   tmp = alloc_slot();
   emitop2('S', tmp);
 
-  cur->prod_cap[n] = tmp;
+  cur.prod_cap[n] = tmp;
   v1("  spill->%02x\n", tmp);
 
   return tmp;
@@ -953,7 +956,7 @@ static uchar *run_production(uchar *p) {
     else if (e >= HIBIT('1') && e <= HIBIT('9')) n = e - HIBIT('0');
     else continue;
 
-    if (n <= cur->prod_n && cur->prod_cap[n] == VAL_ACC)
+    if (n <= cur.prod_n && cur.prod_cap[n] == VAL_ACC)
       force_addr(n);
     // TDOO: should 1..9 be relative to frame pointer?
   }
@@ -993,7 +996,7 @@ static uchar *run_production(uchar *p) {
       } else switch (e) {
 
       case HIBIT('v'):
-        emitop(0xC0 | (cur->func_vec & 0x3f));
+        emitop(0xC0 | (cur.func_vec & 0x3f));
         break;
 
       // \t: new temp slot, emit it, remember it as a capture
@@ -1011,19 +1014,19 @@ static uchar *run_production(uchar *p) {
       // \x: forward jump placeholder
       case HIBIT('x'):
         emit(0);
-        b = cur->npatch;
+        b = cur.npatch;
         if (b < 4) {
-          cur->patch[b] = code_len - 1;
-          cur->npatch = b + 1;
+          cur.patch[b] = code_len - 1;
+          cur.npatch = b + 1;
         }
         break;
 
       // \y: patch newest placeholder to jump here
       case HIBIT('y'):
-        b = cur->npatch;
+        b = cur.npatch;
         if (b) {
-          cur->npatch = --b;
-          w = cur->patch[b];
+          cur.npatch = --b;
+          w = cur.patch[b];
           if (code_len - (w + 1) > 255) FAIL("jump too far");
           code_buf[w] = code_len - (w + 1);
 #ifdef SYMS
@@ -1035,26 +1038,26 @@ static uchar *run_production(uchar *p) {
 
       // \w: swap the two newest placeholders
       case HIBIT('w'):
-        b = cur->npatch;
+        b = cur.npatch;
         if (b >= 2) {
-          w = cur->patch[b - 1];
-          cur->patch[b - 1] = cur->patch[b - 2];
-          cur->patch[b - 2] = w;
+          w = cur.patch[b - 1];
+          cur.patch[b - 1] = cur.patch[b - 2];
+          cur.patch[b - 2] = w;
         }
         break;
 
       // \m: remember loop start
       case HIBIT('m'):
-        cur->mark = code_len;
+        cur.mark = code_len;
         break;
 
       // \z: backward jump delta to the mark (after the B opcode)
       case HIBIT('z'):
-        w = code_len + 1 - cur->mark;
+        w = code_len + 1 - cur.mark;
         if (w > 255) FAIL("loop body too large");
         emit(w);
 #ifdef SYMS
-        sym_patch('B', (word)(code_len - 1), (word)cur->mark,
+        sym_patch('B', (word)(code_len - 1), (word)cur.mark,
                   (int)w, last_func_vec);
 #endif
         break;
@@ -1062,16 +1065,16 @@ static uchar *run_production(uchar *p) {
       // \k: param slot for the next call argument; frame above is the caller
       // (the rule that matched \i and called Z)
       case HIBIT('k'):
-        cv = (sp >= 2) ? cur[-1].func_vec : 0xff;
+        cv = (sp >= 1) ? stack[sp - 1].func_vec : 0xff;
         f = (cv == 0xff) ? SYM_NONE : sym_func(cv);
         if (f == SYM_NONE) FAIL("call of unknown function");
         fs = &syms[f];
-        b = cur->arg_i;
+        b = cur.arg_i;
         if ((word)(b + 1) >= fs->nparams)
           FAIL("too many arguments");
         // (the "S" opcode is not missing: the BNF has [S\k], \k is only the slot)
         emit(fs->param_slot[b]);
-        cur->arg_i = b + 1;
+        cur.arg_i = b + 1;
         break;
 
       // \#xx: emit raw hex byte (e.g. \#00 for NUL, \#20 for space)
@@ -1086,8 +1089,8 @@ static uchar *run_production(uchar *p) {
       // \g: global/local init from captures \1=dest slot, \2=src const
       //   scope 0: defer until main entry; else emit L+S now
       case HIBIT('g'):
-        dest = cur->prod_cap[1] & 0xff;
-        src  = as_addr(cur->prod_cap[2] & 0xff);
+        dest = cur.prod_cap[1] & 0xff;
+        src  = as_addr(cur.prod_cap[2] & 0xff);
         if (scope_depth == 0) {
           if (nginit >= MAX_GINIT)
             FAIL("too many global inits");
@@ -1113,7 +1116,7 @@ static uchar *run_production(uchar *p) {
   }
 
   if (*p == HIBIT(']')) p++;
-  cur->result = VAL_ACC;
+  cur.result = VAL_ACC;
   return p;
 }
 
@@ -1347,8 +1350,8 @@ static int match_ident_same(uchar n) {
   uchar slot;
   Symbol *s;
 
-  if (n < 1 || n > cur->prod_n) return 0;
-  expect = cur->prod_cap[n];
+  if (n < 1 || n > cur.prod_n) return 0;
+  expect = cur.prod_cap[n];
   if (expect == VAL_ACC) return 0;
 
   if (!match_ident_raw()) return 0;
@@ -1396,7 +1399,7 @@ static int match_ident(void) {
   record_capture(MAKE_CAP(slot, sym_type(s)));
 
   // kept in the frame: later \i matches (call arguments) must not change \v
-  cur->func_vec = last_func_vec;
+  cur.func_vec = last_func_vec;
 
   return 1;
 }
@@ -1915,15 +1918,15 @@ static word rule_nalt(uchar r) {
 // snapshot the input/code/scope state of the newest frame as the
 // start of an alt (used by push and by tail-recursion \<)
 static void frame_mark(void) {
-  cur->alt = 0;
-  cur->ip = 0;
-  cur->save = line_pos;
-  cur->save_abs = abs_pos();
-  cur->nsym_save = nsym;
-  cur->scope_save = scope_depth;
-  cur->slot_save = next_slot;
-  cur->code_save = code_len;
-  cur->prod_n = 0;
+  cur.alt = 0;
+  cur.ip = 0;
+  cur.save = line_pos;
+  cur.save_abs = abs_pos();
+  cur.nsym_save = nsym;
+  cur.scope_save = scope_depth;
+  cur.slot_save = next_slot;
+  cur.code_save = code_len;
+  cur.prod_n = 0;
 }
 
 static void push(uchar r, uchar state) {
@@ -1938,44 +1941,42 @@ static void push(uchar r, uchar state) {
     if (!ns) FAIL("out of memory (stack)");
     stack = ns;
     stack_cap = ncap;
-    // the block moved: rebase the cached pointer (rare)
-    cur = sp ? stack + (sp - 1) : NULL;
   }
 
   // program main begin → blob.main
-  if (r == 'B' - 'A' && sp > 0 && cur->rule == 'P' - 'A')
+  if (r == 'B' - 'A' && sp > 0 && cur.rule == 'P' - 'A')
     main_offset = bin_ptr;
 
-  cur = sp ? cur + 1 : stack;
+  // suspend active frame (memcpy via struct assignment), open a new cur
+  stack[sp] = cur;
   sp++;
   anim_push(r);
 
-  cur->rule = r;
-  cur->func_vec = 0xff;
-  cur->arg_i = 0;
-  cur->npatch = 0;
-  cur->mark = 0;
-  cur->restart = 0;
-  cur->result = 0;
-
-  memset(cur->prod_cap, 0, sizeof(cur->prod_cap));
+  cur.rule = r;
+  cur.func_vec = 0xff;
+  cur.arg_i = 0;
+  cur.npatch = 0;
+  cur.mark = 0;
+  cur.restart = 0;
+  cur.result = 0;
+  memset(cur.prod_cap, 0, sizeof(cur.prod_cap));
   frame_mark();
-  cur->state = state;
+  cur.state = state;
 }
 
 static void restore_scope(void) {
-  sym_truncate(cur->nsym_save);
-  scope_depth = cur->scope_save;
-  next_slot = cur->slot_save;
+  sym_truncate(cur.nsym_save);
+  scope_depth = cur.scope_save;
+  next_slot = cur.slot_save;
 }
 
 // back to the start of the current alt: input, code, productions
 static void frame_rewind(void) {
-  line_pos = cur->save;
+  line_pos = cur.save;
   load_nextc();
-  code_len = cur->code_save;
-  cur->prod_n = 0;
-  cur->npatch = 0;
+  code_len = cur.code_save;
+  cur.prod_n = 0;
+  cur.npatch = 0;
 }
 
 // ---- one step ----
@@ -1984,42 +1985,41 @@ static void frame_rewind(void) {
 static int step(void) {
   uchar *alt, *a;
   uchar c, e, rch, st;
-  Frame *f;
   int ok;
   word nalt, adv;
 
   if (sp == 0) return 0;
 
-  st = cur->state;
+  st = cur.state;
 
   // TRY ALTERNATIVES of CURRENT RULE
   if (st == ST_TRY) {
 
     // At end of RULE? => POP and continue caller
-    nalt = rule_nalt(cur->rule);
-    if (cur->alt >= nalt) {
-      vlog("fail %c (no alt) @%u\n", 'A' + cur->rule, abs_pos());
+    nalt = rule_nalt(cur.rule);
+    if (cur.alt >= nalt) {
+      vlog("fail %c (no alt) @%u\n", 'A' + cur.rule, abs_pos());
       anim_pop();
 
-      sp--;
-      cur--;
       if (sp == 0) return -1;
+      sp--;
+      cur = stack[sp]; // restore parent Frame
 
       // parent's current alt failed: set ST_FAIL
       //   restores pos, capture, code, scope, moves next alt
-      cur->state = ST_FAIL;
+      cur.state = ST_FAIL;
 
       return 1;
     }
 
     // undo and rest current ALT
     frame_rewind();
-    cur->ip = 0;
-    cur->state = ST_RUN;
+    cur.ip = 0;
+    cur.state = ST_RUN;
 
-    vlog("try %c alt %u @%u \"", 'A' + cur->rule, cur->alt, abs_pos());
+    vlog("try %c alt %u @%u \"", 'A' + cur.rule, cur.alt, abs_pos());
     #ifdef VERBOSE
-      if (verbose >= 3) show_alt(rule[cur->rule][cur->alt]);
+      if (verbose >= 3) show_alt(rule[cur.rule][cur.alt]);
     #endif
     vlog("\"\n");
 
@@ -2028,42 +2028,42 @@ static int step(void) {
 
 
   if (st == ST_OK) {
-    rch = 'A' + cur->rule;
+    rch = 'A' + cur.rule;
 
     // Type rules I and T set cur_type for subsequent \+/\p decls
     if (rch == 'I') {
       // alts: int=0, word=1, void=2 (word sized), char=3 (order in c.bnf)
-      cur_type = (cur->alt == 3) ? TY_CHAR : TY_WORD;
+      cur_type = (cur.alt == 3) ? TY_CHAR : TY_WORD;
     }
     if (rch == 'T') {
       // T=I *|I^*|I  → alt 0/1 pointer, alt 2 plain
-      if (cur->alt < 2)
+      if (cur.alt < 2)
         cur_type |= TY_PTR;
     }
 
-    vlog("ok %c alt %u -> @%u\n", rch, cur->alt, abs_pos());
+    vlog("ok %c alt %u -> @%u\n", rch, cur.alt, abs_pos());
     #ifdef VERBOSE
       // -v: one GEN per statement (K), after alt commits
-      if (verbose >= 2 && code_len > cur->code_save && rch == 'K') {
+      if (verbose >= 2 && code_len > cur.code_save && rch == 'K') {
         eprintf(NORMAL "GEN:          [ ");
-        ivm_print_code_range(ERROUT, code_buf, cur->code_save, code_len, 0);
+        ivm_print_code_range(ERROUT, code_buf, cur.code_save, code_len, 0);
         eprintf("]\n");
       }
     #endif
 
     // 
     {
-      word child_res = cur->result;
+      word child_res = cur.result;
 
       anim_pop();
-      sp--;
-      cur--;
       if (sp == 0) return 0;
+      sp--;
+      cur = stack[sp]; // restore parent Frame
 
       // parent records subrule result as next \n capture
       record_capture(child_res);
-      cur->ip++;
-      cur->state = ST_RUN;
+      cur.ip++;
+      cur.state = ST_RUN;
     }
     return 1;
   }
@@ -2072,17 +2072,17 @@ static int step(void) {
   if (st == ST_FAIL) {
     frame_rewind();
     restore_scope();
-    cur->alt++;
-    cur->ip = 0;
-    cur->state = ST_TRY;
+    cur.alt++;
+    cur.ip = 0;
+    cur.state = ST_TRY;
     return 1;
   }
 
   // ST_RUN
-  alt = rule[cur->rule][cur->alt];
-  a = alt + cur->ip;
+  alt = rule[cur.rule][cur.alt];
+  a = alt + cur.ip;
   if (!alt || (c = *a) == 0) {
-    cur->state = ST_OK;
+    cur.state = ST_OK;
     return 1;
   }
 
@@ -2098,7 +2098,7 @@ static int step(void) {
             !(ignore_case && isalpha(c) && tolower(nextc) == tolower(c))) {
           vlog("  fail lit '%c' @%u got '%c'\n", c, abs_pos(),
                nextc ? nextc : '?');
-          cur->state = ST_FAIL;
+          cur.state = ST_FAIL;
           return 1;
         }
       }
@@ -2111,7 +2111,7 @@ static int step(void) {
       if (!c || (c & 0x80)) break;
     }
 
-    cur->ip = a - alt;
+    cur.ip = a - alt;
 
     return 1;
   }
@@ -2119,13 +2119,13 @@ static int step(void) {
   // space in BNF = required ws gap: skip comments/whitespace, no input char consumed as literal
   if (c == HIBIT(' ')) {
     skip_ws();
-    cur->ip++;
+    cur.ip++;
     return 1;
   }
 
   // bare [ ... ] = production (use \[ \] in BNF to match bracket chars)
   if (c == HIBIT('[')) {
-    cur->ip = run_production(a + 1) - alt;
+    cur.ip = run_production(a + 1) - alt;
     return 1;
   }
 
@@ -2134,7 +2134,7 @@ static int step(void) {
     uchar r = c - HIBIT('A');
 
     if (!rule_defined(r)) FAIL("rule not defined");
-    vlog("  call %c from %c @%u\n", c & 0x7f, 'A' + cur->rule, abs_pos());
+    vlog("  call %c from %c @%u\n", c & 0x7f, 'A' + cur.rule, abs_pos());
     push(r, ST_TRY);
     return 1;
   }
@@ -2145,16 +2145,16 @@ static int step(void) {
   if (c == HIBIT('<')) {
     // plain \< : full rule restart (sequences, no \> in this rule)
     frame_mark();
-    cur->state = ST_TRY;
-    vlog("  tail %c @%u\n", 'A' + cur->rule, abs_pos());
+    cur.state = ST_TRY;
+    vlog("  tail %c @%u\n", 'A' + cur.rule, abs_pos());
     return 1;
   }
   if (c >= HIBIT(1) && c <= HIBIT(31)) {
     // jump code (x=1..31) from load-time \> : jump to alt x-1
-    cur->alt = c - HIBIT(1);
-    cur->ip = 0;
-    cur->state = ST_TRY;
-    vlog("  tail>%u %c @%u\n", (unsigned)cur->alt, 'A' + cur->rule, abs_pos());
+    cur.alt = c - HIBIT(1);
+    cur.ip = 0;
+    cur.state = ST_TRY;
+    vlog("  tail>%u %c @%u\n", (unsigned)cur.alt, 'A' + cur.rule, abs_pos());
     return 1;
   }
 
@@ -2162,8 +2162,12 @@ static int step(void) {
     // \C commit: drop buffer prefix; keep matching
     line_commit();
     // fix save positions relative to new buffer
-    for (f = stack; f <= cur; f++)
-      f->save = 0;
+    {
+      uchar i;
+      for (i = 0; i < sp; i++)
+        stack[i].save = 0;
+      cur.save = 0;
+    }
   }
   else if (c == HIBIT('{')) scope_enter();
   else if (c == HIBIT('}')) scope_leave();
@@ -2178,8 +2182,8 @@ static int step(void) {
   // \=n: result := capture n (no new capture recorded)
   else if (c == HIBIT('=')) {
     e = a[1] - '0';
-    if (e >= 1 && e <= cur->prod_n)
-      cur->result = cur->prod_cap[e];
+    if (e >= 1 && e <= cur.prod_n)
+      cur.result = cur.prod_cap[e];
     adv = 2;
   }
 
@@ -2211,11 +2215,11 @@ static int step(void) {
 
   if (!ok) {
     vlog("  fail \\%c @%u\n", c & 0x7f, abs_pos());
-    cur->state = ST_FAIL;
+    cur.state = ST_FAIL;
     return 1;
   }
   vlog("  ok \\%c @%u\n", c & 0x7f, abs_pos());
-  cur->ip += adv;
+  cur.ip += adv;
   return 1;
 }
 
@@ -2367,7 +2371,7 @@ static void init(char *bnf_path, char *src_path) {
   stack = NULL;
   stack_cap = 0;
   sp = 0;
-  cur = NULL;
+  memset(&cur, 0, sizeof(cur));
   had_undef = 0;
   had_undef_func = 0;
   undef_pos_abs = 0;
