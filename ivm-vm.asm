@@ -1147,6 +1147,8 @@ OPFOR=2 ;; new one works i,n only
 ;OPFOR=1 ;; hand coded maybve works for ALTCODE
 	
 .if (OPFOR=2) .and (ALTCODE=0)
+;;; 34 Bytes saved compared to OPFOR=1
+
 
 ;;; TODO: only works if NOT ALTCODE
 
@@ -1157,6 +1159,9 @@ OPFOR=2 ;; new one works i,n only
 op_i:
 ;;; This entry point is only used the first time.
 ;;; During the loop it enters from op_n in op_i_step
+
+;;; 74 B 
+
 	;; load acc = mem[v]
 	USEY
 	PARY
@@ -1221,6 +1226,7 @@ i_exit:
 ;;; (for) next - dispatches to a looping-step-compare op
 ;;; like i<=N !j k<N
 op_n:
+;;; 23 B
 	;; basically op_B except the jmp next
 	;; is shortcut to inside op_i
         FIXIPC                  ; Y=0
@@ -1256,6 +1262,7 @@ op_n:
 ;;;  TODO: does it work?
 ;;; 	- no, it was mean to work for ALTCODE=1
 	
+;;; 70 B to much!
 op_i:
         FIXIPC                  ; Y = 0, ipc at first operand
         sty     savey
@@ -1329,6 +1336,7 @@ i_exit:
 .endif ; ALTCODE
 	
 	
+;;;  88 B !!! too much!
 op_n:
         FIXIPC
         sty     savey
