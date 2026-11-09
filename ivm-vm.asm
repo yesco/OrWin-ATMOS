@@ -241,7 +241,15 @@ xnext:
 
 .macro FIXIPC
 .endmacro
-        
+
+anext:	
+	clc
+	adc     _ivm_ipc
+	bcc     xnext
+	inc     _ivm_ipc+1
+:	
+	bne     xnext
+	
 ;; ----- consume 1-byte operand -----
 pnext:
 ;;; 8c (12c)
@@ -1187,10 +1195,11 @@ i_exit:
 
 ;;; n delta
 op_n:
+	FIXIPC
+	USEY
         ldy     #0
-        sty     savey
 
-        ; tpc = ipc - delta + 1  → points at the 'i' opcode
+        ; tmp-hi/lo = tpc = ipc - delta + 1  → points at the 'i' opcode
         lda     _ivm_ipc
         sec
         sbc     (_ivm_ipc),y
@@ -1239,6 +1248,7 @@ op_n:
         lda     tmp_hi
         adc     #0
         sta     _ivm_ipc+1
+
         jmp     xnext
 
 n_exit:
