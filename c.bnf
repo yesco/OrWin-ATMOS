@@ -153,9 +153,6 @@ K=if (E)[?G\x] K else[0?G\x\w\y] K[\y]
 |return E;[X]
 |return;[Q]
 
-# - function call
-|R
-
 # - benchmarking dispatch
 |nop;[ ]
 |pon;[]
@@ -176,7 +173,7 @@ H=\i+=\i;[U\1\2]
 |\i=0;[Z\1]
 |\i=S+S;[L\2+\3S\1]
 |\i=S-S;[L\2-\3S\1]
-o# C dest src — mem[dest]=mem[src]; ACC=value  (var=var, var=const-slot, var=string-slot)
+# C dest src — mem[dest]=mem[src]; ACC=value  (var=var, var=const-slot, var=string-slot)
 |\i=\i;[C\1\2]
 |\i=S;[C\1\2]
 |\i++;[I\1]

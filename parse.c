@@ -741,8 +741,7 @@ static void line_commit(void) {
       line_no_base++;
 
   rest = line_len - line_pos;
-  for (i = 0; i < rest; i++)
-    line_buf[i] = line_buf[line_pos + i];
+  memmove(line_buf, line_buf + line_pos, rest);
 
   line_abs = (word)(line_abs + line_pos);
   line_len = rest;
@@ -809,7 +808,8 @@ static void src_show(word from, word to) {
 #endif
 
 static void note_progress(void) {
-  uchar i;
+  Frame *f;
+  uchar i, n;
   word a = abs_pos();
 
   if (a <= max_pos_abs) return;
@@ -818,11 +818,12 @@ static void note_progress(void) {
   src_show(max_pos_abs, a);
 #endif
   max_pos_abs = a;
-  far_sp = sp;
-  if (far_sp > MAX_STACK) far_sp = MAX_STACK;
-  for (i = 0; i < far_sp; i++) {
-    far_stack[i] = 'A' + stack[i].rule;
-    far_alt[i] = stack[i].alt;
+  n = sp;
+  if (n > MAX_STACK) n = MAX_STACK;
+  far_sp = n;
+  for (f = stack, i = 0; i < n; i++, f++) {
+    far_stack[i] = 'A' + f->rule;
+    far_alt[i] = f->alt;
   }
 }
 
@@ -849,9 +850,11 @@ static uchar const_slot(unsigned int v) {
 
 // record a value-producing match into \\1..\\9 of current frame
 static void record_capture(word val) {
-  if (cur->prod_n < 9) {
-    cur->prod_n++;
-    cur->prod_cap[cur->prod_n] = val;
+  uchar n = cur->prod_n;
+
+  if (n < 9) {
+    cur->prod_n = ++n;
+    cur->prod_cap[n] = val;
   }
 
   cur->result = val;
@@ -943,10 +946,11 @@ static uchar *run_production(uchar *p) {
 
   // ACC captures this production refers to are spilled FIRST, so the
   // spill code lands before the bytes that use it (\l takes ACC as is)
-  for (q = p; *q && *q != HIBIT(']'); q++) {
+  for (q = p; (e = *q) && e != HIBIT(']'); q++) {
 
-    if (*q == HIBIT('a') && q[1]) n = *++q - '0';     // \aN: N is a plain digit
-    else if (*q >= HIBIT('1') && *q <= HIBIT('9')) n = *q - HIBIT('0');
+    n = q[1];
+    if (e == HIBIT('a') && n) { n -= '0'; q++; }     // \aN: N is a plain digit
+    else if (e >= HIBIT('1') && e <= HIBIT('9')) n = e - HIBIT('0');
     else continue;
 
     if (n <= cur->prod_n && cur->prod_cap[n] == VAL_ACC)
@@ -954,10 +958,10 @@ static uchar *run_production(uchar *p) {
     // TDOO: should 1..9 be relative to frame pointer?
   }
 
-  while (*p && *p != HIBIT(']')) {
-    if (*p & 0x80) {
-      e = *p;
-      n = p[1] - '0';   // capture digit for \a \l \c \h (a plain byte)
+  while ((e = *p) && e != HIBIT(']')) {
+    if (e & 0x80) {
+      b = p[1];
+      n = b - '0';      // capture digit for \a \l \c \h (a plain byte)
       adv = 1;          // bytes used by this directive
 
       if (e >= HIBIT('1') && e <= HIBIT('9')) {
@@ -1007,14 +1011,19 @@ static uchar *run_production(uchar *p) {
       // \x: forward jump placeholder
       case HIBIT('x'):
         emit(0);
-        if (cur->npatch < 4)
-          cur->patch[cur->npatch++] = code_len - 1;
+        b = cur->npatch;
+        if (b < 4) {
+          cur->patch[b] = code_len - 1;
+          cur->npatch = b + 1;
+        }
         break;
 
       // \y: patch newest placeholder to jump here
       case HIBIT('y'):
-        if (cur->npatch) {
-          w = cur->patch[--cur->npatch];
+        b = cur->npatch;
+        if (b) {
+          cur->npatch = --b;
+          w = cur->patch[b];
           if (code_len - (w + 1) > 255) FAIL("jump too far");
           code_buf[w] = code_len - (w + 1);
 #ifdef SYMS
@@ -1026,10 +1035,11 @@ static uchar *run_production(uchar *p) {
 
       // \w: swap the two newest placeholders
       case HIBIT('w'):
-        if (cur->npatch >= 2) {
-          w = cur->patch[cur->npatch - 1];
-          cur->patch[cur->npatch - 1] = cur->patch[cur->npatch - 2];
-          cur->patch[cur->npatch - 2] = w;
+        b = cur->npatch;
+        if (b >= 2) {
+          w = cur->patch[b - 1];
+          cur->patch[b - 1] = cur->patch[b - 2];
+          cur->patch[b - 2] = w;
         }
         break;
 
@@ -1056,15 +1066,17 @@ static uchar *run_production(uchar *p) {
         f = (cv == 0xff) ? SYM_NONE : sym_func(cv);
         if (f == SYM_NONE) FAIL("call of unknown function");
         fs = &syms[f];
-        if ((word)(cur->arg_i + 1) >= fs->nparams)
+        b = cur->arg_i;
+        if ((word)(b + 1) >= fs->nparams)
           FAIL("too many arguments");
         // (the "S" opcode is not missing: the BNF has [S\k], \k is only the slot)
-        emit(fs->param_slot[cur->arg_i++]);
+        emit(fs->param_slot[b]);
+        cur->arg_i = b + 1;
         break;
 
       // \#xx: emit raw hex byte (e.g. \#00 for NUL, \#20 for space)
       case HIBIT('#'):
-        if (p[1] && p[2]) {
+        if (b && p[2]) {
           emit(hex2(p + 1));
           adv = 3;
         } else
@@ -1096,8 +1108,8 @@ static uchar *run_production(uchar *p) {
       p += adv;
       continue;
     }
-    b = *p++;
-    emit(b);
+    emit(e);
+    p++;
   }
 
   if (*p == HIBIT(']')) p++;
@@ -1137,14 +1149,23 @@ typedef struct {
 static CommentStyle comments[MAX_COMMENTS];
 static uchar ncomments;
 
+// skip spaces and tabs of a text line
+static char *skipsp(char *p) {
+  char c;
+
+  while ((c = *p) == ' ' || c == '\t') p++;
+  return p;
+}
+
 // Parse one #= directive body (after the "#="). Returns 1 on success.
 // Forms:  "{ }" | "/* */" | "//"   (whitespace separates start/end)
-static int comments_add_from_line(const char *p) {
+static int comments_add_from_line(char *p) {
   CommentStyle *cs;
   word i;
+  char c;
 
   if (ncomments >= MAX_COMMENTS) return 0;
-  while (*p == ' ' || *p == '\t') p++;
+  p = skipsp(p);
   if (!*p) return 0;
 
   cs = &comments[ncomments];
@@ -1155,19 +1176,21 @@ static int comments_add_from_line(const char *p) {
 
   // start delimiter: non-space run
   i = 0;
-  while (*p && *p != ' ' && *p != '\t' && i + 1 < COMM_START_MAX) {
-    cs->start[i++] = *p++;
+  while ((c = *p) && c != ' ' && c != '\t' && i + 1 < COMM_START_MAX) {
+    cs->start[i++] = c;
+    p++;
   }
   cs->start[i] = 0;
   cs->start_len = i;
   if (!cs->start_len) return 0;
 
-  while (*p == ' ' || *p == '\t') p++;
+  p = skipsp(p);
 
   // optional end delimiter => block comment; none => line comment
   i = 0;
-  while (*p && *p != ' ' && *p != '\t' && i + 1 < COMM_END_MAX) {
-    cs->end[i++] = *p++;
+  while ((c = *p) && c != ' ' && c != '\t' && i + 1 < COMM_END_MAX) {
+    cs->end[i++] = c;
+    p++;
   }
   cs->end[i] = 0;
   cs->end_len = i;
@@ -1197,7 +1220,7 @@ static int match_at(const char *s, uchar len) {
 }
 
 static void skip_ws(void) {
-  uchar ci;
+  uchar ci, n;
   CommentStyle *cs;
 
   for (;;) {
@@ -1211,20 +1234,22 @@ static void skip_ws(void) {
     // try each configured comment style
     for (ci = 0; ci < ncomments; ci++) {
       cs = &comments[ci];
-      if (!match_at(cs->start, cs->start_len)) continue;
+      n = cs->start_len;
+      if (!match_at(cs->start, n)) continue;
 
       // consume start
-      eat_n(cs->start_len);
+      eat_n(n);
 
-      if (cs->end_len == 0) {
+      n = cs->end_len;
+      if (n == 0) {
         // line comment: to newline (keep the \n) or EOF
         while (nextc && nextc != '\n')
           skip();
       } else {
         // block comment: to end marker
         while (nextc) {
-          if (match_at(cs->end, cs->end_len)) {
-            eat_n(cs->end_len);
+          if (match_at(cs->end, n)) {
+            eat_n(n);
             break;
           }
           skip();
@@ -1320,6 +1345,7 @@ static void set_decl_type(Symbol *s) {
 static int match_ident_same(uchar n) {
   word i, expect;
   uchar slot;
+  Symbol *s;
 
   if (n < 1 || n > cur->prod_n) return 0;
   expect = cur->prod_cap[n];
@@ -1328,9 +1354,10 @@ static int match_ident_same(uchar n) {
   if (!match_ident_raw()) return 0;
   i = sym_find(id_buf, SYM_VAR, 0);
   if (i == SYM_NONE) return 0; // not defined: just fail this alt
-  slot = syms[i].address;
+  s = &syms[i];
+  slot = s->address;
   if (slot != (expect & 0xff)) return 0;
-  record_capture(MAKE_CAP(slot, sym_type(&syms[i])));
+  record_capture(MAKE_CAP(slot, sym_type(s)));
   return 1;
 }
 
@@ -1456,8 +1483,8 @@ static int match_param_decl(void) {
   if (v == 0xff) return 0;
   // parameter number = params already in this scope (rewinds on backtrack)
   k = 0;
-  for (i = 0; i < nsym; i++)
-    if (syms[i].scope == scope_depth && syms[i].pidx) k++;
+  for (s = syms, i = 0; i < nsym; i++, s++)
+    if (s->scope == scope_depth && s->pidx) k++;
   if (k >= MAX_PARAMS) FAIL("too many parameters");
   if (sym_find(id_buf, SYM_VAR, 1) != SYM_NONE) return 0;
   slot = frame_base[v] + 4 + k;
@@ -1475,8 +1502,8 @@ static int match_param_decl(void) {
 // \r — end of parameter list (no input): the last param lives at fp+3
 static int params_done(void) {
   uchar v, n;
-  word i, last, f;
-  Symbol *fs;
+  word i, f;
+  Symbol *fs, *t, *lastp;
 
   v = last_func_vec;
   if (v == 0xff) return 0;
@@ -1485,17 +1512,17 @@ static int params_done(void) {
   fs = &syms[f];        // nothing is added below: pointer stays valid
 
   n = 0;
-  last = 0;
-  for (i = 0; i < nsym; i++) {
-    if (syms[i].scope == scope_depth && syms[i].pidx) {
-      fs->param_slot[n] = syms[i].address;
-      last = i;
+  lastp = NULL;
+  for (t = syms, i = 0; i < nsym; i++, t++) {
+    if (t->scope == scope_depth && t->pidx) {
+      fs->param_slot[n] = t->address;
+      lastp = t;
       n++;
     }
   }
   if (n) {
-    syms[last].address = frame_base[v] + 3;
-    fs->param_slot[n - 1] = syms[last].address;
+    lastp->address = frame_base[v] + 3;
+    fs->param_slot[n - 1] = lastp->address;
     next_slot--;        // its old cell was the top one: reuse it for locals
   }
   fs->nparams = n;
@@ -1579,8 +1606,11 @@ typedef struct { uchar *buf; word n, max; } StrBuf;
 
 static void put_buf(uchar c, void *ctx) {
   StrBuf *sb = ctx;
-  if (sb->n + 1 < sb->max) {
-    sb->buf[sb->n++] = c;
+  word n = sb->n;
+
+  if (n + 1 < sb->max) {
+    sb->buf[n] = c;
+    sb->n = n + 1;
   }
 }
 
@@ -1708,7 +1738,7 @@ static int is_dir(uchar e) {
 
 static void build_one_rule(uchar r, char *rhs) {
   char *p;
-  uchar *blob, **altp, e, inprod;
+  uchar *blob, **altp, e, inprod, hex;
   word a, bi, na, alt_starts[MAX_ALTS];
   uchar taildest;   // 1-based alt index for \> / \< (0 = none yet)
 
@@ -1726,10 +1756,14 @@ static void build_one_rule(uchar r, char *rhs) {
   bi = 0;
   na = 0;
   inprod = 0;
+  hex = 0;
   taildest = 0;
   alt_starts[na++] = 0;
-  for (p = rhs; *p; p++) {
-    if (*p == '\\' && p[1]) {
+  for (p = rhs; (e = *p); p++) {
+    if (hex) {
+      // \#xx: the two hex digits are data (may be A-F), stored as they are
+      hex--;
+    } else if (e == '\\' && p[1]) {
       e = *++p;
       if (e == '>') {
         // \> : set jump target to current alt (1-based); do not store
@@ -1738,21 +1772,15 @@ static void build_one_rule(uchar r, char *rhs) {
       }
       if (e == '<') {
         // \< : with a \> target jump code 1..31, else full rule restart
-        blob[bi++] = HIBIT(taildest && taildest < 32 ? taildest : '<');
-        continue;
+        e = HIBIT(taildest && taildest < 32 ? taildest : '<');
+      } else {
+        // \C \S would be the rule calls C S: store them as \o \u
+        if (e == 'C') e = 'o';
+        else if (e == 'S') e = 'u';
+        if (is_dir(e)) e = HIBIT(e);
       }
-      // \C \S would be the rule calls C S: store them as \o \u
-      if (e == 'C') e = 'o';
-      else if (e == 'S') e = 'u';
-      blob[bi++] = is_dir(e) ? HIBIT(e) : e;
-      // \#xx: the two hex digits are data (may be A-F), copy them as they are
-      if (e == '#')
-        for (e = 0; e < 2 && p[1]; e++)
-          blob[bi++] = *++p;
-      continue;
-    }
-    // '|' separates alts only outside a bare [ ... ] production
-    if (*p == '|' && !inprod) {
+    } else if (e == '|' && !inprod) {
+      // '|' separates alts only outside a bare [ ... ] production
       // skip empty alts from || or line-join artifacts
       if (na > 0 && alt_starts[na - 1] == bi)
         continue;
@@ -1760,11 +1788,8 @@ static void build_one_rule(uchar r, char *rhs) {
       if (na < MAX_ALTS)
         alt_starts[na++] = bi;
       continue;
-    }
-    // bare [ ] = production (no nesting); | inside is a literal (\[ \] are handled above)
-    // (- 28959 28830) = 129 bytes saved!
-    e= *p;
-    if (e == '[') {
+    } else if (e == '[') {
+      // bare [ ] = production (no nesting); | inside is a literal (\[ \] are handled above)
       inprod = 1;
       e = HIBIT('[');
     } else if (e == ']' && inprod) {
@@ -1773,7 +1798,9 @@ static void build_one_rule(uchar r, char *rhs) {
     } else
       // rule calls and the ws-gap are directives, but not inside a production
       e = (!inprod && (isupper(e) || e == ' ')) ? HIBIT(e) : e;
+
     blob[bi++] = e;
+    if (e == HIBIT('#')) hex = 2;
   }
   blob[bi++] = 0;
 
@@ -1795,7 +1822,7 @@ static void load_bnf(const char *path) {
   char *line = malloc(MAX_LINE);
   char *acc = malloc(MAX_ACCUM);
   uchar cr;
-  char *nl, *eq, *p;
+  char *nl, *eq, *p, c;
   word acc_len, have_cur;
   
   if (!line || !acc) FAIL("out of memory (grammar)");
@@ -1820,18 +1847,18 @@ static void load_bnf(const char *path) {
     nl = strchr(line, '\n');
     if (nl) *nl = 0;
 
-    if (line[0] == '.') break;
-    if (line[0] == 0) continue;
+    c = *line;
+    if (c == '.') break;
+    if (c == 0) continue;
 
     // #= comment-style directive (must be before bare # skip)
-    if (line[0] == '#' && line[1] == '=') {
+    if (c == '#' && line[1] == '=') {
       comments_add_from_line(line + 2);
       continue;
     }
-    if (line[0] == '#') continue;
+    if (c == '#') continue;
 
-    p = line;
-    while (*p == ' ' || *p == '\t') p++;
+    p = skipsp(line);
 
     // continuation: line starts with |  (p stays, text is appended below)
     if (!(*p == '|' && have_cur)) {
@@ -1841,19 +1868,21 @@ static void load_bnf(const char *path) {
         build_one_rule(cr, acc);
       have_cur = 0;
 
-      if (!isupper(line[0])) continue;
+      if (!isupper(c)) continue;
 
       eq = strchr(line, '=');
       if (!eq) continue;
 
-      cr = line[0] - 'A';
+      cr = c - 'A';
       have_cur = 1;
       p = eq + 1;
       acc_len = 0;
     }
 
-    while (*p && acc_len + 1 < MAX_ACCUM)
-      acc[acc_len++] = *p++;
+    while ((c = *p) && acc_len + 1 < MAX_ACCUM) {
+      acc[acc_len++] = c;
+      p++;
+    }
     acc[acc_len] = 0;
   }
 
@@ -1874,9 +1903,10 @@ static int rule_defined(uchar r) {
 
 static word rule_nalt(uchar r) {
   word n = 0;
+  uchar **ap = rule[r];
 
-  if (!rule[r]) return 0;
-  while (rule[r][n]) n++;
+  if (!ap) return 0;
+  while (ap[n]) n++;
   return n;
 }
 
@@ -1953,14 +1983,17 @@ static void frame_rewind(void) {
 
 static int step(void) {
   uchar *alt, *a;
-  uchar c, e, rch;
+  uchar c, e, rch, st;
+  Frame *f;
   int ok;
   word nalt, adv;
 
   if (sp == 0) return 0;
 
+  st = cur->state;
+
   // TRY ALTERNATIVES of CURRENT RULE
-  if (cur->state == ST_TRY) {
+  if (st == ST_TRY) {
 
     // At end of RULE? => POP and continue caller
     nalt = rule_nalt(cur->rule);
@@ -1994,7 +2027,7 @@ static int step(void) {
   }
 
 
-  if (cur->state == ST_OK) {
+  if (st == ST_OK) {
     rch = 'A' + cur->rule;
 
     // Type rules I and T set cur_type for subsequent \+/\p decls
@@ -2036,7 +2069,7 @@ static int step(void) {
   }
 
   // current alt failed — next alt of same rule
-  if (cur->state == ST_FAIL) {
+  if (st == ST_FAIL) {
     frame_rewind();
     restore_scope();
     cur->alt++;
@@ -2047,19 +2080,16 @@ static int step(void) {
 
   // ST_RUN
   alt = rule[cur->rule][cur->alt];
-  if (!alt || alt[cur->ip] == 0) {
+  a = alt + cur->ip;
+  if (!alt || (c = *a) == 0) {
     cur->state = ST_OK;
     return 1;
   }
 
-  c = alt[cur->ip];
-
   // literals (hibit clear) are matched right here: a whole run per step
   // (saved 67 bytes by c = *a)
   if (!(c & 0x80)) {
-    a = alt + cur->ip;
-    do {
-      c= *a;
+    for (;;) {
       if (nextc != c) {
         // not there: whitespace/comments may come first (not before a quoted
         // space/tab), or only the case differs (-I)
@@ -2072,12 +2102,14 @@ static int step(void) {
           return 1;
         }
       }
-      
+
       skip();
       note_progress();
       vlog("  ok lit '%c' @%u\n", c, abs_pos());
 
-    } while (*++a && !(*a & 0x80));
+      c = *++a;
+      if (!c || (c & 0x80)) break;
+    }
 
     cur->ip = a - alt;
 
@@ -2093,7 +2125,7 @@ static int step(void) {
 
   // bare [ ... ] = production (use \[ \] in BNF to match bracket chars)
   if (c == HIBIT('[')) {
-    cur->ip = run_production(alt + cur->ip + 1) - alt;
+    cur->ip = run_production(a + 1) - alt;
     return 1;
   }
 
@@ -2130,22 +2162,22 @@ static int step(void) {
     // \C commit: drop buffer prefix; keep matching
     line_commit();
     // fix save positions relative to new buffer
-    for (e = 0; e < sp; e++)
-      stack[e].save = 0;
+    for (f = stack; f <= cur; f++)
+      f->save = 0;
   }
   else if (c == HIBIT('{')) scope_enter();
   else if (c == HIBIT('}')) scope_leave();
 
   // \#xx: result := hex xx, same as \d having matched that number (no input)
   else if (c == HIBIT('#')) {
-    if (!alt[cur->ip + 1] || !alt[cur->ip + 2]) FAIL("bad \\# in grammar");
-    record_capture(const_slot(hex2(alt + cur->ip + 1)));
+    if (!a[1] || !a[2]) FAIL("bad \\# in grammar");
+    record_capture(const_slot(hex2(a + 1)));
     adv = 3;
   }
 
   // \=n: result := capture n (no new capture recorded)
   else if (c == HIBIT('=')) {
-    e = alt[cur->ip + 1] - '0';
+    e = a[1] - '0';
     if (e >= 1 && e <= cur->prod_n)
       cur->result = cur->prod_cap[e];
     adv = 2;
@@ -2210,9 +2242,13 @@ static void err_prefix(word line) {
 
 // print buffered source line starting at i; returns index after its '\n'
 static word show_line(word line, word i) {
+  uchar c;
+
   err_prefix(line);
-  while (i < line_len && line_buf[i] != '\n')
-    eputc(line_buf[i++]);
+  while (i < line_len && (c = line_buf[i]) != '\n') {
+    eputc(c);
+    i++;
+  }
   eputc('\n');
   if (i < line_len) i++;
   return i;
@@ -2233,10 +2269,11 @@ static void report_reject(void) {
   eprintf("\n");
 
   if (far_sp > 0) {
-    uchar r = far_stack[far_sp - 1] - 'A';
+    uchar r = far_stack[far_sp - 1];
     uchar a = far_alt[far_sp - 1];
 
-    eprintf("EXPECTED: rule %c", far_stack[far_sp - 1]);
+    eprintf("EXPECTED: rule %c", r);
+    r -= 'A';
     if (rule_defined(r) && a < rule_nalt(r))
     { eprintf(" alt %u \"", a); show_alt(rule[r][a]); eputc('"'); }
 
@@ -2373,6 +2410,7 @@ int main(int argc, char **argv) {
 #endif
   char *bnf = NULL;
   char *srcpath = NULL;
+  char *arg;
   word i;
   int rc;
   int err;
@@ -2385,18 +2423,19 @@ int main(int argc, char **argv) {
 
   // parse arguments
   for (i = 1; i < argc; i++) {
-    if (strcmp(argv[i], "-v") == 0)
+    arg = argv[i];
+    if (strcmp(arg, "-v") == 0)
       verbose++;
-    else if (strcmp(argv[i], "-O") == 0)
+    else if (strcmp(arg, "-O") == 0)
       optimize = 1;
-    else if (strcmp(argv[i], "-I") == 0)
+    else if (strcmp(arg, "-I") == 0)
       ignore_case = 1;
-    else if (strcmp(argv[i], "-C") == 0)
+    else if (strcmp(arg, "-C") == 0)
       ignore_case = 0;
     else if (!bnf)
-      bnf = argv[i];
+      bnf = arg;
     else if (!srcpath)
-      srcpath = argv[i];
+      srcpath = arg;
   }
 
   if (!bnf || !srcpath) {
@@ -2493,16 +2532,17 @@ int main(int argc, char **argv) {
         const char *base, *s, *dot;
         FILE *of;
         word n;
+        char ch;
 
         // find base and last '.' position
         // TODO: strrchr ???
         base = src_name ? src_name : "out";
-        for (s = base; *s; s++)
-          if (*s == '/' || *s == '\\') base = s + 1;
+        for (s = base; (ch = *s); s++)
+          if (ch == '/' || ch == '\\') base = s + 1;
         n = 0; dot = 0;
-        for (s = base; *s && n < sizeof(out) - 5; s++) {
-          out[n++] = *s;
-          if (*s == '.') dot = out + n - 1;
+        for (s = base; (ch = *s) && n < sizeof(out) - 5; s++) {
+          out[n++] = ch;
+          if (ch == '.') dot = out + n - 1;
         }
 
         // change name test.p => test.ivm
