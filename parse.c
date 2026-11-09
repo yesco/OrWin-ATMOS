@@ -1383,9 +1383,14 @@ static void note_undef(uchar is_func, word pos) {
 
 // type word of a symbol (for MAKE_CAP): uppercase high byte if pointer
 static word sym_type(Symbol *s) {
+#if 1
+  // (- 26618 26584) = 34 bytes better?
+  return (s->vtype & ~32) << 8;
+#else  
   uchar t = s->vtype;
   if (s->is_ptr) t = (uchar)toupper(t);
   return (word)t << 8;
+#endif
 }
 
 // give a new symbol the type being declared (cur_type)
