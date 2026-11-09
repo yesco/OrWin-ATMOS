@@ -554,10 +554,7 @@ typedef struct {
   word ip; // TODO: or at least only 256 chars - cheap indexing
 
   // -- UNDO INFO - when backtracking
-  
-  word save;          // line_pos at start of this alt
-// TODO: we don't need per backtrack? Just one global max
-  word save_abs;      // absolute for furthest
+  word save_abs;      // abs file pos at alt start (input rewind / commit floor)
 
   word nsym_save;     // symbol count at alt entry (backtrack drops newer ones)
   uchar scope_save;   // scope_depth at alt entry
@@ -710,7 +707,9 @@ static word abs_pos(void) {
   return (word)(line_abs + line_pos);
 }
 
-// \C commit: discard buffer before line_pos
+// \o commit: drop buffer before line_pos; window starts at line_abs.
+// Does not touch frames. Rewind uses save_abs; if save_abs < line_abs, fail-fast.
+// This limits the buffersize to be large enough for largest function
 static void line_commit(void) {
   word i, rest, drop;
 
@@ -718,7 +717,6 @@ static void line_commit(void) {
 
   drop = line_pos;
 
-  // keep line numbers accurate without re-scanning the file
   for (i = 0; i < drop; i++)
     if (line_buf[i] == '\n')
       line_no_base++;
@@ -730,20 +728,8 @@ static void line_commit(void) {
   line_abs = (word)(line_abs + drop);
   line_len = rest;
   line_pos = 0;
-
-  // Alt save = offset into line_buf. Shift by drop; clamp if in dropped prefix.
-  // (Zeroing all saves broke in-buffer backtrack and blew up with \o on 6502.)
-  for (i = 0; i < sp; i++) {
-    if (stack[i].save >= drop)
-      stack[i].save -= drop;
-    else
-      stack[i].save = 0;
-  }
-  if (cur.save >= drop)
-    cur.save -= drop;
-  else
-    cur.save = 0;
 }
+
 
 // the source char at line_pos (0 at EOF), always one char looked ahead
 static uchar nextc;
@@ -1923,7 +1909,6 @@ static word rule_nalt(uchar r) {
 static void frame_mark(void) {
   cur.alt = 0;
   cur.ip = 0;
-  cur.save = line_pos;
   cur.save_abs = abs_pos();
   cur.nsym_save = nsym;
   cur.scope_save = scope_depth;
@@ -1973,24 +1958,27 @@ static void restore_scope(void) {
   next_slot = cur.slot_save;
 }
 
-// back to the start of the current alt: input, code, productions
-static void frame_rewind(void) {
-  line_pos = cur.save;
-  load_nextc();
+// Back to alt start: codegen undo always; input only if not committed away.
+// Returns 0 if save_abs < line_abs (\o dropped that text) — caller fail-fasts.
+static int frame_rewind(void) {
   code_len = cur.code_save;
   cur.prod_n = 0;
   cur.npatch = 0;
 
-  // First emit of a function clears pending_func_entry and may emit main's
-  // deferred ginit. If this rewind drops that code, re-arm so the next emit
-  // runs gen_func_entry again (otherwise globals stay 0 and P sees NULL).
+  // re-arm function entry if rewind ate gen_func_entry / ginit bytes
   if (last_func_vec != 0xff) {
-
     if (last_func_vec < MAX_VECTORS && vectors[last_func_vec] > code_len)
       pending_func_entry = last_func_vec;
     else if (last_func_vec == main_vec && main_offset >= code_len)
       pending_func_entry = last_func_vec;
   }
+
+  if (cur.save_abs < line_abs)
+    return 0;
+
+  line_pos = (word)(cur.save_abs - line_abs);
+  load_nextc();
+  return 1;
 }
 
 // ---- one step ----
@@ -2027,7 +2015,10 @@ static int step(void) {
     }
 
     // undo and rest current ALT
-    frame_rewind();
+    if (!frame_rewind()) {
+      cur.state = ST_FAIL;
+      return 1;
+    }
     cur.ip = 0;
     cur.state = ST_RUN;
 
@@ -2084,7 +2075,12 @@ static int step(void) {
 
   // current alt failed — next alt of same rule
   if (st == ST_FAIL) {
-    frame_rewind();
+    // input mark committed away → no more alts can salvage this rule
+    if (!frame_rewind()) {
+      cur.alt = (uchar)rule_nalt(cur.rule);
+      cur.state = ST_TRY;
+      return 1;
+    }
     restore_scope();
     cur.alt++;
     cur.ip = 0;
@@ -2178,7 +2174,7 @@ static int step(void) {
   }
 
   if (c == HIBIT('o')) {
-    // \o commit: drop buffer prefix; keep matching (saves adjusted in line_commit)
+    // \o commit: drop buffer prefix; keep matching (rewinds fail if save_abs < line_abs)
     line_commit();
   }
   else if (c == HIBIT('{')) scope_enter();
@@ -2409,11 +2405,13 @@ static void shutdown(void) {
   if (src_fp) fclose(src_fp);
   src_fp = NULL;
 
-  printf("\nLINEBUF: no_base=%u len=%u cap=%u pos=%u abs=%u file_pos=%u\n",
-    line_no_base, line_len, line_cap, line_pos, line_abs, (unsigned)file_pos);
-// shows garbage after valid
-//  printf("\n>>>>>LINEBUF>>>>\n%s\n<<<<<\n", line_buf);
-
+  #if 0
+    printf("\nLINEBUF: no_base=%u len=%u cap=%u pos=%u abs=%u file_pos=%u\n",
+      line_no_base, line_len, line_cap, line_pos, line_abs, (unsigned)file_pos);
+    // shows garbage after valid
+    printf("\n>>>>>LINEBUF>>>>\n%s\n<<<<<\n", line_buf);
+  #endif
+    
   free(line_buf);
   line_buf = NULL;
 
