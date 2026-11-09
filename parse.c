@@ -1571,55 +1571,17 @@ static int decode_escape(uchar *out) {
 
 // Next body character of a "..." or '...' string (handles \\ escapes).
 // Returns 0 on failure; 1 and *out on success. Does not consume the closer.
-static int next_body_char(uchar *out) {
+static int read_c_char(uchar *out) {
   uchar c;
 
   if (!nextc) return 0;
+
   c = nextc;
   skip();
   if (c == '\\')
     return decode_escape(out);
   *out = c;
-  return 1;
-}
 
-// Read body until closing delim (' or "). Opening delim already consumed.
-// Calls put(c, ctx) for each decoded byte (not the closing delim).
-// Consumes the closing delim. Returns 0 on failure.
-static int read_quoted_body(uchar delim, void (*put)(uchar c, void *ctx), void *ctx) {
-  uchar c;
-
-  while (nextc && nextc != delim) {
-    if (!next_body_char(&c)) return 0;
-    put(c, ctx);
-  }
-  EXPECT(delim);
-  note_progress();
-  return 1;
-}
-
-// put helpers for the three call sites
-
-static void put_emit(uchar c, void *ctx) {
-  (void)ctx;
-  emit(c);
-}
-
-typedef struct { uchar *buf; word n, max; } StrBuf;
-
-static void put_buf(uchar c, void *ctx) {
-  StrBuf *sb = ctx;
-  word n = sb->n;
-
-  if (n + 1 < sb->max) {
-    sb->buf[n] = c;
-    sb->n = n + 1;
-  }
-}
-
-static int match_str_emit(void) {
-  if (!read_quoted_body('"', put_emit, 0)) return 0;
-  emit(0);
   return 1;
 }
 
@@ -1634,21 +1596,45 @@ static int match_str_emit(void) {
 #endif
 static uchar str_match_buf[STR_MATCH_MAX];
 
-static int match_str_const(void) {
-  StrBuf sb;
+// \s / \S — quoted "..." string
+// emit_code=0 (\s): data pool + reloc pointer const (capture)
+// emit_code=1 (\S): emit bytes into bytecode + trailing 0
+static int match_str(uchar emit_code) {
+  uchar c;
+  word n = 0;
   uchar slot;
 
-  skip_ws();
+  if (!emit_code)
+    skip_ws();
+
   EXPECT('"');
-  sb.buf = str_match_buf; sb.n = 0; sb.max = STR_MATCH_MAX;
-  if (!read_quoted_body('"', put_buf, &sb)) return 0;
-  if (sb.n + 1 >= sb.max) return 0;
-  str_match_buf[sb.n++] = 0;
-  slot = add_string_const(str_match_buf, sb.n);
+
+  // Read till delim (' or ") 
+  // Consumes the closing delim. Returns 0 on failure.
+  while (nextc && nextc != '"') {
+    if (!read_c_char(&c)) return 0;
+    if (emit_code)
+      emit(c);
+    else {
+      if (n + 1 >= STR_MATCH_MAX) return 0;
+      str_match_buf[n++] = c;
+    }
+  }
+  EXPECT('"');
+  note_progress();
+
+  // inline string
+  if (emit_code) {
+    emit(0);
+    return 1;
+  }
+
+  // constant
+  str_match_buf[n++] = 0;
+  slot = add_string_const(str_match_buf, n);
   record_capture(MAKE_CAP(slot, TY_CHAR | TY_PTR));
   return 1;
 }
-
 
 static int match_num(void) {
   word ty;
@@ -1662,7 +1648,7 @@ static int match_num(void) {
   if (got('\'')) {
 
     // character literal 'x' / '\n' / ... → small integer const
-    if (!next_body_char(&c)) return 0;
+    if (!read_c_char(&c)) return 0;
     EXPECT('\'');
     v = c;
     ty = TY_CHAR;
@@ -2204,8 +2190,8 @@ static int step(void) {
   }
   else if (c == HIBIT('d')) ok = match_num();
   else if (c == HIBIT('n')) ok = match_newline();
-  else if (c == HIBIT('s')) ok = match_str_const();
-  else if (c == HIBIT('u')) ok = match_str_emit();    // \S
+  else if (c == HIBIT('s')) ok = match_str(0); // const str
+  else if (c == HIBIT('u')) ok = match_str(1); // old \S = inline
   else if (c == HIBIT('z')) {
     // sizeof value from cur_type (after matching T)
     record_capture(MAKE_CAP(const_slot(
