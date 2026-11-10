@@ -1,0 +1,44 @@
+// from wikipedia byte sieve
+// -
+
+#include <stdio.h>
+
+int true = 1;
+int false = 0;
+int size = 8190;
+int sizepl = 8191;
+
+char *flags;
+int main() {
+  int i, prime, k, count, iter; 
+
+  flags = malloc(sizepl*2);
+  
+  printf("10 iterations\n");
+
+  for (iter = 1; iter <= 10; iter ++) {
+
+    count=0; 
+
+    for (i = 0; i <= size; i++)
+      flags[i] = true; 
+
+    for (i = 0; i <= size; i++) { 
+
+      if (flags[i]) {
+        prime = i + i + 3; 
+        k = i + prime; 
+
+        while (k <= size) { 
+          flags[k] = false; 
+          k += prime; 
+        }
+
+        count = count + 1;
+
+      }
+    }
+  }
+
+  putz("primes: "); putnl(count);
+}

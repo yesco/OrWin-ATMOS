@@ -23,6 +23,11 @@
 // (/ 1000000 44) = 22,727 dis / s in asm " "
 // (/ 1000000 95) = 10,52t ops / s in asm "Ivv"
 
+// 8,914,999,378
+// 1,603,014,148 (/ 8914999378 1603014148.0) 5.56x
+// 891 c / loop turn
+// 160 c / loop turn (- 160 44) 116 c (w/o disptch)
+
 #include <stdio.h>
 
 int main(void) {

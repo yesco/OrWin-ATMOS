@@ -1,34 +1,46 @@
 // IVM - Indirect Virtual Machine
 // (C) 2026 Jonas S Karlsson
 
-// Default type to 2 bytes for 6502,
-// however, on unix runtime int can be int/long!
-
 // Indirect Virtual Machine
 // ========================
 //
 // A byte-coded register virtual machine, where
 // op-code are mostly alphabetcially readable.
 //
+// The most generic form is one can can be used
+// to run many independent VMs at the same time.
+// This naturally gives an overhead during execution
+// because of indirect pointers.
+//
+// The C-code interpreter is about 7-8x slower than
+// the asm implementation (all using this file).
+//
+// There is an embryo of a "jit" where all opcodes
+// are expanded to optimal binary code, let's say
+// zero page (configurable). This may give a boost
+// of ~2x, giving a performance comparable to cc65.
+//
 //
 // Features:
 // - ACCumulator based arch. OPs morestly modify ACC.
-// - Unified global/const/stack/parameter/locals!
 // - alphabetical memomic byte codes ('L" - load...)
-// - register machine (most: OP iADDR or just OP)
-// - 64 indirect call vectors by single byte code call
-// - optimized call by last parameter in ACCumulator
-// - 32 most common vars, single byte load (more common than save)
-// - local var access single byte (max 8)
-// - max 256 registers: [0, N[ per process
+// - Unified global/const/stack/parameter/locals!
+// - max 254 registers: [0, N[ per process
+// - datatypes: char + word and pointers to them
 // - no constants! folded into higher registers...
 // - no stack - using FORTRAN-style STATIC STACK
-// - Pure C implementation (2.75x 6502 asm VM, 10x compiled asm)
+// - parameters + local variables scoped
+// - register machine (most: OP iADDR or just OP)
+// - 64 single byte ndirect call vectors
+// - optimized call by last parameter in ACCumulator
+// - single byte load of 32 most common vars
+// - common loops optimized for size and speed
+// - Pure C implementation (7x, 2.1x using 6502 asm VM)
 //
 //
 // STATIC STACK
 // ------------
-// It's observed that even large programs most have
+// It's observed that even large programs have mostly
 // less than 256 variables active at any point, this includes
 // all global variables, and parameters and local variables
 // active on the stack. An array is counted as one variable.

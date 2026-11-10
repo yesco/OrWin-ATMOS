@@ -3,10 +3,23 @@
 ##
 ##
 # --- performance
-# - cc65          85204077 cycles         4194 bytes
-# - oscar64       21078607 cycles         5772 bytes 682 b main+primes
-# - ivm          731302528 cycles          303 bytes
-# - ivm-asm      199459095 cycles          303 bytes
+#
+#   cc65          85,204,077 cycles         4194 bytes
+#   oscar64       21,078,607 cycles         5772 bytes 682 b main+primes
+
+# --- IVM ---
+#
+#   ivm          731,302,528 cycles          303 bytes
+#   ivm-asm      199,459,095 cycles          303 bytes
+#
+# --- (from mc) ---
+#
+# - byte-sieve.. 696,771,860     ./ivm       122 bytes
+# - byte .. asm  199,637,579     ./ivm-asm   122 bytes
+#
+# 199637579/2208207 = 90.41 cycles / op in asm vm
+#          (/ 1000000 90.41       ) = 11060  ops / s
+# We'll do (/ 1000000 (- 90.41 22)) =    14K ops / s
 #
 # ivm: 11664  imv-asm: 9580 (- 9580 6772) = 2808 VM asm bytes
 #

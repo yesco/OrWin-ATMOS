@@ -1,9 +1,25 @@
 # -- BNF for C → IVM engine
-# Arguments Block Cscopedeclstatements Declare E Func
-# Intcharetc Jprintone Kstatements Massvardecl O Program
-# Q,arguments RstartvalueofE S Type U,vardecl Var W,printitemJ Z H
+# Arguments Block Cscopedeclstatements Declare Expr Func
+# Hassign Intcharetc Jprintone Kstatements Massvardecl
+# O Program 
+# Q,arguments RstartvalueofE Simpleval
+# Type Uvardecl Var WprintitemJ Z H
 #
 # -- letters free: G L N X Y
+
+# Features TODO/missing:
+# - casting, advanced pointer stuff
+# - * is char, and [] is int, p++ is for char
+# - do ... while continue break
+# - switch ... case
+# - label: goto label;
+# - actual include (ignored for now!)
+# - const arrays (initilized)
+# - operands have no priorites; left-to-right
+# - printf very limited; putchar putz puts putn putnl nl
+
+
+# =============================================
 
 # - comment spec
 #= /* */
@@ -18,20 +34,23 @@ D=#include <\+.h>\n\o\<
 |V\o\<|F\o\<|
 
 # - Declarations: optional register\r -> REGISTER slot 0..31
-#   -O: REGISTER 0..31, other globals 32..95, frames at 96+
+# -O: REGISTER 0..31, other globals 32..95, frames at 96+
 V=register\r T M;|T M;
 M=\+=S[\g]U|\+=E[S\1]U|\+U|
-# TODO: deep recursion might be bad...
+
+# - TODO: deep recursion might be bad...
 U=,M|
 
-# TODO: why I^* - pascal artifact?
+# - TODO: why I^* - pascal artifact?
 T=I *\'^|I^*\'^|I
 I=int\'w|word\'w|void\'w|char\'c
 
+# - Function/Args definition
 F=\oT \f\{(A)\r B \}[X]\o
-A=T \pQ|void|
+A=void|T \pQ|
 Q=,A|
 
+# - Block
 B={ \{ C } \}
 C=V\<|K\<|
 
@@ -101,7 +120,9 @@ K=if (E)[?G\x] K else[0?G\x\w\y] K[\y]
 
 |while ([\m]E) [?G\x] K[B\z\y]
 
+
 # - Input / Output
+# TODO: put these as prefix starting with pX X many alts
 |putchar('\\n');[N]
 |putchar(\d);[O\c1]
 |putchar(\i);[L\1E]
@@ -160,7 +181,7 @@ K=if (E)[?G\x] K else[0?G\x\w\y] K[\y]
 |free(\i);[F\1]
 |\i=malloc(E);[M\1]
 
-# - Block
+# - Statement can be a Block, or lastly Assignments
 |B|;
 |H
 
@@ -181,12 +202,11 @@ H=\i+=\i;[U\1\2]
 |--\i;[J\1]
 |\i=E;[S\1]
 
-# - print support
+# - PrintF support (ingore formatting, lol)
 W=,J\<|
 J="%u\\\\n"|"%d\\\\n"|"%s\\\\n"|"%s"|"%u "|"%d "|"%u"|"%d"|"["]\u|E[.]
 
 # - Expressions
-
 E=\i+=\i [U\1\2]
 |RO
 |S[\l1]O
@@ -216,36 +236,36 @@ S=\d|sizeof(T)\z|sizeof(\i)\z|\s|\i
 Z=E,[S\k]\<|E|
 
 O=
-|<<[S\t]R[[\a1]\<
-|>>[S\t]R\a1]\<
-|!=[S\t]R[=\a1?]\<
-|==[S\t]R[=\a1]\<
-|+[S\t]R[+\a1]\<
-|-[S\t]R[S\tL\a1-\a3]\<
-|*[S\t]R[*\a1]\<
-|/[S\t]R[S\tL\a1/\a3]\<
-|&[S\t]R[&\a1]\<
-|\|[S\t]R[|\a1]\<
-|^[S\t]R[^\a1]\<
-|<=[S\t]R[S\tL\a1>\a3?]\<
-|>=[S\t]R[S\tL\a1<\a3?]\<
-|<[S\t]R[S\tL\a1<\a3]\<
-|>[S\t]R[S\tL\a1>\a3]\<
-|<< S[\[\a1]\<
-|>> S[\]\a1]\<
+|<<[S\t] R [[\a1]\<
+|>>[S\t] R\a1]\<
+|!=[S\t] R[=\a1?]\<
+|==[S\t] R[=\a1]\<
+|+ [S\t] R[+\a1]\<
+|- [S\t] R[S\tL\a1-\a3]\<
+|* [S\t] R[*\a1]\<
+|/ [S\t] R[S\tL\a1/\a3]\<
+|& [S\t] R[&\a1]\<
+|\|[S\t] R[|\a1]\<
+|^ [S\t] R[^\a1]\<
+|<=[S\t] R[S\tL\a1>\a3?]\<
+|>=[S\t] R[S\tL\a1<\a3?]\<
+|< [S\t] R[S\tL\a1<\a3]\<
+|> [S\t] R[S\tL\a1>\a3]\<
+|<<S[\[\a1]\<
+|>>S[\]\a1]\<
 |!=S[=\a1?]\<
 |==S[=\a1]\<
-|+S[+\a1]\<
-|-S[-\a1]\<
-|*S[*\a1]\<
-|/S[/\a1]\<
-|&S[&\a1]\<
+|+ S[+\a1]\<
+|- S[-\a1]\<
+|* S[*\a1]\<
+|/ S[/\a1]\<
+|& S[&\a1]\<
 |\|S[|\a1]\<
-|^S[^\a1]\<
+|^ S[^\a1]\<
 |<=S[>\a1?]\<
 |>=S[<\a1?]\<
-|<S[<\a1]\<
-|>S[>\a1]\<
+|< S[<\a1]\<
+|> S[>\a1]\<
 |
 .
 
