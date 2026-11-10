@@ -157,6 +157,7 @@ _run_ivm_asm:
         ldy     #0
         beq     xnext           ; always
 
+;;; IPC += A + Y and FIXIPC if needed
 anext:
 ;;; 10c (17c 19c)
 	clc
@@ -202,7 +203,7 @@ xnext:
 	        sta     _ivm_op
 	        sty     savey
 
-		lda     #'.'
+		lda     #'>'
 	        jsr     _putchar
 
 		lda     _ivm_op
@@ -291,7 +292,7 @@ xnext:
 		sty     savey
 	        sta     _ivm_op
 
-		lda     #' '
+		lda     #'>'
 		jsr     _putchar
 
 		lda     _ivm_op
@@ -1235,20 +1236,33 @@ i_skip_load:
         bcc     i_exit
 
 i_enter:
+
+lda #'!'
+jsr _putchar	
 	;; go to next op (skip jump offset)
         ldy     savey
 	iny
         jmp     xnext
 
 i_exit:
-	;; fail, exit loop read and add offset
+
+
+lda #10
+jsr _putchar
+
+	;; IPC += Y + 1 + mem[o] + 1
         ldy     savey
-        iny
-        lda     (_ivm_ipc),y
-	
+        iny                     ; Y = offset 3 (exit_offset byte)
+        sty     savey           ; savey = offset 3
+        lda     (_ivm_ipc),y    ; A = exit_offset ($02)
+
+	;; TODO: if < "not too big" just tay iny, jmp xnext
+        clc
+        adc     #1              ; +1 skips exit_offset byte -> 3 + 1 + 2 = 6 (Le8)!
         jmp     anext
 
 
+;;; LOOP_NEXT back
 op_n:
 ;;; 10c - FAST JUMP if started at Y=0 !
         tya
@@ -1267,6 +1281,7 @@ op_n_do_the_math:
 	FIXIPC
 
         jmp     op_i_step
+
 
 .else
 
