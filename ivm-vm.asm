@@ -17,14 +17,17 @@
 ;;;   BPL zrel       ; 80-BF: if !acc  ipc += op & $3F
 ;;;   BMI subvec     ; C0-FF: vector call  (op & $3F)  inverse of X/;/Q
 
-;TRACE=1
-TRACE=0
+TRACE=1
+;TRACE=0
         
 ;; ALTCODE: 1.5 % faster...
-ALTCODE=0
-;ALTCODE=1
+;ALTCODE=0
+ALTCODE=1
 
-;FASTDISPATCH=0
+OPFOR=3 ;; new one works i,n only
+;OPFOR=0
+;OPFOR=1 ;; hand coded maybve works for ALTCODE
+
 FASTDISPATCH=1
 
 
@@ -154,6 +157,27 @@ _run_ivm_asm:
         ldy     #0
         beq     xnext           ; always
 
+anext:
+;;; 10c (17c 19c)
+	clc
+	adc     savey
+	tay
+	bcc     pfixnext
+	;; a bit clumsy
+	inc     _ivm_ipc+1
+	bpl     pfixnext
+	bne     xnext
+	
+
+;;; xx11 b  11c (18c)
+;;; Y stays same! (safe)
+	clc
+	adc     _ivm_ipc
+	sta     _ivm_ipc
+	bcc     xnext
+	inc     _ivm_ipc+1
+	bne     xnext
+
 ;;; ----- consume 1-byte operand -----
 ;;; if used parameter always need to savey
 pnext:
@@ -161,6 +185,7 @@ pnext:
         iny
         ;; if Y>=128 fold into ipc (matches comment above); else keep Y offset
 ;;; TODO: 5-10% (2c spent testing here, maybe inject an fixop)
+pfixnext:
         bpl     xnext
         FIXIPC                  ; ipc += Y, Y := 0
         jmp     xnext
@@ -178,6 +203,9 @@ xnext:
 	        sty     savey
 
 		lda     #'.'
+	        jsr     _putchar
+
+		lda     _ivm_op
 	        jsr     _putchar
 
 	        ldy     savey
@@ -224,7 +252,7 @@ pc:	jmp     (dispvec)
 .macro FIXIPC
 .endmacro
 
-anext:	
+anext:
 ;;; 11 b  11c (18c)
 	clc
 	adc     _ivm_ipc
@@ -1135,23 +1163,233 @@ op_B:
 ;;; ------------------------------------------------------------
 
 ;;; ------------------------------------------------------------
-;;; n delta  — next of counting-up for
-;;;   tpc = ipc - delta + 1     ; → address of the 'i'
+;;; n back  — next of counting-up for
+;;;   tpc = ipc - back + 1     ; → address of the 'i'
 ;;;   acc = ++mem[tpc[1]]       ; v
 ;;;   if (acc > mem[tpc[2]]) fall out
 ;;;   else ipc = tpc + 4        ; body
 ;;; ------------------------------------------------------------
-
 
 ;;; (- 9345 6577) = 2768 enabled OPFOR=2
 ;;; (- 9201 6577) = 2624 OPFOR=0
 ;;; (- 2768 2624) = 144 bytes (x 2 for j m)
 
 
-OPFOR=2 ;; new one works i,n only
-;OPFOR=0
-;OPFOR=1 ;; hand coded maybve works for ALTCODE
+
+;;; ONLY FOR ALTCODE
+.if (OPFOR=3) .and (ALTCODE=1)
+
+.if 1
+
+op_i:
+        ;; Entry: Y points to arg 1 ('v'). No FIXIPC needed!
+        sty     savey
+        lda     (_ivm_ipc),y
+        tay
+        LOAD_SLOT_Y             ; _ivm_acc = mem[v]
+        ldy     savey           ; Y = offset of 'v'
+        jmp     i_skip_load
+
+op_i_step:
+        ;; Entry from op_n: _ivm_ipc points to 'v', so Y = 0!
+	;; Y=0 points to 'v'
+
+	;; AX = mem[v];
+        ldy     #0            
+        lda     (_ivm_ipc),y
+        tay
+        lda     (_ivm_memhi),y
+        tax
+        lda     (_ivm_memlo),y
+
+	;; AX++;
+        clc
+        adc     #1
+        bcc     :+
+        inx
+:
+	;; acc = AX;
+        sta     _ivm_acc
+        stx     _ivm_acc+1
+
+	;; mem[v] = AX
+        sta     (_ivm_memlo),y
+        txa
+        sta     (_ivm_memhi),y
+
+	;; "restore Y"
+	ldy     #0
+
+i_skip_load:
+	;; get u parameter memory location
+        iny
+	sty     savey
+        lda     (_ivm_ipc),y
+        tay
+
+	;; acc <= mem[u]
+        lda     (_ivm_memlo),y
+        cmp     _ivm_acc
+        lda     (_ivm_memhi),y
+        sbc     _ivm_acc+1
+        bcc     i_exit
+
+i_enter:
+	;; go to next op (skip jump offset)
+        ldy     savey
+	iny
+        jmp     xnext
+
+i_exit:
+	;; fail, exit loop read and add offset
+        ldy     savey
+        iny
+        lda     (_ivm_ipc),y
 	
+        jmp     anext
+
+
+op_n:
+;;; 10c - FAST JUMP if started at Y=0 !
+        tya
+        sec
+	;; delta = (Y - offset arg)
+        sbc     (_ivm_ipc),y 
+	;; if equal go next step where Y will be RESET to 0
+        beq     op_i_step
+
+op_n_do_the_math:
+	;; Y = delta, don't need update ipc low
+        bcs     :+
+        dec     _ivm_ipc+1
+:       clc
+	;; only issue if Y very big (and might overflow)
+	tay
+	bpl     op_i_step
+	FIXIPC
+        jmp     op_i_step
+
+.else
+
+op_i:
+;;; This entry point is only used the first time.
+;;; During the loop it enters from op_n in op_i_step
+
+;;; 74 B 
+
+	;; load acc = mem[v]
+	;; We normalize here so that Y == 0 meaning
+	;; next value back jump == Y at that time, and
+	;; can super-fast jump back without math
+	;; PARY - LDY #0
+	USEY
+	lda (_ivm_ipc),y
+	tay
+        LOAD_SLOT_Y
+
+	ldy savey
+;;; TODO: jump back shortcut wrong (when Y=0 here)
+;        FIXIPC                  ; Y=0 ; 
+	jmp     i_skip_load
+
+;;; Entry point from op_n! saves bytes
+op_i_step:
+;;; --- 25 b 46c
+	;; PARY ?
+
+	;; 7 i var
+	ldy #2
+	lda (_ivm_ipc),y
+	tay
+
+	;; 
+	lda (_ivm_memhi),y
+	tax
+	lda (_ivm_memlo),y
+
+	;; +1
+	clc
+	adc #1
+	bcc :+
+	inx
+:	
+
+	sta _ivm_acc
+	stx _ivm_acc+1
+
+	sta (_ivm_memlo),y
+	txa
+	sta (_ivm_memhi),y
+
+	ldy #2
+
+;;; We want to compare acc <= mem[u]
+op_i_cmp:
+
+i_skip_load:	
+	iny
+        lda     (_ivm_ipc),y
+        tay
+
+	;; acc <= mem[u] ?
+	;; NAH: NOT( mem[u] < acc )
+        lda     (_ivm_memlo),y
+        cmp     _ivm_acc
+        lda     (_ivm_memhi),y
+        sbc     _ivm_acc+1
+        bcc     i_exit
+
+i_enter:
+	iny
+	jmp pnext
+
+i_exit:
+	FIXIPC
+        lda     (_ivm_ipc),y        ; oo
+	tay
+
+	jmp xnext
+
+
+;;; (for) next - dispatches to a looping-step-compare op
+;;; like i<=N !j k<N
+op_n:
+;;; 10c  5 B
+	tya
+	;; iny ?
+	sec
+	sbc (_ivm_ipc),y
+	;; We're where we can just set Y=0 (== go back beginning loop!)
+	beq op_i_step  		; always (and at dest set Y=0)
+
+op_n_do_the_math:	
+	;; we're not the inner loop - pay the cost
+	;; ipc = ipc + y - back + 2
+
+	;; let's assume is safe? LOL
+	bcs :+
+	dec _ivm_ipc+1
+:	
+;;; TODO: would be good if these two were part of the displacement!
+	;; add 2 (length of instruction)
+	clc
+	adc #2
+	bcc :+
+	inc _ivm_ipc+1
+:	
+	clc
+	adc _ivm_ipc
+	bcc op_i_step
+	inc _ivm_ipc+1
+;;; TODO: specialized dispatch depending on receiver op!
+	jmp op_i_step
+
+.endif
+
+.endif ; OPFOR=3
+
+
+
 .if (OPFOR=2) .and (ALTCODE=0)
 ;;; 34 Bytes saved compared to OPFOR=1
 
@@ -1743,7 +1981,7 @@ op_h:
 op_j:
 op_k:
 
-.if (OPFOR=0) .or (ALTCODE=1)
+.if (OPFOR=0)
 op_i:	
 op_n:	
 .endif
