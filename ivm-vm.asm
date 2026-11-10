@@ -1262,11 +1262,10 @@ op_n_do_the_math:
 	;; Y = delta, don't need update ipc low
         bcs     :+
         dec     _ivm_ipc+1
-:       clc
-	;; only issue if Y very big (and might overflow)
+:
 	tay
-	bpl     op_i_step
 	FIXIPC
+
         jmp     op_i_step
 
 .else
