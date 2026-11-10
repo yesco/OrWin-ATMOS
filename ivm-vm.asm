@@ -42,6 +42,8 @@ FR_PREV = 2
 FR_ACC  = 3
 FP_MAIN = $FF
 
+.data
+	
 .zeropage
 jmpvec: .res 2
 
@@ -51,44 +53,6 @@ tmp_hi: .res 1
 savey:  .res 1
         
 
-
-
-.data
-;;; static dispatch tables (256 bytes) — no runtime init_disp
-displo:
-        .byte   <op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31
-        .byte   <op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31
-        .byte   <op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31
-        .byte   <op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31
-        .byte   <op_sp, <op_bang, <op_str, <op_hash, <op_dollar, <op_mod, <op_and, <op_ri
-        .byte   <op_idxl, <op_idxs, <op_mul, <op_add, <op_wi, <op_sub, <op_dot, <op_div
-        .byte   <op_0, <op_1to7, <op_1to7, <op_1to7, <op_1to7, <op_1to7, <op_1to7, <op_1to7
-        .byte   <op_8, <op_9, <op_colon, <op_semi, <op_lt, <op_eq, <op_gt, <op_not
-        .byte   <op_at, <op_A, <op_B, <op_C, <op_D, <op_E, <op_F, <op_G
-        .byte   <op_H, <op_I, <op_J, <op_K, <op_L, <op_M, <op_N, <op_O
-        .byte   <op_P, <op_Q, <op_R, <op_S, <op_T, <op_U, <op_V, <op_W
-        .byte   <op_X, <op_Y, <op_Z, <op_shl, <op_bslash, <op_shr, <op_xor, <op__
-        .byte   <op_tick, <op_a, <op_b, <op_c, <op_d, <op_e, <op_f, <op_g
-        .byte   <op_h, <op_i, <op_j, <op_k, <op_l, <op_m, <op_n, <op_o
-        .byte   <op_p, <op_q, <op_r, <op_s, <op_t, <op_u, <op_v, <op_w
-        .byte   <op_x, <op_y, <op_z, <op_shlm, <op_or, <op_shrm, <op_bnot, <op_del
-disphi:
-        .byte   >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31
-        .byte   >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31
-        .byte   >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31
-        .byte   >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31
-        .byte   >op_sp, >op_bang, >op_str, >op_hash, >op_dollar, >op_mod, >op_and, >op_ri
-        .byte   >op_idxl, >op_idxs, >op_mul, >op_add, >op_wi, >op_sub, >op_dot, >op_div
-        .byte   >op_0, >op_1to7, >op_1to7, >op_1to7, >op_1to7, >op_1to7, >op_1to7, >op_1to7
-        .byte   >op_8, >op_9, >op_colon, >op_semi, >op_lt, >op_eq, >op_gt, >op_not
-        .byte   >op_at, >op_A, >op_B, >op_C, >op_D, >op_E, >op_F, >op_G
-        .byte   >op_H, >op_I, >op_J, >op_K, >op_L, >op_M, >op_N, >op_O
-        .byte   >op_P, >op_Q, >op_R, >op_S, >op_T, >op_U, >op_V, >op_W
-        .byte   >op_X, >op_Y, >op_Z, >op_shl, >op_bslash, >op_shr, >op_xor, >op__
-        .byte   >op_tick, >op_a, >op_b, >op_c, >op_d, >op_e, >op_f, >op_g
-        .byte   >op_h, >op_i, >op_j, >op_k, >op_l, >op_m, >op_n, >op_o
-        .byte   >op_p, >op_q, >op_r, >op_s, >op_t, >op_u, >op_v, >op_w
-        .byte   >op_x, >op_y, >op_z, >op_shlm, >op_or, >op_shrm, >op_bnot, >op_del
 
 .code
 
@@ -201,7 +165,10 @@ xnext:
         .if TRACE
         sta     _ivm_op
         sty     savey
+
+	lda     #'.'
         jsr     _putchar
+
         ldy     savey
         lda     _ivm_op
         .endif ; TRACE
@@ -260,7 +227,7 @@ pnext:
         inc     _ivm_ipc+1
 :       
         ;; fall-through
-_run_ivm_asm:   
+_run_ivm_asm:
 
 ;;; ----- main loop -----
 ynext:                          ; dummy
@@ -277,9 +244,18 @@ xnext:
         lda     (_ivm_ipc),y
 
         .if TRACE
+	sty     savey
         sta     _ivm_op
+
+	lda     #' '
+	jsr     _putchar
+
+	lda     _ivm_op
         jsr     _putchar
+	
+
         lda     _ivm_op
+	ldy     savey
         .endif ; TRACE
 
         ;; 8-12c
@@ -341,10 +317,10 @@ subvec:
         ;; X = original op (NOT the ASL'd A — that was the vector-index bug)
         FIXIPC
 
-        .if TRACE
-        lda     #10     
-        jsr     _putchar
-        .endif ; TRACE
+;        .if TRACE
+;        lda     #10     
+;        jsr     _putchar
+;        .endif ; TRACE
         
         ;; v = op & $3F
         ;; nfp = fptab[v]
@@ -1079,11 +1055,11 @@ op_G:
         FIXIPC                  ; ipc at delta, Y=0
         sty     savey           ; savey=0
         
-        .if TRACE
-        lda     #10     
-        jsr     _putchar
-        ldy     savey
-        .endif ; TRACE
+;        .if TRACE
+;        lda     #10     
+;        jsr     _putchar
+;        ldy     savey
+;        .endif ; TRACE
         
         ;; test if acc > 0 (signed: not neg and not zero)
         lda     _ivm_acc+1      ; hi
@@ -1757,3 +1733,54 @@ done:   lda     _ivm_acc
         ldx     _ivm_acc+1
 
         rts
+
+	
+	
+	
+	
+	
+//  (/ 199954374 198149017.0) 0.91% faster w pagealign table
+.segment "ALIGNDATA"
+;.data
+	
+.align 256, $42
+	
+;;; static dispatch tables (256 bytes) — no runtime init_disp
+.export _displo
+_displo:
+displo:
+        .byte   <op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31
+        .byte   <op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31
+        .byte   <op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31
+        .byte   <op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31
+        .byte   <op_sp, <op_bang, <op_str, <op_hash, <op_dollar, <op_mod, <op_and, <op_ri
+        .byte   <op_idxl, <op_idxs, <op_mul, <op_add, <op_wi, <op_sub, <op_dot, <op_div
+        .byte   <op_0, <op_1to7, <op_1to7, <op_1to7, <op_1to7, <op_1to7, <op_1to7, <op_1to7
+        .byte   <op_8, <op_9, <op_colon, <op_semi, <op_lt, <op_eq, <op_gt, <op_not
+        .byte   <op_at, <op_A, <op_B, <op_C, <op_D, <op_E, <op_F, <op_G
+        .byte   <op_H, <op_I, <op_J, <op_K, <op_L, <op_M, <op_N, <op_O
+        .byte   <op_P, <op_Q, <op_R, <op_S, <op_T, <op_U, <op_V, <op_W
+        .byte   <op_X, <op_Y, <op_Z, <op_shl, <op_bslash, <op_shr, <op_xor, <op__
+        .byte   <op_tick, <op_a, <op_b, <op_c, <op_d, <op_e, <op_f, <op_g
+        .byte   <op_h, <op_i, <op_j, <op_k, <op_l, <op_m, <op_n, <op_o
+        .byte   <op_p, <op_q, <op_r, <op_s, <op_t, <op_u, <op_v, <op_w
+        .byte   <op_x, <op_y, <op_z, <op_shlm, <op_or, <op_shrm, <op_bnot, <op_del
+disphi:
+        .byte   >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31
+        .byte   >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31
+        .byte   >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31
+        .byte   >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31
+        .byte   >op_sp, >op_bang, >op_str, >op_hash, >op_dollar, >op_mod, >op_and, >op_ri
+        .byte   >op_idxl, >op_idxs, >op_mul, >op_add, >op_wi, >op_sub, >op_dot, >op_div
+        .byte   >op_0, >op_1to7, >op_1to7, >op_1to7, >op_1to7, >op_1to7, >op_1to7, >op_1to7
+        .byte   >op_8, >op_9, >op_colon, >op_semi, >op_lt, >op_eq, >op_gt, >op_not
+        .byte   >op_at, >op_A, >op_B, >op_C, >op_D, >op_E, >op_F, >op_G
+        .byte   >op_H, >op_I, >op_J, >op_K, >op_L, >op_M, >op_N, >op_O
+        .byte   >op_P, >op_Q, >op_R, >op_S, >op_T, >op_U, >op_V, >op_W
+        .byte   >op_X, >op_Y, >op_Z, >op_shl, >op_bslash, >op_shr, >op_xor, >op__
+        .byte   >op_tick, >op_a, >op_b, >op_c, >op_d, >op_e, >op_f, >op_g
+        .byte   >op_h, >op_i, >op_j, >op_k, >op_l, >op_m, >op_n, >op_o
+        .byte   >op_p, >op_q, >op_r, >op_s, >op_t, >op_u, >op_v, >op_w
+        .byte   >op_x, >op_y, >op_z, >op_shlm, >op_or, >op_shrm, >op_bnot, >op_del
+
+	

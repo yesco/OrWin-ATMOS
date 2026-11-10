@@ -1,16 +1,21 @@
+rm ivm-asm.sim ivm-asm.map ivm-asm.asm ivm-asm.lst ivm-asm.s 2>/dev/null
 
 name=$1
 name="${name%.ivm}"
 
-cl65 -DIVMASM -Oirs -vm -C sim6502.cfg -t sim6502 -m ivm-asm.map -o ivm-asm.sim ivm.c ivm-vm.asm || exit 1
-cl65 -DNOIVM -DIVMASM -Oirs -vm -C sim6502.cfg -t sim6502 -m ivm-asm.map -o ivm-asm-noivm.sim ivm.c || exit 1
+cl65 -DIVMASM -Oirs -C sim6502.cfg -t sim6502 -vm -m ivm-asm.map -o ivm-asm.sim ivm-vm.asm ivm.c  || exit 1
+#cl65 -DNOIVM -DIVMASM -Oirs -C sim6502.cfg -t sim6502 -o ivm-asm-noivm.sim ivm.c || exit 1
+
+#ca65 -t sim6502 ivm-vm.asm -l ivm-vm.lst # 2>/dev/null 1>/dev/null
 
 sim65 -c ivm-asm.sim $name.ivm
 
 echo
 echo
-ls -ugGlf ivm-asm.sim ivm-asm-noivm.sim $name.ivm 2>/dev/null
+ls -ugGlf ivm-asm.sim ivm-asm.map ivm-asm-noivm.sim $name.ivm 2>/dev/null
 echo
 echo "=== ivm.c     : `./wcode ivm.c` LOC ==="
 echo "=== ivm-vm.asm: `./wcode ivm-vm.asm` LOC ==="
+echo
+grep _FISH ivm-asm.map
 echo

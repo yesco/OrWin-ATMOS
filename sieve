@@ -27,6 +27,7 @@
 # ivm/cc65 : (/ 731302528 85204077.0) ivm is 8.58x slower than cc65
 # asm/cc65 : (/ 199459095 85204077.0) ivm is 2.34x slower than cc65
 # cc65/osc : (/  85204077 21078607.0)        4.04x LOL!
+#            (/ 199954374 198149017.0) 0.91% faster w pagealign table
 #
 # (+ 256 (* 2 7))
 
