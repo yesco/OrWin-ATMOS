@@ -1244,13 +1244,14 @@ i_exit:
 ;;; like i<=N !j k<N
 op_n:
 .if ALTCODE=1
-;;; 14c  9 B
+;or... 12c ... 
+;;; On entry: X holds the opcode ($C0..$FF), Y holds current loop offset
+op_n_short:
+;;; 10c  5 B
 	tya
 	cmp (_ivm_ipc),y
-	bne op_n_compute
 	;; We're where we can just 
-	ldy #0
-	beq op_i_step 		; always
+	beq op_i_step  		; always (and at dest set Y=0)
 .endif
 
 op_n_compute:	
