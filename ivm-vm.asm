@@ -17,19 +17,12 @@
 ;;;   BPL zrel       ; 80-BF: if !acc  ipc += op & $3F
 ;;;   BMI subvec     ; C0-FF: vector call  (op & $3F)  inverse of X/;/Q
 
-TRACE=1
-;TRACE=0
+;TRACE=1
+TRACE=0
         
 ;; ALTCODE: 1.5 % faster...
-;ALTCODE=0
-ALTCODE=1
-
-OPFOR=3 ;; new one works i,n only
-;OPFOR=0
-;OPFOR=1 ;; hand coded maybve works for ALTCODE
-
-FASTDISPATCH=1
-
+ALTCODE=0
+;ALTCODE=1
 
 .export         _run_ivm_asm
 
@@ -221,21 +214,11 @@ xnext:
         ;; lobit - 0..127
         bmi     HIBIT
 
-.if FASTDISPATCH
 ;;; 7 B  11c
 	asl
 	sta     pc+1
 pc:	jmp     (dispvec)
 
-.else
-;;; 
-        lda     disphi,x
-        sta     jmpvec+1
-
-        lda     displo,x
-        sta     jmpvec
-        jmp     (jmpvec)
-.endif
 
 .else
         
@@ -318,25 +301,12 @@ xnext:
         bmi     HIBIT
 
 
-.if FASTDISPATCH
 ;;; 7 B  11c
 	asl
 	sta     pc+1
 pc:	jmp     (dispvec)
 
-.else
-;;; 15 B  19c
-        ;; +18c
-        lda     disphi,x
-        sta     jmpvec+1
-
-        lda     displo,x
-        sta     jmpvec
-
-        jmp     (jmpvec)
-.endif ; FASTDISPATCH
-
-.endif ; ALTCODE=2
+.endif ; ALTCODE
         
 ;;; ----- HIBIT: ASL → N = former bit6 -----
 ;;; On entry: A=op, X=op (from dispatch tax). ASL only for N/C test — keep X!
@@ -1177,10 +1147,8 @@ op_B:
 
 
 
-;;; ONLY FOR ALTCODE
-.if (OPFOR=3) .and (ALTCODE=1)
+.if ALTCODE=1
 
-.if 1
 
 op_i:
         ;; Entry: Y points to arg 1 ('v'). No FIXIPC needed!
@@ -1236,20 +1204,13 @@ i_skip_load:
         bcc     i_exit
 
 i_enter:
-
-lda #'!'
-jsr _putchar	
 	;; go to next op (skip jump offset)
         ldy     savey
+	iny
 	iny
         jmp     xnext
 
 i_exit:
-
-
-lda #10
-jsr _putchar
-
 	;; IPC += Y + 1 + mem[o] + 1
         ldy     savey
         iny                     ; Y = offset 3 (exit_offset byte)
@@ -1266,6 +1227,10 @@ jsr _putchar
 op_n:
 ;;; 10c - FAST JUMP if started at Y=0 !
         tya
+
+	clc
+	adc #2
+
         sec
 	;; delta = (Y - offset arg)
         sbc     (_ivm_ipc),y 
@@ -1283,146 +1248,11 @@ op_n_do_the_math:
         jmp     op_i_step
 
 
-.else
-
-op_i:
-;;; This entry point is only used the first time.
-;;; During the loop it enters from op_n in op_i_step
-
-;;; 74 B 
-
-	;; load acc = mem[v]
-	;; We normalize here so that Y == 0 meaning
-	;; next value back jump == Y at that time, and
-	;; can super-fast jump back without math
-	;; PARY - LDY #0
-	USEY
-	lda (_ivm_ipc),y
-	tay
-        LOAD_SLOT_Y
-
-	ldy savey
-;;; TODO: jump back shortcut wrong (when Y=0 here)
-;        FIXIPC                  ; Y=0 ; 
-	jmp     i_skip_load
-
-;;; Entry point from op_n! saves bytes
-op_i_step:
-;;; --- 25 b 46c
-	;; PARY ?
-
-	;; 7 i var
-	ldy #2
-	lda (_ivm_ipc),y
-	tay
-
-	;; 
-	lda (_ivm_memhi),y
-	tax
-	lda (_ivm_memlo),y
-
-	;; +1
-	clc
-	adc #1
-	bcc :+
-	inx
-:	
-
-	sta _ivm_acc
-	stx _ivm_acc+1
-
-	sta (_ivm_memlo),y
-	txa
-	sta (_ivm_memhi),y
-
-	ldy #2
-
-;;; We want to compare acc <= mem[u]
-op_i_cmp:
-
-i_skip_load:	
-	iny
-        lda     (_ivm_ipc),y
-        tay
-
-	;; acc <= mem[u] ?
-	;; NAH: NOT( mem[u] < acc )
-        lda     (_ivm_memlo),y
-        cmp     _ivm_acc
-        lda     (_ivm_memhi),y
-        sbc     _ivm_acc+1
-        bcc     i_exit
-
-i_enter:
-	iny
-	jmp pnext
-
-.if 0
-i_exit:
-        ldy     savey
-        iny                     ; Y = offset 3 (exit_offset byte)
-        sty     savey           ; savey = offset 3
-        lda     (_ivm_ipc),y    ; A = exit_offset ($02)
-        clc
-        adc     #1              ; +1 skips exit_offset byte -> 3 + 1 + 2 = 6 (Le8)!
-        jmp     anext
-.else
-i_exit:
-	ldy     savey
-	iny
-        lda     (_ivm_ipc),y        ; oo
-	sec
-	adc     savey
-	FIXIPC
-
-	jmp xnext
-.endif
-	
-
-
-;;; (for) next - dispatches to a looping-step-compare op
-;;; like i<=N !j k<N
-op_n:
-;;; 10c  5 B
-	tya
-	;; add offset 2 for this instruction
-	clc
-	adc #2
-
-	sec
-	sbc (_ivm_ipc),y
-	;; We're where we can just set Y=0 (== go back beginning loop!)
-	beq op_i_step  		; always (and at dest set Y=0)
-
-op_n_do_the_math:	
-	;; we're not the inner loop - pay the cost
-	;; ipc = ipc + y - back + 2
-
-	;; let's assume is safe? LOL
-	bcs :+
-	dec _ivm_ipc+1
-:	
-;;; TODO: would be good if these two were part of the displacement!
-	;; add 2 (length of instruction)
-	clc
-	adc #2
-	bcc :+
-	inc _ivm_ipc+1
-:	
-	clc
-	adc _ivm_ipc
-	bcc op_i_step
-	inc _ivm_ipc+1
-;;; TODO: specialized dispatch depending on receiver op!
-	jmp op_i_step
-
-.endif
-
-.endif ; OPFOR=3
+.endif ; ALTCODE
 
 
 
-.if (OPFOR=2) .and (ALTCODE=0)
+.if ALTCODE=0
 ;;; 34 Bytes saved compared to OPFOR=1
 
 
@@ -1439,19 +1269,8 @@ op_i:
 ;;; 74 B 
 
 	;; load acc = mem[v]
-.if ALTCODE
-	;; We normalize here so that Y == 0 meaning
-	;; next value back jump == Y at that time, and
-	;; can super-fast jump back without math
-	iny
-        FIXIPC                  ; Y=0 ; 
-	;; PARY - LDY #0
-	lda (_ivm_ipc),y
-	tay
-.else
 	USEY
 	PARY			
-.endif
         LOAD_SLOT_Y
 
 	jmp     i_skip_load
@@ -1554,181 +1373,7 @@ op_n_compute:
 	jmp     op_i_step
 
 
-.endif ; OPFOR=2
-	
-
-
-.if OPFOR=1
-;;;  TODO: does it work?
-;;; 	- no, it was mean to work for ALTCODE=1
-	
-;;; 70 B to much!
-op_i:
-        FIXIPC                  ; Y = 0, ipc at first operand
-        sty     savey
-
-;PARAX ???
-        ;; load v → acc  (and keep slot in tmp_lo)
-        lda     (_ivm_ipc),y    ; v
-        sta     tmp_lo
-        tay
-        LOAD_SLOT_Y             ; acc = mem[v]
-
-        ;; get Y = u
-        ldy     #1
-        lda     (_ivm_ipc),y    ; u slot
-        tay
-
-	;; acc <= mem[u]
-        lda     _ivm_acc
-        cmp     (_ivm_memlo),y
-        lda     _ivm_acc+1
-        sbc     (_ivm_memhi),y
-
-        bcc     i_enter         ; acc <  mem[u]
-        bne     i_exit          ; acc >  mem[u]
-        ;; equal → also enter
-
-.if ALTCODE
-i_enter:
-        ;; ipc += 3  (skip v u oo) → body
-	iny
-	iny
-	iny
-
-	jmp     xnext
-
-i_exit:
-	;; ipc += 2 + oo   (from current pos = v)
-	iny
-	;; pretend we're executing 'G' (or jr) !
-	jmp     gyes
-
-.else
-i_enter:
-        ;; ipc += 3  (skip v u oo) → body
-        clc
-
-        lda     _ivm_ipc
-        adc     #3
-        sta     _ivm_ipc
-        bcc     :+
-        inc     _ivm_ipc+1
-:
-        jmp     xnext
-
-i_exit:
-        ;; ipc += 2 + oo   (from current pos = v)
-        clc
-        ldy     #2
-        lda     (_ivm_ipc),y    ; oo
-
-        adc     #2
-        adc     _ivm_ipc
-        sta     _ivm_ipc
-        bcc     :+
-        inc     _ivm_ipc+1
-:
-        jmp     pnext           ; consume the last (already added) byte? 
-                                ; actually the +2 already skipped v+u,
-                                ; pnext will skip one more — adjust if needed
-
-.endif ; ALTCODE
-	
-	
-;;;  88 B !!! too much!
-op_n:
-        FIXIPC
-        sty     savey
-
-        ;; tpc = ipc - *ipc + 1
-        lda     _ivm_ipc
-	sec
-        sbc     (_ivm_ipc),y    ; - delta
-        sta     tmp_lo
-        lda     _ivm_ipc+1
-        sbc     #0
-        sta     tmp_hi
-        ;; +1
-        inc     tmp_lo
-        bne     :+
-        inc     tmp_hi
-:
-
-	;; acc = (tmp_lo) Y=0 still
-	PARY
-
-	lda     (tmp_lo),y	; lo
-	clc
-	adc     #1
-	sta     _ivm_acc
-	tax
-	
-	iny
-	lda     (tmp_lo),y	; hi
-	adc     #0
-	sta     _ivm_acc
-
-	;;  Y=1
-	PARY
-
-	;; acc <= mem[u]
-	txa
-	cmp     (_ivm_memlo),y
-	lda     _ivm_acc+1
-	sbc     (_ivm_memhi),y
-	
-	bcc     n_enter
-	bne     n_exit
-	
-        ;; equal → also enter
-
-.if ALTCODE
-n_enter:
-	lda     tmp_lo
-	sta     _ivm_ipc
-	lda     tmp_hi
-	sta     _ivm_ipc+1
-
-	;; ipc += 2 + oo   (from current pos = v)
-	ldy     #1
-	;; pretend we're executing 'B' (or jr) !
-	jmp     op_B
-
-n_exit:
-	jmp     pnext
-	
-.else
-n_enter:
-        ;; ipc += 3  (skip v u oo) → body
-        clc
-
-        lda     _ivm_ipc
-        adc     #3
-        sta     _ivm_ipc
-        bcc     :+
-        inc     _ivm_ipc+1
-:
-        jmp     xnext
-
-n_exit:
-        ;; ipc += 2 + oo   (from current pos = v)
-        clc
-        ldy     #2
-        lda     (_ivm_ipc),y    ; oo
-
-        adc     #2
-        adc     _ivm_ipc
-        sta     _ivm_ipc
-        bcc     :+
-        inc     _ivm_ipc+1
-:
-        jmp     pnext           ; consume the last (already added) byte? 
-                                ; actually the +2 already skipped v+u,
-                                ; pnext will skip one more — adjust if needed
-.endif ; ALTCODE
-
-.endif ; OPFOR=1
+.endif ; ALTOCODE=0
 	
 
 ;;; TODO:
@@ -1750,8 +1395,6 @@ n_exit:
 
 ;;; NOP - SPACE
 op_sp:
-;	lda     '.'
-;	jsr     _putchar
 	jmp     xnext
 
 
@@ -2013,11 +1656,6 @@ op_h:
 op_j:
 op_k:
 
-.if (OPFOR=0)
-op_i:	
-op_n:	
-.endif
-	
 op_m:
 op_o:
 op_p:
@@ -2093,22 +1731,8 @@ _IVM_ASM_END:
   op_p, op_q, op_r, op_s, op_t, op_u, op_v, op_w, \
   op_x, op_y, op_z, op_shlm, op_or, op_shrm, op_bnot, op_del
 
-.if FASTDISPATCH
-	
   .export _dispvec
   _dispvec:	
 
   dispvec:
     .word JumpTable
-
-.else
-	
-  .export _displo
-  _displo:	
-
-  displo:
-    .lobytes JumpTable
-  disphi:	
-    .hibytes JumpTable
-
-.endif

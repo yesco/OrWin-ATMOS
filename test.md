@@ -90,6 +90,15 @@
 (/ 6950526 2610103.0) = 2.66x faster asm than C
 
 
+(/ 6298806 2320353.0) = 2.71  fster  asm than C
+(/ 6298806 2274126.0) = 2.77x faster asm than C
+
+(/ 2320353 2274126.0) = 2% differnce between ALTCODE and plain
+
+6298806   ./ivm
+2320353   ./ivm-asm ALTCODE=0             loop i n
+2274126   ./ivm-asm FASTCODE ALTCODE=1    loop i n
+
 
 ```
 
@@ -131,6 +140,21 @@ need better dispatch!
 - fsum : 10760 ops 2100688 c = 
 
   (/ (- 2100688 1016914) 1000) = 1083 c / loop - 1148 c long time ago for asm.
+
+
+UPDATE ---- less ops because of i n loop stuff!
+
+test 13717 ops
+
+6298806   ./ivm
+2320353   ./ivm-asm ALTCODE=0             loop i n
+2274126   ./ivm-asm FASTCODE ALTCODE=1    loop i n    - FASTEST
+
+(/ 6298806 13717) = 459 c / op
+(/ 2320353 13717) = 169 c / op
+(/ 2274126 13717) = 165 c / op
+
+loop ops heavy but 5 merged into "one" (shows up as 'n' only)
 
 
 ```
