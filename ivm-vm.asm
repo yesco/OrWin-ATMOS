@@ -57,8 +57,13 @@ tmp_hi: .res 1
 savey:  .res 1
         
 
+;;; CODESIZE: (- _IVM_ASM_END _IVM_ASM_START)
+;;; =========================================
+;;;    (- #x7ee #x24b) = 1443 with DATALIGN and FASTDISPATCH
 
 .code
+.export _IVM_ASM_START
+_IVM_ASM_START:	
 
 ;;  TODO: move the most common/expensive OP that tkaes a parameter here!
 
@@ -163,19 +168,21 @@ pnext:
 ;;; ----- main loop -----
 ynext:  
         ldy     savey
+
 xnext:
+;;; FAST = (+ 5 2 2 2 11) = 22c (can remove 2c)
         lda     (_ivm_ipc),y
 
-        .if TRACE
-        sta     _ivm_op
-        sty     savey
+	        .if TRACE
+	        sta     _ivm_op
+	        sty     savey
 
-	lda     #'.'
-        jsr     _putchar
+		lda     #'.'
+	        jsr     _putchar
 
-        ldy     savey
-        lda     _ivm_op
-        .endif ; TRACE
+	        ldy     savey
+	        lda     _ivm_op
+	        .endif ; TRACE
 
         iny
 
@@ -185,17 +192,21 @@ xnext:
         ;; lobit - 0..127
         bmi     HIBIT
 
+.if FASTDISPATCH
+;;; 7 B  11c
+	asl
+	sta     pc+1
+pc:	jmp     (dispvec)
+
+.else
+;;; 
         lda     disphi,x
         sta     jmpvec+1
 
         lda     displo,x
         sta     jmpvec
-
-        ;; not needed! that' the whole point!
-;       sty     savey
-        
         jmp     (jmpvec)
-
+.endif
 
 .else
         
@@ -243,26 +254,27 @@ xnext:
 ;;; d) consider keeping ACC in AX (extra cost one STA, if not use X for disp)
 ;;;    but savingss could be big
         
-        ;; 10c
+;;; FAST = (+ 7 8 4 11 3) = 33 c
+        ;; 7c
         ldy     #0
         lda     (_ivm_ipc),y
 
-        .if TRACE
-	sty     savey
-        sta     _ivm_op
+	        .if TRACE
+		sty     savey
+	        sta     _ivm_op
 
-	lda     #' '
-	jsr     _putchar
+		lda     #' '
+		jsr     _putchar
 
-	lda     _ivm_op
-        jsr     _putchar
+		lda     _ivm_op
+	        jsr     _putchar
 	
 
-        lda     _ivm_op
-	ldy     savey
-        .endif ; TRACE
+	        lda     _ivm_op
+		ldy     savey
+	        .endif ; TRACE
 
-        ;; 8-12c
+        ;; 8c (12c)
         inc     _ivm_ipc
         bne     :+
         inc     _ivm_ipc+1
@@ -1157,8 +1169,19 @@ op_i:
 ;;; 74 B 
 
 	;; load acc = mem[v]
+.if ALTCODE
+	;; We normalize here so that Y == 0 meaning
+	;; next value back jump == Y at that time, and
+	;; can super-fast jump back without math
+	iny
+        FIXIPC                  ; Y=0 ; 
+	;; PARY - LDY #0
+	lda (_ivm_ipc),y
+	tay
+.else
 	USEY
-	PARY
+	PARY			
+.endif
         LOAD_SLOT_Y
 
 	jmp     i_skip_load
@@ -1220,10 +1243,22 @@ i_exit:
 ;;; (for) next - dispatches to a looping-step-compare op
 ;;; like i<=N !j k<N
 op_n:
-;;; 23 B
+.if ALTCODE=1
+;;; 14c  9 B
+	tya
+	cmp (_ivm_ipc),y
+	bne op_n_compute
+	;; We're where we can just 
+	ldy #0
+	beq op_i_step 		; always
+.endif
+
+op_n_compute:	
+	;; we're not the inner loop - pay the cost
+;;; 23 B  27c f+ this: (FIXIPC + USEY: 12 b  15c +  2 b  3c)
 	;; basically op_B except the jmp next
 	;; is shortcut to inside op_i
-        FIXIPC                  ; Y=0
+        FIXIPC                  ; Y=0 ; 
 	USEY
 
 	ldy     #0
@@ -1239,7 +1274,7 @@ op_n:
 	clc
 	adc     #2 		; our own length!
 	bcc     :+
-	dec     _ivm_ipc+1
+	inc     _ivm_ipc+1
 :	
 
         sta     _ivm_ipc
@@ -1752,6 +1787,8 @@ done:   lda     _ivm_acc
 
         rts
 
+.export _IVM_ASM_END
+_IVM_ASM_END:	
 	
 	
 	

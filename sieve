@@ -30,8 +30,10 @@
 #            (/ 199954374 198149017.0) 0.91% faster w pagealign table
 # FASTDISP.: (/ 198149017.0 181680540) 9.06% faster
 #
-
 # TODO: looking at sieve.bytes - maybe 20% savings possible...
+
+
+
 
 
 echo "-- `uname -a` --"
@@ -49,3 +51,38 @@ echo
 echo "-- pc ; ivm ; ivm-asm --"
 ./pc sieve && ./ivm sieve && ./ivm-asm sieve
 echo
+
+
+# BYTE SIEVE BENCHMARK
+# ====================
+# 
+# according to Gemini AI
+#
+# Implementation / VM	| Time (Seconds)	| Relative Speed - Notes
+# -------------------------------------------------------------------
+# Hand-tuned 6502 asmy	|  ~4 –  7 s    1x Base	| self-modifying code/zp indir ptr
+# fig-FORTH/VolksForth)	| ~25 – 45 s   ~6x  	| (in)direct/indirect fst 16bt stk ops
+# (cc65 / Aztec C)	| ~45 – 75 s  ~10x 	| 16bitsw stk, arr[]
+# SWEET16 (Est / Equiv)	| ~60 – 90 s  ~12x–15x	| ~10x says Woz
+# Applesft/C64 BASIC	|~200 –250 s  ~40x 	| fplopvar, parsing
+# UCSD-Pas (p-code)  **	|      516 s ~100x	| Official BYTE Magazine result; heavy stack-frame and bounds-checking overhead.
+#        (/ 516 7.0)  =                74x
+
+#                        - my measurements - (/ xxx 7.0)
+#
+# oscar64 -Os		|       21 s   ~3x      | best C for 6502
+# cc65 -Oirs		|       85 s  ~12x	| std compliant, slow
+#
+# ./ivm-asm          **	|      182 s  ~26x	| written in asm/ca65
+# ./ivm C-interprter **	|      735 s ~105x	| written in cc65
+#
+#                       - byte-sieve-prime.c -
+#
+# ./ivm C-interpr    ** |      697 s  ~99.6x    | simplier code
+#
+#
+# **) = multi-tasking several processes, at least 2x overhead?
+#
+#
+# The sieve's inner loop: 149,870 times in 10 iterations,
+# adding a 16-bit prime to a 16-bit index k (up to 8190) and writing a byte to memory.
