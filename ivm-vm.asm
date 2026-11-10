@@ -1342,12 +1342,27 @@ i_enter:
 	iny
 	jmp pnext
 
+.if 0
 i_exit:
-	FIXIPC
+        ldy     savey
+        iny                     ; Y = offset 3 (exit_offset byte)
+        sty     savey           ; savey = offset 3
+        lda     (_ivm_ipc),y    ; A = exit_offset ($02)
+        clc
+        adc     #1              ; +1 skips exit_offset byte -> 3 + 1 + 2 = 6 (Le8)!
+        jmp     anext
+.else
+i_exit:
+	ldy     savey
+	iny
         lda     (_ivm_ipc),y        ; oo
-	tay
+	sec
+	adc     savey
+	FIXIPC
 
 	jmp xnext
+.endif
+	
 
 
 ;;; (for) next - dispatches to a looping-step-compare op
@@ -1355,7 +1370,10 @@ i_exit:
 op_n:
 ;;; 10c  5 B
 	tya
-	;; iny ?
+	;; add offset 2 for this instruction
+	clc
+	adc #2
+
 	sec
 	sbc (_ivm_ipc),y
 	;; We're where we can just set Y=0 (== go back beginning loop!)
