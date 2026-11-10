@@ -24,6 +24,10 @@ TRACE=0
 ALTCODE=0
 ;ALTCODE=1
 
+;FASTDISPATCH=0
+FASTDISPATCH=1
+
+
 .export         _run_ivm_asm
 
 .importzp       _ivm_ipc, _ivm_fp, _ivm_acc, _ivm_op
@@ -264,10 +268,23 @@ xnext:
         inc     _ivm_ipc+1
 :
 
-        ;; lobit - 0..127
-        ;; 6c
-        tax
+        ;; lobit - OPCODE DISPATCH (0..127)
+        ;; 4c
+;;; TODO: not needed do ASL / BCS instead, save 2 cycles
+;;;   BUT: then OP is in A<<2 and not in X
+	tax
+
         bmi     HIBIT
+
+
+.if FASTDISPATCH
+;;; 7 B  11c
+	asl
+	sta     pc+1
+pc:	jmp     (dispvec)
+
+.else
+;;; 15 B  19c
         ;; +18c
         lda     disphi,x
         sta     jmpvec+1
@@ -276,8 +293,9 @@ xnext:
         sta     jmpvec
 
         jmp     (jmpvec)
+.endif ; FASTDISPATCH
 
-.endif
+.endif ; ALTCODE=2
         
 ;;; ----- HIBIT: ASL → N = former bit6 -----
 ;;; On entry: A=op, X=op (from dispatch tax). ASL only for N/C test — keep X!
@@ -1739,48 +1757,50 @@ done:   lda     _ivm_acc
 	
 	
 	
-//  (/ 199954374 198149017.0) 0.91% faster w pagealign table
+;;  (/ 199954374 198149017.0) 0.91% faster w pagealign table
 .segment "ALIGNDATA"
 ;.data
 	
 .align 256, $42
 	
 ;;; static dispatch tables (256 bytes) — no runtime init_disp
-.export _displo
-_displo:
-displo:
-        .byte   <op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31
-        .byte   <op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31
-        .byte   <op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31
-        .byte   <op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31, <op_31
-        .byte   <op_sp, <op_bang, <op_str, <op_hash, <op_dollar, <op_mod, <op_and, <op_ri
-        .byte   <op_idxl, <op_idxs, <op_mul, <op_add, <op_wi, <op_sub, <op_dot, <op_div
-        .byte   <op_0, <op_1to7, <op_1to7, <op_1to7, <op_1to7, <op_1to7, <op_1to7, <op_1to7
-        .byte   <op_8, <op_9, <op_colon, <op_semi, <op_lt, <op_eq, <op_gt, <op_not
-        .byte   <op_at, <op_A, <op_B, <op_C, <op_D, <op_E, <op_F, <op_G
-        .byte   <op_H, <op_I, <op_J, <op_K, <op_L, <op_M, <op_N, <op_O
-        .byte   <op_P, <op_Q, <op_R, <op_S, <op_T, <op_U, <op_V, <op_W
-        .byte   <op_X, <op_Y, <op_Z, <op_shl, <op_bslash, <op_shr, <op_xor, <op__
-        .byte   <op_tick, <op_a, <op_b, <op_c, <op_d, <op_e, <op_f, <op_g
-        .byte   <op_h, <op_i, <op_j, <op_k, <op_l, <op_m, <op_n, <op_o
-        .byte   <op_p, <op_q, <op_r, <op_s, <op_t, <op_u, <op_v, <op_w
-        .byte   <op_x, <op_y, <op_z, <op_shlm, <op_or, <op_shrm, <op_bnot, <op_del
-disphi:
-        .byte   >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31
-        .byte   >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31
-        .byte   >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31
-        .byte   >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31, >op_31
-        .byte   >op_sp, >op_bang, >op_str, >op_hash, >op_dollar, >op_mod, >op_and, >op_ri
-        .byte   >op_idxl, >op_idxs, >op_mul, >op_add, >op_wi, >op_sub, >op_dot, >op_div
-        .byte   >op_0, >op_1to7, >op_1to7, >op_1to7, >op_1to7, >op_1to7, >op_1to7, >op_1to7
-        .byte   >op_8, >op_9, >op_colon, >op_semi, >op_lt, >op_eq, >op_gt, >op_not
-        .byte   >op_at, >op_A, >op_B, >op_C, >op_D, >op_E, >op_F, >op_G
-        .byte   >op_H, >op_I, >op_J, >op_K, >op_L, >op_M, >op_N, >op_O
-        .byte   >op_P, >op_Q, >op_R, >op_S, >op_T, >op_U, >op_V, >op_W
-        .byte   >op_X, >op_Y, >op_Z, >op_shl, >op_bslash, >op_shr, >op_xor, >op__
-        .byte   >op_tick, >op_a, >op_b, >op_c, >op_d, >op_e, >op_f, >op_g
-        .byte   >op_h, >op_i, >op_j, >op_k, >op_l, >op_m, >op_n, >op_o
-        .byte   >op_p, >op_q, >op_r, >op_s, >op_t, >op_u, >op_v, >op_w
-        .byte   >op_x, >op_y, >op_z, >op_shlm, >op_or, >op_shrm, >op_bnot, >op_del
 
+.linecont +
 	
+.define JumpTable \
+  op_31, op_31, op_31, op_31, op_31, op_31, op_31, op_31, \
+  op_31, op_31, op_31, op_31, op_31, op_31, op_31, op_31, \
+  op_31, op_31, op_31, op_31, op_31, op_31, op_31, op_31, \
+  op_31, op_31, op_31, op_31, op_31, op_31, op_31, op_31, \
+  op_sp, op_bang, op_str, op_hash, op_dollar, op_mod, op_and, op_ri, \
+  op_idxl, op_idxs, op_mul, op_add, op_wi, op_sub, op_dot, op_div, \
+  op_0, op_1to7, op_1to7, op_1to7, op_1to7, op_1to7, op_1to7, op_1to7, \
+  op_8, op_9, op_colon, op_semi, op_lt, op_eq, op_gt, op_not, \
+  op_at, op_A, op_B, op_C, op_D, op_E, op_F, op_G, \
+  op_H, op_I, op_J, op_K, op_L, op_M, op_N, op_O, \
+  op_P, op_Q, op_R, op_S, op_T, op_U, op_V, op_W, \
+  op_X, op_Y, op_Z, op_shl, op_bslash, op_shr, op_xor, op__, \
+  op_tick, op_a, op_b, op_c, op_d, op_e, op_f, op_g, \
+  op_h, op_i, op_j, op_k, op_l, op_m, op_n, op_o, \
+  op_p, op_q, op_r, op_s, op_t, op_u, op_v, op_w, \
+  op_x, op_y, op_z, op_shlm, op_or, op_shrm, op_bnot, op_del
+
+.if FASTDISPATCH
+	
+  .export _dispvec
+  _dispvec:	
+
+  dispvec:
+    .word JumpTable
+
+.else
+	
+  .export _displo
+  _displo:	
+
+  displo:
+    .lobytes JumpTable
+  disphi:	
+    .hibytes JumpTable
+
+.endif
