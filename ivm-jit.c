@@ -318,7 +318,15 @@ word ivm_jit(const uchar *code, word code_len,
 
     // hibit: vector call ($C0+) or const-slot load
     if (op & 0x80) {
-      if (op >= 0xC0) {
+
+      if (op < 0xC0) {
+
+        // One byte slot load
+        emit_load_slot((uchar)(op & 0x7f));
+
+      } else {
+
+        // One byte vector call
         uchar v = (uchar)(op - 0xC0);
         word dest = 0;
         if (v < lc_ncall && lc_vecmark + v * 2 + 1 < lc_max)
@@ -327,9 +335,9 @@ word ivm_jit(const uchar *code, word code_len,
         // backward calls only: dest must already be filled at callee entry
         if (!dest)
           printf("%%JIT: call vec %u before definition\n", v);
+
         ema(JSR, dest);
-      } else {
-        emit_load_slot((uchar)(op & 0x7f));
+
       }
       continue;
     }
