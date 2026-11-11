@@ -234,6 +234,7 @@
   #include "ivm-jit.c"
   #include "disasm.c"
   static int jit_only = 0;
+  static int jit_force_zp = 0;
 #endif
 
 
@@ -1624,6 +1625,8 @@ word jit_compile(Process* proc) {
 
     lc_main_bc = (word)(bh->main - bh->code);
     lc_main_at = 0;
+    lc_zp = jit_force_zp || (bh->memsz <= 128);
+    if (lc_zp) printf("--- JIT: using zero-page slots ---\n");
     jit_size = ivm_jit(code, code_len, out, out_max, map, code_len,
       mem_base, out_org, vec_bc, frame_base, ncall);
 
@@ -1747,9 +1750,14 @@ int main(int argc, char** argv) {
 #endif
   
   #ifdef JIT
-    if (argc == 3 && argv[1][0] == '-' && argv[1][1] == 'j') {
-      jit_only = 1;
-      return run_file((char*)argv[2]);
+    {
+      int a = 1;
+      while (a < argc && argv[a][0] == '-') {
+        if (argv[a][1] == 'j') jit_only = 1;
+        if (argv[a][1] == 'z') jit_force_zp = 1;
+        a++;
+      }
+      if (a < argc) return run_file((char*)argv[a]);
     }
   #endif
 

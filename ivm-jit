@@ -16,9 +16,14 @@ jit=$(cat "$name.cycles.jit")
 jitandrun=$(grep cycles "$name.log" | sed 's/ cycles//')
 run=$((jitandrun - jit))
 
+echo
+echo
+echo "============================================"
+echo
 echo "JIT      : $jit"
 echo "JIT&RUN  : $jitandrun"
 echo "RUN      : $run"
+echo
 
 echo
 echo

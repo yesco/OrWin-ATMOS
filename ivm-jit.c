@@ -228,16 +228,24 @@ static void ema(uchar op, word addr) {
   em((uchar)(addr >> 8));
 }
 
-static word slotlo(uchar s) { return (word)(lc_mem + ((word)s << 1)); }
+static uchar lc_zp;          // 1 = slots live in zero page
+
+static word slotlo(uchar s) {
+  if (lc_zp) return (word)((word)s << 1);          // ZP: slot*2
+  return (word)(lc_mem + ((word)s << 1));
+}
 static word slothi(uchar s) { return (word)(slotlo(s) + 1); }
 
+// ZP emit: opcode + 1-byte address
+static void emz(uchar op, uchar zp) { em(op); em(zp); }
+
 static void emit_load_slot(uchar s) {
-  ema(LDA, slotlo(s));
-  ema(LDX, slothi(s));
+  if (lc_zp) { emz(LDAZ, (uchar)slotlo(s)); emz(LDXZ, (uchar)slothi(s)); }
+  else       { ema(LDA, slotlo(s)); ema(LDX, slothi(s)); }
 }
 static void emit_store_slot(uchar s) {
-  ema(STA, slotlo(s));
-  ema(STX, slothi(s));
+  if (lc_zp) { emz(STAZ, (uchar)slotlo(s)); emz(STXZ, (uchar)slothi(s)); }
+  else       { ema(STA, slotlo(s)); ema(STX, slothi(s)); }
 }
 static void emit_load0(void) { em2(LDAN, 0); em(TAX); }
 static void emit_load_ffff(void) { em2(LDAN, 0xff); em(TAX); }
@@ -245,9 +253,16 @@ static void emit_load_ffff(void) { em2(LDAN, 0xff); em(TAX); }
 // ACC = ACC OP mem[s]  (ADC/SBC/AND/ORA/EOR abs).
 // CLC/SEC emitted by caller when needed (+/-). Reuse for logical ops too.
 static void emit_lohiop(uchar ins, uchar s) {
-           ema(ins, slotlo(s)); em(TAY);
-  em(TXA); ema(ins, slothi(s)); em(TAX);
-  em(TYA);
+  if (lc_zp) {
+    uchar zop = (uchar)(ins - 8);          // abs → zp (ADC/SBC/AND/ORA/EOR)
+    emz(zop, (uchar)slotlo(s)); em(TAY);
+    em(TXA); emz(zop, (uchar)slothi(s)); em(TAX);
+    em(TYA);
+  } else {
+    ema(ins, slotlo(s)); em(TAY);
+    em(TXA); ema(ins, slothi(s)); em(TAX);
+    em(TYA);
+  }
 }
 
 static void emit_ax_to_tmp1(void) {
@@ -490,7 +505,8 @@ word ivm_jit(const uchar *code, word code_len,
     // I: INC lo; BNE +3; INC hi; reload ACC
     case 'I': {
       uchar s = PAR;
-      ema(INC_, slotlo(s)); em2(BNE, 3); ema(INC_, slothi(s));
+      if (lc_zp) { emz(0xE6, (uchar)slotlo(s)); em2(BNE, 3); emz(0xE6, (uchar)slothi(s)); }
+      else { ema(INC_, slotlo(s)); em2(BNE, 3); ema(INC_, slothi(s)); }
       emit_load_slot(s);
       break;
     }
@@ -713,9 +729,9 @@ word ivm_jit(const uchar *code, word code_len,
       lim  = ip[2];
       loop_top = (word)((ip + 4) - code);  // bc pc of body start
       // increment slot
-      ema(INC_, slotlo(slot));
+      if (lc_zp) emz(0xE6, (uchar)slotlo(slot)); else ema(INC_, slotlo(slot));
       em2(BNE, 3);
-      ema(INC_, slothi(slot));
+      if (lc_zp) emz(0xE6, (uchar)slothi(slot)); else ema(INC_, slothi(slot));
       // compare with lim
       emit_load_slot(slot);
       em(SEC);
