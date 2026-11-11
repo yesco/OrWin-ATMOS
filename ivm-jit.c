@@ -144,6 +144,7 @@ Simplyfy function calling code:
 #define PLA   0x68
 
 extern ivmvar ivm_acc;
+extern ivmvar ivm_par;
 
 extern void opputnum(void);
 extern void opmul(void);
@@ -471,9 +472,20 @@ word ivm_jit(const uchar *code, word code_len,
     }
 
     // * / % — helpers as in ivm-vm.asm (ACC op PAR); TODO: PARAX into zp_par
-    case '*': PAR; ema(JSR, REF(opmul)); break;
-    case '/': PAR; ema(JSR, REF(opdiv)); break;
-    case '%': PAR; ema(JSR, REF(opmod)); break;
+    case '*': case '/': case '%': {
+      uchar s = PAR;
+      ema(STA, (word)(unsigned)&ivm_acc);
+      ema(STX, (word)((unsigned)&ivm_acc + 1));
+      emit_load_slot(s);
+      ema(STA, (word)(unsigned)&ivm_par);
+      ema(STX, (word)((unsigned)&ivm_par + 1));
+      if (op == '*') ema(JSR, REF(opmul));
+      else if (op == '/') ema(JSR, REF(opdiv));
+      else ema(JSR, REF(opmod));
+      ema(LDA, (word)(unsigned)&ivm_acc);
+      ema(LDX, (word)((unsigned)&ivm_acc + 1));
+      break;
+    }
 
     // I: INC lo; BNE +3; INC hi; reload ACC
     case 'I': {
