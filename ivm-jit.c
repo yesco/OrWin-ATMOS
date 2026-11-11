@@ -151,9 +151,19 @@ extern void opmod(void);
 
 extern void printinlinedstring(void);
 
-// dummy
+// Called with the inline string immediately after the JSR.
+// Reads chars from the return address, prints until 0,
+// then fixes the return address to skip past the string.
 void printinlinedstring(void) {
-  printf("<INLINE STRING>");
+  // On 6502 the return address is on the stack (hi, lo), pointing
+  // at the last byte of the JSR. The string follows.
+  // For the host/sim path we just need the C equivalent:
+  // the caller emitted the string bytes right after the JSR opcode
+  // sequence, so we walk them.  For now print from a known
+  // location — the real fix is that the emitter places the
+  // string in the output and this walks it.
+  // Placeholder that at least does not lie:
+  putchar('<'); putchar('S'); putchar('>');
 }
 
 extern ivmvar ivm_zalloc(ivmvar n);
@@ -585,8 +595,12 @@ word ivm_jit(const uchar *code, word code_len,
 
     // " inline string — helper prints until 0
     case '"':
-      ema(JSR, REF(printinlinedstring));
-      while (p < end && *p) p++;
+      // emit LDA #ch / JSR putchar for each character, then skip the 0
+      while (p < end && *p) {
+        em2(LDAN, *p);
+        ema(JSR, REF(putchar));
+        p++;
+      }
       if (p < end) p++;
       break;
 
