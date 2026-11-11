@@ -260,13 +260,24 @@ static void emit_ax_to_tmp1(void) {
 // Reverse a branch opcode (flip the condition bit).
 static uchar rev_branch(uchar bop) { return (uchar)(bop ^ 0x20); }
 
-// Always emit long form: reversed short branch skips over an absolute JMP.
-// Wastes bytes; handles any distance.
+// Forward: long form (reversed branch skips a JMP) — distance unknown yet.
+// Backward: short branch if the mapped distance fits in -128..127.
 static void emit_rel(uchar bop, word bc_target) {
   word at;
-  em2(rev_branch(bop), 3);   // opposite cond skips the JMP
+
+  // backward and already mapped?
+  if (bc_target < lc_mapn && lc_map[bc_target] != 0xffff) {
+    int rel = (int)lc_map[bc_target] - (int)(lc_at + 2);
+    if (rel >= -128 && rel <= 127) {
+      em2(bop, (uchar)rel);
+      return;
+    }
+  }
+
+  // long form
+  em2(rev_branch(bop), 3);
   em(JMP);
-  at = lc_at;                // where the JMP address goes
+  at = lc_at;
   em(0); em(0);
   if (lc_nfix < 256) {
     lc_fix[lc_nfix].at = at;
@@ -735,8 +746,6 @@ word ivm_jit(const uchar *code, word code_len,
     word dest = lc_fix[i].bc_target;
     word mapped = 0xffff;
     word d;
-    int rel;
-
     if (dest < lc_mapn) mapped = lc_map[dest];
 
     // mid-op target → snap forward to next op start
@@ -749,7 +758,7 @@ word ivm_jit(const uchar *code, word code_len,
       return 0;
     }
 
-    // long form: write absolute JMP target
+    // write absolute JMP target (long form)
     if (lc_fix[i].at + 1 < lc_max) {
       word abs = (word)(lc_out_org + mapped);
       lc_out[lc_fix[i].at]     = (uchar)(abs & 0xff);

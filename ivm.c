@@ -1604,22 +1604,6 @@ word jit_compile(Process* proc) {
     (unsigned)bh->call, (unsigned)bh->con, (unsigned)bh->fp,
     (unsigned)bh->code, ncall);
 
-  // find max vector number actually used in bytecode
-  {
-    uchar maxv = 0;
-    const uchar *bp = code;
-    const uchar *be = code + code_len;
-    while (bp < be) {
-      uchar op = *bp++;
-      if (op >= 0xC0 && (op - 0xC0) > maxv)
-        maxv = (uchar)(op - 0xC0);
-    }
-    printf("--- max vector in bytecode: %u ---\n", maxv);
-    if (maxv >= ncall)
-      printf("--- WARNING: bytecode uses vec %u but table has only %u ---\n",
-        maxv, ncall);
-  }
-
   for (i = 0; i < ncall; i++)
     vec_bc[i] = callv[i] - bh->code;
 
