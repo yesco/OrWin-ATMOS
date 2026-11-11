@@ -233,6 +233,7 @@
 #ifdef JIT
   #include "ivm-jit.c"
   #include "disasm.c"
+  static int jit_only = 0;
 #endif
 
 
@@ -1685,6 +1686,13 @@ static int run_loaded_blob(uchar *img, int len) {
     printf("--- JIT: entry at %u ---\n", (unsigned)addr);
   #endif
 
+  #ifdef JIT
+    if (jit_only) {
+      printf("--- JIT only, not running ---\n");
+      return 0;
+    }
+  #endif
+
   printf("--- RUN IVM (blob %d) ---\n", len);
 
   #ifdef JIT
@@ -1738,6 +1746,13 @@ int main(void) {
 int main(int argc, char** argv) {
 #endif
   
+  #ifdef JIT
+    if (argc == 3 && argv[1][0] == '-' && argv[1][1] == 'j') {
+      jit_only = 1;
+      return run_file((char*)argv[2]);
+    }
+  #endif
+
   if (argc==2)
     return run_file((char*)argv[1]);
 

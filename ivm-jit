@@ -9,9 +9,16 @@ cl65 -DJIT -Oirs -C sim6502.cfg -t sim6502 -vm -m ivm-jit.map -o ivm-jit.sim ivm
 #cl65 -DNOIVM -DIVMASM -Oirs -C sim6502.cfg -t sim6502 -o ivm-asm-noivm.sim ivm.c || exit 1
 #ca65 -t sim6502 ivm-vm.asm -l ivm-vm.lst # 2>/dev/null 1>/dev/null
 
-sim65 -c ivm-jit.sim $name.ivm
+sim65 -c ivm-jit.sim -j $name.ivm | grep cycles | sed 's/ cycles//' > $name.cycles.jit
+sim65 -c ivm-jit.sim $name.ivm | tee $name.log
 
+jit=$(cat "$name.cycles.jit")
+jitandrun=$(grep cycles "$name.log" | sed 's/ cycles//')
+run=$((jitandrun - jit))
 
+echo "JIT      : $jit"
+echo "JIT&RUN  : $jitandrun"
+echo "RUN      : $run"
 
 echo
 echo

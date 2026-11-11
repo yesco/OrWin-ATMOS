@@ -12,7 +12,7 @@
 #   ivm          731,302,528 cycles          303 bytes
 #   ivm-asm      199,459,095 cycles          303 bytes
 #
-# --- (from mc) ---
+# --- (byte-sieve-prime.c from mc) ---
 #
 # - byte-sieve.. 696,771,860     ./ivm       122 bytes
 # - byte .. asm  199,637,579     ./ivm-asm   122 bytes
@@ -23,6 +23,7 @@
 #
 # ivm: 11664  imv-asm: 9580 (- 9580 6772) = 2808 VM asm bytes
 #
+# --- FASTDISPATCH ---
 #
 # ivm/cc65 : (/ 731302528 85204077.0) ivm is 8.58x slower than cc65
 # asm/cc65 : (/ 199459095 85204077.0) ivm is 2.34x slower than cc65
@@ -30,9 +31,24 @@
 #            (/ 199954374 198149017.0) 0.91% faster w pagealign table
 # FASTDISP.: (/ 198149017.0 181680540) 9.06% faster
 #
-# TODO: looking at sieve.bytes - maybe 20% savings possible...
-
-
+# --- JIT ASM ---
+#
+# (values are too big, as they include compile time!)
+#./ivm-jit byte-sieve-prime
+#
+# jit@byte.: (/ 198149017 60969255.0) 3.25x faster w JIT
+# jit/cc65 : (/ 60969255 85204077.0)  71.6% time of cc65!
+#
+# loaded byte-sieve-prime.ivm (162 bytes)
+#  --- JIT compiling IVM (blob 162) ---
+#  --- hdr: call=24482 con=24484 fp=24498 code=24499 ncall=1 ---
+#  --- JIT: code_len=122 ncall=1 memsz=254 ---
+#  --- JIT: emitted 748 bytes of 6502 at org 0x6347 ---
+#
+# - from 122 bytes of bytecode
+# (/ 748 122.0) = 6.13x blow up in size
+#
+# (/ 60969255 2208207.0) 27.6 cycles / "op"
 
 
 
@@ -81,6 +97,8 @@ echo
 # ./ivm-asm		|      180 s  ~25x      |
 # ./ivm C-interpr    ** |      697 s  ~99.6x    | simplier code
 #
+# ./ivm-jit             |       61 s   ~8.7x    |
+
 # **) = multi-tasking several processes, at least 2x overhead?
 #
 #
