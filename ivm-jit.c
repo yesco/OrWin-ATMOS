@@ -154,31 +154,30 @@ extern void printinlinedstring(void);
 
 // JSR target. Return address on stack points at last byte of the JSR;
 // the inline string follows. Walk it, print, then JMP to the byte after 0.
+// Uses ZP $fe/$ff (same as tmp1/tmp2 in the emitter).
 void printinlinedstring(void) {
-  __asm__ ("pla");              // lo
-  __asm__ ("sta tmp1");
-  __asm__ ("pla");              // hi
-  __asm__ ("sta tmp2");
-  __asm__ ("inc tmp1");         // return addr is one before the string
+  __asm__ ("pla");
+  __asm__ ("sta $fe");
+  __asm__ ("pla");
+  __asm__ ("sta $ff");
+  __asm__ ("inc $fe");
   __asm__ ("bne %g", pis_noinc);
-  __asm__ ("inc tmp2");
-  pis_noinc:
-  // walk and print
-  pis_loop:
+  __asm__ ("inc $ff");
+pis_noinc:
   __asm__ ("ldy #0");
-  __asm__ ("lda (tmp1),y");
+  __asm__ ("lda ($fe),y");
   __asm__ ("beq %g", pis_done);
   __asm__ ("jsr _putchar");
-  __asm__ ("inc tmp1");
-  __asm__ ("bne %g", pis_loop);
-  __asm__ ("inc tmp2");
-  __asm__ ("bne %g", pis_loop);
-  pis_done:
-  __asm__ ("inc tmp1");         // skip the 0
+  __asm__ ("inc $fe");
+  __asm__ ("bne %g", pis_noinc);
+  __asm__ ("inc $ff");
+  __asm__ ("bne %g", pis_noinc);
+pis_done:
+  __asm__ ("inc $fe");
   __asm__ ("bne %g", pis_out);
-  __asm__ ("inc tmp2");
-  pis_out:
-  __asm__ ("jmp (tmp1)");       // continue after the string
+  __asm__ ("inc $ff");
+pis_out:
+  __asm__ ("jmp ($fe)");
 }
 
 extern ivmvar ivm_zalloc(ivmvar n);
@@ -673,11 +672,10 @@ word ivm_jit(const uchar *code, word code_len,
       em(SEC);
       emit_lohiop(SBC, lim);
       em(TXA);
-      // slot > lim only (strict): zero and negative both loop
-      em2(BMI, 3);                 // < → loop
-      em2(BEQ, 3);                 // == → loop
-      // > lim: fall out (skip the back-branch)
-      em2(BPL, 3);
+      // offsets are from the byte after each branch instruction
+      em2(BMI, 4);                 // < : skip BEQ(2)+BPL(2) → CLC
+      em2(BEQ, 2);                 // == : skip BPL(2) → CLC
+      em2(BPL, 3);                 // > : skip CLC(1)+BCC(2) → fall out
       em(CLC);
       emit_rel(BCC, loop_top);
       break;
