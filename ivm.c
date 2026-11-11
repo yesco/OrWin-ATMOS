@@ -1621,6 +1621,8 @@ word jit_compile(Process* proc) {
     printf("--- JIT: code_len=%u ncall=%u memsz=%u ---\n",
       (unsigned)code_len, ncall, (unsigned)bh->memsz);
 
+    lc_main_bc = (word)(bh->main - bh->code);
+    lc_main_at = 0;
     jit_size = ivm_jit(code, code_len, out, out_max, map, code_len,
       mem_base, out_org, vec_bc, frame_base, ncall);
 
@@ -1629,23 +1631,12 @@ word jit_compile(Process* proc) {
       printf("--- JIT: emitted %u bytes of 6502 at org 0x%04X ---\n",
         (unsigned)jit_size, out_org);
 
-      // Entry should be main (the trampoline), not vector 0.
-      // main is a bytecode offset; find its generated address and
-      // patch the JMP operand (the byte right after the JMP opcode).
-      {
-        word main_bc = (word)(bh->main - bh->code);
-        word k, jmp_at = 0;
-        if (main_bc < code_len && map[main_bc] != 0xffff) {
-          word main_addr = (word)(out_org + map[main_bc]);
-          for (k = 0; k < 4 && k < jit_size; k++)
-            if (out[k] == 0x4C) { jmp_at = k; break; }
-          out[jmp_at + 1] = (uchar)(main_addr & 0xff);
-          out[jmp_at + 2] = (uchar)(main_addr >> 8);
-          printf("--- entry -> main at 0x%04X (bc %u) ---\n",
-            main_addr, (unsigned)main_bc);
-        } else {
-          printf("--- main bc %u not in map ---\n", (unsigned)main_bc);
-        }
+      // main address was noted during codegen
+      if (lc_main_at && lc_jmp_at + 1 < jit_size) {
+        word main_addr = (word)(out_org + lc_main_at);
+        out[lc_jmp_at]     = (uchar)(main_addr & 0xff);
+        out[lc_jmp_at + 1] = (uchar)(main_addr >> 8);
+        printf("--- entry -> main at 0x%04X ---\n", main_addr);
       }
 
 

@@ -206,6 +206,9 @@ static word  lc_nfix;
 
 // jump vector table at start of code (word per vector)
 static word  lc_vecmark;      // offset in out[] of vector table
+static word  lc_main_at;      // output offset where main trampoline landed
+static word  lc_main_bc;      // bytecode offset of main (set by caller)
+static word  lc_jmp_at;       // output offset of the startup JMP operand
 static word  lc_out_org;      // absolute base of out[]
 static uchar lc_ncall;
 static uchar lc_cur_frame;    // frame_base of function being compiled
@@ -260,22 +263,11 @@ static void emit_ax_to_tmp1(void) {
 // Reverse a branch opcode (flip the condition bit).
 static uchar rev_branch(uchar bop) { return (uchar)(bop ^ 0x20); }
 
-// Forward: long form (reversed branch skips a JMP) — distance unknown yet.
-// Backward: short branch if the mapped distance fits in -128..127.
+// Always long form: reversed branch (2) + JMP abs (3) = 5 bytes.
+// Callers that skip over it use +5.
 static void emit_rel(uchar bop, word bc_target) {
   word at;
-
-  // backward and already mapped?
-  if (bc_target < lc_mapn && lc_map[bc_target] != 0xffff) {
-    int rel = (int)lc_map[bc_target] - (int)(lc_at + 2);
-    if (rel >= -128 && rel <= 127) {
-      em2(bop, (uchar)rel);
-      return;
-    }
-  }
-
-  // long form
-  em2(rev_branch(bop), 3);
+  em2(rev_branch(bop), 3);   // opposite cond skips the JMP
   em(JMP);
   at = lc_at;
   em(0); em(0);
@@ -327,6 +319,7 @@ word ivm_jit(const uchar *code, word code_len,
 
   // JMP + vector table: JMP uses first word (main = vector 0)
   em(JMP);
+  lc_jmp_at = lc_at;            // operand starts here
   lc_vecmark = lc_at;
   for (i = 0; i < ncall; i++) {
     em(0); em(0); // patched at function entry
@@ -339,6 +332,8 @@ word ivm_jit(const uchar *code, word code_len,
     bc_pc = (word)(p - code);
     if (bc_pc < lc_mapn)
       lc_map[bc_pc] = lc_at;
+    if (bc_pc == lc_main_bc)
+      lc_main_at = lc_at;
 
     // function entry: patch vector word, set frame, store AX to ACC home
     if (vec_bc && frame_base) {
@@ -669,7 +664,7 @@ word ivm_jit(const uchar *code, word code_len,
       em(SEC);
       emit_lohiop(SBC, lim);       // ACC = slot - lim
       em(TXA);                     // high byte
-      em2(BMI, 2);                 // neg → slot < lim → skip the BNE
+      em2(BMI, 5);                 // neg → skip the 5-byte long branch
       emit_rel(0xD0, dest);        // BNE → slot > lim → skip body
       break;
     }
@@ -703,9 +698,9 @@ word ivm_jit(const uchar *code, word code_len,
       em(TXA);
       em2(ORAZ, 0xfe);             // A = high|low; Z if both zero
       // C still valid from SBC: C=0 means slot < lim
-      em2(BCC, 4);                 // < → loop
-      em2(BEQ, 2);                 // == → loop
-      em2(BPL, 3);                 // > → skip CLC(1)+BCC(2)
+      em2(BCC, 4);                 // < → skip to CLC (loop)
+      em2(BEQ, 2);                 // == → skip to CLC (loop)
+      em2(BPL, 6);                 // > → skip CLC(1) + 5-byte branch
       em(CLC);
       emit_rel(BCC, loop_top);
       break;
