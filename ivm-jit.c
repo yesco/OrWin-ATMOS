@@ -257,11 +257,17 @@ static void emit_ax_to_tmp1(void) {
 //     actual machine code address, as it's record for each
 //     bytecode
 
+// Reverse a branch opcode (flip the condition bit).
+static uchar rev_branch(uchar bop) { return (uchar)(bop ^ 0x20); }
+
+// Always emit long form: reversed short branch skips over an absolute JMP.
+// Wastes bytes; handles any distance.
 static void emit_rel(uchar bop, word bc_target) {
   word at;
-
-  em2(bop, 0);
-  at = lc_at - 1;
+  em2(rev_branch(bop), 3);   // opposite cond skips the JMP
+  em(JMP);
+  at = lc_at;                // where the JMP address goes
+  em(0); em(0);
   if (lc_nfix < 256) {
     lc_fix[lc_nfix].at = at;
     lc_fix[lc_nfix].bc_target = bc_target;
@@ -743,13 +749,12 @@ word ivm_jit(const uchar *code, word code_len,
       return 0;
     }
 
-    rel = (int)mapped - (int)(lc_fix[i].at + 1);
-    if (rel < -128 || rel > 127) {
-      printf("%%JIT: rel range %d\n", rel);
-      return 0;
+    // long form: write absolute JMP target
+    if (lc_fix[i].at + 1 < lc_max) {
+      word abs = (word)(lc_out_org + mapped);
+      lc_out[lc_fix[i].at]     = (uchar)(abs & 0xff);
+      lc_out[lc_fix[i].at + 1] = (uchar)(abs >> 8);
     }
-    if (lc_fix[i].at < lc_max)
-      lc_out[lc_fix[i].at] = (uchar)rel;
   }
 
   return lc_at;
