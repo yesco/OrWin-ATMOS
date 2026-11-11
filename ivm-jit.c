@@ -620,32 +620,16 @@ word ivm_jit(const uchar *code, word code_len,
       break;
     }
 
-    // i: FOR — 3 operands (slot, limit-slot, skip).
-    // if mem[slot] > mem[limit]: skip body; else fall through.
+    // i: FOR — consume 3 operands. Loop body runs once for now
+    // (proper compare/branch comes after linear path is solid).
     case 'i': {
-      uchar slot = PAR;
-      uchar lim  = PAR;
-      uchar skip = PAR;
-      word after = (word)(p - code);          // bc pc after the 3 operands
-      word dest  = (word)(after + skip);      // where to go if done
-      emit_load_slot(slot);
-      em(SEC);
-      emit_lohiop(0xED, lim);                 // SBC abs: ACC = slot - lim
-      // if ACC > 0 (no borrow and nonzero) skip; else fall through
-      em(TXA);
-      em2(0x30, 5);                           // BMI +5 → negative, fall through
-      em2(ORAZ, 0xfe);                        // nonzero test placeholder
-      emit_rel(BCC, dest);                    // patched forward branch
+      (void)PAR; (void)PAR; (void)PAR;
       break;
     }
 
-    // n: NEXT — 1 operand (back distance). Branch back to the i.
+    // n: NEXT — consume operand, no back-branch yet.
     case 'n': {
-      uchar back = PAR;
-      word dest = (word)((p - code) - back);
-      // unconditional back-branch (BCC after CLC)
-      em(CLC);
-      emit_rel(BCC, dest);
+      (void)PAR;
       break;
     }
 
