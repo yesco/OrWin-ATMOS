@@ -20,9 +20,11 @@
 ;TRACE=1
 TRACE=0
         
+;;; ALTCODE=1 breaks on sieve.c and byte-sieve-prime.c
+
 ;; ALTCODE: 1.5 % faster...
-ALTCODE=0
-;ALTCODE=1
+;ALTCODE=0
+ALTCODE=1
 
 .export         _run_ivm_asm
 
@@ -159,8 +161,7 @@ anext:
 	bcc     pfixnext
 	;; a bit clumsy
 	inc     _ivm_ipc+1
-	bpl     pfixnext
-	bne     xnext
+	jmp     pfixnext
 	
 
 ;;; xx11 b  11c (18c)
@@ -1151,6 +1152,9 @@ op_B:
 
 
 op_i:
+;TODO: maybe we fail in sieve.c because of ... length
+;	FIXIPC
+	
         ;; Entry: Y points to arg 1 ('v'). No FIXIPC needed!
         sty     savey
         lda     (_ivm_ipc),y
@@ -1210,6 +1214,17 @@ i_enter:
 	iny
         jmp     xnext
 
+.if 0
+;;;  gemini wrong
+i_exit:
+        ldy     savey
+        iny                     ; Y = offset of exit_offset byte
+        sty     savey           ; savey = offset of exit_offset byte
+        lda     (_ivm_ipc),y    ; A = exit_offset
+        clc
+        adc     #2              ; Compiler measures exit_offset from (exit_offset_addr + 2)!
+        jmp     anext
+.else
 i_exit:
 	;; IPC += Y + 1 + mem[o] + 1
         ldy     savey
@@ -1221,7 +1236,7 @@ i_exit:
         clc
         adc     #1              ; +1 skips exit_offset byte -> 3 + 1 + 2 = 6 (Le8)!
         jmp     anext
-
+.endif
 
 ;;; LOOP_NEXT back
 op_n:

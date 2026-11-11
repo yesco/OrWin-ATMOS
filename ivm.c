@@ -228,10 +228,10 @@
 #endif
 
 
-//#define LOADCOMPILE
+//#define JIT
 
-#ifdef LOADCOMPILE
-  #include "ivm-loadcompile.c"
+#ifdef JIT
+  #include "ivm-jit.c"
 #endif
 
 
@@ -1577,9 +1577,9 @@ int run_file(char* filename) {
   
   if (!img) return -1;
   
-  #ifdef LOADCOMPILE
-    if (ivm_compile_blob(p, loaded))
-      return ivm_run_compiled();
+  #ifdef JIT
+    if (ivm_jit(p, loaded))
+      return ivm_run_jit();
   #endif
     
   run_loaded_blob(img, len);

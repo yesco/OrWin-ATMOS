@@ -1,4 +1,5 @@
-// LOADCOMPILE — load-time 6502 emitter
+// JIT — load-time 6502 emitter
+//
 // switch(bytecode) → 6502 bytes into out[]. No intermediate ISA.
 //
 // ACC: A=lo X=hi (cc65 style). Y is temp.
@@ -9,7 +10,7 @@
 //   (none) abs   N imm   Z zp   X abs,X   Y abs,Y
 //   IX (zp,X)    IY (zp),Y
 //
-// #define LOADCOMPILE 1
+// #define JIT 1
 
 
 /*
@@ -18,16 +19,16 @@ INSTRUCTIONS: Keeps this section but keep updated for status
 
 ### Call vectors — done
 
-Per your INSTRUCTION, `ivm_loadcompile` now takes the resolved vector table:
+Per your INSTRUCTION, `ivm_jit` now takes the resolved vector table:
 
 ```c
-word ivm_loadcompile(..., const word *callvec, uchar ncall);
+word ivm_jit(..., const word *callvec, uchar ncall);
 
 // $C0+v → JSR callvec[v]
 // if callvec[v]==0, site is recorded for later patch
 
-void ivm_loadcompile_resolve_vectors(callvec, ncall, vec_bc, map, out_org);
-void ivm_loadcompile_patch_calls(out, out_max, callvec, ncall);
+void ivm_jit_resolve_vectors(callvec, ncall, vec_bc, map, out_org);
+void ivm_jit_patch_calls(out, out_max, callvec, ncall);
 ```
 
 Typical flow:
@@ -42,12 +43,12 @@ Typical flow:
 
 | Need | Status |
 |------|--------|
-| **Calls** `$C0` main→primes | **emit+resolve** (above) |
-| **Call frame** (fp, args, return) | **Missing** — plain `JSR`/`RTS` is not enough; VM call pushes frame / sets `fp` |
+| **Calls**                | **emit+resolve** (above) |
+| **Call frame**           | **Missing** — plain `JSR`/`RTS` is not enough; VM call pushes frame / sets `fp` |
 | **Compares** `<` `=` `>` | **Missing** (`BRK`) — sieve is full of `i < LIMIT` |
 | **Loops** `i` / `n` (or only `G`/`B`) | **Partial** — `G`/`B` only; no `i`/`n`/`U` |
-| **Array** `(` `)` | Present (needs testing) |
-| **\* / /** | JSR helpers; still need **PARAX → zp_par** |
+| **Array** `(` `)`        | Present (needs testing) |
+| / *                      | JSR helpers; still need **PARAX → zp_par** |
 
 Sieve is dominated by **`for` + compare + index + call to
 `primes`**. Without **`<`/`>`** and a **real call/return frame**, it
@@ -86,7 +87,7 @@ Simplyfy function calling code:
 
 */
 
-#ifdef LOADCOMPILE
+#ifdef JIT
 
 #include <stdio.h>
 #include <string.h>
@@ -143,14 +144,15 @@ Simplyfy function calling code:
 #define PLA   0x68
 
 extern void opputnum(void);
-extern void putchar(void);
+//extern void putchar(void);
 extern void nl(void);
 extern void printinlinedstring(void);
 extern void opmul(void);
 extern void opdiv(void);
 extern void opmod(void);
-extern void ivm_zalloc(void);
-extern void ivm_free(void);
+
+extern ivmvar ivm_zalloc(ivmvar n);
+extern void   ivm_free(ivmvar p);
 
 #define REF(f) ((word)(unsigned long)(void *)(f))
 
@@ -242,7 +244,7 @@ static void emit_rel(uchar bop, word bc_target) {
 // Frames: frame_base[v] known at transpile; entry stores AX to fp+FR_ACC.
 #define FR_ACC 3
 
-word ivm_loadcompile(const uchar *code, word code_len,
+word ivm_jit(const uchar *code, word code_len,
   uchar *out, word out_max,
   word *map, word map_n,
   word mem_base,
@@ -319,7 +321,7 @@ word ivm_loadcompile(const uchar *code, word code_len,
                      | (lc_out[lc_vecmark + v * 2 + 1] << 8));
         // backward calls only: dest must already be filled at callee entry
         if (!dest)
-          printf("%%LOADCOMPILE: call vec %u before definition\n", v);
+          printf("%%JIT: call vec %u before definition\n", v);
         ema(JSR, dest);
       } else {
         emit_load_slot((uchar)(op & 0x7f));
@@ -566,6 +568,7 @@ word ivm_loadcompile(const uchar *code, word code_len,
     default: em(BRK); break; // unknown
 
     }
+    #undef PAR
   }
 
   // patch relative branches only (G/B). Calls need no fixups.
@@ -583,13 +586,13 @@ word ivm_loadcompile(const uchar *code, word code_len,
         if (lc_map[d] != 0xffff) { mapped = lc_map[d]; break; }
 
     if (mapped == 0xffff) {
-      printf("%%LOADCOMPILE: bad fixup %u\n", (unsigned)dest);
+      printf("%%JIT: bad fixup %u\n", (unsigned)dest);
       return 0;
     }
 
     rel = (int)mapped - (int)(lc_fix[i].at + 1);
     if (rel < -128 || rel > 127) {
-      printf("%%LOADCOMPILE: rel range %d\n", rel);
+      printf("%%JIT: rel range %d\n", rel);
       return 0;
     }
     if (lc_fix[i].at < lc_max)

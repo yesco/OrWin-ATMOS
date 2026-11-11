@@ -78,8 +78,8 @@ echo
 #
 #                       - byte-sieve-prime.c -
 #
+# ./ivm-asm		|      180 s  ~25x      |
 # ./ivm C-interpr    ** |      697 s  ~99.6x    | simplier code
-#
 #
 # **) = multi-tasking several processes, at least 2x overhead?
 #
