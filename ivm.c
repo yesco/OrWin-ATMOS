@@ -980,13 +980,14 @@ ivmvar run_ivm(Process *p) {
 
 #else
 
-#ifdef IVMASM
+#if defined(IVMASM) || defined(JIT)
 
 // Single ZP block for importzp (_name in asm). Process switch = save/restore.
 
 #ifdef __CC65__
 #pragma bss-name (push, "ZEROPAGE")
 #endif
+
 uchar *ivm_ipc;
 char   ivm_fp;
 ivmvar ivm_acc;
@@ -996,9 +997,20 @@ uchar *ivm_memhi;
 ivmvar ivm_par;   // ASM stores PAR here before opmul/opdiv/opmod
 uchar *ivm_fptab; // frame_base[v]
 word  *ivm_callv; // call vectors (abs on cc65 after relocate)
+
 #ifdef __CC65__
 #pragma bss-name (pop)
 #endif
+
+// C helpers — ASM jsr _opmul etc; ACC/PAR already in ZP
+void opmul(void)    {              ivm_acc *= ivm_par; }
+void opdiv(void)    { if (ivm_par) ivm_acc /= ivm_par; }
+void opmod(void)    { if (ivm_par) ivm_acc %= ivm_par; }
+void opputnum(void) { printf("%u", (unsigned)ivm_acc); }
+#endif
+
+#ifdef IVMASM
+
 
 // TODO: pivot in-place during loading
 static uchar slice_lo[256];
@@ -1030,12 +1042,6 @@ static void unpivot(void) {
 }
 
 extern ivmvar run_ivm_asm(void);
-
-// C helpers — ASM jsr _opmul etc; ACC/PAR already in ZP
-void opmul(void)    {              ivm_acc *= ivm_par; }
-void opdiv(void)    { if (ivm_par) ivm_acc /= ivm_par; }
-void opmod(void)    { if (ivm_par) ivm_acc %= ivm_par; }
-void opputnum(void) { printf("%u", (unsigned)ivm_acc); }
 
 // TODO: add a run_ivm-for-a-while
 
@@ -1599,13 +1605,13 @@ word jit_compile(Process* proc) {
   out = (uchar *)malloc(out_max);
   if (!map || !out) {
 
-    printf("JIT: alloc fail\n");
+    printf("--- JIT: alloc fail ---\n");
     free(map); free(out);
     return 0;
 
   } else {
 
-    printf("JIT: code_len=%u ncall=%u memsz=%u\n",
+    printf("--- JIT: code_len=%u ncall=%u memsz=%u ---\n",
       (unsigned)code_len, ncall, (unsigned)bh->memsz);
 
     jit_size = ivm_jit(code, code_len, out, out_max, map, code_len,
@@ -1613,17 +1619,16 @@ word jit_compile(Process* proc) {
 
     if (jit_size) {
 
-      printf("JIT: emitted %u bytes of 6502 at org 0x%04X\n",
+      printf("--- JIT: emitted %u bytes of 6502 at org 0x%04X ---\n",
         (unsigned)jit_size, out_org);
 
-      // TODO: store out/map in proc or return the entry address
+      // keep generated code buffer; return its address as entry
       free(map);
-      free(out);
-      return jit_size;
+      return (word)(unsigned)out;
 
     } else {
 
-      printf("JIT: compilation failed\n");
+      printf("--- JIT: compilation failed ---\n");
       free(map);
       free(out);
       return 0;
@@ -1634,26 +1639,33 @@ word jit_compile(Process* proc) {
 #endif // JIT
 
 static int run_loaded_blob(uchar *img, int len) {
-  unsigned int ret;
+  static word ret; // static so can access in 6502 asm
+  static word addr;
+
   Process *proc= Nevm(img);
-  word addr;
     
   if (!proc) return -1;
 
   #ifdef JIT
     printf("--- JIT compiling IVM (blob %d) ---\n", len);
     addr = jit_compile(proc);
-    printf("JIT: entry size/addr %u\n", (unsigned)addr);
+    printf("--- JIT: entry at %u ---\n", (unsigned)addr);
   #endif
 
   printf("--- RUN IVM (blob %d) ---\n", len);
+
   #ifdef JIT
-    // TODO: write 6502 inline asm to call addr;
-    inline(...);
-    // TODO: return value in ret;
+      // call the generated 6502 code at addr (JMP + vector table)
+      // result returns in A/X (cc65 ACC style)
+    __asm__ ("lda %v", addr);
+    __asm__ ("ldx %v+1", addr);
+    __asm__ ("jsr callax");
+    __asm__ ("sta %v", ret);
+    __asm__ ("stx %v+1", ret);
   #else
     ret = run_ivm(proc);
   #endif
+
   printf("\n--- END ---\n");
   printf("acc = %u\n", ret);
 

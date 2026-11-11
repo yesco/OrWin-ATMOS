@@ -145,11 +145,16 @@ Simplyfy function calling code:
 
 extern void opputnum(void);
 //extern void putchar(void);
-extern void nl(void);
-extern void printinlinedstring(void);
 extern void opmul(void);
 extern void opdiv(void);
 extern void opmod(void);
+
+extern void printinlinedstring(void);
+
+// dummy
+void printinlinedstring(void) {
+  printf("<INLINE STRING>");
+}
 
 extern ivmvar ivm_zalloc(ivmvar n);
 extern void   ivm_free(ivmvar p);
@@ -422,7 +427,7 @@ word ivm_jit(const uchar *code, word code_len,
     }
 
     // I/O — same symbols as ivm-vm.asm
-    case 'N': ema(JSR, REF(nl)); break;
+    case 'N': em2(LDAN, 10); ema(JSR, REF(putchar)); break;
     case '.': ema(JSR, REF(opputnum)); break;
     case 'P': ema(JSR, REF(opputnum)); break; // asm op_P is puts(*ACC); wire puts_ax if split
     case 'O': em2(LDAN, PAR); ema(JSR, REF(putchar)); break;
