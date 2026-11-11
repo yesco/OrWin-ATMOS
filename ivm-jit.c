@@ -229,6 +229,8 @@ static void ema(uchar op, word addr) {
 }
 
 static uchar lc_zp;          // 1 = slots live in zero page
+static uchar lc_constidx;     // first constant slot (255 = none)
+static word *lc_constmem;     // mem array with constant values filled
 
 static word slotlo(uchar s) {
   if (lc_zp) return (word)((word)s << 1);          // ZP: slot*2
@@ -239,7 +241,18 @@ static word slothi(uchar s) { return (word)(slotlo(s) + 1); }
 // ZP emit: opcode + 1-byte address
 static void emz(uchar op, uchar zp) { em(op); em(zp); }
 
+static int is_const(uchar s) {
+  return lc_constidx != 255 && s >= lc_constidx && lc_constmem;
+}
+static word const_val(uchar s) { return lc_constmem[s]; }
+
 static void emit_load_slot(uchar s) {
+  if (is_const(s)) {
+    word v = const_val(s);
+    em2(LDAN, (uchar)(v & 0xff));
+    em2(LDXN, (uchar)(v >> 8));
+    return;
+  }
   if (lc_zp) { emz(LDAZ, (uchar)slotlo(s)); emz(LDXZ, (uchar)slothi(s)); }
   else       { ema(LDA, slotlo(s)); ema(LDX, slothi(s)); }
 }
@@ -253,6 +266,14 @@ static void emit_load_ffff(void) { em2(LDAN, 0xff); em(TAX); }
 // ACC = ACC OP mem[s]  (ADC/SBC/AND/ORA/EOR abs).
 // CLC/SEC emitted by caller when needed (+/-). Reuse for logical ops too.
 static void emit_lohiop(uchar ins, uchar s) {
+  if (is_const(s)) {
+    word v = const_val(s);
+    uchar iop = (uchar)(ins - 4);   // abs → immediate
+    em2(iop, (uchar)(v & 0xff)); em(TAY);
+    em(TXA); em2(iop, (uchar)(v >> 8)); em(TAX);
+    em(TYA);
+    return;
+  }
   if (lc_zp) {
     uchar zop = (uchar)(ins - 8);          // abs → zp (ADC/SBC/AND/ORA/EOR)
     emz(zop, (uchar)slotlo(s)); em(TAY);

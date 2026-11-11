@@ -1627,6 +1627,8 @@ word jit_compile(Process* proc) {
     lc_main_at = 0;
     lc_zp = jit_force_zp || (bh->memsz <= 128);
     if (lc_zp) printf("--- JIT: using zero-page slots ---\n");
+    lc_constidx = (uchar)bh->constidx;
+    lc_constmem = proc->h.mem;
     jit_size = ivm_jit(code, code_len, out, out_max, map, code_len,
       mem_base, out_org, vec_bc, frame_base, ncall);
 
