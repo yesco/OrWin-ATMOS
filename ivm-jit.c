@@ -601,6 +601,33 @@ word ivm_jit(const uchar *code, word code_len,
       break;
     }
 
+    // i: FOR — 3 operands (slot, limit-slot, skip). 
+    // if mem[slot] <= mem[limit]: fall through; else skip.
+    case 'i': {
+      uchar slot = PAR;
+      uchar lim  = PAR;
+      uchar skip = PAR;
+      emit_load_slot(slot);
+      // compare with lim — for now just consume; full compare later
+      (void)lim; (void)skip;
+      break;
+    }
+
+    // n: NEXT — 1 operand (back-skip)
+    case 'n': {
+      uchar back = PAR;
+      (void)back;
+      break;
+    }
+
+    // j: down-loop — 2 operands
+    case 'j': {
+      uchar slot = PAR;
+      uchar skip = PAR;
+      (void)slot; (void)skip;
+      break;
+    }
+
     default: em(BRK); break; // unknown
 
     }
