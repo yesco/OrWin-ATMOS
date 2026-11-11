@@ -1556,18 +1556,99 @@ char save_blob(const char *path, uchar *img, int len) {
   return 1;
 }
 
+#ifdef JIT
+
+word jit_compile(Process* proc) {
+
+  // INSTRUCITONS: jit_compile shouldn't be picking things
+  //   out of the blob, parsing is done already into the PROC
+  //   change this code!
+
+  BlobHeader *bh = (BlobHeader *)img;
+  uchar *code = img + bh->code;
+  word code_len = (bh->data > bh->code) ? (bh->data - bh->code) : (bh->len - bh->code);
+  uchar *frame_base = img + bh->fp;
+  word *callv = (word *)(img + bh->call);
+  uchar ncall = 0;
+  word vec_bc[64];
+  word *map;
+  uchar *out;
+  word out_max = 8192;
+  word out_org = 0x4000;  // example 6502 origin
+  word mem_base = 0x200;  // example memory base for slots
+  word jit_size;
+  int i;
+
+  // count call vectors and compute bytecode PCs relative to code start
+  for (i = 0; i < 64; i++) {
+    if (callv[i] == 0) break;
+    vec_bc[i] = callv[i] - bh->code;
+    ncall++;
+  }
+
+  map = (word *)calloc(code_len ? code_len : 1, sizeof(word));
+  out = (uchar *)malloc(out_max);
+  if (!map || !out) {
+
+    printf("JIT: alloc fail\n");
+    free(map); free(out);
+
+  } else {
+
+    // TODO: make more similar to run_loaded_blob messages
+    printf("JIT: code_len=%u ncall=%u memsz=%u\n",
+      (unsigned)code_len, ncall, (unsigned)bh->memsz);
+
+    jit_size = ivm_jit(code, code_len, out, out_max, map, code_len,
+      mem_base, out_org, vec_bc, frame_base, ncall);
+
+    if (jit_size) {
+
+      // TODO: make more similar to run_loaded_blob messages
+      printf("JIT: emitted %u bytes of 6502 at org 0x%04X\n",
+        (unsigned)jit_size, out_org);
+
+      // TODO: return ADDRESS
+
+    } else {
+      printf("JIT: compilation failed\n");
+    }
+
+    // TDOO: should be part of the proc?
+    free(map);
+    free(out);
+  }
+}
+#endif // JIT
+
 static int run_loaded_blob(uchar *img, int len) {
   unsigned int ret;
   Process *proc= Nevm(img);
-
+  word addr;
+    
   if (!proc) return -1;
 
+  #ifdef JIT
+    printf("--- JIT compiling IVM (blob %d) ---\n", len);
+  
+    // TODO: print result of compilation (size)
+  #endif
+
   printf("--- RUN IVM (blob %d) ---\n", len);
-  ret = run_ivm(proc);
+  #ifdef JIT
+    // TODO: write 6502 inline asm to call addr;
+    inline(...);
+    //TODO: return value in ret;
+  #else
+    ret = run_ivm(proc);
+  #endif
   printf("\n--- END ---\n");
   printf("acc = %u\n", ret);
+
   free(proc);
+
   return ret;
+  (void)addr;
 }
 
 int run_file(char* filename) {
@@ -1576,11 +1657,6 @@ int run_file(char* filename) {
   int r;
   
   if (!img) return -1;
-  
-  #ifdef JIT
-    if (ivm_jit(p, loaded))
-      return ivm_run_jit();
-  #endif
     
   run_loaded_blob(img, len);
   free(img);
