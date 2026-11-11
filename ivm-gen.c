@@ -58,6 +58,18 @@
 void note_load(uchar addr);
 void note_store(uchar addr);
 
+// Called for every op that WRITES its variable operand (see WRITES_VAR
+// below). Defined by parse.c / tpi.c: must report an error (IVM_GEN_FAIL /
+// FAIL) if slot ix belongs to a `const int foo = 42;` symbol.
+void check_store(uchar ix);
+
+// A `const int foo = 42;` is an alias of the const-pool slot (no storage of
+// its own, nothing to initialise), so every write op naming it is an error.
+// Define IVM_STORE_CHECK 0 before include to switch the check off.
+#ifndef IVM_STORE_CHECK
+  #define IVM_STORE_CHECK 1
+#endif
+
 // ---------------------------------------------------------------------------
 // Vectors / main
 // ---------------------------------------------------------------------------
@@ -133,12 +145,35 @@ void emitop(uchar op) {
     acc_invalidate();
 }
 
+// Ops whose FIRST operand is a variable slot that the VM modifies
+// (ivm.c run_ivm):
+//   S  mem[v] = acc          Z  mem[v] = 0
+//   C  mem[dst] = mem[src]   (only dst, the 1st operand, is written)
+//   I  ++mem[v]              J  --mem[v]
+//   U  mem[v1] += mem[v2]    (only v1, the 1st operand, is written)
+//   M  mem[v] = alloc(acc)   F  free(mem[v]); mem[v] = 0
+//   s  mem[v] = acc & 0xff
+//   {  mem[v] <<= acc        }  mem[v] >>= acc
+//   '  *mem[v]++ read        ,  *mem[v]++ = acc   (pointer var is advanced)
+// Loop ops i/n/j/m also modify their loop variable (n: ++, m: --), but they
+// are emitted with emit()/emitop() by parse.c, so parse.c must call
+// check_store() on the loop variable itself.
+// NOT writes to the variable: + - * / % & | ^ [ ] < = > L l @ r W  (read it),
+// and ! w ) (write THROUGH the pointer in the var, var itself unchanged).
+#define WRITES_VAR(op) \
+  ((op) == 'S' || (op) == 'Z' || (op) == 'C' || (op) == 'I' || (op) == 'J' || \
+   (op) == 'U' || (op) == 'M' || (op) == 'F' || (op) == 's' || \
+   (op) == '{' || (op) == '}' || (op) == '\''|| (op) == ',' || \
+   (op) == 'i' || (op) == 'j' || (op) == 'k' \
+  )
+
 void emitop2(uchar op, uchar arg) {
-  // const guard: S/Z/C stores
-  if ((op == 'S' || op == 'Z' || op == 'C') ) {
-    extern void check_store(uchar);
+  // const variable guard: refuse to emit a write to a const slot
+#if IVM_STORE_CHECK
+  if (WRITES_VAR(op))
     check_store(arg);
-  }
+#endif
+
   // !optimize: short L for slots 0..31; optimize: always long (phase-1 "stupid")
   if (op == 'L' && arg < 32 && !optimize)
     emit(arg); // one byte short-code
