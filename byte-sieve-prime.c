@@ -19,8 +19,6 @@ int main() {
 
   for (iter = 1; iter <= 10; iter ++) {
 
-    size=42;
-
     count=0; 
 
     for (i = 0; i <= size; i++)

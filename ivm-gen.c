@@ -66,9 +66,6 @@ void check_store(uchar ix);
 // A `const int foo = 42;` is an alias of the const-pool slot (no storage of
 // its own, nothing to initialise), so every write op naming it is an error.
 // Define IVM_STORE_CHECK 0 before include to switch the check off.
-#ifndef IVM_STORE_CHECK
-  #define IVM_STORE_CHECK 1
-#endif
 
 // ---------------------------------------------------------------------------
 // Vectors / main
@@ -687,6 +684,8 @@ uchar *build_blob(int *out_len) {
         continue;
       }
       if (op & 0x80) continue; // call / hi-bit forms: not const slots
+      // only first arg can be modified
+      if (WRITES_VAR(op)) check_store(bin[pc]);
       switch (op) {
       case 'L': case 'S': case 'Z': case 'I': case 'J':
       case 'C': // C dest src — two slot operands

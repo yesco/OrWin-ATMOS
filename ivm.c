@@ -117,6 +117,11 @@
 // BYTE CODE DETAILS
 // =================
 //
+// NOTE: any operator that MODIFIES a variable can only
+//   modify the FIRST parameter, it's check in ivm-gen.c
+//   constant relocation for "illegalit".
+// 
+//
 //? === not implemented
 //
 //0-31: global memory read value
