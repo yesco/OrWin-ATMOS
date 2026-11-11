@@ -618,19 +618,33 @@ word ivm_jit(const uchar *code, word code_len,
     case 'G': {
       word rel = PAR;
       word dest = (word)((p - code) + rel);
+      word at;
       em2(STAZ, tmp1); em(TXA);
-      em2(BMI, 7); em2(ORAZ, tmp1); em2(BEQ, 3);
-// TODO: does this take the instructions into account
-      em(CLC); emit_rel(BCC, dest);
-      em2(LDAZ, tmp1);
+      em2(ORAZ, tmp1);
+      // ACC > 0 → JMP dest; else fall through
+      em2(BEQ, 5);                 // zero → skip JMP (1+2) + BMI? 
+      em2(BMI, 3);                 // neg → skip JMP
+      em(JMP);
+      at = lc_at; em(0); em(0);
+      if (lc_nfix < 256) {
+        lc_fix[lc_nfix].at = at;
+        lc_fix[lc_nfix].bc_target = dest;
+        lc_nfix++;
+      }
       break;
     }
-    // B: unconditional back  pc -= rel8
+    // B: unconditional back
     case 'B': {
       word rel = PAR;
       word dest = (word)((p - code) - rel);
-// TODO: does this take CLC and BCC into account?
-      em(CLC); emit_rel(BCC, dest);
+      word at;
+      em(JMP);
+      at = lc_at; em(0); em(0);
+      if (lc_nfix < 256) {
+        lc_fix[lc_nfix].at = at;
+        lc_fix[lc_nfix].bc_target = dest;
+        lc_nfix++;
+      }
       break;
     }
 
@@ -698,11 +712,20 @@ word ivm_jit(const uchar *code, word code_len,
       em(TXA);
       em2(ORAZ, 0xfe);             // A = high|low; Z if both zero
       // C still valid from SBC: C=0 means slot < lim
-      em2(BCC, 4);                 // < → skip to CLC (loop)
-      em2(BEQ, 2);                 // == → skip to CLC (loop)
-      em2(BPL, 6);                 // > → skip CLC(1) + 5-byte branch
-      em(CLC);
-      emit_rel(BCC, loop_top);
+      // slot <= lim → JMP back; slot > lim → fall out
+      em2(BCC, 4);                 // < → skip to JMP
+      em2(BEQ, 2);                 // == → skip to JMP
+      em2(BPL, 3);                 // > → skip the JMP, fall out
+      em(JMP);
+      {
+        word at = lc_at;
+        em(0); em(0);
+        if (lc_nfix < 256) {
+          lc_fix[lc_nfix].at = at;
+          lc_fix[lc_nfix].bc_target = loop_top;
+          lc_nfix++;
+        }
+      }
       break;
     }
 
