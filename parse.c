@@ -195,6 +195,7 @@
   #include "ivm-print.c"
 #endif
 
+// ------------------------------------------------------------
 #ifdef ANIMATE_STACK
 
 static uchar max_sp;    // deepest the stack got (frames)
@@ -226,6 +227,7 @@ static void anim_report(void) {
 
 #endif
 
+// ------------------------------------------------------------
 // CONFIGURATION
 
 // (- 26871 26002) = 869
@@ -249,13 +251,19 @@ static void anim_report(void) {
 static FILE *sym_fp;
 static uchar sym_r[256];
 static uchar sym_w[256];
+
 static void note_load(uchar addr)  { if (sym_r[addr] < 255) sym_r[addr]++; }
 static void note_store(uchar addr) { if (sym_w[addr] < 255) sym_w[addr]++; }
+
 #else
+
+// TODO: use macros instead this take space
 static void note_load(uchar addr) { (void)addr; }
 static void note_store(uchar addr) { (void)addr; }
+
 #endif
 
+// ------------------------------------------------------------
 // FAIL: real (non-backtracking) errors. Message is printed ONCE where
 // setjmp is caught in main(), together with the source position.
 // 6502: pointer fits in int → longjmp(jb, msg).
@@ -274,9 +282,10 @@ static const char *fail_file;   // optional: file name for "cannot open"
 // ivm-gen.c still uses the old name
 #define IVM_GEN_FAIL(msg) FAIL(msg)
 
-
+// ------------------------------------------------------------
 #include "ivm-gen.c"
 
+// ------------------------------------------------------------
 #ifdef SYMS
 static uchar frame_sz[MAX_VECTORS];
 
@@ -294,10 +303,13 @@ static void sym_patch(char kind, word at, word to, int rel, uchar vec) {
   fputc('\n', sym_fp);
 }
 
+// open NAME.sym for writing
 static void sym_open(const char *path) {
   char out[128];
   word n = 0;
   const char *base = path, *s, *dot = 0;
+
+  // TODO: these rewrites happen in several places
   for (s = path; *s; s++)
     if (*s == '/' || *s == '\\') base = s + 1;
   for (s = base; *s && n < sizeof(out) - 5; s++) {
@@ -307,9 +319,11 @@ static void sym_open(const char *path) {
   if (dot) n = (word)(dot - out);
   out[n++] = '.'; out[n++] = 's'; out[n++] = 'y'; out[n++] = 'm';
   out[n] = 0;
+
   memset(sym_r, 0, sizeof(sym_r));
   memset(sym_w, 0, sizeof(sym_w));
   memset(frame_sz, 0, sizeof(frame_sz));
+
   sym_fp = fopen(out, "w");
   if (sym_fp)
     fprintf(sym_fp, "# %s\n# num  tag  name  scope  type  refs\n", out);
@@ -364,7 +378,7 @@ static void sym_write_all(void) {
       continue;
     }
 
-// TODO: wow - stupid code copiy pasta: map L
+// TODO: wow - stupid code copy pasta: map L
 //   and set a nrefs = 1,2,3 etc and have sone simple loop!
     switch (op) {
     case 'L':
@@ -417,6 +431,9 @@ static void sym_write_all(void) {
     case '&': case '|': case '^': case '[': case ']':
     case '{': case '}': case '<': case '=': case '>':
     case 'M': case 'F': case '@': case '!':
+
+    // TODO: clash with \r register!
+
     case 'r': case 'w': case 'l': case 's': case '\'': case ',':
       if (pc < (word)bin_ptr) pc++;
       break;
@@ -436,6 +453,7 @@ static void sym_write_all(void) {
 
   // TODO: document what this loop does
   for (i = 0; i < nsym; i++) {
+
     s = &syms[i];
     if (s->type != SYM_VAR) continue;
     sym_type_str(s, tbuf);
@@ -474,6 +492,7 @@ static void sym_write_all(void) {
     v = s->address;
     fb = frame_base[v];
     sz = 0;
+
     for (j = 0; j < nvector; j++) {
       uchar ob = frame_base[j];
       if (ob > fb) {
@@ -482,6 +501,7 @@ static void sym_write_all(void) {
       }
     }
     if (!sz) sz = frame_sz[v] ? frame_sz[v] : 4;
+
     fprintf(sym_fp, "%04x  V%02x  %-20s  fp=%02x  sz=%02x  c=%u",
             (unsigned)vectors[v], v, s->name, fb, sz, (unsigned)ccall[v]);
 
@@ -518,24 +538,31 @@ static void sym_write_all(void) {
   fclose(sym_fp);
   sym_fp = 0;
 }
+#endif // SYMS
 
-#endif
+// ------------------------------------------------------------
+
+// TODO: WTF - why rename "abstraction" ???
 
 #define code_buf ((uchar *)bin)
 #define code_len bin_ptr
 
+// TODO: describe semantic meaning
 uchar *g_loaded;
 
 // host libc already has strndup/memmem — keep ivm library, avoid name clash
 
+// ------------------------------------------------------------
+
 #include <assert.h>
 #include <string.h>
-//#include <strings.h>
 
-
+// Save bytes for poor on-device 6502 cc65
 #ifdef RUN
   #include "ivm.c"
 #endif
+
+// ------------------------------------------------------------
 
 // A-Z
 #define NRULES      26
@@ -554,19 +581,23 @@ static uchar **rule[NRULES];
 // blobs[r] holds the contiguous text for rule r
 static uchar *blobs[NRULES];
 
+// ------------------------------------------------------------
 static FILE *src_fp = NULL;
 static char *src_name;
 
 // input line buffer (unbounded source via fgetc; buffer one statement)
 static uchar *line_buf;
+
+// TODO: seriously 7 state variables, lol
 static word line_no_base;
 static word line_len;
 static word line_cap;
 static word line_pos;       // cursor in line_buf
 static word line_abs;       // absolute file offset of line_buf[0]
-static long file_pos;       // ftell-style count of bytes read from file
-
+static word file_pos;       // ftell-style count of bytes read from file
 static word max_pos_abs;    // furthest absolute position
+
+// ------------------------------------------------------------
 // Snapshot of the matcher stack at the furthest source position reached.
 // Used ONLY for error reporting (not during matching).
 // far_stack[i] = rule letter ('A'+rule), far_alt[i] = alt index in that rule.
@@ -575,8 +606,12 @@ static uchar far_stack[MAX_STACK];
 static uchar far_alt[MAX_STACK];
 static uchar far_sp;
 
+// ------------------------------------------------------------
 static uchar verbose;       // 0 off, 1 compact, 2+ detail
 static uchar ignore_case;   // default 1
+
+// ------------------------------------------------------------
+// FRAME struct storage
 
 typedef struct {
   uchar rule;
@@ -628,11 +663,19 @@ static Frame cur;    // working frame — access as cur.field (absolute on 6502)
 // the identifier just matched by match_ident_raw (shared, no arguments)
 static char  id_buf[NAME_LEN];
 
+// TODO: I'm sure when error it's in id_mmatch???
+
 static char  last_undef[NAME_LEN]; // furthest undefined ident (for reject msg)
+
+// TODO: use a damn state, or assign a error string?
 static uchar had_undef;            // sticky: saw undefined ident
 static uchar had_undef_func;       // sticky: it was a function call
+
 static word  undef_pos_abs;        // sticky: position of that ident
 
+// ------------------------------------------------------------
+
+// current function
 static uchar last_func_vec; // function being declared by \f (for \p \r)
 
 uchar next_slot; // next free slot index for \+ decls / temps
@@ -645,6 +688,7 @@ uchar next_slot; // next free slot index for \+ decls / temps
 static word cur_type = TY_WORD;
 
 
+// ------------------------------------------------------------
 // ---- logging ----
 
 #include <stdio.h>
@@ -728,7 +772,8 @@ static void v1_indent(void) {
 
 #endif
 
-// ---- line buffer ----
+// ------------------------------------------------------------
+// LINE BUFFER
 
 // c <= 32 was the old rule; isspace is clearer and smaller on cc65
 #define is_ws(c) isspace(c)
@@ -814,6 +859,7 @@ static uchar got(uchar c) {
 // must be c, consume it, else "return 0" from the CALLING function
 #define EXPECT(c)  do { if (!got(c)) return 0; } while (0)
 
+// ------------------------------------------------------------
 #ifdef VERBOSE
 
 // -v: show source [from,to) (absolute positions) as SRC: lines. Called when
@@ -870,8 +916,8 @@ static void note_progress(void) {
   far_sp = n;
 }
 
-
-// ---- bytecode emission (tpi-style) ----
+// ------------------------------------------------------------
+// BYTECODE EMIT
 
 // hex digit value for \#xx
 static uchar hexval(uchar c) {
@@ -895,6 +941,7 @@ static uchar const_slot(unsigned int v) {
 static void record_capture(word val) {
   uchar n = cur.prod_n;
 
+  // TODO: < 9 WHAT ???
   if (n < 9) {
     cur.prod_n = ++n;
     cur.prod_cap[n] = val;
@@ -914,6 +961,10 @@ static word cap_val(uchar n) {
 // Failed alts restore next_slot via slot_save (see restore_scope).
 static uchar pending_register; // set by \r after literal "register" in BNF
 static uchar pending_const;    // set by \c after literal "const"
+
+
+// ------------------------------------------------------------
+// SLOTS storage and memory index allocations
 
 // Reject stores to const / #define symbols
 void check_store(uchar slot) {
@@ -989,6 +1040,11 @@ static word force_addr(uchar n) {
 
   return tmp;
 }
+
+
+
+// ------------------------------------------------------------
+// PRODUCTION
 
 
 // run production at p (first char after '['); returns after ']'
@@ -1190,6 +1246,12 @@ static uchar *run_production(uchar *p) {
 }
 
 
+// ------------------------------------------------------------
+// PARSING
+
+
+// TODO: move to LINEBUF
+
 static void skip_hspace(void) {
   while (nextc == ' ' || nextc == '\t' || nextc == '\r')
     skip();
@@ -1343,6 +1405,11 @@ static void skip_ws(void) {
     if (ci >= ncomments) return;
   }
 }
+
+
+// ------------------------------------------------------------
+// \OPS in rules
+
 
 // \n in BNF: hspace, >=1 newline, hspace; then comments via skip_ws
 static int match_newline(void) {
@@ -1519,6 +1586,12 @@ static int match_ident_decl(void) {
   return 1;
 }
 
+
+
+// TODO: match_ident_decl and func_decl must be dduplicates....
+
+
+
 // \f — declare function: new frame + vector index; mark entry at current bin_ptr later
 static int match_ident_func_decl(void) {
   uchar base, vec;
@@ -1619,10 +1692,9 @@ static int params_done(void) {
 }
 
 
-
 // ---------------------------------------------------------------------------
 // String / char escapes — one decoder, shared by \S \s \c
-// ---------------------------------------------------------------------------
+
 
 // simple escapes: esc_in[i] decodes to esc_out[i]
 static const char esc_in[]  = "ntrabfv";
@@ -1641,6 +1713,9 @@ static int decode_escape(uchar *out) {
     *out = 0;
   } else if (c == 'x' || c == 'X') {
     v = 0;
+
+    // TODO: check if can use same as in match_digits?
+
     for (i = 0; i < 2 && isxdigit(nextc); i++) {
       v = (v << 4) + hexval(nextc);
       skip();
@@ -1790,7 +1865,7 @@ static void free_rules(void) {
   }
 }
 
-// \e is a directive (stored with the hibit) or a quoted literal char e
+// \X is a directive (stored with the hibit) or a quoted literal char e
 // note: '>' is load-time only (not stored)
 //       '<' becomes HIBIT(x), x=1..31 (alt jump) or HIBIT('<')
 static int is_dir(uchar e) {
@@ -1804,12 +1879,17 @@ static void build_one_rule(uchar r, char *rhs) {
   uchar taildest;   // 1-based alt index for \> / \< (0 = none yet)
 
   // directives (\i \n \s \o \< \d \+ \{ \}, rule calls, bare space, [ ]) get
-  // the hibit, quoted \| \c (not specials) become the plain char
+  // the hibit
+//
+  // quoted \| \c (not specials) become the plain char
+  //
   // \> is not stored; it only updates taildest
   // \< becomes HIBIT(x) (x=1..31) = jump to alt x-1, or HIBIT('<') if no \> yet
   // build contiguous string with 0 separators between alts.
+
   blob = malloc(strlen(rhs) + 2);
   if (!blob) FAIL("out of memory (rule)");
+
   free(blobs[r]);
   free(rule[r]);
   blobs[r] = blob;
@@ -1820,6 +1900,7 @@ static void build_one_rule(uchar r, char *rhs) {
   hex = 0;
   taildest = 0;
   alt_starts[na++] = 0;
+
   for (p = rhs; (e = *p); p++) {
     if (hex) {
       // \#xx: the two hex digits are data (may be A-F), stored as they are
@@ -1872,8 +1953,12 @@ static void build_one_rule(uchar r, char *rhs) {
   rule[r] = altp;
 }
 
+
+// ------------------------------------------------------------
+
 #define MAX_LINE 1024
 #define MAX_ACCUM 4096
+
 
 static void load_bnf(const char *path) {
   FILE *f;
@@ -1987,6 +2072,8 @@ static void push(uchar r) {
     Frame *ns;
     uchar ncap = stack_cap + STACK_GROW;
 
+    // TDOO: check that it minimizes the malloc() block?
+    
     if (ncap > MAX_STACK) ncap = MAX_STACK;
     ns = realloc(stack, ncap * sizeof(Frame));
     if (!ns) FAIL("out of memory (stack)");
@@ -1995,6 +2082,9 @@ static void push(uchar r) {
   }
 
   // program main begin → blob.main
+
+  // TDOO: what? code not clear
+
   if (r == 'B' - 'A' && sp > 0 && cur.rule == 'P' - 'A')
     main_offset = bin_ptr;
 
@@ -2010,10 +2100,17 @@ static void push(uchar r) {
   cur.mark = 0;
   cur.restart = 0;
   cur.result = 0;
+
+  // TDOO: why not memset the whole cur first? no need single assign
+
   memset(cur.prod_cap, 0, sizeof(cur.prod_cap));
+
+  // TODO: init (?) why ehere?
   goto_alt(0);
 }
 
+// ------------------------------------------------------------
+ 
 static void restore_scope(void) {
   sym_truncate(cur.nsym_save);
   scope_depth = cur.scope_save;
@@ -2028,6 +2125,9 @@ static int frame_rewind(void) {
   cur.npatch = 0;
 
   // re-arm function entry if rewind ate gen_func_entry / ginit bytes
+
+  // TODO: why would it "EAT" the entry?
+
   if (last_func_vec != 0xff) {
     if (last_func_vec < MAX_VECTORS && vectors[last_func_vec] > code_len)
       pending_func_entry = last_func_vec;
@@ -2043,16 +2143,20 @@ static int frame_rewind(void) {
   return 1;
 }
 
-// ---- one step ----
+// ------------------------------------------------------------
+// ONE STEP
+
 // estimated ~50-200us per step on 6502 @ 1MHz (dispatch + match)
 
-
-// One unit of work. Returns 1 if more to do, 0 if parse finished (stack empty).
+// One unit of work.
 // Flow: rule char vs source char → match / ws-case / hibit dispatch;
 // end of alt → accept (pop); mismatch → next alt; no alts → fail (pop).
 // State is only "where we are" (rule, ap, ip).
+//
 // Fail / pop lives only at fail_alt — normal path just follows *ap and *src.
-static int step(void) {
+//
+// Returns 1 if more to do, 0 if parse finished (stack empty).
+int step(void) {
   uchar *alt, *a;
   uchar c, e, rch;
   int ok;
@@ -2068,13 +2172,15 @@ static int step(void) {
   if (!c) {
     rch = 'A' + cur.rule;
     vlog("ok %c alt %u -> @%u\n", rch, (unsigned)(cur.alts - rule[cur.rule]), abs_pos());
-#ifdef VERBOSE
-    if (verbose >= 2 && code_len > cur.code_save && rch == 'K') {
-      eprintf(NORMAL "GEN:          [ ");
-      ivm_print_code_range(ERROUT, code_buf, cur.code_save, code_len, 0);
-      eprintf("]\n");
-    }
-#endif
+
+    #ifdef VERBOSE
+      if (verbose >= 2 && code_len > cur.code_save && rch == 'K') {
+        eprintf(NORMAL "GEN:          [ ");
+        ivm_print_code_range(ERROUT, code_buf, cur.code_save, code_len, 0);
+        eprintf("]\n");
+      }
+    #endif
+
     {
       word child_res = cur.result;
       anim_pop();
@@ -2088,7 +2194,10 @@ static int step(void) {
   }
 
   // --- literals (no hibit): rule char vs source ---
+
+  // LITERAL
   if (!(c & 0x80)) {
+
     for (;;) {
       if (nextc != c) {
         if (c != ' ' && c != '\t') skip_ws();
@@ -2117,11 +2226,7 @@ static int step(void) {
     return 1;
   }
 
-  if (c == HIBIT('[')) {
-    cur.rip = (word)(run_production(a + 1) - alt);
-    return 1;
-  }
-
+  // RULE
   if (c >= HIBIT('A') && c <= HIBIT('Z')) {
     uchar r = c - HIBIT('A');
     if (!rule[r]) FAIL("rule not defined");
@@ -2130,14 +2235,24 @@ static int step(void) {
     return 1;
   }
 
+  // GENERATOR
+  if (c == HIBIT('[')) {
+    cur.rip = (word)(run_production(a + 1) - alt);
+    return 1;
+  }
+
   ok = 1;
   adv = 1;
 
+  // TAIL-RECURSE rule ( go back beginning )
+  // TODO: combine with below!
   if (c == HIBIT('<')) {
     goto_alt(0);
     vlog("  tail %c @%u\n", 'A' + cur.rule, abs_pos());
     return 1;
   }
+
+  // TAIL-RECURSE to specific ALT
   if (c >= HIBIT(1) && c <= HIBIT(31)) {
     // \> target: jump to that alt (1-based code stored as HIBIT(n))
     goto_alt((uchar)(c - HIBIT(1)));
@@ -2145,16 +2260,33 @@ static int step(void) {
     return 1;
   }
 
-
+  // 
   if (c == HIBIT('o'))
     line_commit();
+
   else if (c == HIBIT('{')) scope_enter();
   else if (c == HIBIT('}')) scope_leave();
+
+  // SET # RETURN VALUE OF RULE
   else if (c == HIBIT('#')) {
     if (!a[1] || !a[2]) FAIL("bad \\# in grammar");
     record_capture(const_slot(hex2(a + 1)));
     adv = 3;
   }
+
+  // SET other result han LAST
+  else if (c == HIBIT('=')) {
+    e = a[1] - '0';
+    if (e >= 1 && e <= cur.prod_n)
+      cur.result = cur.prod_cap[e];
+    adv = 2;
+  }
+
+  // RESULT PICK
+  else if (c >= HIBIT('0') && c <= HIBIT('9'))
+    ok = match_ident_same(c - HIBIT('0'));
+
+  // TYPE setting
   else if (c == HIBIT('\'')) {
     // \'X: set type high-byte of result (and cur_type) to X
     // \'^: uppercase current type (make it a pointer)
@@ -2167,24 +2299,20 @@ static int step(void) {
     }
     adv = 2;
   }
+
+  // GUARD - ENSURE TYPE
   else if (c == HIBIT('?')) {
     // \?X: fail unless result type high-byte is X
     if (!a[1] || (cur.result >> 8) != a[1]) ok = 0;
     adv = 2;
   }
-  else if (c == HIBIT('=')) {
-    e = a[1] - '0';
-    if (e >= 1 && e <= cur.prod_n)
-      cur.result = cur.prod_cap[e];
-    adv = 2;
-  }
-  else if (c >= HIBIT('0') && c <= HIBIT('9'))
-    ok = match_ident_same(c - HIBIT('0'));
+
   else if (c == HIBIT('i')) ok = match_ident();
   else if (c == HIBIT('+')) ok = match_ident_decl();
   else if (c == HIBIT('f')) ok = match_ident_func_decl();
   else if (c == HIBIT('p')) ok = match_param_decl();
   else if (c == HIBIT('r')) {
+    // TODO: clash with \r register!
     if (last_func_vec != 0xff)
       ok = params_done();
     else {
@@ -2192,26 +2320,44 @@ static int step(void) {
       ok = 1;
     }
   }
+  // CONSTANT flag SET
   else if (c == HIBIT('c')) {
     pending_const = 1;
     ok = 1;
   }
+
+  // NUMBER
   else if (c == HIBIT('d')) ok = match_num();
+
+  // NEWLINE
   else if (c == HIBIT('n')) ok = match_newline();
+
+  // "STRING" value
   else if (c == HIBIT('s')) ok = match_str(0);
+
+  // "INLINE STRING\0
   else if (c == HIBIT('u')) ok = match_str(1);
+
+
+  // LOOP PATCH? FIX?
   else if (c == HIBIT('z')) {
     record_capture(MAKE_CAP(const_slot(
       (!CAP_IS_PTR(cur_type) && CAP_TYPE(cur_type) == TY_CHAR) ? 1 : 2), TY_WORD));
   }
 
-  if (!ok) {
-    vlog("  fail \\%c @%u\n", c & 0x7f, abs_pos());
-    goto fail_alt;
+
+  // OK
+  // TODO: why not retun inside these rules instead?
+  if (ok) {
+    vlog("  ok \\%c @%u\n", c & 0x7f, abs_pos());
+    cur.rip += adv;
+    return 1;
   }
-  vlog("  ok \\%c @%u\n", c & 0x7f, abs_pos());
-  cur.rip += adv;
-  return 1;
+
+
+  // TODO: maybe fail earlier and just jump???
+  
+  if (!ok) vlog("  fail \\%c @%u\n", c & 0x7f, abs_pos());
 
 fail_alt:
   // next alt, or pop if none left / mark committed away
@@ -2235,6 +2381,9 @@ fail_alt:
   goto fail_alt;
 }
 
+
+// TODO: for efficiency merge into one call it run()
+
 // run up to n steps
 // ~50-200 us/step on 6502 @ 1MHz → n=1000 ≈ 50-200 ms
 static int run(word n) {
@@ -2246,6 +2395,12 @@ static int run(word n) {
   } while (--n);
   return 1;       // more work (time slice)
 }
+
+
+
+// ------------------------------------------------------------
+// ERROR SUPPORT
+
 
 // "file:line: " prefix of an error line
 static void err_prefix(word line) {
@@ -2410,7 +2565,7 @@ static void shutdown(void) {
 
   #if 0
     printf("\nLINEBUF: no_base=%u len=%u cap=%u pos=%u abs=%u file_pos=%u\n",
-      line_no_base, line_len, line_cap, line_pos, line_abs, (unsigned)file_pos);
+      line_no_base, line_len, line_cap, line_pos, line_abs, file_pos);
     // shows garbage after valid
     printf("\n>>>>>LINEBUF>>>>\n%s\n<<<<<\n", line_buf);
   #endif
@@ -2427,6 +2582,8 @@ static void shutdown(void) {
   sym_free();
 }
 
+
+/// ------------------------------------------------------------
 int main(int argc, char **argv) {
 #ifdef VERBOSE
   word a;
