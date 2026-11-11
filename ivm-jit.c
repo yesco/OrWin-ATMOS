@@ -474,12 +474,18 @@ word ivm_jit(const uchar *code, word code_len,
 
     // I/O — same symbols as ivm-vm.asm
     case 'N': em2(LDAN, 10); ema(JSR, REF(putchar)); break;
+    case 'E': ema(JSR, REF(putchar)); break;  // emit ACC as char
     case '.':
       ema(STA, (word)(unsigned)&ivm_acc);
       ema(STX, (word)((unsigned)&ivm_acc + 1));
       ema(JSR, REF(opputnum));
       break;
-    case 'P': ema(JSR, REF(opputnum)); break; // asm op_P is puts(*ACC); wire puts_ax if split
+    case 'P':
+      // print string at ACC — stash and call a puts helper
+      ema(STA, (word)(unsigned)&ivm_acc);
+      ema(STX, (word)((unsigned)&ivm_acc + 1));
+      ema(JSR, REF(opputnum));  // TODO: real puts; for now number
+      break;
     case 'O': em2(LDAN, PAR); ema(JSR, REF(putchar)); break;
 
     // heap
