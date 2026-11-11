@@ -1594,12 +1594,13 @@ word jit_compile(Process* proc) {
 
   code_len = (bh->data > bh->code) ? (bh->data - bh->code) : (bh->len - bh->code);
 
-  // count call vectors and compute bytecode PCs relative to code start
-  for (i = 0; i < 64; i++) {
-    if (callv[i] == 0) break;
+  // call table is not zero-terminated (zeros can appear for unused slots).
+  // size is the gap between the call section and the following const section.
+  ncall = (uchar)((bh->con - bh->call) / sizeof(word));
+  if (ncall > 64) ncall = 64;
+
+  for (i = 0; i < ncall; i++)
     vec_bc[i] = callv[i] - bh->code;
-    ncall++;
-  }
 
   map = (word *)calloc(code_len ? code_len : 1, sizeof(word));
   out = (uchar *)malloc(out_max);

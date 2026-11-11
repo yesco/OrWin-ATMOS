@@ -174,6 +174,11 @@ typedef struct { word at, bc_target; } LcFix;
 static LcFix lc_fix[256];
 static word  lc_nfix;
 
+// forward call sites (JSR absolute that must be patched after all functions seen)
+typedef struct { word at; uchar v; } CallFix;
+static CallFix lc_calls[256];
+static word lc_ncalls;
+
 // jump vector table at start of code (word per vector)
 static word  lc_vecmark;      // offset in out[] of vector table
 static word  lc_out_org;      // absolute base of out[]
@@ -265,6 +270,7 @@ word ivm_jit(const uchar *code, word code_len,
   lc_out = out; lc_at = 0; lc_max = out_max;
   lc_map = map; lc_mapn = map_n; lc_mem = mem_base;
   lc_nfix = 0;
+  lc_ncalls = 0;
   lc_out_org = out_org;
   lc_ncall = ncall;
   lc_fbase = frame_base;
@@ -332,10 +338,12 @@ word ivm_jit(const uchar *code, word code_len,
         if (v < lc_ncall && lc_vecmark + v * 2 + 1 < lc_max)
           dest = (word)(lc_out[lc_vecmark + v * 2]
                      | (lc_out[lc_vecmark + v * 2 + 1] << 8));
-        // backward calls only: dest must already be filled at callee entry
-        if (!dest)
-          printf("%%JIT: call vec %u before definition\n", v);
-
+        // record for later patch if not yet defined
+        if (!dest && lc_ncalls < 256) {
+          lc_calls[lc_ncalls].at = lc_at + 1; // after the JSR opcode
+          lc_calls[lc_ncalls].v = v;
+          lc_ncalls++;
+        }
         ema(JSR, dest);
 
       }
@@ -584,7 +592,23 @@ word ivm_jit(const uchar *code, word code_len,
     #undef PAR
   }
 
-  // patch relative branches only (G/B). Calls need no fixups.
+  // patch forward calls now that all function entries have filled the vector table
+  for (i = 0; i < lc_ncalls; i++) {
+    uchar v = lc_calls[i].v;
+    word at = lc_calls[i].at;
+    word dest = 0;
+    if (v < lc_ncall && lc_vecmark + v * 2 + 1 < lc_max)
+      dest = (word)(lc_out[lc_vecmark + v * 2]
+                 | (lc_out[lc_vecmark + v * 2 + 1] << 8));
+    if (dest && at + 1 < lc_max) {
+      lc_out[at]     = (uchar)(dest & 0xff);
+      lc_out[at + 1] = (uchar)(dest >> 8);
+    } else {
+      printf("%%JIT: unresolved call vec %u\n", v);
+    }
+  }
+
+  // patch relative branches only (G/B).
   for (i = 0; i < lc_nfix; i++) {
     word dest = lc_fix[i].bc_target;
     word mapped = 0xffff;
