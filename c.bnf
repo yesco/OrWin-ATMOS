@@ -35,7 +35,7 @@ D=#include <\+.h>\n\o\<
 
 # - Declarations: optional register\r -> REGISTER slot 0..31
 # -O: REGISTER 0..31, other globals 32..95, frames at 96+
-V=register\r T M;|T M;
+V=const\c T M;|register\r T M;|T M;
 M=\+=S[\g]U|\+=E[S\1]U|\+U|
 
 # - TODO: deep recursion might be bad...

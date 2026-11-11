@@ -3,10 +3,10 @@
 
 #include <stdio.h>
 
-int true = 1;
-int false = 0;
-int size = 8190;
-int sizepl = 8191;
+const int true = 1;
+const int false = 0;
+const int size = 8190;
+const int sizepl = 8191;
 
 char *flags;
 int main() {

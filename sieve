@@ -51,10 +51,11 @@
 # (/ 60969255 2208207.0) 27.6 cycles / "op"
 # 1029876275186 = 35.08 c / "op"
 #
-# (/ 60969255 60816464.0) = 0.25% cycles 152791
-
-
-
+# -- const int foo = ... byte...
+# (/ 60969255 60816464.0) = 0.25% cycles  152791
+# (/ 60969255 58556915.0) = 4.12% cycles 2412340
+#
+# ==> 122 byte bytecode went down to: 113! -9 vars!
 
 
 echo "-- `uname -a` --"
@@ -103,6 +104,8 @@ echo
 # ./ivm C-interpr    ** |      697 s  ~99.6x    | simplier code
 #
 # ./ivm-jit             |       61 s   ~8.7x    |
+# ./ivm-jit const       |       58.6s  ~8.37x	| 4.12% cycles 2412340
+
 
 # **) = multi-tasking several processes, at least 2x overhead?
 #

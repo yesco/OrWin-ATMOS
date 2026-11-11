@@ -913,6 +913,7 @@ static word cap_val(uchar n) {
 //   optimize!=0: REGISTER globals 0..31, other globals 32..95, frames >= FRAME_BASE (96)
 // Failed alts restore next_slot via slot_save (see restore_scope).
 static uchar pending_register; // set by \r after literal "register" in BNF
+static uchar pending_const;    // set by \c after literal "const"
 
 static uchar alloc_slot(void) {
   uchar s;
@@ -1132,6 +1133,21 @@ static uchar *run_production(uchar *p) {
       case HIBIT('g'):
         dest = cur.prod_cap[1] & 0xff;
         src  = as_addr(cur.prod_cap[2] & 0xff);
+        if (pending_const) {
+          // rebind the declared name to the const slot; no store emitted
+          pending_const = 0;
+          {
+            word si;
+            for (si = 0; si < nsym; si++)
+              if (syms[si].address == dest && syms[si].type == SYM_VAR) {
+                syms[si].address = src;
+                vlog("  const rebind '%s' slot %u -> const %u\n",
+                  syms[si].name, dest, src);
+                break;
+              }
+          }
+          break;
+        }
         if (scope_depth == 0) {
           if (nginit >= MAX_GINIT)
             FAIL("too many global inits");
@@ -2163,6 +2179,10 @@ static int step(void) {
       pending_register = 1;
       ok = 1;
     }
+  }
+  else if (c == HIBIT('c')) {
+    pending_const = 1;
+    ok = 1;
   }
   else if (c == HIBIT('d')) ok = match_num();
   else if (c == HIBIT('n')) ok = match_newline();
