@@ -643,7 +643,7 @@ word ivm_jit(const uchar *code, word code_len,
       uchar back = PAR;
       // the i is `back` bytes before this operand
       // i layout: slot, lim, skip — we need those
-      const uchar *ip = p - 1 - back;   // points at the i opcode
+      const uchar *ip = p - back;       // operand_pos - back + 1
       uchar slot, lim;
       word loop_top;
       if (ip < code || *ip != 'i') {
@@ -662,11 +662,10 @@ word ivm_jit(const uchar *code, word code_len,
       em(SEC);
       emit_lohiop(SBC, lim);
       em(TXA);
-      em2(BMI, 2);                 // still < lim → branch back
-      em2(BNE, 2);                 // > lim → fall out
-      // == lim → branch back (inclusive)
+      // slot > lim (positive high byte): skip the 3-byte back-branch
+      em2(BPL, 3);
       em(CLC);
-      emit_rel(BCC, loop_top);
+      emit_rel(BCC, loop_top);     // slot <= lim → loop
       break;
     }
 
