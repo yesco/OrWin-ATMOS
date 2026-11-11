@@ -1645,6 +1645,7 @@ word jit_compile(Process* proc) {
       printf("--- JIT: emitted %u bytes of 6502 at org 0x%04X ---\n",
         (unsigned)jit_size, out_org);
 
+
       // hexdump
       printf("--- HEXDUMP (%u bytes) ---\n", (unsigned)jit_size);
       {

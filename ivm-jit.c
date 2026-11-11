@@ -151,6 +151,12 @@ extern void opdiv(void);
 extern void opmod(void);
 
 extern void printinlinedstring(void);
+void jit_puts(void) {
+  // print the string at ivm_acc (set by the P emitter)
+  unsigned char *s = (unsigned char *)(unsigned)ivm_acc;
+  if (!s) return;
+  while (*s) putchar(*s++);
+}
 
 // JSR target. Return address on stack points at last byte of the JSR;
 // the inline string follows. Walk it, print, then JMP to the byte after 0.
@@ -481,10 +487,9 @@ word ivm_jit(const uchar *code, word code_len,
       ema(JSR, REF(opputnum));
       break;
     case 'P':
-      // print string at ACC — stash and call a puts helper
       ema(STA, (word)(unsigned)&ivm_acc);
       ema(STX, (word)((unsigned)&ivm_acc + 1));
-      ema(JSR, REF(opputnum));  // TODO: real puts; for now number
+      ema(JSR, REF(jit_puts));
       break;
     case 'O': em2(LDAN, PAR); ema(JSR, REF(putchar)); break;
 
@@ -700,15 +705,20 @@ word ivm_jit(const uchar *code, word code_len,
       break;
     }
 
-    // j: down-loop — 2 operands
+    // j: down-loop — 2 operands (not yet implemented)
     case 'j': {
       uchar slot = PAR;
       uchar skip = PAR;
-      (void)slot; (void)skip;
+      printf("%%Warning: unimpl op 'j' (slot %u skip %u) — skipping\n",
+        slot, skip);
       break;
     }
 
-    default: em(BRK); break; // unknown
+    default:
+      printf("%%ERROR: unimpl op 0x%02X '%c' at bc %u — continuing\n",
+        op, (op >= 32 && op < 127) ? op : '.',
+        (unsigned)(p - code - 1));
+      break;
 
     }
     #undef PAR
