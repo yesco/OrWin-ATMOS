@@ -114,18 +114,18 @@ void disasm(char* mc, char* end, char indent) {
 #else
 
 //#ifdef __ATMOS__
-#if 1
-  #define ADDR "\x83"
-  #define MNIC "\x86"
-  #define JMP  "\b\x82"
-  #define ARG  "\x87"
-  #define VAR  "\x82"
+#if 0
+  #define ppADDR "\x83"
+  #define ppMNIC "\x86"
+  #define ppJMP  "\b\x82"
+  #define ppARG  "\x87"
+  #define ppVAR  "\x82"
 #else
-  #define ADDR " "
-  #define MNIC " "
-  #define JMP  " "
-  #define ARG  " "
-  #define VAR  " "
+  #define ppADDR " "
+  #define ppMNIC " "
+  #define ppJMP  " "
+  #define ppARG  " "
+  #define ppVAR  " "
 #endif // __ATMOS__
 
 
@@ -160,7 +160,7 @@ char* disasm(char* mc, char* end, char indent) {
     // TODO: remove
     indent= 2;
 
-    printf(ADDR"%*c%04X"MNIC, indent, ' ', p);
+    printf(ppADDR"%*c%04X"ppMNIC, indent, ' ', p);
 
 #ifdef __ATMOS__    
     if (!--maxlines) return p;
@@ -169,19 +169,19 @@ char* disasm(char* mc, char* end, char indent) {
     ++p;
 
     // exception modes
-    if      (i==0x20) printf(JMP"jsr"ARG"$%04x",*((int*)p)++);
-    else if (i==0x4c) printf(JMP"jmp"ARG"$%04x",*((int*)p)++);
-    else if (i==0x6c) printf(JMP"jpi"ARG"($%04x)",*((int*)p)++);
+    if      (i==0x20) printf(ppJMP"jsr"ppARG"$%04x",*((int*)p)++);
+    else if (i==0x4c) printf(ppJMP"jmp"ppARG"$%04x",*((int*)p)++);
+    else if (i==0x6c) printf(ppJMP"jpi"ppARG"($%04x)",*((int*)p)++);
     // branches
     else if ((i&0x1f)==0x10) 
-      printf(JMP"b%.2s"ARG"%+d\t=>"ADDR"$%04X", DA_BRANCH-1+(i>>4), *(signed char*)p, p+1+*(signed char*)p++);
+      printf(ppJMP"b%.2s"ppARG"%+d\t=>"ppADDR"$%04X", DA_BRANCH-1+(i>>4), *(signed char*)p, p+1+*(signed char*)p++);
     // single byte instructions
-    else if ((i&0xf)==0x8 || (i&0xf)==0xA) printf("%.3s"ARG,(i&2?DA_XA:DA_X8)+3*(i>>4));
-    else if (!(i&0x9f)) printf(JMP"%.3s", DA_JMPS+3*(i>>5));
+    else if ((i&0xf)==0x8 || (i&0xf)==0xA) printf("%.3s"ppARG,(i&2?DA_XA:DA_X8)+3*(i>>4));
+    else if (!(i&0x9f)) printf(ppJMP"%.3s", DA_JMPS+3*(i>>5));
     // regular instructions with various addressing modes
     else {
       unsigned char cciii= (i>>5)+((i&3)<<3); // "ccc_ __ii" encoding change to "cciii"
-      if (cciii<0b11000) printf("%.3s"ARG, DA_CCIII+3*cciii);
+      if (cciii<0b11000) printf("%.3s"ppARG, DA_CCIII+3*cciii);
       else printf("$%02x ??? ", i);
 
       switch(m) { // addressing modes

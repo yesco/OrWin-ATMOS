@@ -232,6 +232,7 @@
 
 #ifdef JIT
   #include "ivm-jit.c"
+  #include "disasm.c"
 #endif
 
 
@@ -1643,6 +1644,21 @@ word jit_compile(Process* proc) {
 
       printf("--- JIT: emitted %u bytes of 6502 at org 0x%04X ---\n",
         (unsigned)jit_size, out_org);
+
+      // hexdump
+      printf("--- HEXDUMP (%u bytes) ---\n", (unsigned)jit_size);
+      {
+        word k;
+        for (k = 0; k < jit_size; k++) {
+          if ((k & 15) == 0) printf("%04X  ", (unsigned)(out_org + k));
+          printf("%02X ", out[k]);
+          if ((k & 15) == 15 || k + 1 == jit_size) printf("\n");
+        }
+      }
+
+      // disasm
+      printf("--- DISASM ---\n");
+      disasm((char *)out, (char *)(out + jit_size), 2);
 
       // keep generated code buffer; return its address as entry
       free(map);
