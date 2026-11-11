@@ -2,6 +2,7 @@
 // -
 
 #include <stdio.h>
+#include <stdlib.h>
 
 const int true = 1;
 const int false = 0;
@@ -17,6 +18,8 @@ int main() {
   printf("10 iterations\n");
 
   for (iter = 1; iter <= 10; iter ++) {
+
+    size=42;
 
     count=0; 
 

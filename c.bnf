@@ -28,7 +28,7 @@
 # - Program starts with P
 P=D
 
-D=#include <\+.h>\n\o\<
+D=#include <\+.h>\n\o\<|#define \c\+ \d[\g]\o|#define \c\+ \s[\g]\o
 |#include "\+.h"\n\o\<
 |#include <\+.c>\n\o\<
 |V\o\<|F\o\<|
@@ -228,7 +228,7 @@ R=\i(Z)[\v]
 # - Not
 |! E[?]
 
-# - Simple Expression: \c = char lit, \s = string const, \d = number
+# - Simple Expression: \s = string const, \d = number
 S=\d|sizeof(T)\z|sizeof(\i)\z|\s|\i
 
 # - List of expressions (limited, TODO: get rid of?)

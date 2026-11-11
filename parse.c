@@ -915,6 +915,17 @@ static word cap_val(uchar n) {
 static uchar pending_register; // set by \r after literal "register" in BNF
 static uchar pending_const;    // set by \c after literal "const"
 
+// Reject stores to const / #define symbols
+void check_store(uchar slot) {
+  word i;
+  for (i = 0; i < nsym; i++)
+    if (syms[i].type == SYM_VAR && syms[i].address == slot && syms[i].is_const) {
+      printf("\nconst variable: %s\n", syms[i].name);
+      FAIL("const cannot be modified");
+    }
+}
+
+
 static uchar alloc_slot(void) {
   uchar s;
 
@@ -1141,6 +1152,7 @@ static uchar *run_production(uchar *p) {
             for (si = 0; si < nsym; si++)
               if (syms[si].address == dest && syms[si].type == SYM_VAR) {
                 syms[si].address = src;
+                syms[si].is_const = 1;
                 vlog("  const rebind '%s' slot %u -> const %u\n",
                   syms[si].name, dest, src);
                 break;

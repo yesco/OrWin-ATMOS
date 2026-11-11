@@ -134,6 +134,11 @@ void emitop(uchar op) {
 }
 
 void emitop2(uchar op, uchar arg) {
+  // const guard: S/Z/C stores
+  if ((op == 'S' || op == 'Z' || op == 'C') ) {
+    extern void check_store(uchar);
+    check_store(arg);
+  }
   // !optimize: short L for slots 0..31; optimize: always long (phase-1 "stupid")
   if (op == 'L' && arg < 32 && !optimize)
     emit(arg); // one byte short-code
@@ -333,6 +338,7 @@ typedef struct {
 
   // is_ptr: prefer TY_PTR in typed captures; kept here for sym_find/decl
   uchar is_ptr;        // 1 if pointer type (still one cell)
+  uchar is_const;      // 1 = const / #define, no stores allowed
   uchar vtype;         // TY_WORD ('w') or TY_CHAR ('c') — element type
 
   uchar scope;         // scope depth it was declared in
