@@ -143,9 +143,9 @@ Simplyfy function calling code:
 #define PHA   0x48
 #define PLA   0x68
 
-extern void opputnum(void);
 extern ivmvar ivm_acc;
-//extern void putchar(void);
+
+extern void opputnum(void);
 extern void opmul(void);
 extern void opdiv(void);
 extern void opmod(void);
