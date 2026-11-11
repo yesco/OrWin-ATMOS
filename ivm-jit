@@ -1,15 +1,21 @@
-rm ivm-jit.x
-
 name=$1
 name="${name%.ivm}"
 
-clang -DJIT -g ivm.c -o ivm-jit.x || exit 1
+#rm ivm-jit.x 2>/dev/null
+#clang -DJIT -g ivm.c -o ivm-jit.x || exit 1
+#time ./ivm-jit.x $name.ivm
 
-time ./ivm-jit.x $name.ivm
+cl65 -DJIT -Oirs -C sim6502.cfg -t sim6502 -vm -m ivm-jit.map -o ivm-jit.sim ivm.c  || exit 1
+#cl65 -DNOIVM -DIVMASM -Oirs -C sim6502.cfg -t sim6502 -o ivm-asm-noivm.sim ivm.c || exit 1
+#ca65 -t sim6502 ivm-vm.asm -l ivm-vm.lst # 2>/dev/null 1>/dev/null
+
+sim65 -c ivm-jit.sim $name.ivm
+
+
 
 echo
 echo
-ls -ugGlf ivm.x ivm-jit.x $name.ivm 2>/dev/null
+ls -ugGlf ivm-jit.sim ivm.x ivm-jit.x $name.ivm 2>/dev/null
 echo
 echo "=== ivm.c: `./wcode ivm.c` LOC ==="
 echo "=== jit c: `./wcode ivm-jit.c` LOC ==="

@@ -1559,25 +1559,34 @@ char save_blob(const char *path, uchar *img, int len) {
 #ifdef JIT
 
 word jit_compile(Process* proc) {
+  BlobHeader *bh = &proc->h.hdr;
 
-  // INSTRUCITONS: jit_compile shouldn't be picking things
-  //   out of the blob, parsing is done already into the PROC
-  //   change this code!
-
-  BlobHeader *bh = (BlobHeader *)img;
-  uchar *code = img + bh->code;
-  word code_len = (bh->data > bh->code) ? (bh->data - bh->code) : (bh->len - bh->code);
-  uchar *frame_base = img + bh->fp;
-  word *callv = (word *)(img + bh->call);
+  word code_len;
   uchar ncall = 0;
   word vec_bc[64];
   word *map;
   uchar *out;
   word out_max = 8192;
   word out_org = 0x4000;  // example 6502 origin
-  word mem_base = 0x200;  // example memory base for slots
+  word mem_base = (word)(unsigned)proc->h.mem; // slots already allocated
   word jit_size;
   int i;
+  
+  uchar *base = NULL;
+  uchar *code;
+  uchar *frame_base;
+  word *callv;
+
+  // I guess we can Why would this be differnt for CC65?
+  #ifdef __CC65__
+  base = (uchar *)proc->h.ipc - bh->main;
+  #endif
+
+  code = base + bh->code;
+  frame_base = base + bh->fp;
+  callv = (word *)(base + bh->call);
+
+  code_len = (bh->data > bh->code) ? (bh->data - bh->code) : (bh->len - bh->code);
 
   // count call vectors and compute bytecode PCs relative to code start
   for (i = 0; i < 64; i++) {
@@ -1592,10 +1601,10 @@ word jit_compile(Process* proc) {
 
     printf("JIT: alloc fail\n");
     free(map); free(out);
+    return 0;
 
   } else {
 
-    // TODO: make more similar to run_loaded_blob messages
     printf("JIT: code_len=%u ncall=%u memsz=%u\n",
       (unsigned)code_len, ncall, (unsigned)bh->memsz);
 
@@ -1604,19 +1613,22 @@ word jit_compile(Process* proc) {
 
     if (jit_size) {
 
-      // TODO: make more similar to run_loaded_blob messages
       printf("JIT: emitted %u bytes of 6502 at org 0x%04X\n",
         (unsigned)jit_size, out_org);
 
-      // TODO: return ADDRESS
+      // TODO: store out/map in proc or return the entry address
+      free(map);
+      free(out);
+      return jit_size;
 
     } else {
-      printf("JIT: compilation failed\n");
-    }
 
-    // TDOO: should be part of the proc?
-    free(map);
-    free(out);
+      printf("JIT: compilation failed\n");
+      free(map);
+      free(out);
+      return 0;
+
+    }
   }
 }
 #endif // JIT
@@ -1630,15 +1642,15 @@ static int run_loaded_blob(uchar *img, int len) {
 
   #ifdef JIT
     printf("--- JIT compiling IVM (blob %d) ---\n", len);
-  
-    // TODO: print result of compilation (size)
+    addr = jit_compile(proc);
+    printf("JIT: entry size/addr %u\n", (unsigned)addr);
   #endif
 
   printf("--- RUN IVM (blob %d) ---\n", len);
   #ifdef JIT
     // TODO: write 6502 inline asm to call addr;
     inline(...);
-    //TODO: return value in ret;
+    // TODO: return value in ret;
   #else
     ret = run_ivm(proc);
   #endif
