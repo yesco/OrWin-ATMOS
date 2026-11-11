@@ -152,19 +152,33 @@ extern void opmod(void);
 
 extern void printinlinedstring(void);
 
-// Called with the inline string immediately after the JSR.
-// Reads chars from the return address, prints until 0,
-// then fixes the return address to skip past the string.
+// JSR target. Return address on stack points at last byte of the JSR;
+// the inline string follows. Walk it, print, then JMP to the byte after 0.
 void printinlinedstring(void) {
-  // On 6502 the return address is on the stack (hi, lo), pointing
-  // at the last byte of the JSR. The string follows.
-  // For the host/sim path we just need the C equivalent:
-  // the caller emitted the string bytes right after the JSR opcode
-  // sequence, so we walk them.  For now print from a known
-  // location — the real fix is that the emitter places the
-  // string in the output and this walks it.
-  // Placeholder that at least does not lie:
-  putchar('<'); putchar('S'); putchar('>');
+  __asm__ ("pla");              // lo
+  __asm__ ("sta tmp1");
+  __asm__ ("pla");              // hi
+  __asm__ ("sta tmp2");
+  __asm__ ("inc tmp1");         // return addr is one before the string
+  __asm__ ("bne %g", pis_noinc);
+  __asm__ ("inc tmp2");
+  pis_noinc:
+  // walk and print
+  pis_loop:
+  __asm__ ("ldy #0");
+  __asm__ ("lda (tmp1),y");
+  __asm__ ("beq %g", pis_done);
+  __asm__ ("jsr _putchar");
+  __asm__ ("inc tmp1");
+  __asm__ ("bne %g", pis_loop);
+  __asm__ ("inc tmp2");
+  __asm__ ("bne %g", pis_loop);
+  pis_done:
+  __asm__ ("inc tmp1");         // skip the 0
+  __asm__ ("bne %g", pis_out);
+  __asm__ ("inc tmp2");
+  pis_out:
+  __asm__ ("jmp (tmp1)");       // continue after the string
 }
 
 extern ivmvar ivm_zalloc(ivmvar n);
@@ -600,12 +614,9 @@ word ivm_jit(const uchar *code, word code_len,
 
     // " inline string — helper prints until 0
     case '"':
-      // emit LDA #ch / JSR putchar for each character, then skip the 0
-      while (p < end && *p) {
-        em2(LDAN, *p);
-        ema(JSR, REF(putchar));
-        p++;
-      }
+      ema(JSR, REF(printinlinedstring));
+      while (p < end && *p) { em(*p); p++; }
+      em(0);
       if (p < end) p++;
       break;
 
@@ -662,10 +673,13 @@ word ivm_jit(const uchar *code, word code_len,
       em(SEC);
       emit_lohiop(SBC, lim);
       em(TXA);
-      // slot > lim (positive high byte): skip the 3-byte back-branch
+      // slot > lim only (strict): zero and negative both loop
+      em2(BMI, 3);                 // < → loop
+      em2(BEQ, 3);                 // == → loop
+      // > lim: fall out (skip the back-branch)
       em2(BPL, 3);
       em(CLC);
-      emit_rel(BCC, loop_top);     // slot <= lim → loop
+      emit_rel(BCC, loop_top);
       break;
     }
 
