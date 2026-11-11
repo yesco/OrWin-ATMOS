@@ -620,22 +620,43 @@ word ivm_jit(const uchar *code, word code_len,
       break;
     }
 
-    // i: FOR — 3 operands (slot, limit-slot, skip). 
-    // if mem[slot] <= mem[limit]: fall through; else skip.
+    // i: FOR — 3 operands (slot, limit-slot, skip).
+    // if mem[slot] > mem[limit]: skip body; else fall through.
     case 'i': {
       uchar slot = PAR;
       uchar lim  = PAR;
       uchar skip = PAR;
+      word after = (word)(p - code);          // bc pc after the 3 operands
+      word dest  = (word)(after + skip);      // where to go if done
       emit_load_slot(slot);
-      // compare with lim — for now just consume; full compare later
-      (void)lim; (void)skip;
+      em(SEC);
+      emit_lohiop(0xED, lim);                 // SBC abs: ACC = slot - lim
+      // if ACC > 0 (no borrow and nonzero) skip; else fall through
+      em(TXA);
+      em2(0x30, 5);                           // BMI +5 → negative, fall through
+      em2(ORAZ, 0xfe);                        // nonzero test placeholder
+      emit_rel(BCC, dest);                    // patched forward branch
       break;
     }
 
-    // n: NEXT — 1 operand (back-skip)
+    // n: NEXT — 1 operand (back distance). Branch back to the i.
     case 'n': {
       uchar back = PAR;
-      (void)back;
+      word dest = (word)((p - code) - back);
+      // unconditional back-branch (BCC after CLC)
+      em(CLC);
+      emit_rel(BCC, dest);
+      break;
+    }
+
+    // U: mem[a] += mem[b]; ACC = result. Two slot operands.
+    case 'U': {
+      uchar a = PAR;
+      uchar b = PAR;
+      emit_load_slot(a);
+      em(CLC);
+      emit_lohiop(ADC, b);
+      emit_store_slot(a);
       break;
     }
 
