@@ -620,16 +620,53 @@ word ivm_jit(const uchar *code, word code_len,
       break;
     }
 
-    // i: FOR — consume 3 operands. Loop body runs once for now
-    // (proper compare/branch comes after linear path is solid).
+    // i: FOR slot lim skip
+    // if mem[slot] > mem[lim]: branch forward past body; else fall through.
     case 'i': {
-      (void)PAR; (void)PAR; (void)PAR;
+      uchar slot = PAR;
+      uchar lim  = PAR;
+      uchar skip = PAR;
+      word dest = (word)((p - code) + skip);
+      emit_load_slot(slot);
+      em(SEC);
+      emit_lohiop(SBC, lim);       // ACC = slot - lim
+      em(TXA);                     // high byte
+      em2(BMI, 2);                 // neg → slot < lim → skip the BNE
+      emit_rel(0xD0, dest);        // BNE → slot > lim → skip body
       break;
     }
 
-    // n: NEXT — consume operand, no back-branch yet.
+    // n: NEXT back
+    // increment the loop slot (from the matching i) and branch back
+    // if still <= lim; else fall through.
     case 'n': {
-      (void)PAR;
+      uchar back = PAR;
+      // the i is `back` bytes before this operand
+      // i layout: slot, lim, skip — we need those
+      const uchar *ip = p - 1 - back;   // points at the i opcode
+      uchar slot, lim;
+      word loop_top;
+      if (ip < code || *ip != 'i') {
+        // can't find matching i; just consume
+        break;
+      }
+      slot = ip[1];
+      lim  = ip[2];
+      loop_top = (word)((ip + 4) - code);  // bc pc of body start
+      // increment slot
+      ema(INC_, slotlo(slot));
+      em2(BNE, 3);
+      ema(INC_, slothi(slot));
+      // compare with lim
+      emit_load_slot(slot);
+      em(SEC);
+      emit_lohiop(SBC, lim);
+      em(TXA);
+      em2(BMI, 2);                 // still < lim → branch back
+      em2(BNE, 2);                 // > lim → fall out
+      // == lim → branch back (inclusive)
+      em(CLC);
+      emit_rel(BCC, loop_top);
       break;
     }
 
