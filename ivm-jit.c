@@ -174,11 +174,6 @@ typedef struct { word at, bc_target; } LcFix;
 static LcFix lc_fix[256];
 static word  lc_nfix;
 
-// forward call sites (JSR absolute that must be patched after all functions seen)
-typedef struct { word at; uchar v; } CallFix;
-static CallFix lc_calls[256];
-static word lc_ncalls;
-
 // jump vector table at start of code (word per vector)
 static word  lc_vecmark;      // offset in out[] of vector table
 static word  lc_out_org;      // absolute base of out[]
@@ -270,7 +265,6 @@ word ivm_jit(const uchar *code, word code_len,
   lc_out = out; lc_at = 0; lc_max = out_max;
   lc_map = map; lc_mapn = map_n; lc_mem = mem_base;
   lc_nfix = 0;
-  lc_ncalls = 0;
   lc_out_org = out_org;
   lc_ncall = ncall;
   lc_fbase = frame_base;
@@ -332,19 +326,31 @@ word ivm_jit(const uchar *code, word code_len,
 
       } else {
 
-        // One byte vector call
+        // One byte vector call.
+        // Only vectors that exist in the call table are real calls.
         uchar v = (uchar)(op - 0xC0);
-        word dest = 0;
-        if (v < lc_ncall && lc_vecmark + v * 2 + 1 < lc_max)
-          dest = (word)(lc_out[lc_vecmark + v * 2]
-                     | (lc_out[lc_vecmark + v * 2 + 1] << 8));
-        // record for later patch if not yet defined
-        if (!dest && lc_ncalls < 256) {
-          lc_calls[lc_ncalls].at = lc_at + 1; // after the JSR opcode
-          lc_calls[lc_ncalls].v = v;
-          lc_ncalls++;
+        if (v < lc_ncall) {
+          word dest = 0;
+          if (lc_vecmark + v * 2 + 1 < lc_max)
+            dest = (word)(lc_out[lc_vecmark + v * 2]
+                       | (lc_out[lc_vecmark + v * 2 + 1] << 8));
+          if (!dest)
+            printf("%%JIT: call vec %u before definition\n", v);
+          ema(JSR, dest);
+        } else {
+          // not a real call — dump context so we can see what this byte is
+          word pc = (word)(p - code - 1);
+          printf("%%JIT: not-a-call 0x%02X (vec %u) at bc %u  ctx:",
+            op, v, (unsigned)pc);
+          {
+            int k;
+            word start = pc > 4 ? pc - 4 : 0;
+            word stop  = pc + 5 < code_len ? pc + 5 : code_len;
+            for (k = (int)start; k < (int)stop; k++)
+              printf(" %02X%s", code[k], k == (int)pc ? "*" : "");
+          }
+          printf("\n");
         }
-        ema(JSR, dest);
 
       }
       continue;
@@ -586,29 +592,22 @@ word ivm_jit(const uchar *code, word code_len,
 
     case ' ': break; // spacer
 
+    // C: copy mem[s] -> mem[d], result in ACC. Two slot operands.
+    case 'C': {
+      uchar d = PAR;
+      uchar s = PAR;
+      emit_load_slot(s);
+      emit_store_slot(d);
+      break;
+    }
+
     default: em(BRK); break; // unknown
 
     }
     #undef PAR
   }
 
-  // patch forward calls now that all function entries have filled the vector table
-  for (i = 0; i < lc_ncalls; i++) {
-    uchar v = lc_calls[i].v;
-    word at = lc_calls[i].at;
-    word dest = 0;
-    if (v < lc_ncall && lc_vecmark + v * 2 + 1 < lc_max)
-      dest = (word)(lc_out[lc_vecmark + v * 2]
-                 | (lc_out[lc_vecmark + v * 2 + 1] << 8));
-    if (dest && at + 1 < lc_max) {
-      lc_out[at]     = (uchar)(dest & 0xff);
-      lc_out[at + 1] = (uchar)(dest >> 8);
-    } else {
-      printf("%%JIT: unresolved call vec %u\n", v);
-    }
-  }
-
-  // patch relative branches only (G/B).
+  // patch relative branches only (G/B). Calls need no fixups.
   for (i = 0; i < lc_nfix; i++) {
     word dest = lc_fix[i].bc_target;
     word mapped = 0xffff;

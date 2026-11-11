@@ -1573,7 +1573,7 @@ word jit_compile(Process* proc) {
   word *map;
   uchar *out;
   word out_max = 8192;
-  word out_org = 0x4000;  // example 6502 origin
+  word out_org;
   word mem_base = (word)(unsigned)proc->h.mem; // slots already allocated
   word jit_size;
   int i;
@@ -1594,16 +1594,37 @@ word jit_compile(Process* proc) {
 
   code_len = (bh->data > bh->code) ? (bh->data - bh->code) : (bh->len - bh->code);
 
-  // call table is not zero-terminated (zeros can appear for unused slots).
-  // size is the gap between the call section and the following const section.
+  // call table size from section gap
   ncall = (uchar)((bh->con - bh->call) / sizeof(word));
   if (ncall > 64) ncall = 64;
+
+  // diagnostic
+  printf("--- hdr: call=%u con=%u fp=%u code=%u ncall=%u ---\n",
+    (unsigned)bh->call, (unsigned)bh->con, (unsigned)bh->fp,
+    (unsigned)bh->code, ncall);
+
+  // find max vector number actually used in bytecode
+  {
+    uchar maxv = 0;
+    const uchar *bp = code;
+    const uchar *be = code + code_len;
+    while (bp < be) {
+      uchar op = *bp++;
+      if (op >= 0xC0 && (op - 0xC0) > maxv)
+        maxv = (uchar)(op - 0xC0);
+    }
+    printf("--- max vector in bytecode: %u ---\n", maxv);
+    if (maxv >= ncall)
+      printf("--- WARNING: bytecode uses vec %u but table has only %u ---\n",
+        maxv, ncall);
+  }
 
   for (i = 0; i < ncall; i++)
     vec_bc[i] = callv[i] - bh->code;
 
   map = (word *)calloc(code_len ? code_len : 1, sizeof(word));
   out = (uchar *)malloc(out_max);
+  out_org = (word)(unsigned)out;
   if (!map || !out) {
 
     printf("--- JIT: alloc fail ---\n");
