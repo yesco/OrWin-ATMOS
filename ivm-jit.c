@@ -670,12 +670,14 @@ word ivm_jit(const uchar *code, word code_len,
       // compare with lim
       emit_load_slot(slot);
       em(SEC);
-      emit_lohiop(SBC, lim);
+      emit_lohiop(SBC, lim);       // A = low, X = high
+      em2(STAZ, 0xfe);             // save low
       em(TXA);
-      // offsets are from the byte after each branch instruction
-      em2(BMI, 4);                 // < : skip BEQ(2)+BPL(2) → CLC
-      em2(BEQ, 2);                 // == : skip BPL(2) → CLC
-      em2(BPL, 3);                 // > : skip CLC(1)+BCC(2) → fall out
+      em2(ORAZ, 0xfe);             // A = high|low; Z if both zero
+      // C still valid from SBC: C=0 means slot < lim
+      em2(BCC, 4);                 // < → loop
+      em2(BEQ, 2);                 // == → loop
+      em2(BPL, 3);                 // > → skip CLC(1)+BCC(2)
       em(CLC);
       emit_rel(BCC, loop_top);
       break;
