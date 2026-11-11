@@ -144,6 +144,7 @@ Simplyfy function calling code:
 #define PLA   0x68
 
 extern void opputnum(void);
+extern ivmvar ivm_acc;
 //extern void putchar(void);
 extern void opmul(void);
 extern void opdiv(void);
@@ -460,7 +461,11 @@ word ivm_jit(const uchar *code, word code_len,
 
     // I/O — same symbols as ivm-vm.asm
     case 'N': em2(LDAN, 10); ema(JSR, REF(putchar)); break;
-    case '.': ema(JSR, REF(opputnum)); break;
+    case '.':
+      ema(STA, (word)(unsigned)&ivm_acc);
+      ema(STX, (word)((unsigned)&ivm_acc + 1));
+      ema(JSR, REF(opputnum));
+      break;
     case 'P': ema(JSR, REF(opputnum)); break; // asm op_P is puts(*ACC); wire puts_ax if split
     case 'O': em2(LDAN, PAR); ema(JSR, REF(putchar)); break;
 
