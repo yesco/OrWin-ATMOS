@@ -668,17 +668,24 @@ word ivm_jit(const uchar *code, word code_len,
     // compares → boolean ACC (0 or 1). '=' trivial; '<'/'>' via subtract + sign/ne
     case '=': {
       uchar s = PAR;
+#if 0
+      emit_alub(CMP, s, 0); BNE(+4);
+      emit_alub(CMP, S, 1); BNE(+2);
+#else
       em(SEC); emit_lohiop(SBC, s);           // ACC -= mem[s]
       em2(STXZ, tmp1); em2(ORAZ, tmp1);       // Z if equal
       em2(BEQ, 6);
       em2(LDAN, 0); em2(LDXN, 0); em2(BEQ, 4);
       em2(LDAN, 1); em2(LDXN, 0);
+#endif
       break;
     }
     case '<': {
       uchar s = PAR;
       em(SEC); emit_lohiop(SBC, s);           // ACC = ACC - mem[s]
+// TODOO: we're unsigned, lol
       // signed < : result negative → 1
+// TODO: BMI bad!!!
       em(TXA); em2(BMI, 6);
       em2(LDAN, 0); em2(LDXN, 0); em2(BEQ, 4);
       em2(LDAN, 1); em2(LDXN, 0);
@@ -686,18 +693,12 @@ word ivm_jit(const uchar *code, word code_len,
     }
     case '>': {
       uchar s = PAR;
-      // ACC > mem  iff  mem < ACC  iff  !(ACC <= mem) — do mem-ACC via swap:
-      // compute mem[s]-ACC: load mem, subtract ACC
-      em2(STAZ, tmp1); em2(STXZ, tmp2);       // save ACC
-      emit_load_slot(s);
-      em(SEC);
-      em2(SBCZ, tmp1); em(TAY);
-      em(TXA); em2(SBCZ, tmp2); em(TAX);      // AX = mem - ACC
-      em(TYA);
-      // mem-ACC negative ⇒ mem < ACC ⇒ ACC > mem
-      em(TXA); em2(BMI, 6);
-      em2(LDAN, 0); em2(LDXN, 0); em2(BEQ, 4);
-      em2(LDAN, 1); em2(LDXN, 0);
+      // - ACC + mem, == mem - ACC, C is opposite
+      em(SEC); em2(EORN, 0xff); emit_alub(ADC, s, 0);
+      em(TXA); em2(EORN, 0xff); emit_alub(ADC, s, 1);
+
+      em2(BCC, 6);  em2(LDAN, 0); em2(LDXN, 0);
+      em2(BEQ, 4);  em2(LDAN, 1); em2(LDXN, 0);
       break;
     }
 
