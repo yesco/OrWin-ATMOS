@@ -668,10 +668,23 @@ word ivm_jit(const uchar *code, word code_len,
     // compares → boolean ACC (0 or 1). '=' trivial; '<'/'>' via subtract + sign/ne
     case '=': {
       uchar s = PAR;
+      word at;
 #if 0
-      emit_alub(CMP, s, 0); BNE(+4);
-      emit_alub(CMP, S, 1); BNE(+2);
+// (/ 55020545 56084737.0) 1.2% faster
+
+
+// TODO: USE THIS ONE!
+// TODO: fix jumps
+// 14-16 B  12-16-17c (+2 for !zp)
+      emit_alub(CMP, s, 0); em2(BNE, +8);
+      emit_alub(CPX, s, 1); em2(BNE, +4); // TOO: we don't know size of alub!
+
+      eq: em2(LDAN, 1); em2(BNE, +2);
+      ne: em2(LDAN, 0);
+      em2(LDXN, 0);
+
 #else
+// // 19 B  18-21c
       em(SEC); emit_lohiop(SBC, s);           // ACC -= mem[s]
       em2(STXZ, tmp1); em2(ORAZ, tmp1);       // Z if equal
       em2(BEQ, 6);
@@ -682,14 +695,25 @@ word ivm_jit(const uchar *code, word code_len,
     }
     case '<': {
       uchar s = PAR;
+#if 0
+// TODO: Use this one! -- slightly faster?
+      emit_alub(CMP, s, 0); em(TXA);
+      emit_alub(SBC, s, 1); 
+      
+      // result is !C lol
+      em2(LDAN, 0); em(TAX); em(ROLA); em2(EORN, 1);
+#else
       em(SEC); emit_lohiop(SBC, s);           // ACC = ACC - mem[s]
+
 // TODOO: we're unsigned, lol
-      // signed < : result negative → 1
 // TODO: BMI bad!!!
+      // signed < : result negative → 1
+
       em(TXA); em2(BMI, 6);
       em2(LDAN, 0); em2(LDXN, 0); em2(BEQ, 4);
       em2(LDAN, 1); em2(LDXN, 0);
       break;
+#endif
     }
     case '>': {
       uchar s = PAR;
