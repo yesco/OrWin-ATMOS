@@ -72,7 +72,7 @@ cl65 -Dputz=printf -t sim6502 -Oirs -vm -m $name.map.cc65 $name.c -o $name.sim &
 echo
 
 echo "-- oscar64 --"
-time ./oscar -Oz -Dputz=printf -ep $name.c 
+time ./oscar -Os -Dputz=printf -ep $name.c 
 echo
 
 echo "-- pc --"
@@ -119,8 +119,8 @@ echo
 #
 #      ============  byte-sieve-prime.c - 111 BC ============
 #
-# oscar64 -Os		|       16 s   ~2.3x      | best C for 6502
-# cc65 -Oirs		|       78 s  ~11x	| std compliant, slow
+# oscar64 -Os	  294 B	|       16 s   ~2.3x    | best C for 6502 -   (4594 B)
+# cc65 -Oirs	  442 B	|       78 s  ~11x	| std compliant, slow (3083 B)
 #
 # ./ivm-asm 		|      180 s  ~25x      |
 # ./ivm C-interpr    ** |(751?)697 s  ~99.6x    | simplier code

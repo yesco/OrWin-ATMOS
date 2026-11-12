@@ -304,6 +304,9 @@ pis_out:
   __asm__ ("jmp ($fe)");
 }
 
+extern char* disasm(char* mc, char* end, char indent);
+    
+
 extern ivmvar ivm_zalloc(ivmvar n);
 extern void   ivm_free(ivmvar p);
 
@@ -498,7 +501,8 @@ word ivm_jit(const uchar *code, word code_len,
   const uchar *p, *end;
   word i, bc_pc;
   uchar op;
-
+  word start;
+  
   if (!code || !out || !map || code_len > map_n) return 0;
 
   zpmap_init();
@@ -602,6 +606,10 @@ word ivm_jit(const uchar *code, word code_len,
 
     // PAR: one operand byte, advances p
     #define PAR (*p++)
+
+    printf("------- %02x '%c' %02x %02x %02x %02x ------\n",
+      op, isprint(op)? op: ' ', p[0], p[1], p[2], p[3]);
+    start = lc_at;
 
     switch (op) {
     // control
@@ -799,10 +807,12 @@ word ivm_jit(const uchar *code, word code_len,
     case '(': {
       uchar base = PAR, idx = PAR;
       // ptr = mem[base] + 2*mem[idx] into tmp1, then word load
+// TODO: shoulldn't do this
       emit_load_slot(base); emit_ax_to_tmp1();
       emit_load_slot(idx);
       em(ASLA); em(TAY); em(TXA); em(ROLA); em(TAX); em(TYA);
       em(CLC);
+// TODO: isntead just add base here!
       em2(ADCZ, tmp1); em2(STAZ, tmp1);
       em(TXA); em2(ADCZ, tmp2); em2(STAZ, tmp2);
       // load word into AX using ptr
@@ -812,6 +822,7 @@ word ivm_jit(const uchar *code, word code_len,
     }
     // ): ((word*)base)[idx] = ACC
     case ')': {
+// TODO: shouldn't need tmp1, use base directly in ADC!
       uchar base = PAR, idx = PAR;
       em(PHA); em(TXA); em(PHA);           // save ACC value
       emit_load_slot(base); emit_ax_to_tmp1();
@@ -824,14 +835,16 @@ word ivm_jit(const uchar *code, word code_len,
       em(PLA); em(TAX); em(PLA);
       em2(LDYN, 0); em2(STAIY, tmp1);
       em(INY); em(TXA); em2(STAIY, tmp1);
+// TODO: AX is not ACC
       break;
     }
 
     // ?: ACC = !ACC
     case '?':
+      // TODO: make it shorter and it becomes more expensive!?
       em2(STXZ, tmp1); em2(ORAZ, tmp1);
-      em2(BEQ, 6); em2(LDAN, 0); em2(LDXN, 0); em2(BEQ, 4);
-      em2(LDAN, 1); em2(LDXN, 0);
+      em2(BEQ, 6); em2(LDAN, 0); em2(LDXN, 0);
+      em2(BEQ, 4); em2(LDAN, 1); em2(LDXN, 0);
       break;
     // ~: ACC = ~ACC
     case '~':
@@ -941,8 +954,15 @@ word ivm_jit(const uchar *code, word code_len,
       // slot <= lim → JMP back; slot > lim → fall out
       em2(BCC, 4);                 // < → skip to JMP
       em2(BEQ, 2);                 // == → skip to JMP
+
+// TDOO: wow, so messy! BPL on lo BITOR hi ???? BCS maybe?
+
       em2(BPL, 3);                 // > → skip the JMP, fall out
       em(JMP);
+
+// TODO: maybe if shot jump we can generate smaller code?
+//   this is jumping BACK so we know the size?!?      
+
       {
         word at = lc_at;
         em(0); em(0);
@@ -982,6 +1002,9 @@ word ivm_jit(const uchar *code, word code_len,
       break;
 
     }
+
+    disasm(lc_out + start, lc_out + lc_at, 0);
+
     #undef PAR
   }
 
