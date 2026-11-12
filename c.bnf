@@ -207,6 +207,9 @@ G=V\<
 # - Assignments
 # Prefer specific forms (no peephole across jumps): COPY / Z / U / ...
 H=\i+=\i;[U\1\2]
+|\i=\1+1;[I\1]
+|\i=1+\1;[I\1]
+|\i=\1-1;[J\1]
 |* \i=E;[!\1]
 |\i\[S\]=E;[)\1\2]
 |\i=0;[Z\1]

@@ -130,8 +130,10 @@ echo
 # ./ivm-jit zptmp       |       58.6s  		| 58,557,526 
 # ./ivm-jit zp    597 B	|       55.3   ~7.9x	| 55,267,670
 #      - unopt:  -12.6%	|			|
-#     - fix i ( )	| 	50.5    7.22x	| 50,546,185
+#     - fix i ( ) 547 B | 	50.5    7.22x	| 50,546,185
+# a = a + 1 == I  540 B	|       50.3    7.19x	| 50,300,804
 #
+# (/ 50.3 7.0)
 
 #  oscar64      0.29x (wow, fast! but super-optimized)
 #  ivm-jitzp    0.91x

@@ -10,6 +10,7 @@ const int size = 8190;
 const int sizepl = 8191;
 
 char *flags;
+
 int main() {
   int i, prime, k, count, iter; 
 
@@ -19,7 +20,7 @@ int main() {
 
   for (iter = 1; iter <= 10; iter ++) {
 
-    count=0; 
+    count = 0; 
 
     for (i = 0; i <= size; i++)
       flags[i] = TRUE; 
