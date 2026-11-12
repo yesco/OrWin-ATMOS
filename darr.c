@@ -120,20 +120,38 @@ Darr *darr(size_t z) {
   return d;
 }
 
-void dfree(Darr *d) {
+static void dfree_rec(Darr *d, uchar flags) {
   Darr *next;
+  void **vp;
+  size_t k;
 
   if (!d) return;
 
-  dfree(d->super);
+  if (d->super) dfree_rec(d->super, flags + 1);
 
   // free next list
   while (d) {
+
+    // free directories upwards, walking down
+    if (flags) {
+      vp = (void **)d->bytes;
+      for (k = 0; k < d->bn; k++) {
+        // if at leaf level and flag set free items
+        if (flags & 0x7f) dfree_rec((Darr *)vp[k], flags - 1);
+        else              free(vp[k]);
+      }
+    }
+
+    // free this chunk
     next = d->next;
     free(d);
     d = next;
   }
 }
+
+void dfree(Darr *d)       { dfree_rec(d, 0); }
+void dfree_owned(Darr *d) { dfree_rec(d, 128); }
+
 
 void* dptr(Darr *d, size_t i) {
   size_t bi, local, g, b;

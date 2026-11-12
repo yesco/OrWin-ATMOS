@@ -43,7 +43,7 @@ U=,M|
 
 # - TODO: why I^* - pascal artifact?
 T=I *\'^|I^*\'^|I
-I=int\'w|word\'w|void\'w|char\'c
+I=int\'w|word\'w|void\'w|char\'c|unsigned int\'w|unsigned char\'c
 
 # - Function/Args definition
 F=\oT \f\{(A)\r B \}[X]\o
@@ -57,6 +57,12 @@ C=V\<|K\<|
 # - Statements — keywords / specific forms first
 K=if (E)[?G\x] K else[0?G\x\w\y] K[\y]
 |if (E)[?G\x] K[\y]
+
+# - Switch
+# \sXX - not implemented cannot enable
+#|switch (E) [\s1 G\x] { \{ G \} [\y\s4] }\<
+# TODO: make work: for & while continue; ?
+#|break;[J\s3]\<
 
 # - Loops
 |for (\i=0; [Z\1]   \1<=\d; \1++) [\mi\1\3\x] K [n\z\y]
@@ -183,7 +189,20 @@ K=if (E)[?G\x] K else[0?G\x\w\y] K[\y]
 
 # - Statement can be a Block, or lastly Assignments
 |B|;
+|R;
 |H
+
+# END STATEMENT
+
+# G = Switch interior items (declarations, case/default labels, or normal statements)
+# TODO: oh, I guess one could declare vars at beginning, lol, even seen
+#   actually, REAL C is worse! This grammar is actually structured!
+G=V\<
+|case \d:[\s1]\<
+|default : [\s2] G\<
+|K\<
+|
+
 
 # - Assignments
 # Prefer specific forms (no peephole across jumps): COPY / Z / U / ...
@@ -208,6 +227,15 @@ J="%u\\\\n"|"%d\\\\n"|"%s\\\\n"|"%s"|"%u "|"%d "|"%u"|"%d"|"["]\u|E[.]
 
 # - Expressions
 E=\i+=\i [U\1\2]
+
+# - Casting
+#|(I)E  - not work (type annotation require a symbol?
+#|(T*)E - not work
+|(char*)E
+|(int*) E
+|(word*)E
+|(char)E[&\xff] # TODO: doesn't work
+
 |RO
 |S[\l1]O
 
@@ -280,6 +308,7 @@ Tokens:
   \f  declare function ident: name = ret-value cell of a new frame
       (base+0 ret addr, +1 ret value, +2 prev fp, +3 last param) + vector index
   \p  declare parameter: slot base+4+n
+-- TODO: conflict with \r set mark on REGISTER var
   \r  end of params (no input): last param moves to base+3 (JSR stores ACC there)
 
   \d  number -> const address (CONST_TOP down, via lit_addr)
@@ -308,4 +337,57 @@ Generate:
   \m       mark loop start    \z emit backward delta to the mark
   \[ \]    emit a literal [ or ]
 
-  [;]      function return opcode (after body)
+  [;]      function return opcode (alt: Q, X: after body)
+
+
+
+
+--- TODO: revsit / implement
+
+Switch:
+
+In C, a switch body { ... } is simply a sequence of statements interspersed with case <const>: and default: labels, plus break; statements.
+
+3. How the 4 Tiny Semantic Actions (\s1–\s4) Drive Your "Swiss Cheese" 'k' Emitter
+
+Because your parser is single-pass and backtracks on failed alternatives, keeping a tiny compile-time switch_stack[MAX_SWITCH_DEPTH] (with sp) handles nested switches and backtracking cleanly:
+
+1. [\s0] (on switch (E) right before [G\x]):
+	• Push a new SwitchFrame onto switch_stack[sp++].
+	• Allocate one relocatable break_const_slot from your constant
+          pool (CONST_TOP down) and clear the frame's (const_val,
+          code_offset) list.
+	• Emit [G\x] (jumps over all case bodies straight to the
+          bottom 'k' table).
+
+2. [\s1] (on case N :):
+	• Record (N, current_code_offset) in switch_stack[sp-1].
+	• (If current_code_offset - first_case_offset > 220, you can
+          optionally flush a 'k' chunk right here and emit a fresh
+          [G\x] for the next chunk so back never overflows 255!)
+
+3. [\s2] (on default :):
+
+	• Record default_offset = current_code_offset in
+          switch_stack[sp-1].
+
+4. [J\s3] (on break;):
+	• Emit J followed by switch_stack[sp-1].break_const_slot (2
+          bytes total!).
+	• (Note: If you also want break; inside for/while loops later,
+          \s3 simply checks whether the innermost enclosing block is a
+          switch or a loop!)
+
+5. [\y\s4] (at closing }):
+	• [\y] patches the top [G\x] jump to land right here at the
+          start of the 'k' dispatch block.
+	• [\s4] sorts the recorded (val, offset) pairs, splits them
+          into dense (span <= 2 * count, 0-filled holes!) vs. sparse
+          (0xff) 'k' chunks, and emits each 'k' instruction using back
+          = k_base_offset - case_offset.
+	• If default_offset was recorded, emit a final B
+          <back_to_default> (or GW if >255 bytes) right after the last
+          'k' chunk.
+	• Write current_code_offset (the exact end of the switch!)
+          into break_const_slot (marked for load-time relocation!),
+          and pop sp--.

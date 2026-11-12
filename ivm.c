@@ -94,16 +94,15 @@
 // BYTE CODES OVERVIEW
 // ====================
 // 0-31                 - fast var load (load typically 4x more common th store)
-// #$ \ (:_) (`)        - FREE to use
+// #$  \  :_  `         - FREE to use
 // 12345678             - local vars 1-7, 8 ist last var (AX)
-// ACD H R T VY         - FREE op vars
+// AD H R T VY          - FREE op vars
 //   possibly usage: cAr Cons cDr, Heap/Here, Recurse, Tail-call, Vector/index? Yndex?
 //
-// 23: a-w              - FREE OrwinOS API or system library strXX functions?
-// ? abcd   efgh        - ?store local (need analyze code savings)
-// ? ijk(l) mnop        - ?index stuff, built in loops iGG GG if zero/non-zero?
-// ? q(rs)t uv(w)       - ?SSTACK saves, param: 1..7 (ACC is 0th)
-// ? xyz                - syscall function LN with 1,2,3 byte args indices+acc
+// ? abcdefgh           - lisp?
+// ? mnop               - ?index stuff, built in loops iGG GG if zero/non-zero?
+// ? t uvw              - ?SSTACK saves, param: 1..7 (ACC is 0th)
+// xyz                  - syscall function LN with 1,2,3 byte args indices+acc
 //
 
 
@@ -149,14 +148,14 @@
 //  <=> - cmp - lt eq gt => 0 or 1
 //  ? - NOT acc (C: !)
 //  @ - read from global address ACC
-//? A - car acc= acc[0] == @
+//? A - car acc= acc[0] == @ TODO: redundant, find other USE!
 //  B - back jump "B03" = back 3 bytes
-//  C - copy ... cons(acc, $) - a variant of alloc cell and , ???
-//? D - cdr acc= acc[1] == 2 + @, LOL
+//  C - copy ... cons(acc, $) - a variant of alloc cell and
+//? D - cdr acc= acc[1] == 2 + @, LOL TODO: good for linked list
 //  E - emit char = putchar(acc)
 //  F - free var, set it 0 "Fvv"
 //  G - conditional acc > 0: goto 1-255
-//? H - TODO: heap/here something?
+//? H - TODO: heap/here something? Hollerith? LOL
 //  IJ - inc/dec var, leave val in ACC
 //  K - key = getchar (waits?)
 //  L - load var
@@ -167,43 +166,78 @@
 //  Q - "Quit" local function == return 0;
 //? R - recurse (save current frame, malloc?)
 //  S - store ACC in variable "Svv"
-//? T - type #ACCc chars from arg (or reverse), or Tailcall: Tii
+//? T - type #ACCc chars from arg (or reverse), or Tailcall: Tvv
 //  U - Unified op: ACC= var2 += var2
 //? V - TODO: same using ACC as value?  Vss == +ssSss (2 not 4 B)
 //  W - write var as number (unsigned) "Wvv"
 //  X - return ACC; see ';' and Q
-//? Y - 
+//? Y - TODO: readline?
 //  Z - zero variable Zvv
 //
 //? a-h - save local param (h needed, meaning ACC?)
-//? ijk - indexing stuff?
+//  ?    = lisp functions = ???
+//     a   - car/append
+//     b   - memBer
+//     c   - cons or :
+//     d   - cdr
+//     e   - eval
+//     f   - filter
+//     g   - assoc/G
+//     h   - happend
+//
+//     m   - map(car)
+//     o   - ordinal/length
+//     p   - print any (readable?)
+//     t   - terpri
+//     u   - null
+//     v   - 
+//     w   - write/while
+//
+//     #   - numberp or MKINT (like *2 ?)
+//     $   = string or consp ?
+//     \   - lambda
+//           nlist
+//           read
+//           setq   == !
+//           setcar == !
+//           setcdr
+//           not    == ?
+//           eq
+//           equal
+//           nth
+//           consp
+//
+//  i   - loop <= with 'n' ('i' var upper skip)
+//  j   - TODO: loop >=0 with 'n' (j var skip)
+//  k   - switch-case ('k'ase low count (const back)...)
+//
 //  l   - load byte from slot
-//? m   -
+//? m   - TODO: mini-malloc? fixed-size? lol Method call
 //  n   - next loop (together with ij ind/dec-for)
-//? op  - 
+//? op  - TODO: object, 'm' method call 'p' ... ?
 //  q   - quit program
 //  r   - read byte (c@)
 //  s   - save byte in slot (reset hibit)
 //? t   -
 //? u   - similar U ? or not need
-//? v
+//? v   - 
 //  w   - write byte (c!)
 //  xyz - call library functions w 2..4 args
 
-//  [ - shift left variable steps "[vv]
+//  [ - shift left variable steps "[vv"
 //? '\' possible use instead of 'O'!!! \ is like literal... lol
 //  ] - shift rigth varible steps "]vv"
 //  ^ - xor "^vv"
 //? _ - load ACC by name _cc (cc - const char* ptr)
 
-//" ` - 
+//" ` - TODO: eval/superquote literal datastructure?
 //  { - shift ACC left fixed steps "{nn}
 //  | - or w var "|vv"
 //  } - shift ACC right "}nn"
 //
 //  ~ - inverse ACC (oric: gray)
-//? - PON; (nop backwards for bench)
-//      TODO: NEXTPAGE: DEL not visible (oric: full block)
+//? - PON; (ivm.c: nop backwards for bench)
+//  - TODO: NEXTPAGE: DEL not visible (oric: full block)
 //
 // $80-$bf (64) conditional relative jump (forward) get rid of G
 // $bf-$ff (64) subroutine calls (vectorized)
@@ -1402,8 +1436,102 @@ ZL(op_m,   'm')  tpc = zp.ipc - *zp.ipc + 1;
                  if (!zp.acc)                 goto pnext; // done
                  zp.ipc = tpc + 3;            goto xnext; // back
 
+/*
 
-  
+Your design is remarkably cohesive—every piece solves a specific 6502
+and single-pass BNF constraint without adding runtime bloat.
+
+1. Flushing K Blocks Before back Overflows 255
+
+Emitting a K block mid-switch whenever accumulated_bytes + (3 + 2 *
+count) > 255 is a great single-pass compiler trick:
+
+• Why it works seamlessly: Because all breaks inside the switch jump
+  via J <break_const> (which gets overwritten at } with the final
+  end-of-switch relocated address), flushing an intermediate K block
+  mid-switch doesn't break control flow at all.
+
+• How fall-through and misses work:
+	• If a K block matches, it subtracts its 1-byte back offset
+          and jumps backward into the preceding case body.
+	• If it misses, it falls through straight into the next batch
+          of case bodies—which starts with a G jump over those bodies
+          to the next K block. Every single back delta stays strictly
+          1 byte (<= 255), even in a 2 KB switch.
+
+2. Using 255 (0xFF) as the Mode Sentinel: Dense Range vs. Sparse Pairs
+
+Using a single byte (low / mode) where 0xFF means "sparse (const,
+back) pairs" and any other value (0x00..0xFE) means "dense range
+starting at low" unifies both dispatch strategies into one opcode with
+zero extra opcode table slots:
+
+• Dense Mode (low != 0xFF, size = 4 + count bytes):
+
+   [OP_K] [low] [count] [break_const] ( [back_0] [back_1] ) ...
+   
+	• Cost: Only 1 byte per case (half the size of sparse mode!).
+	• 6502 execution: Acc - low -> CMP count -> BCS miss -> TAY ->
+          LDA (IP),Y gives back in O(1) (~18 cycles)!
+	• For our 6502 disassembler (0..31): All 32 cases pack into
+          just 36 bytes (4 + 32), fitting effortlessly inside a single
+          while loop and dispatching in ~18 cycles instead of 30 if
+          checks!
+
+• Sparse Mode (low == 0xFF, size = 4 + 2 * count bytes):
+
+   [OP_K] [0xFF] [count] [break_const] [c0] [back_0] [c1] [back_1] ...
+
+	• Cost: 2 bytes per case, handling arbitrary non-contiguous
+          constants (like 0x00, 0x20, 0x40, 0x4C, 0x60, 0x6C in the
+          second disassembler switch).
+
+	• 6502 execution: CMP (IP),Y / BEQ match / INY / INY / DEX /
+          BNE at 16 cycles per entry.
+
+3. One Tiny Edge Case to Watch (low == 0xFF as a Dense Start)
+
+In practice, a dense range almost never starts at 255 (0xFF) because 255 + count would wrap an 8-bit unsigned byte anyway—so 0xFF is naturally an impossible start value for a multi-element dense range.
+Are you going to make OP_K read the switch expression directly from the Accumulator (so switch (expr) just evaluates expr into Acc and jumps to OP_K), or pass a variable slot index?  
+
+*/
+
+// "kase low count back ..." (const implied = low+i!)
+// "kase xFF count (const back) ..."
+ZL(op_k,   'k')  {
+  uchar* base = zp.ipc;
+
+  word low   = *zp.ipc;
+  word n     = *++zp.ipc;
+    
+  if (low != 0xff) {
+    // Dense range [low, low + n - 1] => index lookup
+    word a  = zp.acc - low ;
+    word back;
+
+    if (a >= n) { zp.ipc += n; goto xnext; }
+
+    // in range [low, low+n] index lookup
+    back = zp.ipc[a];
+
+    // hole -> fall through!
+    if (!back)  { zp.ipc += n; goto xnext; }
+
+    // we got it, go back
+    zp.ipc = base - back; goto xnext;
+
+  } else {
+    // Sparse: (const back)... => serial scan
+    while (n--)
+      if (zp.acc == *++zp.ipc) { zp.ipc = base - *++zp.ipc; goto xnext; }
+      else zp.ipc++;
+
+    // not found - already at next op!
+    goto xnext;
+  }
+ }
+
+// OS API caller "x <lib:4><fun:4> one" (y, z adds +1 and +1 running)
 
 ZL(op_x,   'x')  zp.acc= sys(1, zp.acc, zp.ipc); zp.ipc+= 1; goto xnext;
 ZL(op_y,   'y')  zp.acc= sys(2, zp.acc, zp.ipc); zp.ipc+= 2; goto xnext;

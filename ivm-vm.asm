@@ -23,8 +23,8 @@ TRACE=0
 ;;; ALTCODE=1 breaks on sieve.c and byte-sieve-prime.c
 
 ;; ALTCODE: 1.5 % faster...
-;ALTCODE=0
-ALTCODE=1
+ALTCODE=0
+;ALTCODE=1
 
 .export         _run_ivm_asm
 

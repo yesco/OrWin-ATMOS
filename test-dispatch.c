@@ -8,7 +8,8 @@
 //   408,959,336 ./ivm test-dispatch-pon
 // 1,371,959,628 ./ivm test-dispatch-fun - last! and supser expensive!
 // 8,914,999,378 ./ivm-test-dispatch-loop 10 M
-//
+//   751,977,998 byte-sieve
+
 //  68 ops
 // (/ (- 409 66) 68.0) 5.044 c/ops! (linear search CMP #xx / BEQ xx)
 
@@ -16,26 +17,29 @@
 //    44,034,108 ./ivm-asm test-dispatch  // using ALTCODE+0
 //    95,074,135 ./ivm-asm test-dispatch-inc
 //   214,054,457 ./ivm-asm test-dispatch-fun (call + return)
-//
 // 1,603,014,148 ./ivm-asm test-dispatch-loop
 
-// --- IVM-ASM: UPDATED with FASTDISPATCH
+// --- IVM-ASM: UPDATED with FASTDISPATCH ALTCODE=0
 
 //    36,413,525 - dipatch
 //    85,964,138 - inc
-//     .......   - test-dispatch-fun.c  - fail compile
+//   204,884,444 - fun
 // 1,512,825,132 - loop 10 M ops
+//   184,577,647 - byte-sieve
 
-// --- IVM-ASM: AND ALTCODE ---
+// --- IVM-ASM: AND ALTCODE=1 ---
 //    28,133,473 - dispatch
 //    79,184,563 - inc
-//     .......   - test-dispatch-fun.c  - fail compile
-// 1,302,964,133 - loop ALTCODE=1 (print problem
+//   218,974,445 - fun  SLOWER! :-(
+// 1,302,964,133 - loop ALTCODE=1 
+//   ? crash     - byte-sieve
 
-// -- JIT ----
-//     2,384,325 - dispatch
-///   47,568,070 - inc
-//   550,272,728 - loop
+// -- JIT w const ----
+//       598,503 - dispatch    47. x   !
+//    17,508,004 - inc          4.5x
+//    20,468,599 - fun         10.7x  !
+//   550,272,728 - loop         2.4x
+//    58,556,915 - byte-sieve   3.15x
 
 
 // n++; == "Ivv" one dispatch, read param, read memory, inc, write

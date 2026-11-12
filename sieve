@@ -105,7 +105,12 @@ echo
 #
 # ./ivm-jit             |       61 s   ~8.7x    |
 # ./ivm-jit const       |       58.6s  ~8.37x	| 4.12% cycles 2412340
+# ./ivm-jit const   ZP  |
+#
 
+## cc65     is 43 % slower than ivm-jit!
+#  ivm-asm      3x  
+#  ivm         12x 
 
 # **) = multi-tasking several processes, at least 2x overhead?
 #
