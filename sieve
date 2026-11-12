@@ -129,12 +129,13 @@ echo
 # ./ivm-jit const       |       58.7s  ~8.4x	| 4.12% cycles 2412340
 # ./ivm-jit zptmp       |       58.6s  		| 58,557,526 
 # ./ivm-jit zp    597 B	|       55.3   ~7.9x	| 55,267,670
-#      - unopt:  -12.6%	|
-#
+#      - unopt:  -12.6%	|			|
+#     - fix i ( )	| 	50.5    7.22x	| 50,546,185
 #
 
 #  oscar64      0.29x (wow, fast! but super-optimized)
-#  ivm-jit      1.00x   == BASE 
+#  ivm-jitzp    0.91x
+#  ivm-jit      1.00x   == BASE ==  55.3s       (/ 78 55.3)
 #  cc65         1.41x
 #  ivm-asm      3.25x  
 #  ivm         13.3x

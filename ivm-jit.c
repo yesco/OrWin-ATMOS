@@ -305,7 +305,6 @@ pis_out:
 }
 
 extern char* disasm(char* mc, char* end, char indent);
-    
 
 extern ivmvar ivm_zalloc(ivmvar n);
 extern void   ivm_free(ivmvar p);
@@ -457,6 +456,28 @@ static void emit_ax_to_tmp1(void) {
   em2(STXZ, tmp2);
 }
 
+// A = A OP (lo or hi byte of mem[s]); const-aware. CLC/SEC by caller.
+static void emit_alub(uchar ins, uchar s, uchar hi) {
+  if (is_const(s)) {
+    word v = const_val(s);
+    em2(immop(ins), (uchar)(hi ? (v >> 8) : (v & 0xff)));
+  } else {
+    emop2(ins, hi ? slothi(s) : slotlo(s));
+  }
+}
+
+// tmp1/tmp2 = mem[base] + 2*mem[idx]   (clobbers A, X, Y)
+// base is added straight from its slot: no copy of base into tmp first.
+static void emit_elem_ptr(uchar base, uchar idx) {
+  emit_load_slot(idx);
+  em(ASLA); em(TAY);                       // Y = lo*2, C = bit 7
+  em(TXA); em(ROLA); em(TAX);              // X = hi*2 | C
+  em(CLC); em(TYA);
+  emit_alub(ADC, base, 0); em2(STAZ, tmp1);
+  em(TXA);
+  emit_alub(ADC, base, 1); em2(STAZ, tmp2);
+}
+
 // INSTRUCTION:
 //   TODO: rewrite so it takes the relative bytecode value
 //     this routine can do all the mapping and translation to
@@ -502,7 +523,7 @@ word ivm_jit(const uchar *code, word code_len,
   word i, bc_pc;
   uchar op;
   word start;
-  
+
   if (!code || !out || !map || code_len > map_n) return 0;
 
   zpmap_init();
@@ -604,12 +625,12 @@ word ivm_jit(const uchar *code, word code_len,
       continue;
     }
 
-    // PAR: one operand byte, advances p
-    #define PAR (*p++)
-
     printf("------- %02x '%c' %02x %02x %02x %02x ------\n",
       op, isprint(op)? op: ' ', p[0], p[1], p[2], p[3]);
     start = lc_at;
+
+    // PAR: one operand byte, advances p
+    #define PAR (*p++)
 
     switch (op) {
     // control
@@ -806,45 +827,28 @@ word ivm_jit(const uchar *code, word code_len,
     // (: ACC = ((word*)base)[idx]
     case '(': {
       uchar base = PAR, idx = PAR;
-      // ptr = mem[base] + 2*mem[idx] into tmp1, then word load
-// TODO: shoulldn't do this
-      emit_load_slot(base); emit_ax_to_tmp1();
-      emit_load_slot(idx);
-      em(ASLA); em(TAY); em(TXA); em(ROLA); em(TAX); em(TYA);
-      em(CLC);
-// TODO: isntead just add base here!
-      em2(ADCZ, tmp1); em2(STAZ, tmp1);
-      em(TXA); em2(ADCZ, tmp2); em2(STAZ, tmp2);
-      // load word into AX using ptr
-      em2(LDYN, 0); em2(LDAIY, tmp1); em(PHA);
-      em(INY); em2(LDAIY, tmp1); em(TAX); em(PLA);
+      emit_elem_ptr(base, idx);            // tmp1/tmp2 = &base[idx]
+      // load word: hi first, then lo, no stack traffic
+      em2(LDYN, 1); em2(LDAIY, tmp1); em(TAX);
+      em(DEY);      em2(LDAIY, tmp1);
       break;
     }
     // ): ((word*)base)[idx] = ACC
     case ')': {
-// TODO: shouldn't need tmp1, use base directly in ADC!
       uchar base = PAR, idx = PAR;
-      em(PHA); em(TXA); em(PHA);           // save ACC value
-      emit_load_slot(base); emit_ax_to_tmp1();
-      emit_load_slot(idx);
-      em(ASLA); em(TAY); em(TXA); em(ROLA); em(TAX); em(TYA);
-      em(CLC);
-      em2(ADCZ, tmp1); em2(STAZ, tmp1);
-      em(TXA); em2(ADCZ, tmp2); em2(STAZ, tmp2);
-      // pushed lo then hi → PLA hi; TAX; PLA lo
-      em(PLA); em(TAX); em(PLA);
-      em2(LDYN, 0); em2(STAIY, tmp1);
-      em(INY); em(TXA); em2(STAIY, tmp1);
-// TODO: AX is not ACC
+      em(PHA); em(TXA); em(PHA);           // save ACC: lo, then hi
+      emit_elem_ptr(base, idx);            // tmp1/tmp2 = &base[idx]
+      // pop hi → store, pop lo → store; AX ends up = original ACC
+      em(PLA); em2(LDYN, 1); em2(STAIY, tmp1); em(TAX);
+      em(PLA); em(DEY);      em2(STAIY, tmp1);
       break;
     }
 
     // ?: ACC = !ACC
     case '?':
-      // TODO: make it shorter and it becomes more expensive!?
       em2(STXZ, tmp1); em2(ORAZ, tmp1);
-      em2(BEQ, 6); em2(LDAN, 0); em2(LDXN, 0);
-      em2(BEQ, 4); em2(LDAN, 1); em2(LDXN, 0);
+      em2(BEQ, 6); em2(LDAN, 0); em2(LDXN, 0); em2(BEQ, 4);
+      em2(LDAN, 1); em2(LDXN, 0);
       break;
     // ~: ACC = ~ACC
     case '~':
@@ -911,12 +915,22 @@ word ivm_jit(const uchar *code, word code_len,
       uchar lim  = PAR;
       uchar skip = PAR;
       word dest = (word)((p - code) + skip);
-      emit_load_slot(slot);
-      em(SEC);
-      emit_lohiop(SBC, lim);       // ACC = slot - lim
-      em(TXA);                     // high byte
-      em2(BMI, 5);                 // neg → skip the 5-byte long branch
-      emit_rel(BNE, dest);         // BNE → slot > lim → skip body
+      // slot > lim  <=>  lim - slot < 0. 16-bit subtract, N flag of the
+      // high-byte SBC is the sign (same convention as '<' / '>').
+      // Only A is clobbered; flags come straight from the SBC.
+      if (is_const(lim)) {
+        word v = const_val(lim);
+        em2(LDAN, (uchar)(v & 0xff));
+        em(SEC); emop2(SBC, slotlo(slot));
+        em2(LDAN, (uchar)(v >> 8));
+        emop2(SBC, slothi(slot));
+      } else {
+        emop2(LDA, slotlo(lim));
+        em(SEC); emop2(SBC, slotlo(slot));
+        emop2(LDA, slothi(lim));
+        emop2(SBC, slothi(slot));
+      }
+      emit_rel(BMI, dest);         // negative → slot > lim → skip body
       break;
     }
 
@@ -1003,9 +1017,10 @@ word ivm_jit(const uchar *code, word code_len,
 
     }
 
+    #undef PAR
+
     disasm(lc_out + start, lc_out + lc_at, 0);
 
-    #undef PAR
   }
 
   // patch relative branches only (G/B). Calls need no fixups.
