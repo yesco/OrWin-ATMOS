@@ -4,8 +4,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-const int true = 1;
-const int false = 0;
+const int TRUE = 1;
+const int FALSE = 0;
 const int size = 8190;
 const int sizepl = 8191;
 
@@ -22,7 +22,7 @@ int main() {
     count=0; 
 
     for (i = 0; i <= size; i++)
-      flags[i] = true; 
+      flags[i] = TRUE; 
 
     for (i = 0; i <= size; i++) { 
 
@@ -31,7 +31,7 @@ int main() {
         k = i + prime; 
 
         while (k <= size) { 
-          flags[k] = false; 
+          flags[k] = FALSE; 
           k += prime; 
         }
 
@@ -41,5 +41,5 @@ int main() {
     }
   }
 
-  putz("primes: "); putnl(count);
+  putz("primes: "); printf("%u \n", count);
 }

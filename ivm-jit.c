@@ -7,8 +7,9 @@
 // JSR helpers share symbols with ivm-vm.asm / C.
 //
 // Opcode naming: base mnemonic + suffix
-//   (none) abs   N imm   Z zp   X abs,X   Y abs,Y
-//   IX (zp,X)    IY (zp),Y
+//   (none) abs   N imm   Z zp   X abs,X   Y abs,Y   A accumulator
+//   ZX zp,X   ZY zp,Y   IX (zp,X)   IY (zp),Y   I (abs) indirect
+//   Exception: the plain abs forms of AND/INC/DEC are AND_ INC_ DEC_
 //
 // #define JIT 1
 
@@ -17,53 +18,33 @@
 
 INSTRUCTIONS: Keeps this section but keep updated for status
 
-### Call vectors — done
+### Status
 
-Per your INSTRUCTION, `ivm_jit` now takes the resolved vector table:
-
-```c
-word ivm_jit(..., const word *callvec, uchar ncall);
-
-// $C0+v → JSR callvec[v]
-// if callvec[v]==0, site is recorded for later patch
-
-void ivm_jit_resolve_vectors(callvec, ncall, vec_bc, map, out_org);
-void ivm_jit_patch_calls(out, out_max, callvec, ncall);
-```
-
-Typical flow:
-
-1. Compile with `callvec=NULL` (JSRs recorded)
-2. `resolve_vectors`: `callvec[i] = out_org + map[vec_bc[i]]`
-3. `patch_calls` fills JSR absolute addresses
-
----
-
-### What sieve still needs
-
-| Need | Status |
-|------|--------|
-| **Calls**                | **emit+resolve** (above) |
-| **Call frame**           | **Missing** — plain `JSR`/`RTS` is not enough; VM call pushes frame / sets `fp` |
-| **Compares** `<` `=` `>` | **Missing** (`BRK`) — sieve is full of `i < LIMIT` |
-| **Loops** `i` / `n` (or only `G`/`B`) | **Partial** — `G`/`B` only; no `i`/`n`/`U` |
-| **Array** `(` `)`        | Present (needs testing) |
+| Feature                  | Status |
+|--------------------------|--------|
+| Calls (vector table)     | **Done** — JMP + word table at start, JSR abs |
+| Call frame               | **Done** — fixed addresses from frame_base, AX stored at fp+FR_ACC on entry |
+| Compares `<` `=` `>`     | **Done** — boolean in ACC (needs testing) |
+| Loops `i` / `n` / `G` / `B` | **Present** — needs testing |
+| `U`                      | Present |
+| `j` (down-loop)          | **Missing** — warns only |
+| Array `(` `)`            | Present (needs testing) |
 | / *                      | JSR helpers; still need **PARAX → zp_par** |
+| ZP optimisation          | **Done, one place** — emop2() + zpmap[] (see below) |
 
-Sieve is dominated by **`for` + compare + index + call to
-`primes`**. Without **`<`/`>`** and a **real call/return frame**, it
-will not run even with vectors patched.
+### Zero page
 
-### Next concrete steps
+No lc_zp flag any more. Every abs-form instruction goes through
+emop2(op, addr): if addr < 256 and zpmap[op] != 0 the zero-page opcode
+is emitted (2 bytes), else the absolute form (3 bytes).  zpmap[] is a
+256 slot table indexed by the abs opcode, filled in zpmap_init().
+Only plain abs → zp is mapped; abs,X / abs,Y are NOT (zp,X wraps at
+$FF, abs,X does not).
 
-1. Emit **frame prologue/epilogue** (or shared `JSR call_helper` that
-matches `ivm-vm.asm` call) for `$C0+`
+Because sizes now vary, never hard-code a skip distance across an
+emop2() instruction: use em_br() / br_fix().
 
-2. Implement **`<` `=` `>`** → boolean in ACC (then `G` works)
-
-3. Confirm **`(` `)`** and **`M`/`F`** against soft-heap / 6502 memory
-model
-
+### Call vectors
 
 Simplyfy function calling code:
 - WHOLE code should start with NOP till you get odd address
@@ -83,7 +64,6 @@ Simplyfy function calling code:
 
 - implement '<' '=' and '>' please. '=' is trivial. '<' and '>' is just
   subtraction and test not ==
-- 
 
 */
 
@@ -95,53 +75,190 @@ Simplyfy function calling code:
 // INSTRUCTION: Keep all OPS defined on 6502 here
 //   Don't randomly remove because not used "today"
 //   Example: DEX you removed, why?
-#define BRK   0x00
-#define ORAZ  0x05
-#define ORA   0x0D
-#define BPL   0x10
-#define CLC   0x18
-#define JSR   0x20
-#define AND_  0x2D
-#define BMI   0x30
-#define SEC   0x38
-#define EORN  0x49
-#define EOR   0x4D
-#define JMP   0x4C
-#define RTS   0x60
-#define ADC   0x6D
+// Complete documented NMOS 6502 set. No raw opcode bytes in the code below.
+
+// ADC
+#define ADCN  0x69
 #define ADCZ  0x65
-#define STA   0x8D
-#define STX   0x8E
-#define STAZ  0x85
-#define STXZ  0x86
-#define TXA   0x8A
-#define TYA   0x98
+#define ADCZX 0x75
+#define ADC   0x6D
+#define ADCX  0x7D
+#define ADCY  0x79
+#define ADCIX 0x61
+#define ADCIY 0x71
+// AND
+#define ANDN  0x29
+#define ANDZ  0x25
+#define ANDZX 0x35
+#define AND_  0x2D
+#define ANDX  0x3D
+#define ANDY  0x39
+#define ANDIX 0x21
+#define ANDIY 0x31
+// ASL
+#define ASLA  0x0A
+#define ASLZ  0x06
+#define ASLZX 0x16
+#define ASL   0x0E
+#define ASLX  0x1E
+// branches
 #define BCC   0x90
-#define LDAZ  0xA5
-#define LDXZ  0xA6
-#define TAY   0xA8
-#define LDAN  0xA9
-#define TAX   0xAA
-#define LDA   0xAD
-#define LDX   0xAE
-#define LDYN  0xA0
-#define LDXN  0xA2
-#define LDAIY 0xB1
-#define STAIY 0x91
-#define INY   0xC8
-#define BNE   0xD0
+#define BCS   0xB0
 #define BEQ   0xF0
-#define SBCZ  0xE5
-#define SBC   0xED
-#define INC_  0xEE
+#define BMI   0x30
+#define BNE   0xD0
+#define BPL   0x10
+#define BVC   0x50
+#define BVS   0x70
+// BIT
+#define BITZ  0x24
+#define BIT   0x2C
+// BRK
+#define BRK   0x00
+// flags
+#define CLC   0x18
+#define CLD   0xD8
+#define CLI   0x58
+#define CLV   0xB8
+#define SEC   0x38
+#define SED   0xF8
+#define SEI   0x78
+// CMP
+#define CMPN  0xC9
+#define CMPZ  0xC5
+#define CMPZX 0xD5
+#define CMP   0xCD
+#define CMPX  0xDD
+#define CMPY  0xD9
+#define CMPIX 0xC1
+#define CMPIY 0xD1
+// CPX / CPY
+#define CPXN  0xE0
+#define CPXZ  0xE4
+#define CPX   0xEC
+#define CPYN  0xC0
+#define CPYZ  0xC4
+#define CPY   0xCC
+// DEC / DEX / DEY
+#define DECZ  0xC6
+#define DECZX 0xD6
 #define DEC_  0xCE
+#define DEC_X 0xDE
 #define DEX   0xCA
+#define DEY   0x88
+// EOR
+#define EORN  0x49
+#define EORZ  0x45
+#define EORZX 0x55
+#define EOR   0x4D
+#define EORX  0x5D
+#define EORY  0x59
+#define EORIX 0x41
+#define EORIY 0x51
+// INC / INX / INY
+#define INCZ  0xE6
+#define INCZX 0xF6
+#define INC_  0xEE
+#define INC_X 0xFE
 #define INX   0xE8
+#define INY   0xC8
+// JMP / JSR
+#define JMP   0x4C
+#define JMPI  0x6C
+#define JSR   0x20
+// LDA
+#define LDAN  0xA9
+#define LDAZ  0xA5
+#define LDAZX 0xB5
+#define LDA   0xAD
+#define LDAX  0xBD
+#define LDAY  0xB9
+#define LDAIX 0xA1
+#define LDAIY 0xB1
+// LDX
+#define LDXN  0xA2
+#define LDXZ  0xA6
+#define LDXZY 0xB6
+#define LDX   0xAE
+#define LDXY  0xBE
+// LDY
+#define LDYN  0xA0
+#define LDYZ  0xA4
+#define LDYZX 0xB4
+#define LDY   0xAC
+#define LDYX  0xBC
+// LSR
+#define LSRA  0x4A
+#define LSRZ  0x46
+#define LSRZX 0x56
+#define LSR   0x4E
+#define LSRX  0x5E
+// NOP
 #define NOP   0xEA
-#define ASL   0x0A
-#define ROL   0x2A
+// ORA
+#define ORAN  0x09
+#define ORAZ  0x05
+#define ORAZX 0x15
+#define ORA   0x0D
+#define ORAX  0x1D
+#define ORAY  0x19
+#define ORAIX 0x01
+#define ORAIY 0x11
+// stack
 #define PHA   0x48
+#define PHP   0x08
 #define PLA   0x68
+#define PLP   0x28
+// ROL
+#define ROLA  0x2A
+#define ROLZ  0x26
+#define ROLZX 0x36
+#define ROL   0x2E
+#define ROLX  0x3E
+// ROR
+#define RORA  0x6A
+#define RORZ  0x66
+#define RORZX 0x76
+#define ROR   0x6E
+#define RORX  0x7E
+// RTI / RTS
+#define RTI   0x40
+#define RTS   0x60
+// SBC
+#define SBCN  0xE9
+#define SBCZ  0xE5
+#define SBCZX 0xF5
+#define SBC   0xED
+#define SBCX  0xFD
+#define SBCY  0xF9
+#define SBCIX 0xE1
+#define SBCIY 0xF1
+// STA
+#define STAZ  0x85
+#define STAZX 0x95
+#define STA   0x8D
+#define STAX  0x9D
+#define STAY  0x99
+#define STAIX 0x81
+#define STAIY 0x91
+// STX
+#define STXZ  0x86
+#define STXZY 0x96
+#define STX   0x8E
+// STY
+#define STYZ  0x84
+#define STYZX 0x94
+#define STY   0x8C
+// transfers
+#define TAX   0xAA
+#define TAY   0xA8
+#define TSX   0xBA
+#define TXA   0x8A
+#define TXS   0x9A
+#define TYA   0x98
+
+// Branch conditions come in pairs differing by this bit (BNE<->BEQ etc).
+#define BRFLIP 0x20
 
 extern ivmvar ivm_acc;
 extern ivmvar ivm_par;
@@ -217,29 +334,70 @@ static const uchar *lc_fbase; // frame_base[v]
 static const word  *lc_vec_bc;// bytecode entry pc per vector
 
 
+// abs opcode → zero-page opcode, indexed by opcode. 0 = no zp variant.
+static uchar zpmap[256];
+
+static void zpmap_init(void) {
+  if (zpmap[LDA]) return;     // already done
+  zpmap[ORA]  = ORAZ;
+  zpmap[ASL]  = ASLZ;
+  zpmap[BIT]  = BITZ;
+  zpmap[AND_] = ANDZ;
+  zpmap[ROL]  = ROLZ;
+  zpmap[EOR]  = EORZ;
+  zpmap[LSR]  = LSRZ;
+  zpmap[ADC]  = ADCZ;
+  zpmap[ROR]  = RORZ;
+  zpmap[STY]  = STYZ;
+  zpmap[STA]  = STAZ;
+  zpmap[STX]  = STXZ;
+  zpmap[LDY]  = LDYZ;
+  zpmap[LDA]  = LDAZ;
+  zpmap[LDX]  = LDXZ;
+  zpmap[CPY]  = CPYZ;
+  zpmap[CMP]  = CMPZ;
+  zpmap[DEC_] = DECZ;
+  zpmap[CPX]  = CPXZ;
+  zpmap[SBC]  = SBCZ;
+  zpmap[INC_] = INCZ;
+}
+
 static void em(uchar b) {
   if (lc_at < lc_max) lc_out[lc_at] = b;
   lc_at++;
 }
 static void em2(uchar a, uchar b) { em(a); em(b); }
+
+// forced absolute form (JSR / JMP and anything without a zp variant)
 static void ema(uchar op, word addr) {
   em(op);
   em((uchar)(addr & 0xff));
   em((uchar)(addr >> 8));
 }
 
-static uchar lc_zp;          // 1 = slots live in zero page
-static uchar lc_constidx;     // first constant slot (255 = none)
-static word *lc_constmem;     // mem array with constant values filled
-
-static word slotlo(uchar s) {
-  if (lc_zp) return (word)((word)s << 1);          // ZP: slot*2
-  return (word)(lc_mem + ((word)s << 1));
+// op + address: abs opcode given; zero-page form used when addr is 0..255
+// and the opcode has one.
+static void emop2(uchar op, word addr) {
+  uchar z = zpmap[op];
+  if (z && addr < 256) em2(z, (uchar)addr);
+  else ema(op, addr);
 }
+
+// Branch with operand patched later: em_br() then br_fix() once the
+// skipped code is emitted. Safe with variable-size (zp/abs) instructions.
+static word em_br(uchar bop) {
+  em(bop); em(0);
+  return (word)(lc_at - 1);
+}
+static void br_fix(word at) {
+  if (at < lc_max) lc_out[at] = (uchar)(lc_at - at - 1);
+}
+
+static word slotlo(uchar s) { return (word)(lc_mem + ((word)s << 1)); }
 static word slothi(uchar s) { return (word)(slotlo(s) + 1); }
 
-// ZP emit: opcode + 1-byte address
-static void emz(uchar op, uchar zp) { em(op); em(zp); }
+static uchar lc_constidx;     // first constant slot (255 = none)
+static word *lc_constmem;     // mem array with constant values filled
 
 static int is_const(uchar s) {
   return lc_constidx != 255 && s >= lc_constidx && lc_constmem;
@@ -253,37 +411,42 @@ static void emit_load_slot(uchar s) {
     em2(LDXN, (uchar)(v >> 8));
     return;
   }
-  if (lc_zp) { emz(LDAZ, (uchar)slotlo(s)); emz(LDXZ, (uchar)slothi(s)); }
-  else       { ema(LDA, slotlo(s)); ema(LDX, slothi(s)); }
+  emop2(LDA, slotlo(s));
+  emop2(LDX, slothi(s));
 }
 static void emit_store_slot(uchar s) {
-  if (lc_zp) { emz(STAZ, (uchar)slotlo(s)); emz(STXZ, (uchar)slothi(s)); }
-  else       { ema(STA, slotlo(s)); ema(STX, slothi(s)); }
+  emop2(STA, slotlo(s));
+  emop2(STX, slothi(s));
 }
 static void emit_load0(void) { em2(LDAN, 0); em(TAX); }
 static void emit_load_ffff(void) { em2(LDAN, 0xff); em(TAX); }
+
+// abs ALU opcode → immediate form
+static uchar immop(uchar ins) {
+  switch (ins) {
+  case ADC:  return ADCN;
+  case SBC:  return SBCN;
+  case AND_: return ANDN;
+  case ORA:  return ORAN;
+  case EOR:  return EORN;
+  }
+  return 0;
+}
 
 // ACC = ACC OP mem[s]  (ADC/SBC/AND/ORA/EOR abs).
 // CLC/SEC emitted by caller when needed (+/-). Reuse for logical ops too.
 static void emit_lohiop(uchar ins, uchar s) {
   if (is_const(s)) {
     word v = const_val(s);
-    uchar iop = (uchar)(ins - 4);   // abs → immediate
+    uchar iop = immop(ins);
     em2(iop, (uchar)(v & 0xff)); em(TAY);
     em(TXA); em2(iop, (uchar)(v >> 8)); em(TAX);
     em(TYA);
     return;
   }
-  if (lc_zp) {
-    uchar zop = (uchar)(ins - 8);          // abs → zp (ADC/SBC/AND/ORA/EOR)
-    emz(zop, (uchar)slotlo(s)); em(TAY);
-    em(TXA); emz(zop, (uchar)slothi(s)); em(TAX);
-    em(TYA);
-  } else {
-    ema(ins, slotlo(s)); em(TAY);
-    em(TXA); ema(ins, slothi(s)); em(TAX);
-    em(TYA);
-  }
+  emop2(ins, slotlo(s)); em(TAY);
+  em(TXA); emop2(ins, slothi(s)); em(TAX);
+  em(TYA);
 }
 
 static void emit_ax_to_tmp1(void) {
@@ -298,7 +461,7 @@ static void emit_ax_to_tmp1(void) {
 //     bytecode
 
 // Reverse a branch opcode (flip the condition bit).
-static uchar rev_branch(uchar bop) { return (uchar)(bop ^ 0x20); }
+static uchar rev_branch(uchar bop) { return (uchar)(bop ^ BRFLIP); }
 
 // Always long form: reversed branch (2) + JMP abs (3) = 5 bytes.
 // Callers that skip over it use +5.
@@ -337,6 +500,8 @@ word ivm_jit(const uchar *code, word code_len,
   uchar op;
 
   if (!code || !out || !map || code_len > map_n) return 0;
+
+  zpmap_init();
 
   lc_out = out; lc_at = 0; lc_max = out_max;
   lc_map = map; lc_mapn = map_n; lc_mem = mem_base;
@@ -510,32 +675,40 @@ word ivm_jit(const uchar *code, word code_len,
     // * / % — helpers as in ivm-vm.asm (ACC op PAR); TODO: PARAX into zp_par
     case '*': case '/': case '%': {
       uchar s = PAR;
-      ema(STA, (word)(unsigned)&ivm_acc);
-      ema(STX, (word)((unsigned)&ivm_acc + 1));
+      emop2(STA, (word)(unsigned)&ivm_acc);
+      emop2(STX, (word)((unsigned)&ivm_acc + 1));
       emit_load_slot(s);
-      ema(STA, (word)(unsigned)&ivm_par);
-      ema(STX, (word)((unsigned)&ivm_par + 1));
+      emop2(STA, (word)(unsigned)&ivm_par);
+      emop2(STX, (word)((unsigned)&ivm_par + 1));
       if (op == '*') ema(JSR, REF(opmul));
       else if (op == '/') ema(JSR, REF(opdiv));
       else ema(JSR, REF(opmod));
-      ema(LDA, (word)(unsigned)&ivm_acc);
-      ema(LDX, (word)((unsigned)&ivm_acc + 1));
+      emop2(LDA, (word)(unsigned)&ivm_acc);
+      emop2(LDX, (word)((unsigned)&ivm_acc + 1));
       break;
     }
 
-    // I: INC lo; BNE +3; INC hi; reload ACC
+    // I: INC lo; BNE skip; INC hi; reload ACC
     case 'I': {
       uchar s = PAR;
-      if (lc_zp) { emz(0xE6, (uchar)slotlo(s)); em2(BNE, 3); emz(0xE6, (uchar)slothi(s)); }
-      else { ema(INC_, slotlo(s)); em2(BNE, 3); ema(INC_, slothi(s)); }
+      word br;
+      emop2(INC_, slotlo(s));
+      br = em_br(BNE);
+      emop2(INC_, slothi(s));
+      br_fix(br);
       emit_load_slot(s);
       break;
     }
-    // J: LDA lo; BNE +3; DEC hi; DEC lo; reload ACC
+    // J: LDA lo; BNE skip; DEC hi; DEC lo; reload ACC
     case 'J': {
       uchar s = PAR;
-      ema(LDA, slotlo(s)); em2(BNE, 3); ema(DEC_, slothi(s));
-      ema(DEC_, slotlo(s)); emit_load_slot(s);
+      word br;
+      emop2(LDA, slotlo(s));
+      br = em_br(BNE);
+      emop2(DEC_, slothi(s));
+      br_fix(br);
+      emop2(DEC_, slotlo(s));
+      emit_load_slot(s);
       break;
     }
 
@@ -543,13 +716,13 @@ word ivm_jit(const uchar *code, word code_len,
     case 'N': em2(LDAN, 10); ema(JSR, REF(putchar)); break;
     case 'E': ema(JSR, REF(putchar)); break;  // emit ACC as char
     case '.':
-      ema(STA, (word)(unsigned)&ivm_acc);
-      ema(STX, (word)((unsigned)&ivm_acc + 1));
+      emop2(STA, (word)(unsigned)&ivm_acc);
+      emop2(STX, (word)((unsigned)&ivm_acc + 1));
       ema(JSR, REF(opputnum));
       break;
     case 'P':
-      ema(STA, (word)(unsigned)&ivm_acc);
-      ema(STX, (word)((unsigned)&ivm_acc + 1));
+      emop2(STA, (word)(unsigned)&ivm_acc);
+      emop2(STX, (word)((unsigned)&ivm_acc + 1));
       ema(JSR, REF(jit_puts));
       break;
     case 'O': em2(LDAN, PAR); ema(JSR, REF(putchar)); break;
@@ -559,8 +732,8 @@ word ivm_jit(const uchar *code, word code_len,
     case 'F': { uchar s = PAR; emit_load_slot(s); ema(JSR, REF(ivm_free)); emit_load0(); emit_store_slot(s); break; }
 
     // byte slot
-    case 'l': { uchar s = PAR; ema(LDA, slotlo(s)); em2(LDXN, 0); break; } // ACC = lo(mem[s])
-    case 's': { uchar s = PAR; ema(STA, slotlo(s)); em2(LDAN, 0); ema(STA, slothi(s)); break; }
+    case 'l': { uchar s = PAR; emop2(LDA, slotlo(s)); em2(LDXN, 0); break; } // ACC = lo(mem[s])
+    case 's': { uchar s = PAR; emop2(STA, slotlo(s)); em2(LDAN, 0); emop2(STA, slothi(s)); break; }
 
     case 'r': {
       uchar s = PAR;
@@ -575,14 +748,16 @@ word ivm_jit(const uchar *code, word code_len,
       break;
     }
 
+    // ': ACC = *(uchar*)ptr; ptr++   (post-increment byte read)
     case '\'': {
       uchar s = PAR;
       emit_load_slot(s); emit_ax_to_tmp1();
       em2(LDYN, 0); em2(LDAIY, tmp1); em(PHA);
-      em2(LDAZ, tmp1); em2(0x69, 1); em2(STAZ, tmp1);
-      em2(LDAZ, (uchar)(tmp2)); em2(0x69, 0); em2(STAZ, (uchar)(tmp2));
-      em2(LDAZ, tmp1); ema(STA, slotlo(s));
-      em2(LDAZ, (uchar)(tmp2)); ema(STA, slothi(s));
+      em(CLC);
+      em2(LDAZ, tmp1); em2(ADCN, 1); em2(STAZ, tmp1);
+      em2(LDAZ, tmp2); em2(ADCN, 0); em2(STAZ, tmp2);
+      em2(LDAZ, tmp1); emop2(STA, slotlo(s));
+      em2(LDAZ, tmp2); emop2(STA, slothi(s));
       em(PLA); em2(LDXN, 0);
       break;
     }
@@ -591,10 +766,11 @@ word ivm_jit(const uchar *code, word code_len,
       uchar s = PAR;
       em(TAY); emit_load_slot(s); emit_ax_to_tmp1();
       em(TYA); em2(LDYN, 0); em2(STAIY, tmp1);
-      em2(LDAZ, tmp1); em2(0x69, 1); em2(STAZ, tmp1);
-      em2(LDAZ, (uchar)(tmp2)); em2(0x69, 0); em2(STAZ, (uchar)(tmp2));
-      em2(LDAZ, tmp1); ema(STA, slotlo(s));
-      em2(LDAZ, (uchar)(tmp2)); ema(STA, slothi(s));
+      em(CLC);
+      em2(LDAZ, tmp1); em2(ADCN, 1); em2(STAZ, tmp1);
+      em2(LDAZ, tmp2); em2(ADCN, 0); em2(STAZ, tmp2);
+      em2(LDAZ, tmp1); emop2(STA, slotlo(s));
+      em2(LDAZ, tmp2); emop2(STA, slothi(s));
       break;
     }
 
@@ -625,10 +801,10 @@ word ivm_jit(const uchar *code, word code_len,
       // ptr = mem[base] + 2*mem[idx] into tmp1, then word load
       emit_load_slot(base); emit_ax_to_tmp1();
       emit_load_slot(idx);
-      em(ASL); em(TAY); em(TXA); em(ROL); em(TAX); em(TYA);
+      em(ASLA); em(TAY); em(TXA); em(ROLA); em(TAX); em(TYA);
       em(CLC);
       em2(ADCZ, tmp1); em2(STAZ, tmp1);
-      em(TXA); em2(ADCZ, (uchar)(tmp2)); em2(STAZ, (uchar)(tmp2));
+      em(TXA); em2(ADCZ, tmp2); em2(STAZ, tmp2);
       // load word into AX using ptr
       em2(LDYN, 0); em2(LDAIY, tmp1); em(PHA);
       em(INY); em2(LDAIY, tmp1); em(TAX); em(PLA);
@@ -640,12 +816,12 @@ word ivm_jit(const uchar *code, word code_len,
       em(PHA); em(TXA); em(PHA);           // save ACC value
       emit_load_slot(base); emit_ax_to_tmp1();
       emit_load_slot(idx);
-      em(ASL); em(TAY); em(TXA); em(ROL); em(TAX); em(TYA);
+      em(ASLA); em(TAY); em(TXA); em(ROLA); em(TAX); em(TYA);
       em(CLC);
       em2(ADCZ, tmp1); em2(STAZ, tmp1);
-      em(TXA); em2(ADCZ, (uchar)(tmp2)); em2(STAZ, (uchar)(tmp2));
-      em(PLA); em(TAX); em(PLA);           // ACC value A=lo X=hi? pull hi then lo if pushed lo,hi
-      // pushed PHA lo; PHA hi → PLA hi; TAX; PLA lo
+      em(TXA); em2(ADCZ, tmp2); em2(STAZ, tmp2);
+      // pushed lo then hi → PLA hi; TAX; PLA lo
+      em(PLA); em(TAX); em(PLA);
       em2(LDYN, 0); em2(STAIY, tmp1);
       em(INY); em(TXA); em2(STAIY, tmp1);
       break;
@@ -659,7 +835,6 @@ word ivm_jit(const uchar *code, word code_len,
       break;
     // ~: ACC = ~ACC
     case '~':
-      // INSTRUCITON: why the F did you remove op codes names? Don't use random consatnats!
       em2(EORN, 0xff); em(TAY); em(TXA); em2(EORN, 0xff); em(TAX); em(TYA);
       break;
 
@@ -671,7 +846,7 @@ word ivm_jit(const uchar *code, word code_len,
       em2(STAZ, tmp1); em(TXA);
       em2(ORAZ, tmp1);
       // ACC > 0 → JMP dest; else fall through
-      em2(BEQ, 5);                 // zero → skip JMP (1+2) + BMI? 
+      em2(BEQ, 5);                 // zero → skip BMI (2) + JMP (3)
       em2(BMI, 3);                 // neg → skip JMP
       em(JMP);
       at = lc_at; em(0); em(0);
@@ -728,7 +903,7 @@ word ivm_jit(const uchar *code, word code_len,
       emit_lohiop(SBC, lim);       // ACC = slot - lim
       em(TXA);                     // high byte
       em2(BMI, 5);                 // neg → skip the 5-byte long branch
-      emit_rel(0xD0, dest);        // BNE → slot > lim → skip body
+      emit_rel(BNE, dest);         // BNE → slot > lim → skip body
       break;
     }
 
@@ -742,6 +917,7 @@ word ivm_jit(const uchar *code, word code_len,
       const uchar *ip = p - back;       // operand_pos - back + 1
       uchar slot, lim;
       word loop_top;
+      word br;
       if (ip < code || *ip != 'i') {
         // can't find matching i; just consume
         break;
@@ -750,16 +926,17 @@ word ivm_jit(const uchar *code, word code_len,
       lim  = ip[2];
       loop_top = (word)((ip + 4) - code);  // bc pc of body start
       // increment slot
-      if (lc_zp) emz(0xE6, (uchar)slotlo(slot)); else ema(INC_, slotlo(slot));
-      em2(BNE, 3);
-      if (lc_zp) emz(0xE6, (uchar)slothi(slot)); else ema(INC_, slothi(slot));
+      emop2(INC_, slotlo(slot));
+      br = em_br(BNE);
+      emop2(INC_, slothi(slot));
+      br_fix(br);
       // compare with lim
       emit_load_slot(slot);
       em(SEC);
       emit_lohiop(SBC, lim);       // A = low, X = high
-      em2(STAZ, 0xfe);             // save low
+      em2(STAZ, tmp1);             // save low
       em(TXA);
-      em2(ORAZ, 0xfe);             // A = high|low; Z if both zero
+      em2(ORAZ, tmp1);             // A = high|low; Z if both zero
       // C still valid from SBC: C=0 means slot < lim
       // slot <= lim → JMP back; slot > lim → fall out
       em2(BCC, 4);                 // < → skip to JMP

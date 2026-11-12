@@ -38,7 +38,9 @@
 #
 # jit@byte.: (/ 198149017 60969255.0) 3.25x faster w JIT
 # jit/cc65 : (/ 60969255 85204077.0)  71.6% time of cc65!
-#
+# jitzptmp       58,557,526
+# 
+
 # loaded byte-sieve-prime.ivm (162 bytes)
 #  --- JIT compiling IVM (blob 162) ---
 #  --- hdr: call=24482 con=24484 fp=24498 code=24499 ncall=1 ---
@@ -57,22 +59,39 @@
 #
 # ==> 122 byte bytecode went down to: 113! -9 vars!
 
+#name="sieve"
+
+name="byte-sieve-prime"
 
 echo "-- `uname -a` --"
-clang -Dputz=printf sieve.c && time ./a.out
+clang -Dputz=printf $name.c && time ./a.out
 echo
 
 echo "-- cc65 --"
-cl65 -Dputz=printf -t sim6502 -Oirs sieve.c -o sieve.sim && time sim65 -c sieve.sim
+cl65 -Dputz=printf -t sim6502 -Oirs -vm -m $name.map.cc65 $name.c -o $name.sim && time sim65 -c $name.sim
 echo
 
 echo "-- oscar64 --"
-time ./oscar -Oz -Dputz=printf -ep sieve.c 
+time ./oscar -Oz -Dputz=printf -ep $name.c 
 echo
 
-echo "-- pc ; ivm ; ivm-asm --"
-./pc sieve && ./ivm sieve && ./ivm-asm sieve
+echo "-- pc --"
+./pc $name
 echo
+
+echo "-- ivm --"
+./ivm     $name
+echo
+
+echo "-- ivm-asm --"
+./ivm-asm $name
+echo
+
+echo "-- ivm-jit --"
+./ivm-jit $name
+echo
+
+
 
 
 # BYTE SIEVE BENCHMARK
@@ -98,19 +117,27 @@ echo
 # ./ivm-asm          **	|      182 s  ~26x	| written in asm/ca65
 # ./ivm C-interprter **	|      735 s ~105x	| written in cc65
 #
-#                       - byte-sieve-prime.c -
+#      ============  byte-sieve-prime.c - 111 BC ============
 #
-# ./ivm-asm		|      180 s  ~25x      |
-# ./ivm C-interpr    ** |      697 s  ~99.6x    | simplier code
+# oscar64 -Os		|       16 s   ~2.3x      | best C for 6502
+# cc65 -Oirs		|       78 s  ~11x	| std compliant, slow
 #
-# ./ivm-jit             |       61 s   ~8.7x    |
-# ./ivm-jit const       |       58.6s  ~8.37x	| 4.12% cycles 2412340
-# ./ivm-jit const   ZP  |
+# ./ivm-asm 		|      180 s  ~25x      |
+# ./ivm C-interpr    ** |(751?)697 s  ~99.6x    | simplier code
+#
+# ./ivm-jit       672 B |       61 s   ~8.7x    |
+# ./ivm-jit const       |       58.7s  ~8.4x	| 4.12% cycles 2412340
+# ./ivm-jit zptmp       |       58.6s  		| 58,557,526 
+# ./ivm-jit zp    597 B	|       55.3   ~7.9x	| 55,267,670
+#      - unopt:  -12.6%	|
+#
 #
 
-## cc65     is 43 % slower than ivm-jit!
-#  ivm-asm      3x  
-#  ivm         12x 
+#  oscar64      0.29x (wow, fast! but super-optimized)
+#  ivm-jit      1.00x   == BASE 
+#  cc65         1.41x
+#  ivm-asm      3.25x  
+#  ivm         13.3x
 
 # **) = multi-tasking several processes, at least 2x overhead?
 #
