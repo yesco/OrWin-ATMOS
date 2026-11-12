@@ -697,8 +697,8 @@ word ivm_jit(const uchar *code, word code_len,
       em(SEC); em2(EORN, 0xff); emit_alub(ADC, s, 0);
       em(TXA); em2(EORN, 0xff); emit_alub(ADC, s, 1);
 
-      em2(BCC, 6);  em2(LDAN, 0); em2(LDXN, 0);
-      em2(BEQ, 4);  em2(LDAN, 1); em2(LDXN, 0);
+      // result is !C lol
+      em2(LDAN, 0); em(TAX); em(ROLA); em2(EORN, 1);
       break;
     }
 
