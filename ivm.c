@@ -1214,6 +1214,7 @@ ivmvar run_ivm(Process *p) {
       t['I'] = &&op_I;    t['J'] = &&op_J;   t['U'] = &&op_U;
 
       t['M'] = &&op_M;    t['F'] = &&op_F;
+      t['m'] = &&op_m;
       t['@'] = &&op_at;   t['!'] = &&op_bang;
       t['r'] = &&op_r;    t['w'] = &&op_w;
       t['\'']= &&op_ri;   t[','] = &&op_wi;
@@ -1359,6 +1360,18 @@ ZL(op_idxs,')')
 // Memmory heap
 // operand = slot of pointer var; ACC = size in bytes
 ZL(op_M,   'M') zp.acc = zp.mem[*zp.ipc] = ivm_zalloc(zp.acc); goto pnext;
+
+// m: memset bytes. ACC=count, ipc[0]=ptr slot, ipc[1]=value slot.
+// Fills ((char*)mem[pp])[0..ACC-1] with low byte of mem[vv].
+ZL(op_m,   'm') {
+  uchar *p = (uchar *)(word)(zp.mem[zp.ipc[0]]);
+  uchar v  = (uchar)zp.mem[zp.ipc[1]];
+  word n   = zp.acc;
+
+  while (n--) *p++ = v;
+  zp.ipc += 2; goto xnext;
+}
+
 ZL(op_F,   'F') ivm_free(PAR); zp.mem[*zp.ipc] = 0;            goto pnext;
 
 ZL(op_I,   'I')  zp.acc = ++zp.mem[*zp.ipc]; goto pnext;
@@ -1431,10 +1444,11 @@ ZL(op_j,   'j')  zp.acc = zp.mem[zp.ipc[0]];
                    zp.ipc += 2;               goto xnext; } // 2 args
                  zp.ipc += 1 + zp.ipc[2];     goto pnext; // skip
 // NEXT loop --
-ZL(op_m,   'm')  tpc = zp.ipc - *zp.ipc + 1;
-                 zp.acc = --zp.mem[tpc[1]];
-                 if (!zp.acc)                 goto pnext; // done
-                 zp.ipc = tpc + 3;            goto xnext; // back
+// TODO: fuse into i (j) and n
+//ZL(op_m,   'm')  tpc = zp.ipc - *zp.ipc + 1;
+//                 zp.acc = --zp.mem[tpc[1]];
+//                 if (!zp.acc)                 goto pnext; // done
+//                 zp.ipc = tpc + 3;            goto xnext; // back
 
 /*
 

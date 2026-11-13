@@ -18,7 +18,7 @@ int main() {
   
   printf("10 iterations\n");
 
-  for (iter = 1; iter <= 10; iter ++) {
+  for (iter = 1; iter <= 10; iter++) {
 
     count = 0; 
 

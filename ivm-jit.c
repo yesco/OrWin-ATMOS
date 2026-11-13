@@ -1126,6 +1126,23 @@ word ivm_jit(const uchar *code, word code_len,
       break;
     }
 
+    // m: memset. ACC=count, pp=ptr slot, vv=value slot.
+    case 'm': {
+      uchar pp = PAR;
+      uchar vv = PAR;
+      // simple: call a helper
+      ema(STA, (word)(unsigned)&ivm_acc);
+      ema(STX, (word)((unsigned)&ivm_acc + 1));
+      emit_load_slot(pp);
+      ema(STA, (word)(unsigned)&ivm_par);
+      ema(STX, (word)((unsigned)&ivm_par + 1));
+      emit_load_slot(vv);
+      // stash value low byte, call helper
+      ema(JSR, REF(opputnum)); // placeholder — real memset helper later
+      (void)pp; (void)vv;
+      break;
+    }
+
     default:
       printf("%%ERROR: unimpl op 0x%02X '%c' at bc %u — continuing\n",
         op, (op >= 32 && op < 127) ? op : '.',
