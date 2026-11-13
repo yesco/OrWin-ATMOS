@@ -100,8 +100,8 @@
 //   possibly usage: cAr Cons cDr, Heap/Here, Recurse, Tail-call, Vector/index? Yndex?
 //
 // ? abcdefgh           - lisp?
-// ? mnop               - ?index stuff, built in loops iGG GG if zero/non-zero?
-// ? t uvw              - ?SSTACK saves, param: 1..7 (ACC is 0th)
+// ? m op               - ?index stuff, built in loops iGG GG if zero/non-zero?
+// ? tuv                - ?SSTACK saves, param: 1..7 (ACC is 0th)
 // xyz                  - syscall function LN with 1,2,3 byte args indices+acc
 //
 
@@ -185,13 +185,13 @@
 //     g   - assoc/G
 //     h   - happend
 //
-//     m   - map(car)
+//   ( m   - map(car) )
 //     o   - ordinal/length
 //     p   - print any (readable?)
 //     t   - terpri
 //     u   - null
 //     v   - 
-//     w   - write/while
+//   ( w   - write/while )
 //
 //     #   - numberp or MKINT (like *2 ?)
 //     $   = string or consp ?
@@ -212,7 +212,7 @@
 //  k   - switch-case ('k'ase low count (const back)...)
 //
 //  l   - load byte from slot
-//? m   - TODO: mini-malloc? fixed-size? lol Method call
+//  m   - memset ACC=size "m pp vv" 
 //  n   - next loop (together with ij ind/dec-for)
 //? op  - TODO: object, 'm' method call 'p' ... ?
 //  q   - quit program
