@@ -119,7 +119,7 @@ unsigned ivm_print_code_range(
     unsigned before = i;
     uchar ch = code[i];
 
-    if (wrap && (strchr("ijnm", ch) != NULL)) {
+    if (wrap && (strchr("ijnmB", ch) != NULL || (ch ^ 0x80) < 64)) {
       fputc('\n', fp);
       n = 0;
     }
@@ -127,7 +127,7 @@ unsigned ivm_print_code_range(
     ivm_print_one(fp, code, end, &i);
     if (i <= before) i = before + 1;
 
-    if (wrap && ((strchr("ijnmN;XQ", ch) != NULL) || ++n >= wrap)) {
+    if (wrap && ((strchr("ijnGBmN;XQ", ch) != NULL) || ++n >= wrap)) {
       fputc('\n', fp);
       n = 0;
     }
@@ -390,8 +390,7 @@ if (h.len == 0 || h.len > len)
 
   fprintf(fp, "\n\n--- BYTECODE (%u bytes) ---\n", code_len);
   ivm_print_code(fp, blob + h.code, code_len);
-  fputc('\n', fp);
-
+  fprintf(fp, "\n--- BYTECODE (%u bytes) ---\n\n", code_len);
 }
 
 #endif // IVM_PRINT_C

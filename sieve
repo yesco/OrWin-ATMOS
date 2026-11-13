@@ -116,14 +116,15 @@ echo
 #
 # ./ivm-asm          **	|      182 s  ~26x	| written in asm/ca65
 # ./ivm C-interprter **	|      735 s ~105x	| written in cc65
-#
-#      ============  byte-sieve-prime.c - 111 BC ============
+
+
+#      ============  byte-sieve-prime.c - 109 BC ============
 #
 # oscar64 -Os	  294 B	|       16 s   ~2.3x    | best C for 6502 -   (4594 B)
 # cc65 -Oirs	  442 B	|       78 s  ~11x	| std compliant, slow (3083 B)
 #
-# ./ivm-asm 		|      180 s  ~25x      |
-# ./ivm C-interpr    ** |(751?)697 s  ~99.6x    | simplier code
+# ./ivm-asm 	  109 BC|(182?)180 s  ~25x      |
+# ./ivm C-interpr "  ** |(744?)697 s  ~99.6x    | simplier code
 #
 # ./ivm-jit       672 B |       61 s   ~8.7x    |
 # ./ivm-jit const       |       58.7s  ~8.4x	| 4.12% cycles 2412340
@@ -138,14 +139,14 @@ echo
 # jit: empatch    487 B |       44.8    6.40x	| 44,791,864 5% faster
 # jit: const ')'  478 B |	41.4	5.91x	| 41,380,743
 # jit: Lcc(bbcc   469 B	|       40.5    5.78x	| 40,453,871 2.3%
-
+# jit: *2  -> <<1 450 B |       40.39	5.77x	| 40,389,838
 #
-# (/ 40.453871 7.0) 
-# (/ 469 478.0)
+# (/ 40.389838 7.0) 
+# (/ 450 469.0)
 # (/ 526 111.0)4.738738738738738 (/ 672 111.0)6.054054054054054
 
 #  oscar64      0.29x (wow, fast! but super-optimized)
-#  ivm-jitzp    0.73x                        (/ 40.5 55.3)
+#  ivm-jitzp    0.73x                        (/ 40.39 55.3)
 #  ivm-jit      1.00x   == BASE ==  55.3s       
 #  cc65         1.41x
 #  ivm-asm      3.25x  

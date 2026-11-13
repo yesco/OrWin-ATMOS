@@ -6,15 +6,15 @@
 
 const int TRUE = 1;
 const int FALSE = 0;
-const int size = 8190;
-const int sizepl = 8191;
+const int SIZE = 8190;
+const int SIZEPL = 8191;
 
 char *flags;
 
 int main() {
   int i, prime, k, count, iter; 
 
-  flags = malloc(sizepl*2);
+  flags = malloc(SIZEPL << 1);
   
   printf("10 iterations\n");
 
@@ -22,16 +22,16 @@ int main() {
 
     count = 0; 
 
-    for (i = 0; i <= size; i++)
+    for (i = 0; i <= SIZE; i++)
       flags[i] = TRUE; 
 
-    for (i = 0; i <= size; i++) { 
+    for (i = 0; i <= SIZE; i++) { 
 
       if (flags[i]) {
         prime = i + i + 3; 
         k = i + prime; 
 
-        while (k <= size) { 
+        while (k <= SIZE) { 
           flags[k] = FALSE; 
           k += prime; 
         }

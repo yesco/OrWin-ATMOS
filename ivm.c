@@ -1769,9 +1769,6 @@ word jit_compile(Process* proc) {
 
     if (jit_size) {
 
-      printf("--- JIT: emitted %u bytes of 6502 at org 0x%04X ---\n",
-        (unsigned)jit_size, out_org);
-
       // main address was noted during codegen
       if (lc_main_at && lc_jmp_at + 1 < jit_size) {
         word main_addr = (word)(out_org + lc_main_at);
@@ -1779,7 +1776,6 @@ word jit_compile(Process* proc) {
         out[lc_jmp_at + 1] = (uchar)(main_addr >> 8);
         printf("--- entry -> main at 0x%04X ---\n", main_addr);
       }
-
 
       // hexdump
       printf("--- HEXDUMP (%u bytes) ---\n", (unsigned)jit_size);
@@ -1795,6 +1791,9 @@ word jit_compile(Process* proc) {
       // disasm
       printf("--- DISASM ---\n");
       disasm((char *)out, (char *)(out + jit_size), 2);
+
+      printf("\n--- JIT: emitted %u bytes (BC: %u) of 6502 at org 0x%04X ---\n\n",
+        jit_size, code_len, out_org);
 
       // keep generated code buffer; return its address as entry
       free(map);
