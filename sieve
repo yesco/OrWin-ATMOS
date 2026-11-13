@@ -137,6 +137,7 @@ echo
 #     even better 526 B	|	47.4    6.77x 	| 47,402,930
 #   saved 21.7% code    |			|
 # jit: empatch    487 B |       44.8    6.40x	| 44,791,864 5% faster
+# zp: Gemini Guess:	|      ~44.7    ...
 # jit: const ')'  478 B |	41.4	5.91x	| 41,380,743
 # jit: Lcc(bbcc   469 B	|       40.5    5.78x	| 40,453,871 2.3%
 # jit: *2  -> <<1 450 B |       40.39	5.77x	| 40,389,838
@@ -157,3 +158,29 @@ echo
 #
 # The sieve's inner loop: 149,870 times in 10 iterations,
 # adding a 16-bit prime to a 16-bit index k (up to 8190) and writing a byte to memory.
+
+
+# Gemini guess:
+#
+# Where the Remaining ~33 Seconds Above Hand-Coded ASM Live
+#
+# In hand-written 6502 assembly (~7.0 s / ~47 cycles per inner-loop
+# hit), the inner loop is literally ~8 instructions:
+#
+#   STA (ptr),Y
+#   TYA
+#   CLC
+#   ADC prime_lo
+#   TAY
+#   LDA ptr+1
+#   ADC prime_hi
+#   STA ptr+1
+#   CMP end_hi
+#   BCC loop
+#
+# Your ivm-jit is currently averaging ~269 cycles per inner-loop hit
+# (40.39M / 149,870), which means a simple peephole pass in
+# ivm-jit—specifically fusing U0d0c + <0d> >fa + B11 so A isn't reloaded
+# between the 16-bit add and the bounds check—could realistically drop
+# your JIT time from 40.39 s into the ~28–32 s (~4.0x–4.5x) range
+# without touching the bytecode ISA.
