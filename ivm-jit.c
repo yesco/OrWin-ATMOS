@@ -12,6 +12,7 @@
 //   Exception: the plain abs forms of AND/INC/DEC are AND_ INC_ DEC_
 //
 // #define JIT 1
+#define JIT_TRACE 1   // per-op trace + disassembly; comment out for quiet
 
 
 /*
@@ -24,13 +25,14 @@ INSTRUCTIONS: Keeps this section but keep updated for status
 |--------------------------|--------|
 | Calls (vector table)     | **Done** — JMP + word table at start, JSR abs |
 | Call frame               | **Done** — fixed addresses from frame_base, AX stored at fp+FR_ACC on entry |
-| Compares `<` `=` `>`     | **Done** — boolean in ACC (needs testing) |
-| Loops `i` / `n` / `G` / `B` | **Present** — needs testing |
+| Compares `<` `=` `>`     | **Done** — boolean in ACC, UNSIGNED (needs testing) |
+| Loops `i` / `n` / `G` / `B` | **Present** — i/n signed via N flag (+-16K), needs testing |
 | `U`                      | Present |
 | `j` (down-loop)          | **Missing** — warns only |
 | Array `(` `)`            | Present (needs testing) |
 | / *                      | JSR helpers; still need **PARAX → zp_par** |
 | ZP optimisation          | **Done, one place** — emop2() + zpmap[] (see below) |
+| Branch emit              | **Done** — emrel/empatch (local), emjump (bytecode target) |
 
 ### Zero page
 
@@ -41,8 +43,24 @@ is emitted (2 bytes), else the absolute form (3 bytes).  zpmap[] is a
 Only plain abs → zp is mapped; abs,X / abs,Y are NOT (zp,X wraps at
 $FF, abs,X does not).
 
-Because sizes now vary, never hard-code a skip distance across an
-emop2() instruction: use em_br() / br_fix().
+### Branches
+
+Sizes vary (zp/abs), so never hard-code a skip distance across an
+emop2()/emit_alub() instruction.
+
+  fix = emrel(BNE); ...variable size code...; empatch(fix);
+      Local forward skip inside one op's template. Short branch,
+      range checked (lc_err if > 127; cannot happen for templates).
+
+  emjump(BNE, bc_target);  emjump(JMP, bc_target);
+      Jump to a BYTECODE pc.
+      - target already emitted (backward, i.e. loop close): exact
+        distance known → short branch if it fits, else reversed
+        branch + JMP abs. Unconditional is JMP abs. No fixup.
+      - target not emitted yet (forward): long form (reversed branch
+        over a JMP abs), absolute operand patched at the end (lc_fix).
+      Future -O: forward short form + "this one failed" bitmap keyed
+      by bytecode pc, re-run the whole pass until no new failures.
 
 ### Call vectors
 
@@ -71,6 +89,7 @@ Simplyfy function calling code:
 
 #include <stdio.h>
 #include <string.h>
+#include <ctype.h>
 
 // INSTRUCTION: Keep all OPS defined on 6502 here
 //   Don't randomly remove because not used "today"
@@ -318,6 +337,7 @@ static uchar tmp2 = 0xff;
 static uchar *lc_out;
 static word   lc_at, lc_max;
 static word  *lc_map, lc_mapn, lc_mem;
+static uchar  lc_err;         // set when a short branch is out of range
 
 typedef struct { word at, bc_target; } LcFix;
 
@@ -385,14 +405,49 @@ static void emop2(uchar op, word addr) {
   else ema(op, addr);
 }
 
-// Branch with operand patched later: em_br() then br_fix() once the
-// skipped code is emitted. Safe with variable-size (zp/abs) instructions.
-static word em_br(uchar bop) {
+// Reverse a branch opcode (flip the condition bit).
+static uchar rev_branch(uchar bop) { return (uchar)(bop ^ BRFLIP); }
+
+// ---- local forward branch (inside one op's template) -------------------
+//   fix = emrel(BNE);  ...code of any size...;  empatch(fix);
+static word emrel(uchar bop) {
   em(bop); em(0);
-  return (word)(lc_at - 1);
+  return (word)(lc_at - 1);          // offset of the operand byte
 }
-static void br_fix(word at) {
-  if (at < lc_max) lc_out[at] = (uchar)(lc_at - at - 1);
+static void empatch(word fix) {
+  word d = (word)(lc_at - fix - 1);  // distance from after the operand
+  if (d > 127) { lc_err = 1; return; }
+  if (fix < lc_max) lc_out[fix] = (uchar)d;
+}
+
+// ---- jump to a bytecode pc ---------------------------------------------
+// bop = a branch opcode, or JMP for unconditional.
+// Already-emitted target (loop close): exact, short if it fits, no fixup.
+// Not emitted yet (forward): long form, absolute address patched at the end.
+static void emjump(uchar bop, word bc_target) {
+  word t = (bc_target < lc_mapn) ? lc_map[bc_target] : 0xffff;
+  word at;
+
+  if (t != 0xffff) {
+    if (bop == JMP) { ema(JMP, (word)(lc_out_org + t)); return; }
+    {
+      int off = (int)t - (int)(lc_at + 2);
+      if (off >= -128 && off <= 127) { em2(bop, (uchar)off); return; }
+    }
+    em2(rev_branch(bop), 3);                  // far: skip over the JMP
+    ema(JMP, (word)(lc_out_org + t));
+    return;
+  }
+
+  if (bop != JMP) em2(rev_branch(bop), 3);    // opposite cond skips the JMP
+  em(JMP);
+  at = lc_at;
+  em(0); em(0);
+  if (lc_nfix < 256) {
+    lc_fix[lc_nfix].at = at;
+    lc_fix[lc_nfix].bc_target = bc_target;
+    lc_nfix++;
+  }
 }
 
 static word slotlo(uchar s) { return (word)(lc_mem + ((word)s << 1)); }
@@ -423,7 +478,7 @@ static void emit_store_slot(uchar s) {
 static void emit_load0(void) { em2(LDAN, 0); em(TAX); }
 static void emit_load_ffff(void) { em2(LDAN, 0xff); em(TAX); }
 
-// abs ALU opcode → immediate form
+// abs opcode → immediate form
 static uchar immop(uchar ins) {
   switch (ins) {
   case ADC:  return ADCN;
@@ -431,6 +486,9 @@ static uchar immop(uchar ins) {
   case AND_: return ANDN;
   case ORA:  return ORAN;
   case EOR:  return EORN;
+  case CMP:  return CMPN;
+  case CPX:  return CPXN;
+  case CPY:  return CPYN;
   }
   return 0;
 }
@@ -458,7 +516,8 @@ static void emit_ax_to_tmp1(void) {
   em2(STXZ, tmp2);
 }
 
-// A = A OP (lo or hi byte of mem[s]); const-aware. CLC/SEC by caller.
+// reg OP (lo or hi byte of mem[s]); const-aware. For ADC/SBC/AND/ORA/EOR
+// (on A) and CMP (A) / CPX (X). CLC/SEC by caller.
 static void emit_alub(uchar ins, uchar s, uchar hi) {
   if (is_const(s)) {
     word v = const_val(s);
@@ -468,45 +527,45 @@ static void emit_alub(uchar ins, uchar s, uchar hi) {
   }
 }
 
+// A = hi(mem[lim] - mem[slot]); N = sign (valid while |lim-slot| < 32768).
+// Only A is clobbered. Used by 'i' and 'n'.
+static void emit_lim_minus_slot(uchar lim, uchar slot) {
+  if (is_const(lim)) {
+    word v = const_val(lim);
+    em2(LDAN, (uchar)(v & 0xff));
+    em(SEC); emop2(SBC, slotlo(slot));
+    em2(LDAN, (uchar)(v >> 8));
+    emop2(SBC, slothi(slot));
+  } else {
+    emop2(LDA, slotlo(lim));
+    em(SEC); emop2(SBC, slotlo(slot));
+    emop2(LDA, slothi(lim));
+    emop2(SBC, slothi(slot));
+  }
+}
+
 // tmp1/tmp2 = mem[base] + 2*mem[idx]   (clobbers A, X, Y)
-// base is added straight from its slot: no copy of base into tmp first.
-static void emit_elem_ptr(uchar base, uchar idx) {
 // TODO: this is very expensive, we should pass in the size
 //   if we know it, also, have a byte operator. If size < 256 bytes
 //   then we can simplify to simple LDA (base),Y !
-  em2(LDA, idx);   em(ASLA); em(CLC); emit_alub(ADC, base, 0); em2(STAZ, tmp1);
-  em2(LDA, idx+1); em(ROL);           emit_alub(ADC, base, 1); em2(STAZ, tmp2);
-  emit_load_slot(idx);
-  em(ASLA); em(TAY);                       // Y = lo*2, C = bit 7
-  em(TXA); em(ROLA); em(TAX);              // X = hi*2 | C
+static void emit_elem_ptr(uchar base, uchar idx) {
+  if (is_const(idx)) {
+    // constant index folds into one add
+    word v = (word)(const_val(idx) << 1);
+    emit_load_slot(base);
+    em(CLC);
+    em2(ADCN, (uchar)(v & 0xff)); em2(STAZ, tmp1);
+    em(TXA);
+    em2(ADCN, (uchar)(v >> 8));   em2(STAZ, tmp2);
+    return;
+  }
+  // idx*2 (lo kept in Y, hi in tmp2), then + base
+  emop2(LDA, slotlo(idx)); em(ASLA); em(TAY);
+  emop2(LDA, slothi(idx)); em(ROLA); em2(STAZ, tmp2);
   em(CLC); em(TYA);
   emit_alub(ADC, base, 0); em2(STAZ, tmp1);
-  em(TXA);
+  em2(LDAZ, tmp2);
   emit_alub(ADC, base, 1); em2(STAZ, tmp2);
-}
-
-// INSTRUCTION:
-//   TODO: rewrite so it takes the relative bytecode value
-//     this routine can do all the mapping and translation to
-//     actual machine code address, as it's record for each
-//     bytecode
-
-// Reverse a branch opcode (flip the condition bit).
-static uchar rev_branch(uchar bop) { return (uchar)(bop ^ BRFLIP); }
-
-// Always long form: reversed branch (2) + JMP abs (3) = 5 bytes.
-// Callers that skip over it use +5.
-static void emit_rel(uchar bop, word bc_target) {
-  word at;
-  em2(rev_branch(bop), 3);   // opposite cond skips the JMP
-  em(JMP);
-  at = lc_at;
-  em(0); em(0);
-  if (lc_nfix < 256) {
-    lc_fix[lc_nfix].at = at;
-    lc_fix[lc_nfix].bc_target = bc_target;
-    lc_nfix++;
-  }
 }
 
 
@@ -529,7 +588,9 @@ word ivm_jit(const uchar *code, word code_len,
   const uchar *p, *end;
   word i, bc_pc;
   uchar op;
-  word start;
+#ifdef JIT_TRACE
+  word ostart;
+#endif
 
   if (!code || !out || !map || code_len > map_n) return 0;
 
@@ -538,6 +599,7 @@ word ivm_jit(const uchar *code, word code_len,
   lc_out = out; lc_at = 0; lc_max = out_max;
   lc_map = map; lc_mapn = map_n; lc_mem = mem_base;
   lc_nfix = 0;
+  lc_err = 0;
   lc_out_org = out_org;
   lc_ncall = ncall;
   lc_fbase = frame_base;
@@ -620,9 +682,9 @@ word ivm_jit(const uchar *code, word code_len,
             op, v, (unsigned)pc);
           {
             int k;
-            word start = pc > 4 ? pc - 4 : 0;
-            word stop  = pc + 5 < code_len ? pc + 5 : code_len;
-            for (k = (int)start; k < (int)stop; k++)
+            word kstart = pc > 4 ? pc - 4 : 0;
+            word kstop  = pc + 5 < code_len ? pc + 5 : code_len;
+            for (k = (int)kstart; k < (int)kstop; k++)
               printf(" %02X%s", code[k], k == (int)pc ? "*" : "");
           }
           printf("\n");
@@ -632,9 +694,11 @@ word ivm_jit(const uchar *code, word code_len,
       continue;
     }
 
+#ifdef JIT_TRACE
     printf("------- %02x '%c' %02x %02x %02x %02x ------\n",
-      op, isprint(op)? op: ' ', p[0], p[1], p[2], p[3]);
-    start = lc_at;
+      op, isprint(op) ? op : ' ', p[0], p[1], p[2], p[3]);
+    ostart = lc_at;
+#endif
 
     // PAR: one operand byte, advances p
     #define PAR (*p++)
@@ -672,64 +736,34 @@ word ivm_jit(const uchar *code, word code_len,
     case '|':          emit_lohiop(ORA, PAR); break;
     case '^':          emit_lohiop(EOR, PAR); break;
 
-    // compares → boolean ACC (0 or 1). '=' trivial; '<'/'>' via subtract + sign/ne
+    // compares → boolean ACC (0 or 1), X = 0.  UNSIGNED.
+    // '=': CMP lo, CPX hi; 14-16 B (+1 per non-zp operand)
     case '=': {
       uchar s = PAR;
-      word at;
-#if 0
-// (/ 55020545 56084737.0) 1.2% faster
-
-
-// TODO: USE THIS ONE!
-// TODO: fix jumps
-// 14-16 B  12-16-17c (+2 for !zp)
-      emit_alub(CMP, s, 0); em2(BNE, +8);
-      emit_alub(CPX, s, 1); em2(BNE, +4); // TOO: we don't know size of alub!
-
-      eq: em2(LDAN, 1); em2(BNE, +2);
-      ne: em2(LDAN, 0);
+      word fx1, fx2, fx3;
+      emit_alub(CMP, s, 0); fx1 = emrel(BNE);      // lo differs → ne
+      emit_alub(CPX, s, 1); fx2 = emrel(BNE);      // hi differs → ne
+      em2(LDAN, 1);         fx3 = emrel(BNE);      // Z=0 after LDA #1: always
+      empatch(fx1); empatch(fx2);                  // ne:
+      em2(LDAN, 0);
+      empatch(fx3);
       em2(LDXN, 0);
-
-#else
-// // 19 B  18-21c
-      em(SEC); emit_lohiop(SBC, s);           // ACC -= mem[s]
-      em2(STXZ, tmp1); em2(ORAZ, tmp1);       // Z if equal
-      em2(BEQ, 6);
-      em2(LDAN, 0); em2(LDXN, 0); em2(BEQ, 4);
-      em2(LDAN, 1); em2(LDXN, 0);
-#endif
       break;
     }
+    // '<': ACC < mem  <=>  borrow in ACC - mem  <=>  !C
     case '<': {
       uchar s = PAR;
-#if 0
-// TODO: Use this one! -- slightly faster?
-      emit_alub(CMP, s, 0); em(TXA);
-      emit_alub(SBC, s, 1); 
-      
-      // result is !C lol
-      em2(LDAN, 0); em(TAX); em(ROLA); em2(EORN, 1);
-#else
-      em(SEC); emit_lohiop(SBC, s);           // ACC = ACC - mem[s]
-
-// TODOO: we're unsigned, lol
-// TODO: BMI bad!!!
-      // signed < : result negative → 1
-
-      em(TXA); em2(BMI, 6);
-      em2(LDAN, 0); em2(LDXN, 0); em2(BEQ, 4);
-      em2(LDAN, 1); em2(LDXN, 0);
+      emit_alub(CMP, s, 0); em(TXA);               // C from lo compare
+      emit_alub(SBC, s, 1);                        // C = ACC >= mem
+      em2(LDAN, 0); em(TAX); em(ROLA); em2(EORN, 1);   // A = !C, X = 0
       break;
-#endif
     }
+    // '>': ACC > mem  <=>  mem - ACC borrows  <=>  !C of (mem + ~ACC + 1)
     case '>': {
       uchar s = PAR;
-      // - ACC + mem, == mem - ACC, C is opposite
       em(SEC); em2(EORN, 0xff); emit_alub(ADC, s, 0);
       em(TXA); em2(EORN, 0xff); emit_alub(ADC, s, 1);
-
-      // result is !C lol
-      em2(LDAN, 0); em(TAX); em(ROLA); em2(EORN, 1);
+      em2(LDAN, 0); em(TAX); em(ROLA); em2(EORN, 1);   // A = !C, X = 0
       break;
     }
 
@@ -752,22 +786,22 @@ word ivm_jit(const uchar *code, word code_len,
     // I: INC lo; BNE skip; INC hi; reload ACC
     case 'I': {
       uchar s = PAR;
-      word br;
+      word fx;
       emop2(INC_, slotlo(s));
-      br = em_br(BNE);
+      fx = emrel(BNE);
       emop2(INC_, slothi(s));
-      br_fix(br);
+      empatch(fx);
       emit_load_slot(s);
       break;
     }
     // J: LDA lo; BNE skip; DEC hi; DEC lo; reload ACC
     case 'J': {
       uchar s = PAR;
-      word br;
+      word fx;
       emop2(LDA, slotlo(s));
-      br = em_br(BNE);
+      fx = emrel(BNE);
       emop2(DEC_, slothi(s));
-      br_fix(br);
+      empatch(fx);
       emop2(DEC_, slotlo(s));
       emit_load_slot(s);
       break;
@@ -865,25 +899,10 @@ word ivm_jit(const uchar *code, word code_len,
       em(DEY);      em2(LDAIY, tmp1);
       break;
     }
-    // ): ((word*)base)[idx] = ACC
-
-
-/*
-  Fuse Array Indexing ('(' and ')')
-
-In the inner loop ($6C65 – $6C81), your ')' (store array) template saves A/X onto the hardware stack (pha, txa, pha), computes (index * 2) + base_ptr, and pulls the values back off. When storing a constant (like 0 in flags[k] = 0 or 1 in flags[i] = 1), pushing and pulling 0 or 1 wastes 14 cycles per array write.
-• Specialize Constant Array Stores: If the JIT knows the value being stored is a constant (like #0 or #1), skip pha/pla and load the immediate right before sta ($fe),y:6502
-; Compute address in ($fe) first...
-
-ldy #$01
-lda #$00        ; High byte of constant 0
-sta ($fe),y
-dey
-sta ($fe),y     ; Low byte is also 0 (saves 4 stack ops + 1 lda!)
-*/
-      
+    // ): ((word*)base)[idx] = ACC   (ACC preserved)
+    // TODO: constant stores (#0/#1): skip the push/pop and store the
+    //   immediate directly via (tmp1),Y. Needs "ACC is constant" tracking.
     case ')': {
-      // TODO: check if set to constant, how?
       uchar base = PAR, idx = PAR;
       em(PHA); em(TXA); em(PHA);           // save ACC: lo, then hi
       emit_elem_ptr(base, idx);            // tmp1/tmp2 = &base[idx]
@@ -908,33 +927,22 @@ sta ($fe),y     ; Low byte is also 0 (saves 4 stack ops + 1 lda!)
     case 'G': {
       word rel = PAR;
       word dest = (word)((p - code) + rel);
-      word at;
+      word fn, fz;
+      // sign must come from the HIGH byte only (ORA of lo|hi would put
+      // lo bit 7 into N)
       em2(STAZ, tmp1); em(TXA);
-      em2(ORAZ, tmp1);
-      // ACC > 0 → JMP dest; else fall through
-      em2(BEQ, 5);                 // zero → skip BMI (2) + JMP (3)
-      em2(BMI, 3);                 // neg → skip JMP
-      em(JMP);
-      at = lc_at; em(0); em(0);
-      if (lc_nfix < 256) {
-        lc_fix[lc_nfix].at = at;
-        lc_fix[lc_nfix].bc_target = dest;
-        lc_nfix++;
-      }
+      fn = emrel(BMI);             // negative → skip
+      em2(ORAZ, tmp1);             // Z if hi|lo == 0
+      fz = emrel(BEQ);             // zero → skip
+      emjump(JMP, dest);
+      empatch(fn); empatch(fz);
       break;
     }
     // B: unconditional back
     case 'B': {
       word rel = PAR;
       word dest = (word)((p - code) - rel);
-      word at;
-      em(JMP);
-      at = lc_at; em(0); em(0);
-      if (lc_nfix < 256) {
-        lc_fix[lc_nfix].at = at;
-        lc_fix[lc_nfix].bc_target = dest;
-        lc_nfix++;
-      }
+      emjump(JMP, dest);
       break;
     }
 
@@ -964,22 +972,8 @@ sta ($fe),y     ; Low byte is also 0 (saves 4 stack ops + 1 lda!)
       uchar lim  = PAR;
       uchar skip = PAR;
       word dest = (word)((p - code) + skip);
-      // slot > lim  <=>  lim - slot < 0. 16-bit subtract, N flag of the
-      // high-byte SBC is the sign (same convention as '<' / '>').
-      // Only A is clobbered; flags come straight from the SBC.
-      if (is_const(lim)) {
-        word v = const_val(lim);
-        em2(LDAN, (uchar)(v & 0xff));
-        em(SEC); emop2(SBC, slotlo(slot));
-        em2(LDAN, (uchar)(v >> 8));
-        emop2(SBC, slothi(slot));
-      } else {
-        emop2(LDA, slotlo(lim));
-        em(SEC); emop2(SBC, slotlo(slot));
-        emop2(LDA, slothi(lim));
-        emop2(SBC, slothi(slot));
-      }
-      emit_rel(BMI, dest);         // negative → slot > lim → skip body
+      emit_lim_minus_slot(lim, slot);
+      emjump(BMI, dest);           // lim - slot < 0 → skip body
       break;
     }
 
@@ -993,7 +987,7 @@ sta ($fe),y     ; Low byte is also 0 (saves 4 stack ops + 1 lda!)
       const uchar *ip = p - back;       // operand_pos - back + 1
       uchar slot, lim;
       word loop_top;
-      word br;
+      word fx;
       if (ip < code || *ip != 'i') {
         // can't find matching i; just consume
         break;
@@ -1003,38 +997,13 @@ sta ($fe),y     ; Low byte is also 0 (saves 4 stack ops + 1 lda!)
       loop_top = (word)((ip + 4) - code);  // bc pc of body start
       // increment slot
       emop2(INC_, slotlo(slot));
-      br = em_br(BNE);
+      fx = emrel(BNE);
       emop2(INC_, slothi(slot));
-      br_fix(br);
-      // compare with lim
-      emit_load_slot(slot);
-      em(SEC);
-      emit_lohiop(SBC, lim);       // A = low, X = high
-      em2(STAZ, tmp1);             // save low
-      em(TXA);
-      em2(ORAZ, tmp1);             // A = high|low; Z if both zero
-      // C still valid from SBC: C=0 means slot < lim
-      // slot <= lim → JMP back; slot > lim → fall out
-      em2(BCC, 4);                 // < → skip to JMP
-      em2(BEQ, 2);                 // == → skip to JMP
-
-// TDOO: wow, so messy! BPL on lo BITOR hi ???? BCS maybe?
-
-      em2(BPL, 3);                 // > → skip the JMP, fall out
-      em(JMP);
-
-// TODO: maybe if shot jump we can generate smaller code?
-//   this is jumping BACK so we know the size?!?      
-
-      {
-        word at = lc_at;
-        em(0); em(0);
-        if (lc_nfix < 256) {
-          lc_fix[lc_nfix].at = at;
-          lc_fix[lc_nfix].bc_target = loop_top;
-          lc_nfix++;
-        }
-      }
+      empatch(fx);
+      // slot <= lim  <=>  lim - slot >= 0  <=>  N clear → loop
+      // (backward: distance known, short branch when it fits)
+      emit_lim_minus_slot(lim, slot);
+      emjump(BPL, loop_top);
       break;
     }
 
@@ -1068,11 +1037,19 @@ sta ($fe),y     ; Low byte is also 0 (saves 4 stack ops + 1 lda!)
 
     #undef PAR
 
-    disasm(lc_out + start, lc_out + lc_at, 0);
+#ifdef JIT_TRACE
+    if (lc_at <= lc_max)
+      disasm((char *)(lc_out + ostart), (char *)(lc_out + lc_at), 0);
+#endif
 
   }
 
-  // patch relative branches only (G/B). Calls need no fixups.
+  if (lc_err) {
+    printf("%%JIT: short branch out of range\n");
+    return 0;
+  }
+
+  // patch forward jumps (G/i and any unmapped target). Calls need no fixups.
   for (i = 0; i < lc_nfix; i++) {
     word dest = lc_fix[i].bc_target;
     word mapped = 0xffff;
