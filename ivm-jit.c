@@ -26,13 +26,15 @@ INSTRUCTIONS: Keeps this section but keep updated for status
 | Calls (vector table)     | **Done** — JMP + word table at start, JSR abs |
 | Call frame               | **Done** — fixed addresses from frame_base, AX stored at fp+FR_ACC on entry |
 | Compares `<` `=` `>`     | **Done** — boolean in ACC, UNSIGNED (needs testing) |
-| Loops `i` / `n` / `G` / `B` | **Present** — i/n signed via N flag (+-16K), needs testing |
+| Loops `i` / `n` / `B` | **Present** — unsigned (carry), needs testing |
+| `G`                      | Legacy, to be addressed later |
 | `U`                      | Present |
 | `j` (down-loop)          | **Missing** — warns only |
 | Array `(` `)`            | Present (needs testing) |
 | / *                      | JSR helpers; still need **PARAX → zp_par** |
 | ZP optimisation          | **Done, one place** — emop2() + zpmap[] (see below) |
 | Branch emit              | **Done** — emrel/empatch (local), emjump (bytecode target) |
+| ACC const tracking       | **Done** for `)` — '0' '9' 'L' 'C' slot loads set it, every other op clears it |
 
 ### Zero page
 
@@ -527,18 +529,20 @@ static void emit_alub(uchar ins, uchar s, uchar hi) {
   }
 }
 
-// A = hi(mem[lim] - mem[slot]); N = sign (valid while |lim-slot| < 32768).
-// Only A is clobbered. Used by 'i' and 'n'.
+// UNSIGNED 16-bit compare: C = (mem[lim] >= mem[slot]).
+// CMP on the low byte starts the carry chain (same as SEC;SBC, 1 byte
+// shorter), SBC on the high byte finishes it. Only A is clobbered.
+// Used by 'i' and 'n'.
 static void emit_lim_minus_slot(uchar lim, uchar slot) {
   if (is_const(lim)) {
     word v = const_val(lim);
     em2(LDAN, (uchar)(v & 0xff));
-    em(SEC); emop2(SBC, slotlo(slot));
+    emop2(CMP, slotlo(slot));
     em2(LDAN, (uchar)(v >> 8));
     emop2(SBC, slothi(slot));
   } else {
     emop2(LDA, slotlo(lim));
-    em(SEC); emop2(SBC, slotlo(slot));
+    emop2(CMP, slotlo(slot));
     emop2(LDA, slothi(lim));
     emop2(SBC, slothi(slot));
   }
@@ -569,6 +573,24 @@ static void emit_elem_ptr(uchar base, uchar idx) {
 }
 
 
+// ---- "ACC holds a known constant" tracking -------------------------------
+// Set only by ops that load a constant ('0' '9' 'L' 'C', slot loads);
+// the main loop clears it before every op, so anything else leaves it
+// unknown. An op that wants to use it reads the value from before itself.
+static uchar lc_kc;
+static word  lc_kv;
+static void kc_set(word v) { lc_kc = 1; lc_kv = v; }
+static void kc_slot(uchar s) { if (is_const(s)) kc_set(const_val(s)); }
+
+// Is bc a pending forward-jump target? (ACC state is unknown there.)
+// Backward targets are loop tops right after 'i', which clears the state.
+static int is_fwd_target(word bc) {
+  word k;
+  for (k = 0; k < lc_nfix; k++)
+    if (lc_fix[k].bc_target == bc) return 1;
+  return 0;
+}
+
 // Layout at out_org:
 //   NOPs until odd address
 //   JMP + vec[0..n)   ; JMP operand is vec[0] (main), filled at main entry
@@ -588,6 +610,8 @@ word ivm_jit(const uchar *code, word code_len,
   const uchar *p, *end;
   word i, bc_pc;
   uchar op;
+  uchar kc;                     // ACC known constant before this op?
+  word  kv;                     // ...and its value
 #ifdef JIT_TRACE
   word ostart;
 #endif
@@ -600,6 +624,7 @@ word ivm_jit(const uchar *code, word code_len,
   lc_map = map; lc_mapn = map_n; lc_mem = mem_base;
   lc_nfix = 0;
   lc_err = 0;
+  lc_kc = 0;
   lc_out_org = out_org;
   lc_ncall = ncall;
   lc_fbase = frame_base;
@@ -628,6 +653,7 @@ word ivm_jit(const uchar *code, word code_len,
     bc_pc = (word)(p - code);
     if (bc_pc < lc_mapn)
       lc_map[bc_pc] = lc_at;
+    kc = lc_kc; kv = lc_kv; lc_kc = 0;   // state before this op; default: unknown after
     if (bc_pc == lc_main_bc)
       lc_main_at = lc_at;
 
@@ -642,6 +668,7 @@ word ivm_jit(const uchar *code, word code_len,
             lc_out[at + 1] = (uchar)(abs >> 8);
           }
           lc_cur_frame = frame_base[i];
+          kc = 0;                    // function entry is a label
           // first in function: mem[fp+FR_ACC] = AX (incoming arg / ACC home)
           emit_store_slot((uchar)(lc_cur_frame + FR_ACC));
           break;
@@ -652,7 +679,7 @@ word ivm_jit(const uchar *code, word code_len,
     op = *p++;
 
     // 0..31: fast load mem[op]
-    if (op < 32) { emit_load_slot(op); continue; }
+    if (op < 32) { emit_load_slot(op); kc_slot(op); continue; }
 
     // hibit: vector call ($C0+) or const-slot load
     if (op & 0x80) {
@@ -661,6 +688,7 @@ word ivm_jit(const uchar *code, word code_len,
 
         // One byte slot load
         emit_load_slot((uchar)(op & 0x7f));
+        kc_slot((uchar)(op & 0x7f));
 
       } else {
 
@@ -712,11 +740,11 @@ word ivm_jit(const uchar *code, word code_len,
     case 'X': case ';': em(RTS); break;
 
     // constants
-    case '0': emit_load0(); break;
-    case '9': emit_load_ffff(); break;
+    case '0': emit_load0(); kc_set(0); break;
+    case '9': emit_load_ffff(); kc_set(0xffff); break;
 
     // load/store
-    case 'L': emit_load_slot(PAR); break;
+    case 'L': { uchar s = PAR; emit_load_slot(s); kc_slot(s); break; }
     case 'S': emit_store_slot(PAR); break;
     case 'Z': emit_load0(); emit_store_slot(PAR); break;
 
@@ -900,15 +928,24 @@ word ivm_jit(const uchar *code, word code_len,
       break;
     }
     // ): ((word*)base)[idx] = ACC   (ACC preserved)
-    // TODO: constant stores (#0/#1): skip the push/pop and store the
-    //   immediate directly via (tmp1),Y. Needs "ACC is constant" tracking.
     case ')': {
       uchar base = PAR, idx = PAR;
-      em(PHA); em(TXA); em(PHA);           // save ACC: lo, then hi
-      emit_elem_ptr(base, idx);            // tmp1/tmp2 = &base[idx]
-      // pop hi → store, pop lo → store; AX ends up = original ACC
-      em(PLA); em2(LDYN, 1); em2(STAIY, tmp1); em(TAX);
-      em(PLA); em(DEY);      em2(STAIY, tmp1);
+      if (kc && !is_fwd_target(bc_pc)) {
+        // ACC is a known constant: nothing to save, store immediates.
+        uchar lo = (uchar)(kv & 0xff), hi = (uchar)(kv >> 8);
+        emit_elem_ptr(base, idx);          // tmp1/tmp2 = &base[idx]
+        em2(LDYN, 1); em2(LDAN, hi); em2(STAIY, tmp1); em(TAX);   // X = hi
+        em(DEY);
+        if (lo != hi) em2(LDAN, lo);       // A = lo (already, if lo == hi)
+        em2(STAIY, tmp1);
+        kc_set(kv);                        // AX == kv still holds
+      } else {
+        em(PHA); em(TXA); em(PHA);         // save ACC: lo, then hi
+        emit_elem_ptr(base, idx);          // tmp1/tmp2 = &base[idx]
+        // pop hi → store, pop lo → store; AX ends up = original ACC
+        em(PLA); em2(LDYN, 1); em2(STAIY, tmp1); em(TAX);
+        em(PLA); em(DEY);      em2(STAIY, tmp1);
+      }
       break;
     }
 
@@ -962,6 +999,7 @@ word ivm_jit(const uchar *code, word code_len,
       uchar s = PAR;
       emit_load_slot(s);
       emit_store_slot(d);
+      kc_slot(s);
       break;
     }
 
@@ -973,7 +1011,7 @@ word ivm_jit(const uchar *code, word code_len,
       uchar skip = PAR;
       word dest = (word)((p - code) + skip);
       emit_lim_minus_slot(lim, slot);
-      emjump(BMI, dest);           // lim - slot < 0 → skip body
+      emjump(BCC, dest);           // lim < slot (unsigned) → skip body
       break;
     }
 
@@ -1000,10 +1038,10 @@ word ivm_jit(const uchar *code, word code_len,
       fx = emrel(BNE);
       emop2(INC_, slothi(slot));
       empatch(fx);
-      // slot <= lim  <=>  lim - slot >= 0  <=>  N clear → loop
+      // slot <= lim (unsigned)  <=>  C set → loop
       // (backward: distance known, short branch when it fits)
       emit_lim_minus_slot(lim, slot);
-      emjump(BPL, loop_top);
+      emjump(BCS, loop_top);
       break;
     }
 

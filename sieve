@@ -135,20 +135,20 @@ echo
 #    better >     532 B |       47.6    6.79x	| 47,553,365
 #     even better 526 B	|	47.4    6.77x 	| 47,402,930
 #   saved 21.7% code    |			|
-# jit: empatch    487 B |       44.8    6.40%	| 44,791,864 5% faster
-
+# jit: empatch    487 B |       44.8    6.40x	| 44,791,864 5% faster
+# jit: const ')'  478 B |	41.4	5.91x	| 41,380,743
 
 #
-# (/ 44.791864 7.0)   
-# (/ 487 672.0)
+# (/ 41.380743 7.0)   
+# (/ 478 672.0)
 # (/ 526 111.0)4.738738738738738 (/ 672 111.0)6.054054054054054
 
 #  oscar64      0.29x (wow, fast! but super-optimized)
-#  ivm-jitzp    0.81x
-#  ivm-jit      1.00x   == BASE ==  55.3s       (/ 44.8 55.3)
+#  ivm-jitzp    0.75x                        (/ 41.4 55.3)
+#  ivm-jit      1.00x   == BASE ==  55.3s       
 #  cc65         1.41x
 #  ivm-asm      3.25x  
-#  ivm         13.3x
+#  ivm         13.3xx
 
 # **) = multi-tasking several processes, at least 2x overhead?
 #
