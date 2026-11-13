@@ -441,14 +441,16 @@ static void emit_lohiop(uchar ins, uchar s) {
   if (is_const(s)) {
     word v = const_val(s);
     uchar iop = immop(ins);
+
     em2(iop, (uchar)(v & 0xff)); em(TAY);
     em(TXA); em2(iop, (uchar)(v >> 8)); em(TAX);
     em(TYA);
+
     return;
   }
-  emop2(ins, slotlo(s)); em(TAY);
-  em(TXA); emop2(ins, slothi(s)); em(TAX);
-  em(TYA);
+  emop2(ins, slotlo(s));
+  em(TAY); em(TXA); emop2(ins, slothi(s));
+  em(TAX); em(TYA);
 }
 
 static void emit_ax_to_tmp1(void) {
@@ -469,6 +471,11 @@ static void emit_alub(uchar ins, uchar s, uchar hi) {
 // tmp1/tmp2 = mem[base] + 2*mem[idx]   (clobbers A, X, Y)
 // base is added straight from its slot: no copy of base into tmp first.
 static void emit_elem_ptr(uchar base, uchar idx) {
+// TODO: this is very expensive, we should pass in the size
+//   if we know it, also, have a byte operator. If size < 256 bytes
+//   then we can simplify to simple LDA (base),Y !
+  em2(LDA, idx);   em(ASLA); em(CLC); emit_alub(ADC, base, 0); em2(STAZ, tmp1);
+  em2(LDA, idx+1); em(ROL);           emit_alub(ADC, base, 1); em2(STAZ, tmp2);
   emit_load_slot(idx);
   em(ASLA); em(TAY);                       // Y = lo*2, C = bit 7
   em(TXA); em(ROLA); em(TAX);              // X = hi*2 | C
@@ -476,6 +483,7 @@ static void emit_elem_ptr(uchar base, uchar idx) {
   emit_alub(ADC, base, 0); em2(STAZ, tmp1);
   em(TXA);
   emit_alub(ADC, base, 1); em2(STAZ, tmp2);
+#endif
 }
 
 // INSTRUCTION:
@@ -859,7 +867,24 @@ word ivm_jit(const uchar *code, word code_len,
       break;
     }
     // ): ((word*)base)[idx] = ACC
+
+
+/*
+  Fuse Array Indexing ('(' and ')')
+
+In the inner loop ($6C65 – $6C81), your ')' (store array) template saves A/X onto the hardware stack (pha, txa, pha), computes (index * 2) + base_ptr, and pulls the values back off. When storing a constant (like 0 in flags[k] = 0 or 1 in flags[i] = 1), pushing and pulling 0 or 1 wastes 14 cycles per array write.
+• Specialize Constant Array Stores: If the JIT knows the value being stored is a constant (like #0 or #1), skip pha/pla and load the immediate right before sta ($fe),y:6502
+; Compute address in ($fe) first...
+
+ldy #$01
+lda #$00        ; High byte of constant 0
+sta ($fe),y
+dey
+sta ($fe),y     ; Low byte is also 0 (saves 4 stack ops + 1 lda!)
+*/
+      
     case ')': {
+      // TODO: check if set to constant, how?
       uchar base = PAR, idx = PAR;
       em(PHA); em(TXA); em(PHA);           // save ACC: lo, then hi
       emit_elem_ptr(base, idx);            // tmp1/tmp2 = &base[idx]
