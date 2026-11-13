@@ -483,7 +483,6 @@ static void emit_elem_ptr(uchar base, uchar idx) {
   emit_alub(ADC, base, 0); em2(STAZ, tmp1);
   em(TXA);
   emit_alub(ADC, base, 1); em2(STAZ, tmp2);
-#endif
 }
 
 // INSTRUCTION:
