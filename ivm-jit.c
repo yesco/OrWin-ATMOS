@@ -34,7 +34,7 @@ INSTRUCTIONS: Keeps this section but keep updated for status
 | / *                      | JSR helpers; still need **PARAX → zp_par** |
 | ZP optimisation          | **Done, one place** — emop2() + zpmap[] (see below) |
 | Branch emit              | **Done** — emrel/empatch (local), emjump (bytecode target) |
-| ACC const tracking       | **Done** for `)` — '0' '9' 'L' 'C' slot loads set it, every other op clears it |
+| ACC const tracking       | **Done** for `)` — const loads ('0' '9' 'L', slot loads) are deferred and dropped when `)` consumes them; every other op flushes them first |
 
 ### Zero page
 
@@ -284,18 +284,31 @@ Simplyfy function calling code:
 extern ivmvar ivm_acc;
 extern ivmvar ivm_par;
 
-extern void opputnum(void);
+
+
+// TODO: emit as native asm to USR using tmp1 as first arg, ACC as second
+//   result in ACC: * / % outputnum
+
+extern void opputnum(void); // there is like a 30 B variant!
 extern void opmul(void);
 extern void opdiv(void);
 extern void opmod(void);
 
-extern void printinlinedstring(void);
+// TODO: word oprandom(void): see my parse.asm in Meteoric C compiler
+
+
+// TODO: this should be in asm,
+//   this could be the base routine used by printinlinedstring
+//   the asm should use ACC to be printing advancing it at END
+//   it holds next byte, or for printinlined string,
+//   the return address
 void jit_puts(void) {
   // print the string at ivm_acc (set by the P emitter)
   unsigned char *s = (unsigned char *)(unsigned)ivm_acc;
   if (!s) return;
   while (*s) putchar(*s++);
 }
+
 
 // JSR target. Return address on stack points at last byte of the JSR;
 // the inline string follows. Walk it, print, then JMP to the byte after 0.
@@ -325,10 +338,13 @@ pis_out:
   __asm__ ("jmp ($fe)");
 }
 
+
 extern char* disasm(char* mc, char* end, char indent);
+
 
 extern ivmvar ivm_zalloc(ivmvar n);
 extern void   ivm_free(ivmvar p);
+
 
 #define REF(f) ((word)(unsigned long)(void *)(f))
 
@@ -452,6 +468,7 @@ static void emjump(uchar bop, word bc_target) {
   }
 }
 
+
 static word slotlo(uchar s) { return (word)(lc_mem + ((word)s << 1)); }
 static word slothi(uchar s) { return (word)(slotlo(s) + 1); }
 
@@ -461,15 +478,19 @@ static word *lc_constmem;     // mem array with constant values filled
 static int is_const(uchar s) {
   return lc_constidx != 255 && s >= lc_constidx && lc_constmem;
 }
+
 static word const_val(uchar s) { return lc_constmem[s]; }
 
+
+// ACC = constant. Equal bytes (0, $FFFF, $0101...) → LDA #; TAX.
+static void emit_load_const(word v) {
+  uchar lo = (uchar)(v & 0xff), hi = (uchar)(v >> 8);
+  em2(LDAN, lo);
+  if (lo == hi) em(TAX); else em2(LDXN, hi);
+}
+
 static void emit_load_slot(uchar s) {
-  if (is_const(s)) {
-    word v = const_val(s);
-    em2(LDAN, (uchar)(v & 0xff));
-    em2(LDXN, (uchar)(v >> 8));
-    return;
-  }
+  if (is_const(s)) { emit_load_const(const_val(s)); return; }
   emop2(LDA, slotlo(s));
   emop2(LDX, slothi(s));
 }
@@ -573,14 +594,26 @@ static void emit_elem_ptr(uchar base, uchar idx) {
 }
 
 
-// ---- "ACC holds a known constant" tracking -------------------------------
-// Set only by ops that load a constant ('0' '9' 'L' 'C', slot loads);
-// the main loop clears it before every op, so anything else leaves it
-// unknown. An op that wants to use it reads the value from before itself.
-static uchar lc_kc;
+// ---- "ACC holds a known constant" tracking, lazy load ----------------------
+// lc_kc/lc_kv: ACC is known to hold lc_kv after the op just emitted.
+// lc_kp: that load has NOT been emitted yet (pending). The main loop clears
+// both before every op and emits the pending load before the next op,
+// unless that op is ')' which stores the constant itself and never needs it.
+// Pending loads are emitted BEFORE the next op's map[] entry, so a jump
+// landing on that op skips them and the fall-through path still gets them.
+static uchar lc_kc, lc_kp;
 static word  lc_kv;
-static void kc_set(word v) { lc_kc = 1; lc_kv = v; }
+
+// known, already emitted
+static void kc_set(word v)  { lc_kc = 1; lc_kv = v; }
+// known, emit lazily
+static void kc_load(word v) { lc_kc = 1; lc_kv = v; lc_kp = 1; }
+
 static void kc_slot(uchar s) { if (is_const(s)) kc_set(const_val(s)); }
+
+static void load_slot_lazy(uchar s) {
+  if (is_const(s)) kc_load(const_val(s)); else emit_load_slot(s);
+}
 
 // Is bc a pending forward-jump target? (ACC state is unknown there.)
 // Backward targets are loop tops right after 'i', which clears the state.
@@ -588,6 +621,14 @@ static int is_fwd_target(word bc) {
   word k;
   for (k = 0; k < lc_nfix; k++)
     if (lc_fix[k].bc_target == bc) return 1;
+  return 0;
+}
+
+static int is_fn_entry(word bc) {
+  word k;
+  if (!lc_vec_bc) return 0;
+  for (k = 0; k < lc_ncall; k++)
+    if (lc_vec_bc[k] == bc) return 1;
   return 0;
 }
 
@@ -610,11 +651,12 @@ word ivm_jit(const uchar *code, word code_len,
   const uchar *p, *end;
   word i, bc_pc;
   uchar op;
+  uchar kp;                     // ...and its load still pending (not emitted)?
   uchar kc;                     // ACC known constant before this op?
   word  kv;                     // ...and its value
-#ifdef JIT_TRACE
+  #ifdef JIT_TRACE
   word ostart;
-#endif
+  #endif
 
   if (!code || !out || !map || code_len > map_n) return 0;
 
@@ -624,7 +666,7 @@ word ivm_jit(const uchar *code, word code_len,
   lc_map = map; lc_mapn = map_n; lc_mem = mem_base;
   lc_nfix = 0;
   lc_err = 0;
-  lc_kc = 0;
+  lc_kc = 0; lc_kp = 0;
   lc_out_org = out_org;
   lc_ncall = ncall;
   lc_fbase = frame_base;
@@ -651,9 +693,28 @@ word ivm_jit(const uchar *code, word code_len,
 
   while (p < end) {
     bc_pc = (word)(p - code);
+
+    // state left by the previous op; default for this op: unknown after
+    kc = lc_kc; kv = lc_kv; kp = lc_kp; lc_kc = 0; lc_kp = 0;
+    // a label (jump target / function entry) here: ACC is not what the
+    // previous op left on every path
+    if (kc && (is_fwd_target(bc_pc) || is_fn_entry(bc_pc))) kc = 0;
+    // emit the deferred constant load unless ')' consumes it itself.
+    // Done BEFORE map[bc_pc] so jumps to this op do not run it.
+    if (kp && !(kc && code[bc_pc] == ')')) {
+      #ifdef JIT_TRACE
+      ostart = lc_at;
+      #endif
+      emit_load_const(kv);
+      #ifdef JIT_TRACE
+      printf("------- deferred const load ------\n");
+      if (lc_at <= lc_max)
+        disasm((char *)(lc_out + ostart), (char *)(lc_out + lc_at), 0);
+      #endif
+    }
+
     if (bc_pc < lc_mapn)
       lc_map[bc_pc] = lc_at;
-    kc = lc_kc; kv = lc_kv; lc_kc = 0;   // state before this op; default: unknown after
     if (bc_pc == lc_main_bc)
       lc_main_at = lc_at;
 
@@ -668,7 +729,6 @@ word ivm_jit(const uchar *code, word code_len,
             lc_out[at + 1] = (uchar)(abs >> 8);
           }
           lc_cur_frame = frame_base[i];
-          kc = 0;                    // function entry is a label
           // first in function: mem[fp+FR_ACC] = AX (incoming arg / ACC home)
           emit_store_slot((uchar)(lc_cur_frame + FR_ACC));
           break;
@@ -679,7 +739,7 @@ word ivm_jit(const uchar *code, word code_len,
     op = *p++;
 
     // 0..31: fast load mem[op]
-    if (op < 32) { emit_load_slot(op); kc_slot(op); continue; }
+    if (op < 32) { load_slot_lazy(op); continue; }
 
     // hibit: vector call ($C0+) or const-slot load
     if (op & 0x80) {
@@ -687,8 +747,7 @@ word ivm_jit(const uchar *code, word code_len,
       if (op < 0xC0) {
 
         // One byte slot load
-        emit_load_slot((uchar)(op & 0x7f));
-        kc_slot((uchar)(op & 0x7f));
+        load_slot_lazy((uchar)(op & 0x7f));
 
       } else {
 
@@ -722,11 +781,11 @@ word ivm_jit(const uchar *code, word code_len,
       continue;
     }
 
-#ifdef JIT_TRACE
+    #ifdef JIT_TRACE
     printf("------- %02x '%c' %02x %02x %02x %02x ------\n",
       op, isprint(op) ? op : ' ', p[0], p[1], p[2], p[3]);
     ostart = lc_at;
-#endif
+    #endif
 
     // PAR: one operand byte, advances p
     #define PAR (*p++)
@@ -740,11 +799,11 @@ word ivm_jit(const uchar *code, word code_len,
     case 'X': case ';': em(RTS); break;
 
     // constants
-    case '0': emit_load0(); kc_set(0); break;
-    case '9': emit_load_ffff(); kc_set(0xffff); break;
+    case '0': kc_load(0); break;
+    case '9': kc_load(0xffff); break;
 
     // load/store
-    case 'L': { uchar s = PAR; emit_load_slot(s); kc_slot(s); break; }
+    case 'L': load_slot_lazy(PAR); break;
     case 'S': emit_store_slot(PAR); break;
     case 'Z': emit_load0(); emit_store_slot(PAR); break;
 
@@ -930,8 +989,10 @@ word ivm_jit(const uchar *code, word code_len,
     // ): ((word*)base)[idx] = ACC   (ACC preserved)
     case ')': {
       uchar base = PAR, idx = PAR;
-      if (kc && !is_fwd_target(bc_pc)) {
-        // ACC is a known constant: nothing to save, store immediates.
+      if (kc) {
+        // ACC is a known constant (its load may not even be emitted:
+        // see top of loop): nothing to save, store immediates. Ends with
+        // AX == kv either way.
         uchar lo = (uchar)(kv & 0xff), hi = (uchar)(kv >> 8);
         emit_elem_ptr(base, idx);          // tmp1/tmp2 = &base[idx]
         em2(LDYN, 1); em2(LDAN, hi); em2(STAIY, tmp1); em(TAX);   // X = hi
@@ -1081,6 +1142,9 @@ word ivm_jit(const uchar *code, word code_len,
 #endif
 
   }
+
+  // pending load at end of code
+  if (lc_kp) emit_load_const(lc_kv);
 
   if (lc_err) {
     printf("%%JIT: short branch out of range\n");
