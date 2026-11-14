@@ -1235,9 +1235,10 @@ op_B:
 
 
 .if ALTCODE=1
-
+;;;  about 100 bytes exatly!
 
 op_i:
+;;;  
 ;TODO: maybe we fail in sieve.c because of ... length
 ;	FIXIPC
 	
@@ -1300,17 +1301,6 @@ i_enter:
 	iny
         jmp     xnext
 
-.if 0
-;;;  gemini wrong
-i_exit:
-        ldy     savey
-        iny                     ; Y = offset of exit_offset byte
-        sty     savey           ; savey = offset of exit_offset byte
-        lda     (_ivm_ipc),y    ; A = exit_offset
-        clc
-        adc     #2              ; Compiler measures exit_offset from (exit_offset_addr + 2)!
-        jmp     anext
-.else
 i_exit:
 	;; IPC += Y + 1 + mem[o] + 1
         ldy     savey
@@ -1322,7 +1312,6 @@ i_exit:
         clc
         adc     #1              ; +1 skips exit_offset byte -> 3 + 1 + 2 = 6 (Le8)!
         jmp     anext
-.endif
 
 ;;; LOOP_NEXT back
 op_n:
