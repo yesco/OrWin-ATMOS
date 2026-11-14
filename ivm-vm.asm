@@ -20,9 +20,8 @@
 ;TRACE=1
 TRACE=0
         
-;;; ALTCODE=1 breaks on sieve.c and byte-sieve-prime.c
+;; ALTCODE: 9.3 % faster!
 
-;; ALTCODE: 1.5 % faster...
 ;ALTCODE=0
 ALTCODE=1
 
@@ -669,19 +668,9 @@ op_F:   USEY
 	
 ;;; mppvv - memset(pp, vv, ACC)
 op_m:	
-
-;;; TODO: crashes copy algo correct, params maybe not?
-
-;;;  TODO: wtf, this hangs after one '!'  ?
-;lda #'!'
-;jsr _putchar	
-
-;;;  TODO: not good for ALTCODE
-
+	USEY
 	;; copy pointer to tmp1
-	ldy #0
-	lda (_ivm_ipc),y
-	tay
+	PARY
 
 	lda (_ivm_memlo),y
 	sta tmp_lo
@@ -689,7 +678,13 @@ op_m:
 	sta tmp_hi
 
 	;; get low byte value
+.if ALTCODE
+	ldy savey
+	iny
+	sty savey
+.else
 	ldy #1
+.endif	
 	lda (_ivm_ipc),y
 	tay
 	lda (_ivm_memlo),y
@@ -735,16 +730,13 @@ op_m_page:
 	dex
 	bpl op_m_loop
 
-
-
-;; TODO: jmp anext ??? or make macro
-.if .not(ALTCODE)
+.if ALTCODE=0
         ; consume 1 operand bytes
         inc     _ivm_ipc
         bne     :+
         inc     _ivm_ipc+1
-:
 .endif
+
 	jmp pnext
 
 
@@ -872,19 +864,15 @@ op_bang: PARAX
 
         jmp     pnext
 
-;;; (aa ii   ACC = base[index]   (word elements, index*=2)
+;;; ( aa ii   ACC = base[index]   (word elements, index*=2)
 op_idxl:
-        USEY
-        ; ipc[0]=aa (base slot), ipc[1]=ii (index slot)
-
-
-;;; TODO: not correct for ALTCODE!!!! Y set to 0!!!!
-
-
+.if ALTCODE=0
         ldy     #0
+.endif
         lda     (_ivm_ipc),y        ; aa
         tax
         iny
+	USEY
         lda     (_ivm_ipc),y        ; ii
         tay
         ; index *= 2
@@ -911,28 +899,27 @@ op_idxl:
         iny
         lda     (tmp_lo),y
         sta     _ivm_acc+1
-        ; consume 2 operands
-.if ALTCODE
-        ldy     savey
-        iny
-        iny
 
-        jmp     xnext
-.else
+.if ALTCODE=0
+        ; consume 2 operands
         inc     _ivm_ipc
         bne     :+
         inc     _ivm_ipc+1
 :
-        jmp     pnext               ; pnext does the second ++
 .endif
+
+        jmp     pnext               ; pnext does the second ++
+
 
 ;;; )aa ii   base[index] = ACC
 op_idxs:
-        USEY
+.if ALTCODE=0
         ldy     #0
+.endif
         lda     (_ivm_ipc),y        ; aa
         tax
         iny
+        USEY
         lda     (_ivm_ipc),y        ; ii
         tay
         ; index *= 2
@@ -959,21 +946,16 @@ op_idxs:
         iny
         lda     _ivm_acc+1
         sta     (tmp_lo),y
-        ; consume 2 operands
-.if ALTCODE
-        ldy     savey
-        iny
-        iny
 
-        jmp     xnext
-.else
+.if ALTCODE=0
+        ; consume 2 operands
         inc     _ivm_ipc
         bne     :+
         inc     _ivm_ipc+1
 :
-        jmp     pnext
 .endif
 
+        jmp     pnext
 
 
 
@@ -1238,8 +1220,6 @@ op_B:
 ;;;  about 100 bytes exatly!
 
 op_i:
-;;;  
-;TODO: maybe we fail in sieve.c because of ... length
 	FIXIPC
 	
         ;; Entry: Y points to arg 1 ('v'). No FIXIPC needed!
@@ -1253,7 +1233,9 @@ op_i_step:
 ;;; 2262309 - op_i_tep opt
 ;;; 2262643 - FIXIPC at op_i enter
 ;;; 2248522 - FIXIPC  (/ 2272806 2248522.0) = 1.1% faseter
-;;; 
+;;; 2248266 - correct exit
+;;; 2248783 - hmmm, not clear. lol
+	
 ;;; 24 B  45c
         ;; Entry from op_n: _ivm_ipc points to 'v', so Y = 0!
         ldy     #0
@@ -1288,9 +1270,23 @@ i_skip_load:
 
 i_enter:
 	;; go to next op (skip jump offset)
-	ldy     #3
+	;;  TODO: comically we can add or remove 1 here!
+	;;  #3 #2 works - probably jups to low load bytes
+	ldy     #3		; body = &v + 3
         jmp     xnext
 
+.if 1				
+i_exit:
+        ldy     #2
+        lda     (_ivm_ipc),y    ; oo
+        clc
+        adc     #3              ; end = &v + 3 + oo  ('n back' already inside oo)
+        tay
+        bcc     :+
+        inc     _ivm_ipc+1      ; oo >= 253: carry into ipc
+:
+	jmp     xnext
+.else	
 i_exit:
 	ldy     #2
         lda     (_ivm_ipc),y    ; A = exit_offset ($02)
@@ -1298,8 +1294,12 @@ i_exit:
 	;; skip "nXX" instruction (TODO: bake into offset!)
 	iny
 	iny
-
+	;;  TODO: comilcally we can remove next line here
+	;;     - probably jups to low load bytes
+	iny
+	
 	jmp     xnext
+.endif
 
 ;;; LOOP_NEXT back
 op_n:
@@ -1307,6 +1307,8 @@ op_n:
         tya
 	clc
 	adc #2
+	;; Evaluaate if we can remove this
+	;; but that would subtrace 1 more?
         sec
 	;; delta = (Y - offset arg)
         sbc     (_ivm_ipc),y 

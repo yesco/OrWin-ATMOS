@@ -172,10 +172,6 @@ L=\i=0; \1<E; \1++) \i\[\1\]=\d;[m\5\7]
 |\i=\d;[C\1\2] \1<=\d; \1++) [\mi\1\4\x] K [n\z\y]
 |\i=\i;[C\1\2] \1<=\d; \1++) [\mi\1\4\x] K [n\z\y]
 
-|\i=0; [Z\1]   \1<=\i; \1++) [\mi\1\3\x] K [n\z\y]
-|\i=\d;[C\1\2] \1<=\i; \1++) [\mi\1\4\x] K [n\z\y]
-|\i=\i;[C\1\2] \1<=\i; \1++) [\mi\1\4\x] K [n\z\y]
-
 # TODO: - make same for vars, but can we really?
 #   need new op instead of 'i' (j is down) so 'k' maybe (and 'l')
 #   should rewrite so only 'n' is needed, it can figure out the

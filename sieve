@@ -144,26 +144,28 @@ echo
 #
 # ivm: memset     101 BC|      623 s   89x	|622,733,340
 #	no ?? (41 instr)|      561 s   80x	|
-# asm: memset		|      154 s   22x	| 154,385,371
-#       no ??		|      148 s   21x	| 148,471,071
+# asm: memset		|      154 s   22x	|154,385,371
+#       no ??		|      148 s   21x	|148,471,071
 # jit: memset     412 B	|	34.98   5.00x	| 34,984,658
 #	no ??	  385 B	|	31.16   4.45x	| 31,158,066
-# asm:                  |      154		|154,385,371
-# asm:                  |      
+# asm:                  |      154		|154,385,591
+# asm: ALTCODE=1 m ( )	|      139 s   19.9x	|139,257,315
+#       no ??		|      133 s   19.0x	|133,343,015
 
 # it's currently 101 bytes, 41 instr, can made 30 by remove redundant!
 
 #
-# (/ 31.16 7.0) 
+# (/ 133 7.0) 
 # (/ 450 469.0)
 # (/ 526 111.0)4.738738738738738 (/ 672 111.0)6.054054054054054
 
 #  oscar64      0.29x (wow, fast! but super-optimized)
-#  ivm-jitzp    0.73x                        (/ 40.39 55.3)
-#  ivm-jit      1.00x   == BASE ==  55.3s       
+#  ivm-jitzp    0.56x                       
+#  ivm-jit      1.00x   == BASE ==  55.3s  (/ 561 55.3) 
 #  cc65         1.41x
-#  ivm-asm      3.25x  
-#  ivm         13.3xx
+#  ivm-asmALT   2.41x
+#  ivm-asm      2.67x
+#  ivm         10.14x
 
 # **) = multi-tasking several processes, at least 2x overhead?
 #
