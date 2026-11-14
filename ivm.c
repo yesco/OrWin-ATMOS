@@ -1363,19 +1363,19 @@ ZL(op_M,   'M') zp.acc = zp.mem[*zp.ipc] = ivm_zalloc(zp.acc); goto pnext;
 // m: memset bytes. ACC=count, ipc[0]=ptr slot, ipc[1]=value slot.
 // Fills ((char*)mem[pp])[0..ACC-1] with low byte of mem[vv].
 ZL(op_m,   'm') {
-  uchar *p = (uchar *)(word)(zp.mem[zp.ipc[0]]);
+  uchar *p = (uchar *)IVM_PTR(PAR);
   uchar v  = (uchar)zp.mem[zp.ipc[1]];
 
   // TODO: since it is word arrays only for now... lol
   // TODO: multiply by 2 on outside!
   word n   = zp.acc * 2;
 
-//  printf("\n<<< 'm'emset: %u %u %u\n", p, v, n);
+  //  printf("\n<<< 'm'emset: %u %u %u\n", p, v, n);
     
   // 743932708 - no, loop high level
   
   // 646536594 - slow!
-  //while (n--) *p++ = v;
+  // while (n--) *p++ = v;
 
   // 622898428 - memset
   memset(p, v, n);

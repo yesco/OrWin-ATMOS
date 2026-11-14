@@ -16,14 +16,17 @@ int main() {
   
   printf("10 iterations\n");
 
+  // < is incorect so use <= lol
   for (iter = 1; iter <= 10; iter++) {
 
     count = 0; 
 
     // recognized as memset! save bytes and time!
+    // TODO: currently only using < ...
     for (i = 0; i < SIZEPL; i++)
       flags[i] = 1;
 
+    // < is incorect so use <= lol
     for (i = 0; i <= SIZE; i++) { 
 
       if (flags[i]) {

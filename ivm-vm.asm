@@ -686,7 +686,7 @@ op_m:
 	lda (_ivm_memlo),y
 	sta tmp_lo
 	lda (_ivm_memhi),y
-	stx tmp_hi
+	sta tmp_hi
 
 	;; get low byte value
 	ldy #1
@@ -744,6 +744,7 @@ op_l:   USEY
         sta     _ivm_acc+1
 
         jmp     pnext
+
 
 ;;; sxx  slot xx := ACC & 0xff  (hi := 0)
 op_s:   USEY
