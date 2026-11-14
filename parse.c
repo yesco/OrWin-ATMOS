@@ -1924,8 +1924,12 @@ static void build_one_rule(uchar r, char *rhs) {
       if (na > 0 && alt_starts[na - 1] == bi)
         continue;
       blob[bi++] = 0;
-      if (na < MAX_ALTS)
-        alt_starts[na++] = bi;
+      // was: if (na < MAX_ALTS) ... -> extra alts were silently DROPPED
+      if (na >= MAX_ALTS) {
+        eprintf("\nrule %c: more than %u alts\n", 'A' + r, (unsigned)MAX_ALTS);
+        FAIL("too many alts in rule (MAX_ALTS)");
+      }
+      alt_starts[na++] = bi;
       continue;
     } else if (e == '[') {
       // bare [ ] = production (no nesting); | inside is a literal (\[ \] are handled above)

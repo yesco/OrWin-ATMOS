@@ -4,8 +4,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-const int TRUE = 1;
-const int FALSE = 0;
 const int SIZE = 8190;
 const int SIZEPL = 8191;
 
@@ -22,8 +20,9 @@ int main() {
 
     count = 0; 
 
-    for (i = 0; i <= SIZE; i++)
-      flags[i] = TRUE; 
+    // recognized as memset! save bytes and time!
+    for (i = 0; i < SIZEPL; i++)
+      flags[i] = 1;
 
     for (i = 0; i <= SIZE; i++) { 
 
@@ -32,7 +31,7 @@ int main() {
         k = i + prime; 
 
         while (k <= SIZE) { 
-          flags[k] = FALSE; 
+          flags[k] = 0;
           k += prime; 
         }
 

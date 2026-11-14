@@ -1357,8 +1357,7 @@ ZL(op_idxs,')')
     zp.ipc += 2; goto xnext; // 2 args
 
  
-// Memmory heap
-// operand = slot of pointer var; ACC = size in bytes
+// M: malloc: operand = slot of pointer var; ACC = size in bytes
 ZL(op_M,   'M') zp.acc = zp.mem[*zp.ipc] = ivm_zalloc(zp.acc); goto pnext;
 
 // m: memset bytes. ACC=count, ipc[0]=ptr slot, ipc[1]=value slot.
@@ -1366,9 +1365,21 @@ ZL(op_M,   'M') zp.acc = zp.mem[*zp.ipc] = ivm_zalloc(zp.acc); goto pnext;
 ZL(op_m,   'm') {
   uchar *p = (uchar *)(word)(zp.mem[zp.ipc[0]]);
   uchar v  = (uchar)zp.mem[zp.ipc[1]];
-  word n   = zp.acc;
 
-  while (n--) *p++ = v;
+  // TODO: since it is word arrays only for now... lol
+  // TODO: multiply by 2 on outside!
+  word n   = zp.acc * 2;
+
+//  printf("\n<<< 'm'emset: %u %u %u\n", p, v, n);
+    
+  // 743932708 - no, loop high level
+  
+  // 646536594 - slow!
+  //while (n--) *p++ = v;
+
+  // 622898428 - memset
+  memset(p, v, n);
+  
   zp.ipc += 2; goto xnext;
 }
 

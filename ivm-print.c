@@ -76,7 +76,7 @@ static void ivm_print_one(FILE *fp, const uchar *code, unsigned len, unsigned *p
     }
 
     // 2 args
-    if ((c == 'C' || c == 'U' || c == '(' || c == ')') && i + 2 < len) {
+    if ((c == 'm' || c == 'C' || c == 'U' || c == '(' || c == ')') && i + 2 < len) {
       fprintf(fp, "%c%02x%02x ", c, code[i + 1], code[i + 2]);
       *pi = i + 3;
       return;
@@ -119,7 +119,7 @@ unsigned ivm_print_code_range(
     unsigned before = i;
     uchar ch = code[i];
 
-    if (wrap && (strchr("ijnmB", ch) != NULL || (ch ^ 0x80) < 64)) {
+    if (wrap && (strchr("ijnB", ch) != NULL || (ch ^ 0x80) < 64)) {
       fputc('\n', fp);
       n = 0;
     }

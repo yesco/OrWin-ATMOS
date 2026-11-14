@@ -878,6 +878,9 @@ word ivm_jit(const uchar *code, word code_len,
       fx = emrel(BNE);
       emop2(INC_, slothi(s));
       empatch(fx);
+
+// TODO: lazy load! (wasting 6 cycles if not need. disp-inc: 14c 
+
       emit_load_slot(s);
       break;
     }
@@ -1126,22 +1129,61 @@ word ivm_jit(const uchar *code, word code_len,
       break;
     }
 
+#if 0
     // m: memset. ACC=count, pp=ptr slot, vv=value slot.
+    //   count lo in Y, hi in X (X must hold ACC hi here!)
+    //   remainder goes on the LAST page, then full pages downwards
     case 'm': {
-      uchar pp = PAR;
-      uchar vv = PAR;
-      // simple: call a helper
-      ema(STA, (word)(unsigned)&ivm_acc);
-      ema(STX, (word)((unsigned)&ivm_acc + 1));
-      emit_load_slot(pp);
-      ema(STA, (word)(unsigned)&ivm_par);
-      ema(STX, (word)((unsigned)&ivm_par + 1));
-      emit_load_slot(vv);
-      // stash value low byte, call helper
-      ema(JSR, REF(opputnum)); // placeholder — real memset helper later
-      (void)pp; (void)vv;
+      uchar ptr = PAR;
+      uchar val = PAR;
+      em(TAY);                              // Y = count lo
+      emop2(LDA, slotlo(ptr)); emop2(STA, tmp1);
+      em(TXA); em(CLC);
+      emop2(ADC, slothi(ptr)); emop2(STA, tmp2);  // tmp2 = ptrhi + pages
+      emop2(LDA, slotlo(val));              // fill byte
+      emop2(CPYN, 0);
+      emop2(BEQ, +5);                       // no remainder -> next
+// loop:
+      em(DEY);                              // 1
+      emop2(STAIY, tmp1);                   // 2  STA (tmp1),Y
+      emop2(BNE, -5);                       // 2  -> loop
+// next:
+      emop2(DEC_, tmp2);                    // 2  previous page
+      em(DEX);                              // 1
+      emop2(BPL, -10);                      // 2  -> loop, Y==0: 256 bytes
+      // BPL: max 0x7FFF bytes (32K) - ok
       break;
     }
+#else      
+    // m: memset. ACC=count, pp=ptr slot, vv=value slot.
+    case 'm': {
+      uchar ptr = PAR;
+      uchar val = PAR;
+      // counter in Y (low) X (hi)
+      em(TAY);
+      // ptr in tmp1/tmp2
+      emop2(LDA, slotlo(ptr)); emop2(STA, tmp1);
+      emop2(LDA, slothi(ptr)); emop2(STA, tmp2);
+      // low byte value in A
+      emop2(LDA, slotlo(val));
+      // loop while Y != 0 (handles up to 255; high byte via X)      
+      em(CPYN); em(0);
+      em(BEQ); em(+7); // => loop2
+      // loop body
+//loop1:
+      em(DEY);
+      //emop2(STAIY, tmp1); // STA (tmp1),Y
+      em(STAIY); em(tmp1); // STA (tmp1),Y
+      em(BNE); em(-5); // => loop1
+      emop2(INC_, tmp2);
+//loop2:
+      em(DEX);
+      // high byte loop - one more page
+      em(BPL); em(-10); // => loop1
+      // PLL limits to max 32K lll it's ok!
+      break;
+    }
+#endif
 
     default:
       printf("%%ERROR: unimpl op 0x%02X '%c' at bc %u — continuing\n",

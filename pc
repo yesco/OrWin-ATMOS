@@ -6,6 +6,8 @@ else
     name="$1"
 fi
 
+rm $name.ivm 2>/dev/null
+
 
 clang -DSYMS -DVERBOSE -DRUN parse.c -o parse.x && time ./parse.x -v c.bnf $name.c
 

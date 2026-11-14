@@ -41,6 +41,13 @@
 //   550,272,728 - loop         2.4x
 //    58,556,915 - byte-sieve   3.15x
 
+// -- with i + n loop opt --
+//       558,449 - dispatch
+//    14,284,034 - inc
+//    18,248,449 - fun
+//   210,381,273 - loop 10M
+//    30,253,218 - byte-sieve
+
 
 // n++; == "Ivv" one dispatch, read param, read memory, inc, write
 // (- 95.07 44.03) 51.04  44      16           -- 34 --  3 jmp

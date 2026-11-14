@@ -667,6 +667,73 @@ op_F:   USEY
 	jmp pnext
 
 	
+;;; mppvv - memset(pp, vv, ACC)
+op_m:	
+
+;;; TODO: crashes copy algo correct, params maybe not?
+
+;;;  TODO: wtf, this hangs after one '!'  ?
+;lda #'!'
+;jsr _putchar	
+
+;;;  TODO: not good for ALTCODE
+
+	;; copy pointer to tmp1
+	ldy #0
+	lda (_ivm_ipc),y
+	tay
+
+	lda (_ivm_memlo),y
+	sta tmp_lo
+	lda (_ivm_memhi),y
+	stx tmp_hi
+
+	;; get low byte value
+	ldy #1
+	lda (_ivm_ipc),y
+	tay
+	lda (_ivm_memlo),y
+
+	;; get size
+.if 1
+	pha
+
+;;;  TDOO: now we *2 but shouldn't LOL
+	lda _ivm_acc
+	asl
+	tay			; lo
+	lda _ivm_acc+1
+	rol
+	tax 			; hi
+
+	pla
+	cpy #0
+.else	
+	ldx _ivm_acc+1		; hi
+	ldy _ivm_acc    	; lo
+.endif
+
+	beq op_m_page
+op_m_loop:	
+	dey
+	sta (tmp_lo),y
+	bne op_m_loop
+
+	inc tmp_hi
+op_m_page:	
+	dex
+	bpl op_m_loop
+
+;; TODO: jmp anext ??? or make macro
+.if .not(ALTCODE)
+        ; consume 1 operand bytes
+        inc     _ivm_ipc
+        bne     :+
+        inc     _ivm_ipc+1
+:
+.endif
+	jmp pnext
+
 
 ;;; lxx  ACC = low byte of slot xx  (hi := 0)
 op_l:   USEY
@@ -795,6 +862,11 @@ op_bang: PARAX
 op_idxl:
         USEY
         ; ipc[0]=aa (base slot), ipc[1]=ii (index slot)
+
+
+;;; TODO: not correct for ALTCODE!!!! Y set to 0!!!!
+
+
         ldy     #0
         lda     (_ivm_ipc),y        ; aa
         tax
@@ -1671,7 +1743,6 @@ op_h:
 op_j:
 op_k:
 
-op_m:
 op_o:
 op_p:
 
