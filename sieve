@@ -148,6 +148,9 @@ echo
 #       no ??		|      148 s   21x	| 148,471,071
 # jit: memset     412 B	|	34.98   5.00x	| 34,984,658
 #	no ??	  385 B	|	31.16   4.45x	| 31,158,066
+# asm:                  |      154		|154,385,371
+# asm:                  |      
+
 # it's currently 101 bytes, 41 instr, can made 30 by remove redundant!
 
 #

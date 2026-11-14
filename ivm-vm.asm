@@ -23,8 +23,8 @@ TRACE=0
 ;;; ALTCODE=1 breaks on sieve.c and byte-sieve-prime.c
 
 ;; ALTCODE: 1.5 % faster...
-ALTCODE=0
-;ALTCODE=1
+;ALTCODE=0
+ALTCODE=1
 
 .export         _run_ivm_asm
 
@@ -1240,49 +1240,41 @@ op_B:
 op_i:
 ;;;  
 ;TODO: maybe we fail in sieve.c because of ... length
-;	FIXIPC
+	FIXIPC
 	
         ;; Entry: Y points to arg 1 ('v'). No FIXIPC needed!
-        sty     savey
         lda     (_ivm_ipc),y
         tay
         LOAD_SLOT_Y             ; _ivm_acc = mem[v]
-        ldy     savey           ; Y = offset of 'v'
         jmp     i_skip_load
 
 op_i_step:
+;;; 2272806 - test.ivm start
+;;; 2262309 - op_i_tep opt
+;;; 2262643 - FIXIPC at op_i enter
+;;; 2248522 - FIXIPC  (/ 2272806 2248522.0) = 1.1% faseter
+;;; 
+;;; 24 B  45c
         ;; Entry from op_n: _ivm_ipc points to 'v', so Y = 0!
-	;; Y=0 points to 'v'
-
-	;; AX = mem[v];
-        ldy     #0            
+        ldy     #0
         lda     (_ivm_ipc),y
         tay
-        lda     (_ivm_memhi),y
-        tax
-        lda     (_ivm_memlo),y
 
-	;; AX++;
+        ;; mem[v]++ and keep result in _ivm_acc (no X register, no branch!)
+        lda     (_ivm_memlo),y
         clc
         adc     #1
-        bcc     :+
-        inx
-:
-	;; acc = AX;
         sta     _ivm_acc
-        stx     _ivm_acc+1
-
-	;; mem[v] = AX
         sta     (_ivm_memlo),y
-        txa
-        sta     (_ivm_memhi),y
 
-	;; "restore Y"
-	ldy     #0
+        lda     (_ivm_memhi),y
+        adc     #0
+        sta     _ivm_acc+1
+        sta     (_ivm_memhi),y
 
 i_skip_load:
 	;; get u parameter memory location
-        iny
+	ldy     #1
 	sty     savey
         lda     (_ivm_ipc),y
         tay
@@ -1296,31 +1288,25 @@ i_skip_load:
 
 i_enter:
 	;; go to next op (skip jump offset)
-        ldy     savey
-	iny
-	iny
+	ldy     #3
         jmp     xnext
 
 i_exit:
-	;; IPC += Y + 1 + mem[o] + 1
-        ldy     savey
-        iny                     ; Y = offset 3 (exit_offset byte)
-        sty     savey           ; savey = offset 3
+	ldy     #2
         lda     (_ivm_ipc),y    ; A = exit_offset ($02)
+	tay
+	;; skip "nXX" instruction (TODO: bake into offset!)
+	iny
+	iny
 
-	;; TODO: if < "not too big" just tay iny, jmp xnext
-        clc
-        adc     #1              ; +1 skips exit_offset byte -> 3 + 1 + 2 = 6 (Le8)!
-        jmp     anext
+	jmp     xnext
 
 ;;; LOOP_NEXT back
 op_n:
-;;; 10c - FAST JUMP if started at Y=0 !
+;;; 16c - FAST JUMP if started at Y=0 !
         tya
-
 	clc
 	adc #2
-
         sec
 	;; delta = (Y - offset arg)
         sbc     (_ivm_ipc),y 
@@ -1328,6 +1314,7 @@ op_n:
         beq     op_i_step
 
 op_n_do_the_math:
+;;; +10 +
 	;; Y = delta, don't need update ipc low
         bcs     :+
         dec     _ivm_ipc+1
