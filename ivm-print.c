@@ -76,14 +76,14 @@ static void ivm_print_one(FILE *fp, const uchar *code, unsigned len, unsigned *p
     }
 
     // 2 args
-    if ((c == 'm' || c == 'C' || c == 'U' || c == '(' || c == ')') && i + 2 < len) {
+    if ((c=='m'||c=='C'||c=='U'||c=='('||c==')'||c=='['||c==']') && i + 2 < len) {
       fprintf(fp, "%c%02x%02x ", c, code[i + 1], code[i + 2]);
       *pi = i + 3;
       return;
     }
 
     // 0 arg
-    if (strchr("#$(),.0123456789;?ADEKNPQR~X", c) != NULL) {
+    if (strchr("#$,,.0123456789;?ADEKNPQR~X", c) != NULL) {
       fprintf(fp, "%c ", c);
       *pi = i + 1;
       return;

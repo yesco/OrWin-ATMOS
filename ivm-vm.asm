@@ -690,26 +690,11 @@ op_m:
 	lda (_ivm_memlo),y
 
 	;; get size
+	ldy _ivm_acc		; lo
+	ldx _ivm_acc+1		; hi = full pages
+
+	;; tmp_hi += 
 	pha
-
-;;;  TDOO: now we *2 but shouldn't LOL
-	lda _ivm_acc
-	asl
-	tay			; lo
-	lda _ivm_acc+1
-	rol
-	tax 			; hi
-
-	pla
-
-	;; get size (words -> bytes)
-	pha
-	lda _ivm_acc
-	asl
-	tay			; lo
-	lda _ivm_acc+1
-	rol
-	tax 			; hi = full pages
 
 	txa			; NEW: start on the LAST page
 	clc
@@ -958,7 +943,68 @@ op_idxs:
         jmp     pnext
 
 
+;;; R aa ii  ACC = ((uchar*)mem[aa])[mem[ii]]
+;;; W aa ii        ((uchar*)mem[aa])[mem[ii]] = lo(ACC)
+.macro BELEM            ; -> (tmp_lo),Y = &base[idx]
+        lda     (_ivm_ipc),y        ; aa
+        tax
 
+	;; load index ii
+        iny
+	USEY
+        lda     (_ivm_ipc),y        ; ii
+        tay
+
+        lda     (_ivm_memlo),y
+        sta     tmp_lo              ; idx lo
+        lda     (_ivm_memhi),y
+        sta     tmp_hi              ; idx hi
+
+	;; read base aa
+        txa
+        tay
+        lda     (_ivm_memhi),y
+	;; add to ii
+        clc
+        adc     tmp_hi
+        sta     tmp_hi              ; base hi + idx hi
+        lda     (_ivm_memlo),y
+        tay                         ; Y = base lo
+.endmacro
+
+;;; 
+.macro P2NEXT
+   .if ALTCODE=0
+        inc     _ivm_ipc
+        bne     :+
+        inc     _ivm_ipc+1
+:
+  .endif
+
+        jmp     pnext
+
+.endmacro
+
+
+op_bidxl:
+	USEY
+        BELEM
+        lda     (tmp_lo),y
+        sta     _ivm_acc
+        lda     #0
+        sta     _ivm_acc+1
+
+        P2NEXT
+
+op_bidxs:
+	USEY
+        BELEM
+        lda     _ivm_acc
+        sta     (tmp_lo),y
+
+        P2NEXT
+	
+	
 
 ;;; ACC = -1  or 0xFF or TRUE (forth/basic)
 op_9:   lda     #$FF
@@ -1621,8 +1667,9 @@ op_bnot:
         jmp     xnext
 
 
-;;; [  acc <<= PAR   (ASL/ROL on ZP ok)
+;;; {  acc <<= PAR   (ASL/ROL on ZP ok)
 op_shl: PARAX
+	;; TODO: PARAX is overkill, no need X
         tax                     ; count = par_lo
         beq     shl_dn
 shllp:  asl     _ivm_acc
@@ -1632,8 +1679,9 @@ shllp:  asl     _ivm_acc
 
 shl_dn: jmp     pnext
 
-;;; ]  acc >>= PAR
+;;; }  acc >>= PAR
 op_shr: PARAX
+	;; TODO: PARAX is overkill, no need X
         tax
         beq     shr_dn
 shrlp:  lsr     _ivm_acc+1
@@ -1643,6 +1691,9 @@ shrlp:  lsr     _ivm_acc+1
 
 shr_dn: jmp     pnext
 
+;;; TODO: these are disabled, use others op_shr op_shl
+	
+.if 0
 ;;; {xx  mem[xx] <<= acc
 ;;; no ASL (zp),Y — load lo→tmp_lo, hi→A, count in X
 op_shlm:
@@ -1670,6 +1721,7 @@ shlm_st:
 
         jmp     pnext
 
+
 ;;; }xx  mem[xx] >>= acc
 op_shrm:
 	USEY
@@ -1694,6 +1746,7 @@ shrm_st:
         sta     (_ivm_memlo),y
 
         jmp     pnext
+.endif
 
 
 ;;; unknown: print % + op + NL, halt
@@ -1802,11 +1855,11 @@ _IVM_ASM_END:
   op_at, op_A, op_B, op_C, op_D, op_E, op_F, op_G, \
   op_H, op_I, op_J, op_K, op_L, op_M, op_N, op_O, \
   op_P, op_Q, op_R, op_S, op_T, op_U, op_V, op_W, \
-  op_X, op_Y, op_Z, op_shl, op_bslash, op_shr, op_xor, op__, \
+  op_X, op_Y, op_Z, op_bidxl, op_bslash, op_bidxs, op_xor, op__, \
   op_tick, op_a, op_b, op_c, op_d, op_e, op_f, op_g, \
   op_h, op_i, op_j, op_k, op_l, op_m, op_n, op_o, \
   op_p, op_q, op_r, op_s, op_t, op_u, op_v, op_w, \
-  op_x, op_y, op_z, op_shlm, op_or, op_shrm, op_bnot, op_del
+  op_x, op_y, op_z, op_shl, op_or, op_shr, op_bnot, op_del
 
   .export _dispvec
   _dispvec:	

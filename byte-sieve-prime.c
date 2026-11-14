@@ -12,7 +12,7 @@ char *flags;
 int main() {
   int i, prime, k, count, iter; 
 
-  flags = malloc(SIZEPL << 1);
+  flags = malloc(SIZEPL);
   
   printf("10 iterations\n");
 

@@ -712,7 +712,7 @@ uchar *build_blob(int *out_len) {
         
       // 2 slot arguments 
       case 'C': case 'i': case 'U': case 'm':
-      case '(': case ')':
+      case '(': case ')': case '[': case ']':
         bin[pc] = map[bin[pc]]; pc++;
         // fall-through
         
@@ -720,7 +720,7 @@ uchar *build_blob(int *out_len) {
       case 'L': case 'S': case 'Z': case 'I': case 'J':
       case '+': case '-': case '*': case '/': case '%':
       case '&': case '|': case '^':
-      case '[': case ']': // case '{': case '}': TODO: remove
+      case '{': case '}':
       case '<': case '=': case '>':
       case 'M': case 'F': case '@': case '!':
       case 'r': case 'w': case 'l': case 's': case '\'': case ',':

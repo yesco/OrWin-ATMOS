@@ -1,3 +1,95 @@
+# Claude analysis compare with oscar64 asm:
+
+Before the comparison, there's a bug in the JIT trace: the first two
+lines go wrong.
+
+```
+L fa  [ fb  M 04      ; size = 8191 << 1 ; flags = malloc(size)
+%ERROR: unimpl op 0x5B '['
+%JIT: not-a-call 0xFB
+```
+
+The JIT has no `[` (shift left), so `malloc` gets $1FFF = 8191 bytes,
+not $3FFE. That's what oscar asks for, and what the word array
+needs. The memset then writes 16380 bytes into an 8191-byte block. It
+only gives the right answer because nothing else lives after it on the
+heap. This lines up with your "`*2 → <<1`" codegen change in the
+table. Add `[` and `]` to the JIT (`ASL`/`ROL` × const), or fold a
+const-by-const shift at compile time.
+
+## Matching the parts
+
+| C | oscar64 | JIT | Difference |
+|---|---|---|---|
+| `flags = malloc(16382)` | 088a–089b | 7008–7011 | Size bug (above) |
+| `puts("10 iterations")` | 089d–08a7 | 7013 | |
+| `for (iter = 1; iter <= 10;)` | 08aa, test only at the bottom (093b) | 7025–7037, 714D–715D | oscar uses an 8-bit counter, because it knows iter ≤ 10 |
+| `count = 0` | 08b6 (count lives in **X** + T7+1) | 703A | oscar keeps count in a register |
+| `memset(flags, 1, …)` | 08ae–08cd | 7045–7066 | oscar fills 8191 bytes, JIT 16380 |
+| `for (i = 0; i <= 8190;)` | 08cf, 0927–0939 | 7065–7078, 713A–714A | |
+| `if (flags[i])` | **08d5–08d9: 3 instructions** | **7079–70B1: about 30** | Biggest difference outside the hot loop |
+| `prime = i + i + 3` | 08db–08ea | 70B2–70CA | |
+| `k = i + prime` | 08ef–08f7 | 70CC–70DB | |
+| `while (k <= 8190)` | 0914–0920 | 70DD–70FC | |
+| `flags[k] = 0` | 08fc–0907 | 70FD–711A | |
+| `k += prime` | 0909–0914 | 711C–712D | |
+| `count++` | 0922–0925 (`INX`) | 7130–7138 | `I` reloads ACC for nothing |
+| `printf(count)` | 0946–0969 | 7160– | |
+
+## What oscar does that the JIT doesn't
+
+1. **Strength reduction on `flags[i]`.** oscar keeps a pointer T1 and
+does `INC T1` once per `i`. The JIT's `(` recomputes `flags + 2*i`
+every time, about 30 cycles.
+
+2. **Compare and branch fused.** oscar does `LDA (T1),y / BEQ`. The
+JIT builds a boolean with `?` and then tests it again in `G`, which is
+the `??` cost you measured. The same happens with `>` then `G`.
+
+3. **A cheaper store in the hot loop.** For `flags[k] = 0`, oscar uses
+`LDY flags_lo` and adds only the high bytes: one `STA (T5),y`. The JIT
+does ×2 plus a 16-bit add plus two stores.
+
+4. **Bytes instead of words.** That halves the memset and the
+stores. This one is just waiting on your `char[]` support.
+
+## The hot loop (`while`, roughly 17k passes per iteration)
+
+These cycle counts are hand estimates:
+
+- **JIT:** about 132 cycles per pass. That's a 6-cycle load of k, `>`
+    22, `G` 15, `)` 58, `U` 28 and `B` 3.
+
+- **oscar:** about 58 cycles per pass.
+
+So the hot loop is about 2.3× slower, which matches 31s vs 16s
+overall. These changes would close most of the gap:
+
+- **Fuse `> s G`** into `CMP #lo / TXA / SBC #hi / BCS exit`. That's
+    about 10 cycles instead of 37.
+
+- **Drop the k reload at the loop top.** Both paths into it (`S 0b`
+    and `U 0b 0a`) already leave AX = k. Extending the `kc` tracking
+    to "AX == slot s" would remove it.
+
+- **Byte `)` with a constant value**: with `char[]` it becomes `LDY lo
+    / STA (ptr),y` plus a high-byte add, about 20 cycles instead of
+    58.
+
+Two smaller items:
+
+- The memset reads its fill byte with `lda $01f6` even though `fb` is
+  a constant slot. Use `is_const` and emit `LDA #1`.
+
+
+- `I 0c` (`count++`) reloads ACC with `lda $18/ldx $19`, but `n` comes
+  next and overwrites AX. Your existing "TODO: lazy load!" covers
+  this.
+
+
+# ----------------------------------------------------------
+
+
 # Gemini Analysis of Assembly generated
 
 Looking directly at the 6502 disassembly of your ivm-jit inner loop
@@ -15,6 +107,8 @@ Right now, > fa ? ? G 0a materializes a boolean 0/1 into A,X, negates
 it twice with ? (0x3F), stores it in $FE, and checks sign/zero just to
 perform a single conditional branch ($7002–$703D = 38 bytes / ~46
 cycles every iteration):
+
+
 
 6502
 ; CURRENT (38 bytes, ~46 cycles per hit)

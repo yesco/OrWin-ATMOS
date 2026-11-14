@@ -224,9 +224,9 @@
 //  w   - write byte (c!)
 //  xyz - call library functions w 2..4 args
 
-//  [ - shift left variable steps "[vv"
+//  [ - read index byte array "[ bb ii"  => ACC
 //? '\' possible use instead of 'O'!!! \ is like literal... lol
-//  ] - shift rigth varible steps "]vv"
+//  ] - write index byte array "] bb ii" <= ACC
 //  ^ - xor "^vv"
 //? _ - load ACC by name _cc (cc - const char* ptr)
 
@@ -1204,8 +1204,8 @@ ivmvar run_ivm(Process *p) {
       t['+'] = &&op_add;  t['-'] = &&op_sub; t['*'] = &&op_mul;
       t['/'] = &&op_div;  t['%'] = &&op_mod;
       t['&'] = &&op_and;  t['|'] = &&op_or;  t['^'] = &&op_xor;
-      t['['] = &&op_shl;  t[']'] = &&op_shr;
-      t['{'] = &&op_shlm; t['}'] = &&op_shrm;
+      t['{'] = &&op_shl;  t['}'] = &&op_shr;
+//      t['{'] = &&op_shlm; t['}'] = &&op_shrm;
 
       t['L'] = &&op_L;    t['S'] = &&op_S;   t['Z'] = &&op_Z;
       t['C'] = &&op_C;
@@ -1219,6 +1219,7 @@ ivmvar run_ivm(Process *p) {
       t['r'] = &&op_r;    t['w'] = &&op_w;
       t['\'']= &&op_ri;   t[','] = &&op_wi;
       t['('] = &&op_idxl; t[')'] = &&op_idxs;
+      t['['] = &&op_bidxl;t[']'] = &&op_bidxs;
 
       t['i'] = &&op_i;    t['n'] = &&op_n;   
 
@@ -1297,10 +1298,10 @@ ZL(op_mod, '%')  if (PAR) zp.acc %= PAR; goto pnext;
 ZL(op_and, '&')  zp.acc &= PAR; goto pnext;
 ZL(op_or,  '|')  zp.acc |= PAR; goto pnext;
 ZL(op_xor, '^')  zp.acc ^= PAR; goto pnext;
-ZL(op_shl, '[')  zp.acc <<= PAR; goto pnext;
-ZL(op_shr, ']')  zp.acc >>= PAR; goto pnext;
-ZL(op_shlm,'{')  zp.mem[*zp.ipc] <<= zp.acc; goto pnext;
-ZL(op_shrm,'}')  zp.mem[*zp.ipc] >>= zp.acc; goto pnext;
+ZL(op_shl, '{')  zp.acc <<= PAR; goto pnext;
+ZL(op_shr, '}')  zp.acc >>= PAR; goto pnext;
+//ZL(op_shlm,'...{')  zp.mem[*zp.ipc] <<= zp.acc; goto pnext;
+//ZL(op_shrm,'...}')  zp.mem[*zp.ipc] >>= zp.acc; goto pnext;
 
 
 // TODO: Global name address lookup (sys registry)
@@ -1356,6 +1357,14 @@ ZL(op_idxs,')')
     IVM_PTR(PAR)[zp.mem[zp.ipc[1]]] = zp.acc;
     zp.ipc += 2; goto xnext; // 2 args
 
+ZL(op_idxl,'[')
+    CHKP(PAR + zp.mem[zp.ipc[1]], 2);
+    zp.acc = ((uchar*)(IVM_PTR(PAR)))[zp.mem[zp.ipc[1]]];
+    zp.ipc += 2; goto xnext; // 2 args
+ZL(op_idxs,']')
+    CHKP(PAR + zp.mem[zp.ipc[1]], 2);
+    ((uchar*)(IVM_PTR(PAR)))[zp.mem[zp.ipc[1]]] = zp.acc;
+    zp.ipc += 2; goto xnext; // 2 args
  
 // M: malloc: operand = slot of pointer var; ACC = size in bytes
 ZL(op_M,   'M') zp.acc = zp.mem[*zp.ipc] = ivm_zalloc(zp.acc); goto pnext;
@@ -1366,9 +1375,7 @@ ZL(op_m,   'm') {
   uchar *p = (uchar *)IVM_PTR(PAR);
   uchar v  = (uchar)zp.mem[zp.ipc[1]];
 
-  // TODO: since it is word arrays only for now... lol
-  // TODO: multiply by 2 on outside!
-  word n   = zp.acc * 2;
+  word n   = zp.acc;
 
   //  printf("\n<<< 'm'emset: %u %u %u\n", p, v, n);
     

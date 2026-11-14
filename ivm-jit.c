@@ -593,6 +593,21 @@ static void emit_elem_ptr(uchar base, uchar idx) {
   emit_alub(ADC, base, 1); em2(STAZ, tmp2);
 }
 
+// (tmp1),Y == &((uchar*)mem[base])[mem[idx]]   (clobbers A, Y; X kept)
+// ptr = (idx_lo, base_hi+idx_hi), Y = base_lo: the indexed mode does the
+// lo add + carry for free.
+static void emit_belem_ptr(uchar base, uchar idx) {
+  if (is_const(idx)) em2(LDAN, const_val(idx));
+  else               emop2(LDA, slotlo(idx));
+  em2(STAZ, tmp1);
+  if (is_const(idx)) em2(LDAN, const_val(idx) >> 8);
+  else               emop2(LDA, slothi(idx));
+  em(CLC);
+  emit_alub(ADC, base, 1);
+  em2(STAZ, tmp2);
+  if (is_const(base)) em2(LDYN, const_val(base));
+  else                emop2(LDY, slotlo(base));
+}
 
 // ---- "ACC holds a known constant" tracking, lazy load ----------------------
 // lc_kc/lc_kv: ACC is known to hold lc_kv after the op just emitted.
@@ -1013,6 +1028,30 @@ word ivm_jit(const uchar *code, word code_len,
       break;
     }
 
+    // [ bb ii : ACC = ((uchar*)base)[idx]
+    case '[': {
+      uchar base = PAR, idx = PAR;
+      emit_belem_ptr(base, idx);
+      em2(LDAIY, tmp1); em2(LDXN, 0);
+      break;
+    }
+    // ] bb ii : ((uchar*)base)[idx] = ACC   (ACC preserved)
+    case ']': {
+      uchar base = PAR, idx = PAR;
+      if (kc) {                            // const: load may not be emitted
+        uchar lo = (uchar)(kv & 0xff), hi = (uchar)(kv >> 8);
+        emit_belem_ptr(base, idx);
+        em2(LDAN, lo); em2(STAIY, tmp1);
+        if (lo == hi) em(TAX); else em2(LDXN, hi);
+        kc_set(kv);
+      } else {
+        em(PHA);                           // X untouched by the helper
+        emit_belem_ptr(base, idx);
+        em(PLA); em2(STAIY, tmp1);
+      }
+      break;
+    }
+      
     // ?: ACC = !ACC
     case '?':
       em2(STXZ, tmp1); em2(ORAZ, tmp1);
@@ -1137,12 +1176,9 @@ word ivm_jit(const uchar *code, word code_len,
       uchar val = PAR;
       word fx;
 
-// 31 Bytes TODO: move out to subroutine, nothing is "special"
+// 27 Bytes TODO: move out to subroutine, nothing is "special"
 
-      // byte count = ACC*2 → Y lo, X hi
-// TODO: remove, this is onlly because we don't have 2* in code gen! lol
-      em(ASLA); em(TAY);
-      em(TXA); em(ROLA); em(TAX);
+      em(TAY);
 
       // tmp1/tmp2 = ptr + X*256  (last page)
       emop2(LDA, slotlo(ptr)); em2(STAZ, tmp1);
