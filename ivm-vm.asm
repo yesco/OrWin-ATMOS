@@ -695,7 +695,6 @@ op_m:
 	lda (_ivm_memlo),y
 
 	;; get size
-.if 1
 	pha
 
 ;;;  TDOO: now we *2 but shouldn't LOL
@@ -707,22 +706,36 @@ op_m:
 	tax 			; hi
 
 	pla
-	cpy #0
-.else	
-	ldx _ivm_acc+1		; hi
-	ldy _ivm_acc    	; lo
-.endif
 
+	;; get size (words -> bytes)
+	pha
+	lda _ivm_acc
+	asl
+	tay			; lo
+	lda _ivm_acc+1
+	rol
+	tax 			; hi = full pages
+
+	txa			; NEW: start on the LAST page
+	clc
+	adc tmp_hi
+	sta tmp_hi
+
+	pla
+
+	;; extremly *minimalistic* memset! 14 B !
+	cpy #0
 	beq op_m_page
-op_m_loop:	
+op_m_loop:
 	dey
 	sta (tmp_lo),y
 	bne op_m_loop
-
-	inc tmp_hi
-op_m_page:	
+op_m_page:
+	dec tmp_hi		; was: inc tmp_hi, above this label
 	dex
 	bpl op_m_loop
+
+
 
 ;; TODO: jmp anext ??? or make macro
 .if .not(ALTCODE)
@@ -1475,8 +1488,7 @@ op_n_compute:
         ; enter: ipc += 2
         ; exit:  ipc += 1 + oo
 
-;op_m:
-        ; analogous to op_n but -- and length 3
+       ; analogous to op_n but -- and length 3
 	
 	
 

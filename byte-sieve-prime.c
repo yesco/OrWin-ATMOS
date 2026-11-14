@@ -33,6 +33,7 @@ int main() {
         prime = i + i + 3; 
         k = i + prime; 
 
+        // TODO: for-loop with clear stride...
         while (k <= SIZE) { 
           flags[k] = 0;
           k += prime; 

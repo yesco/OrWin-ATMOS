@@ -1129,61 +1129,46 @@ word ivm_jit(const uchar *code, word code_len,
       break;
     }
 
-#if 0
-    // m: memset. ACC=count, pp=ptr slot, vv=value slot.
-    //   count lo in Y, hi in X (X must hold ACC hi here!)
-    //   remainder goes on the LAST page, then full pages downwards
+    // m: memset words. ACC = word count, ptr slot, val slot (lo byte = fill).
+    //   bytes = 2*ACC: Y = lo, X = hi (= full pages). Remainder on the LAST
+    //   page first, then full pages downwards. BPL: max 32K bytes.
     case 'm': {
       uchar ptr = PAR;
       uchar val = PAR;
-      em(TAY);                              // Y = count lo
-      emop2(LDA, slotlo(ptr)); emop2(STA, tmp1);
+      word fx;
+
+// 31 Bytes TODO: move out to subroutine, nothing is "special"
+
+      // byte count = ACC*2 → Y lo, X hi
+// TODO: remove, this is onlly because we don't have 2* in code gen! lol
+      em(ASLA); em(TAY);
+      em(TXA); em(ROLA); em(TAX);
+
+      // tmp1/tmp2 = ptr + X*256  (last page)
+      emop2(LDA, slotlo(ptr)); em2(STAZ, tmp1);
       em(TXA); em(CLC);
-      emop2(ADC, slothi(ptr)); emop2(STA, tmp2);  // tmp2 = ptrhi + pages
-      emop2(LDA, slotlo(val));              // fill byte
-      emop2(CPYN, 0);
-      emop2(BEQ, +5);                       // no remainder -> next
-// loop:
-      em(DEY);                              // 1
-      emop2(STAIY, tmp1);                   // 2  STA (tmp1),Y
-      emop2(BNE, -5);                       // 2  -> loop
-// next:
-      emop2(DEC_, tmp2);                    // 2  previous page
-      em(DEX);                              // 1
-      emop2(BPL, -10);                      // 2  -> loop, Y==0: 256 bytes
-      // BPL: max 0x7FFF bytes (32K) - ok
-      break;
-    }
-#else      
-    // m: memset. ACC=count, pp=ptr slot, vv=value slot.
-    case 'm': {
-      uchar ptr = PAR;
-      uchar val = PAR;
-      // counter in Y (low) X (hi)
-      em(TAY);
-      // ptr in tmp1/tmp2
-      emop2(LDA, slotlo(ptr)); emop2(STA, tmp1);
-      emop2(LDA, slothi(ptr)); emop2(STA, tmp2);
-      // low byte value in A
+      emit_alub(ADC, ptr, 1);  em2(STAZ, tmp2);
+
+      // fill byte
       emop2(LDA, slotlo(val));
-      // loop while Y != 0 (handles up to 255; high byte via X)      
-      em(CPYN); em(0);
-      em(BEQ); em(+7); // => loop2
-      // loop body
-//loop1:
-      em(DEY);
-      //emop2(STAIY, tmp1); // STA (tmp1),Y
-      em(STAIY); em(tmp1); // STA (tmp1),Y
-      em(BNE); em(-5); // => loop1
-      emop2(INC_, tmp2);
-//loop2:
-      em(DEX);
-      // high byte loop - one more page
-      em(BPL); em(-10); // => loop1
-      // PLL limits to max 32K lll it's ok!
+
+      // init
+      em2(CPYN, 0);
+      fx = emrel(BEQ);                    // no remainder → page
+
+      // loop:
+      em(DEY);                            // 1
+      em2(STAIY, tmp1);                   // 2
+      em2(BNE, (uchar)-5);                // 2 → loop
+      empatch(fx);
+
+      // page:
+      em2(DECZ, tmp2);                    // 2
+      em(DEX);                            // 1
+      em2(BPL, (uchar)-10);               // 2 → loop (Y==0: 256 bytes)
+
       break;
     }
-#endif
 
     default:
       printf("%%ERROR: unimpl op 0x%02X '%c' at bc %u — continuing\n",

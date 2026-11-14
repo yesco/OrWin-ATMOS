@@ -143,13 +143,15 @@ echo
 # jit: *2  -> <<1 450 B |       40.39	5.77x	| 40,389,838
 #
 # ivm: memset     101 BC|      623 s   89x	|622,733,340
-#	no ??		       561 s   80x
+#	no ?? (41 instr)|      561 s   80x	|
+# asm: memset		|      154 s   22x	| 154,385,371
+#       no ??		|      148 s   21x	| 148,471,071
 # jit: memset     412 B	|	34.98   5.00x	| 34,984,658
-#	no ??	  380 B		30.25   4.32	| 30,253,218
-# asm: 			|			| 154,164,957
+#	no ??	  385 B	|	31.16   4.45x	| 31,158,066
+# it's currently 101 bytes, 41 instr, can made 30 by remove redundant!
 
 #
-# (/ 561 7.0) 
+# (/ 31.16 7.0) 
 # (/ 450 469.0)
 # (/ 526 111.0)4.738738738738738 (/ 672 111.0)6.054054054054054
 
@@ -174,6 +176,7 @@ echo
 # In hand-written 6502 assembly (~7.0 s / ~47 cycles per inner-loop
 # hit), the inner loop is literally ~8 instructions:
 #
+# loop:
 #   STA (ptr),Y
 #   TYA
 #   CLC
@@ -191,3 +194,8 @@ echo
 # between the 16-bit add and the bounds check—could realistically drop
 # your JIT time from 40.39 s into the ~28–32 s (~4.0x–4.5x) range
 # without touching the bytecode ISA.
+#
+# <09> +09 +fd S0a
+# L09 +0a S0b <0b> >f9 G0a
+#   Lf8 )040b U0b0a
+# B11
