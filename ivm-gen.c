@@ -566,11 +566,17 @@ static word gen_memadd(uchar *base, uchar **pp, const void *src, word n) {
 // Fills map[] for the variable slots, returns the first free slot (consts).
 static uchar gen_pack(uchar *map) {
   uchar s, v, f0, b, e, top;
+  word i;
 
-  // globals 32.. directly after the registers
-  for (s = 32; s < next_glob; s++)
-    map[s] = next_reg + s - 32;
-  f0 = next_reg + next_glob - 32;
+  // registers + globals: only slots a symbol still names, in slot order
+  // (failed alts don't give back next_reg / next_glob: those are holes)
+  f0 = 0;
+  for (s = 0; s < FRAME_BASE; s++)
+    for (i = 0; i < nsym; i++)
+      if (syms[i].type == SYM_VAR && syms[i].address == s) {
+        map[s] = f0++;
+        break;
+      }
   top = f0;
 
   // frame of v starts fneed[v] cells above f0
