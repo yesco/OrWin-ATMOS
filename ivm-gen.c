@@ -15,6 +15,9 @@
   typedef uint16_t      word;
 #endif
 
+// opcode table: operand bytes / slots / jumps (all bytecode walkers)
+#include "ivm-walk.c"
+
 // --- limits (override before include if needed) ---
 #ifndef MAX_BIN_LEN
   #define MAX_BIN_LEN   2048
@@ -688,7 +691,7 @@ uchar *build_blob(int *out_len) {
     uchar *map; // old_slot -> new_slot
     uchar nn = 0, n0 = nconst, os;
     int k;
-    word pc;
+    word pc, w;
     uchar op;
 
     map = (uchar *)malloc(256);
@@ -760,83 +763,27 @@ uchar *build_blob(int *out_len) {
     // RELOCATE CONSTANTS by scanning code
   
     // Remap slot operands only (walk opcodes; skip string bodies / rel bytes)
-    for (pc = 0; pc < (word)bin_ptr; ) {
+    for (pc = 0; pc < (word)bin_ptr; pc += w) {
+      uchar *a = bin + pc, *q;
 
-      op = bin[pc++];
-      if (op < 32) {
-        // short load of slot op — only remap if that slot moved
-        if (map[op] != op) bin[pc - 1] = map[op];
-        continue;
-      }
-
-      if (op & 0x80) continue; // call / hi-bit forms: not const slots
-
-      // Enforce that constants cannot be modified
-      if (WRITES_VAR(op)) check_store(bin[pc]);
-
-
-      switch (op) {
-
-      // variable slot arguments: xDD11 yDD1122 yDD112233
-      case 'x': case 'y': case 'z':
-        // skip first
-        pc++;
-          
-        bin[pc] = map[bin[pc]]; pc++;
-        if (op == 'x') break;
-
-        bin[pc] = map[bin[pc]]; pc++;
-        if (op == 'y') break;
-
-        bin[pc] = map[bin[pc]]; pc++;
-        // 'z'
-        break;
-        
-      // 2 slot arguments 
-      case 'C': case 'i': case 'U': case 'm':
-      case '(': case ')': case '[': case ']':
-        bin[pc] = map[bin[pc]]; pc++;
-        // fall-through
-        
-      // 1 slot operand (PAR = mem[slot]) — must remap after const pack
-      case 'L': case 'S': case 'Z': case 'I': case 'J':
-      case '+': case '-': case '*': case '/': case '%':
-      case '&': case '|': case '^':
-      case '{': case '}':
-      case '<': case '=': case '>':
-      case 'M': case 'F': case '@': case '!':
-      case 'r': case 'w': case 'l': case 's': case '\'': case ',':
-      case 'W': case 'P':
-        bin[pc] = map[bin[pc]]; pc++;
-        break;
-
-      // 0 slot arguments
-      case '.': case ' ': case '?': case 'q':
-      case 'E': case 'K': case 'N':
-      case '0': case '1': case '2': case '3': case '4':
-      case '5': case '6': case '7': case '8': case '9':
-      case 'Q': case ';': case 'X':
-
-      // data slot
-      case 'G': case 'B': case 'O': case 'n':
-        break;
-        
-      // Skip string cata
-      case '"':
-        while (pc < (word)bin_ptr && bin[pc]) pc++;
-        if (pc < (word)bin_ptr) pc++;
-        break;
-
-      default:
+      op = *a;
+      w = ivm_oplen(a);
+      if (!w) {
         printf("ivm-gen:FAIL: unknown opcode: %02x '%c'",
           op, isprint(op)?op:' ');
         exit(1);
       }
 
-      // skip jump offset/data inline byte
-      if (op=='B'||op=='G'||op=='O'||op=='i'||op=='j'||op=='n')
-        pc++;
+      // short load of slot op — only remap if that slot moved
+      if (op < 32) {
+        if (map[op] != op) *a = map[op];
+        continue;
+      }
 
+      // Enforce that constants cannot be modified
+      if (WRITES_VAR(op)) check_store(a[1]);
+
+      IVM_EACH_SLOT(a, q, *q = map[*q]);
     }
 
     gen_map_syms(map);

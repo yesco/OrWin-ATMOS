@@ -18,6 +18,9 @@ typedef uint16_t       word;
 #ifndef IVM_PRINT_C
 #define IVM_PRINT_C
 
+// opcode table: operand bytes / slots / jumps (all bytecode walkers)
+#include "ivm-walk.c"
+
 // ---- bytecode pretty-printer (existing) ---- 
 
 static void ivm_print_one(FILE *fp, const uchar *code, unsigned len, unsigned *pi) {
@@ -67,38 +70,15 @@ static void ivm_print_one(FILE *fp, const uchar *code, unsigned len, unsigned *p
   }
 
   if (c > ' ' && c < 127) {
+    unsigned n = ivm_oplen(code + i), k;
 
-    // 3 args
-    if ((c == 'i' || c == 'j') && i + 3 < len) {
-      fprintf(fp, "%c%02x%02x%02x ", c, code[i + 1], code[i + 2], code[i + 3]);
-      *pi = i + 4;
-      return;
-    }
-
-    // 2 args
-    if ((c=='m'||c=='C'||c=='U'||c=='('||c==')'||c=='['||c==']') && i + 2 < len) {
-      fprintf(fp, "%c%02x%02x ", c, code[i + 1], code[i + 2]);
-      *pi = i + 3;
-      return;
-    }
-
-    // 0 arg
-    if (strchr("#$,,.0123456789;?ADEKNPQR~X", c) != NULL) {
-      fprintf(fp, "%c ", c);
-      *pi = i + 1;
-      return;
-    }
-
-    // assume 1 arg
-    if (i + 1 < len) {
-      fprintf(fp, "%c%02x ", c, code[i + 1]);
-      *pi = i + 2;
-      return;
-    }
-
-    // fallback at end
-    fprintf(fp, "%c ", c);
-    *pi = i + 1;
+    // op then its operand bytes in hex; unknown / cut off: just the op
+    if (!n || i + n > len) n = 1;
+    fputc((int)c, fp);
+    for (k = 1; k < n; k++)
+      fprintf(fp, "%02x", code[i + k]);
+    fputc(' ', fp);
+    *pi = i + n;
     return;
   }
 

@@ -334,14 +334,15 @@ static void sym_write_all(void) {
   uchar v, fb, sz, op;
   char tbuf[4];
   Symbol *s;
-  uchar r[256], wcnt[256];
+  // reuse the static note_* arrays: 512 bytes less on the cc65 C stack
+  uchar *r = sym_r, *wcnt = sym_w;
   uchar ccall[MAX_VECTORS];
   word cmask[MAX_VECTORS];
 
   if (!sym_fp) return;
 
-  memset(r, 0, sizeof(r));
-  memset(wcnt, 0, sizeof(wcnt));
+  memset(sym_r, 0, sizeof(sym_r));
+  memset(sym_w, 0, sizeof(sym_w));
   memset(ccall, 0, sizeof(ccall));
   memset(cmask, 0, sizeof(cmask));
 
@@ -350,114 +351,35 @@ static void sym_write_all(void) {
   // (that can potentiall by replaced by one byte ops)
   for (pc = 0; pc < (word)bin_ptr; ) {
 
-    op = bin[pc++];
+    op = bin[pc];
+    j = ivm_oplen(bin + pc);
+    pc += j ? j : 1;
+
+    // only count L S !!! (thats the byte savers!) - <32 is a one-byte L
     if (op < 32) {
       if (r[op] < 255) r[op]++;
       continue;
     }
+    if (op == 'L' && r[bin[pc - 1]] < 255) r[bin[pc - 1]]++;
+    if (op == 'S' && wcnt[bin[pc - 1]] < 255) wcnt[bin[pc - 1]]++;
 
-    if (op & 0x80) {
-      if (op >= 0xC0) {
-        uchar callee = (uchar)(op - 0xC0);
-        uchar caller = 0xff;
-        word at = (word)(pc - 1);
+    if (op >= 0xC0) {
+      uchar callee = (uchar)(op - 0xC0);
+      uchar caller = 0xff;
+      word at = (word)(pc - 1);
 
-        if (callee < MAX_VECTORS && ccall[callee] < 255)
-          ccall[callee]++;
+      if (callee < MAX_VECTORS && ccall[callee] < 255)
+        ccall[callee]++;
 
-        for (i = 0; i < nvector; i++) {
-          word a = vectors[i], b = (word)bin_ptr;
-          for (j = 0; j < nvector; j++)
-            if (vectors[j] > a && vectors[j] < b) b = vectors[j];
-          if (at >= a && at < b) { caller = (uchar)i; break; }
-        }
-
-        if (caller != 0xff && callee < 16)
-          cmask[caller] |= (word)(1u << callee);
+      for (i = 0; i < nvector; i++) {
+        word a = vectors[i], b = (word)bin_ptr;
+        for (j = 0; j < nvector; j++)
+          if (vectors[j] > a && vectors[j] < b) b = vectors[j];
+        if (at >= a && at < b) { caller = (uchar)i; break; }
       }
-      continue;
-    }
 
-// TODO: wow - stupid code copy pasta: map L
-//   and set a nrefs = 1,2,3 etc and have sone simple loop!
-    switch (op) {
-    case 'L':
-      if (pc < (word)bin_ptr) {
-        uchar a = bin[pc++];
-        if (r[a] < 255) r[a]++;
-      }
-      break;
-    case 'S': //case 'Z':
-      if (pc < (word)bin_ptr) {
-        uchar a = bin[pc++];
-        if (wcnt[a] < 255) wcnt[a]++;
-      }
-      break;
-    case 'I': case 'J':
-      break;
-      // only count L S !!! (thats the byte savers!)
-
-      // rmw one slot
-      if (pc < (word)bin_ptr) {
-        uchar a = bin[pc++];
-        if (r[a] < 255) r[a]++;
-        if (wcnt[a] < 255) wcnt[a]++;
-      }
-      break;
-    case 'U':
-      break;
-      // only count L S !!! (thats the byte savers!)
-
-      // Uab: mem[a]+=mem[b] — two slots, both read; a written
-      if (pc + 1 < (word)bin_ptr) {
-        uchar a = bin[pc++], b = bin[pc++];
-        if (r[a] < 255) r[a]++;
-        if (r[b] < 255) r[b]++;
-        if (wcnt[a] < 255) wcnt[a]++;
-      }
-      break;
-    case 'i':
-      break;
-      // only count L S !!! (thats the byte savers!)
-
-      // i var limit rel — 3 args; var read (loop head)
-      if (pc + 2 < (word)bin_ptr) {
-        uchar a = bin[pc++];
-        uchar b = bin[pc++];
-        pc++; // rel
-        if (r[a] < 255) r[a]++;
-        if (r[b] < 255) r[b]++;
-      }
-      break;
-
-    case 'n':
-      // n back — 1 arg; target slot increment is dynamic; skip only
-      if (pc < (word)bin_ptr) pc++;
-      break;
-
-    // OPS: with 
-    case 'G': case 'B': case 'O': case 'W':
-    case '+': case '-': case '*': case '/': case '%':
-    case '&': case '|': case '^': case '[': case ']':
-    case '{': case '}': case '<': case '=': case '>':
-    case 'M': case 'F': case '@': case '!':
-
-    // TODO: clash with \r register!
-
-    case 'r': case 'w': case 'l': case 's': case '\'': case ',':
-      if (pc < (word)bin_ptr) pc++;
-      break;
-    case '(': case ')':
-      if (pc + 1 < (word)bin_ptr) pc += 2;
-      break;
-    case '"':
-      while (pc < (word)bin_ptr && bin[pc]) pc++;
-      if (pc < (word)bin_ptr) pc++;
-      break;
-
-    default:
-      // TODO: complain, we might miss new ones otherwise!
-      break;
+      if (caller != 0xff && callee < 16)
+        cmask[caller] |= (word)(1u << callee);
     }
   }
 
