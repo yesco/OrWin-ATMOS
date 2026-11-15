@@ -1,16 +1,26 @@
 name=$1
 name="${name%.ivm}"
+shift
+echo "ARGS: $*"
+
+rm ivm-jit.x ivm-vm.lst ivm-jit.sim ivm-jit.lst 2>/dev/null
 
 #rm ivm-jit.x 2>/dev/null
 #clang -DJIT -g ivm.c -o ivm-jit.x || exit 1
 #time ./ivm-jit.x $name.ivm
 
-cl65 -DJIT -Oirs -C sim6502.cfg -t sim6502 -vm -m ivm-jit.map -o ivm-jit.sim ivm-lib.asm ivm.c  || exit 1
-#cl65 -DNOIVM -DIVMASM -Oirs -C sim6502.cfg -t sim6502 -o ivm-asm-noivm.sim ivm.c || exit 1
-#ca65 -t sim6502 ivm-vm.asm -l ivm-vm.lst # 2>/dev/null 1>/dev/null
+#cl65 -DJIT -Oirs -C sim6502.cfg -t sim6502  -l ivm-jit.s -vm -m ivm-jit.map -o ivm-jit.sim ivm-lib.asm ivm.c  || exit 1
+#cl65 -DJIT -Oirs -C sim6502.cfg -t sim6502 -vm -m ivm-jit.map -o ivm-jit.sim ivm-lib.asm ivm.c || exit 1
+#cl65 -DJIT -Oirs -g -C sim6502.cfg -t sim6502 -l ivm-jit.raw.lst -vm -m ivm-jit.map -o ivm-jit.sim ivm-lib.asm ivm.c || exit 1
+#da65 -S 0x0200 --comments 4 -o ivm-jit.lst ivm-jit.sim || exit 1
+#cl65 -DJIT -Oirs -g --add-source -C sim6502.cfg -t sim6502 -l ivm-jit.raw.lst -vm -m ivm-jit.map -o ivm-jit.sim ivm-lib.asm ivm.c || exit 1
 
-sim65 -c ivm-jit.sim -j $name.ivm | grep cycles | sed 's/ cycles//' > $name.cycles.jit
-sim65 -c ivm-jit.sim $name.ivm | tee $name.log
+# recreate .lst asm and merge C force comments
+./cafix
+
+
+sim65 -c ivm-jit.sim -j $* $name.ivm | grep cycles | sed 's/ cycles//' > $name.cycles.jit
+sim65 -c ivm-jit.sim $* $name.ivm | tee $name.log
 
 jit=$(cat "$name.cycles.jit")
 jitandrun=$(grep cycles "$name.log" | sed 's/ cycles//')

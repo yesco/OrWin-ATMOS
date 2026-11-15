@@ -1,0 +1,17 @@
+#!/bin/sh
+# Build ivm-jit.sim with absolute listings for ivm-lib and ivm.
+set -e
+
+# lib assembled on its own: its own listing (cl65 -l would overwrite it)
+ca65 -t sim6502 -g -l ivm-lib.raw.lst -o ivm-lib.o ivm-lib.asm
+
+cl65 -DJIT -Oirs -g --add-source -C sim6502.cfg -t sim6502 \
+     -l ivm.raw.lst -vm -m ivm-jit.map -Ln ivm-jit.lbl \
+     -o ivm-jit.sim ivm-lib.o ivm.c
+
+# -s: group by segment (address order); drop -s for cc65's interleaved order
+python3 cafix.py -s ivm-jit.map ivm-lib.o ivm-lib.raw.lst > ivm-lib.lst
+python3 cafix.py -s ivm-jit.map ivm.o     ivm.raw.lst     > ivm-jit.lst
+
+# quick sanity: where did the library land?
+grep -E '\._(ivmlib_start|ivmlib_end|opmul|opputchar)$' ivm-jit.lbl || true
