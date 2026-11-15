@@ -154,10 +154,12 @@ echo
 # asm: ALTCODE=1 m ( )	|      139 s   19.9x	|139,257,315
 #       no ??		|      133 s   19.0x	|133,343,015
 # ivm: byte idx	  105 B	|			|625,684,958 ???
+#                                                711,065,583
 # asm: byte idx         |      128 s   18.35x	|128,431,679
+#                                                124,425,393
 # jit: byte idx	  404 B	|      slower...        | 31,266,638
 #       no ??     367 B |       25.56	3.65x	| 25,557,416
-
+#                                                 27,904,725
 # it's currently 101 bytes, 41 instr, can made 30 by remove redundant!
 
 #

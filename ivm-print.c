@@ -53,7 +53,8 @@ static void ivm_print_one(FILE *fp, const uchar *code, unsigned len, unsigned *p
     return;
   }
   if (c >= 0x80) {
-    fprintf(fp, "C%02x ", (unsigned)(c & 0x7f));
+    // zjp: jump forward if ACC == 0 - same as the "?G rr" it replaced
+    fprintf(fp, "?G%02x ", (unsigned)(c & 0x3f));
     *pi = i + 1;
     return;
   }

@@ -27,10 +27,13 @@
 //   n  rel           NEXT: back to its 'i'
 //   j  slot rel      down-loop (forward)
 //
+//   0x80+rel    zjp (rel < 64): jump forward if ACC == 0, see ivm_jump()
+//
 // Not in the table (ivm_opinfo() gives 0, one byte, no operands):
 //   0x00..0x1f  one-byte load: the opcode IS the slot
-//   0x80..0xbf  one-byte forms (JIT: slot load of op & 0x7f)
+//   0x80..0xbf  zjp: the rel is in the opcode itself
 //   0xc0..0xff  call vector op - 0xc0
+//   0x7f DEL    NOP; filler of the peephole, removed by gen_squeeze()
 
 #define OPI_SLOTS    0x07
 #define OPI_NARGS(i) (((i) >> 3) & 3)
@@ -94,6 +97,19 @@ static word ivm_oplen(const uchar *p) {
   for (n = 1; p[n]; n++)
     ;
   return n + 1;
+}
+
+// jump target of the op at p (= code + pc), 0xffff if it is not a jump
+//   0x80+rel (rel < 64): zjp, forward if ACC == 0 (ACC kept)
+static word ivm_jump(const uchar *p, word pc) {
+  uchar i = ivm_opinfo(*p), n;
+
+  if ((uchar)(*p - 0x80) < 64) return (word)(pc + 1 + (*p & 0x3f));
+  if (!(i & OPI_REL)) return 0xffff;
+
+  n = OPI_NARGS(i);           // the rel byte is the last operand: p[n]
+  if (i & OPI_BACK) return (word)(pc + n + 1 - p[n]);
+  return (word)(pc + n + 1 + p[n]);
 }
 
 // do body for each slot operand of the op at p; q points at that byte

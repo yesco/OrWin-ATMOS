@@ -1237,7 +1237,7 @@ ivmvar run_ivm(Process *p) {
       t['<'] = &&op_lt;   t['='] = &&op_eq;  t['>'] = &&op_gt;
       t['?'] = &&op_not;  t['~'] = &&op_bnot;
 
-      t[' '] = &&op_sp;
+      t[' '] = &&op_sp;    t[127] = &&op_DEL; // DEL: NOP too
 
       t['0'] = &&op_0;    t['9'] = &&op_9;
 

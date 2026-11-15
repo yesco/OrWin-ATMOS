@@ -9,7 +9,7 @@ fi
 rm $name.ivm 2>/dev/null
 
 
-clang -DSYMS -DRUN -DVERBOSE -O3 parse.c -o parse.x | exit 1
+clang -DSYMS -DRUN -DVERBOSE -O3 parse.c -o parse.x || exit 1
 
 time ./parse.x -O -v c.bnf $name.c
 

@@ -40,6 +40,7 @@ INSTRUCTIONS: Keeps this section but keep updated for status
 | `-a XXXX` code org       | **Done (untested)** — implies -j (can't run code built for another address) |
 | `-o file` save           | **Done (untested)** — [hdr][ivm-lib][mem image][strings][gap][JIT code], implies -j |
 | `-t target`              | **Done (untested)** — sim6502 (sim65 hdr), atmos (.tap autorun), raw |
+| zjp 0x80+rel             | **Done (untested)** — jump if ACC == 0; replaces the old 0x80..0xBF one-byte slot load |
 
 ### Zero page
 
@@ -770,13 +771,18 @@ word ivm_jit(const uchar *code, word code_len,
     // 0..31: fast load mem[op]
     if (op < 32) { load_slot_lazy(op); continue; }
 
-    // hibit: vector call ($C0+) or const-slot load
+    // hibit: vector call ($C0+) or zjp
     if (op & 0x80) {
 
       if (op < 0xC0) {
 
-        // One byte slot load
-        load_slot_lazy((uchar)(op & 0x7f));
+        // zjp 0x80+rel: jump forward rel if ACC == 0 (ACC kept)
+        //   CMP #0; BNE skip; CPX #0; BEQ dest; skip:
+        word dest = (word)((p - code) + (op & 0x3f));
+        word fx;
+        em2(CMPN, 0); fx = emrel(BNE);
+        em2(CPXN, 0); emjump(BEQ, dest);
+        empatch(fx);
 
       } else {
 
@@ -1109,6 +1115,7 @@ word ivm_jit(const uchar *code, word code_len,
       break;
 
     case ' ': break; // spacer
+    case 127: break; // DEL: peephole filler (squeezed out by ivm-gen)
 
     // C: copy mem[s] -> mem[d], result in ACC. Two slot operands.
     case 'C': {
