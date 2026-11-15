@@ -117,11 +117,13 @@ echo
 # ./ivm-asm          **	|      182 s  ~26x	| written in asm/ca65
 # ./ivm C-interprter **	|      735 s ~105x	| written in cc65
 
+# **) = multi-tasking several processes, at least 2x overhead?
+
 
 #      ============  byte-sieve-prime.c - 109 BC ============
-#
-# oscar64 -Os	  294 B	|       16 s   ~2.3x    | best C for 6502 -   (4594 B)
-# cc65 -Oirs	  442 B	|       78 s  ~11x	| std compliant, slow (3083 B)
+# (/ 14.4 7.0)
+# oscar64 -Os	  294 B	|       14.4s  ~2.06x 	| best C for 6502 -   (4594 B)
+# cc65 -Oirs	  442 B	|       69.5s  ~9.93x	| std compliant, slow (3083 B)
 #
 # ./ivm-asm 	  109 BC|(182?)180 s  ~25x      |
 # ./ivm C-interpr "  ** |(744?)697 s  ~99.6x    | simplier code
@@ -151,7 +153,7 @@ echo
 # asm:                  |      154		|154,385,591
 # asm: ALTCODE=1 m ( )	|      139 s   19.9x	|139,257,315
 #       no ??		|      133 s   19.0x	|133,343,015
-# ivm: byte idx		|			|625,684,958
+# ivm: byte idx	  105 B	|			|625,684,958 ???
 # asm: byte idx         |      128 s   18.35x	|128,431,679
 # jit: byte idx	  404 B	|      slower...        | 31,266,638
 #       no ??     367 B |       25.56	3.65x	| 25,557,416
@@ -159,7 +161,7 @@ echo
 # it's currently 101 bytes, 41 instr, can made 30 by remove redundant!
 
 #
-# (/ 25.56 7.0) 
+# (/ 69.5 7.0) 
 # (/ 450 469.0)
 # (/ 526 111.0)4.738738738738738 (/ 672 111.0)6.054054054054054
 
@@ -171,7 +173,34 @@ echo
 #  ivm-asm      2.67x
 #  ivm         10.14x
 
-# **) = multi-tasking several processes, at least 2x overhead?
+
+# Target / Variant        |  Size |   Time | vs ASM | Oscar  | vs JIT
+# -------------------------------------------------------------------
+# Orig ASM (hand)         |     - |  7.00s |  1.00x |  0.49x |  0.27x
+# oscar64 -Os            *| 294 B | 14.40s |  2.06x |  1.00x |  0.56x
+# ivm-jit (byte idx)     *| 367 B | 25.56s |  3.65x |  1.77x |  1.00x
+# ivm-jit (memset, no ??) | 385 B | 31.16s |  4.45x |  2.16x |  1.22x
+# ivm-jit (const/*2)      | 450 B | 40.39s |  5.77x |  2.80x |  1.58x
+# ivm-jit (zp baseline)   | 597 B | 55.30s |  7.90x |  3.84x |  2.16x
+# ivm-jit (initial)       | 672 B | 61.00s |  8.71x |  4.24x |  2.39x
+# cc65 -Oirs             *| 442 B | 69.50s |  9.93x |  4.83x |  2.72x
+# ivm-asm (byte idx)      | 105 BC| 128.4s | 18.34x |  8.92x |  5.02x
+# ivm-asm (ALTCODE=1)     | 101 BC| 133.3s | 19.04x |  9.26x |  5.22x
+# ivm-asm (memset)        | 101 BC| 148.5s | 21.21x | 10.31x |  5.81x
+# ivm-asm (initial)       | 109 BC| 180.0s | 25.71x | 12.50x |  7.04x
+# ivm C-interp (latest)   | 101 BC| 561.0s | 80.14x | 38.96x | 21.95x
+# ivm C-interp (initial)  | 109 BC| 697.0s | 99.57x | 48.40x | 27.27x
+#
+#
+# *) actual program size (file) is bigger:
+#
+#    oscar64 : 5772
+#    cc65    : 4194
+#    ivm     :  143 (file.ivm) but should add loader/library ?
+#    jit     :  749 (+ (* 6 2) 367 100 50 50 20 50 100)
+#      libs  :      malloc free opmu opodiv opmod opputnum
+#                   putchar getchar INIT
+
 #
 #
 # The sieve's inner loop: 149,870 times in 10 iterations,
