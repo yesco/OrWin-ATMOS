@@ -78,6 +78,15 @@ void check_store(uchar ix);
 uint16_t vectors[MAX_VECTORS];
 uchar frame_base[MAX_VECTORS];
 uchar nvector;
+
+// -O frame packing: frames of functions never active at the same time
+// share cells. Callees are compiled before callers, so when a call is
+// emitted the callee's fneed is final (recorded by emitop()):
+//   fneed[v] = cells below v's frame = max over callees c of
+//              fneed[c] + size(c),  size(c) = frame_base[c+1] - frame_base[c]
+// Backtracking can only make it bigger (safe, just less packing).
+uchar fneed[MAX_VECTORS];
+uchar cur_func;           // function being emitted (gen_func_entry), 0xff none
 uchar next_slot; // frames/locals bump (and all slots when !optimize)
 // optimize==0: intermixed layout from 0 (as before); short L if slot<32
 // optimize!=0: REGISTER 0..31, other globals 32..95, frames at FRAME_BASE (96)+
@@ -137,6 +146,15 @@ void emit(uchar c) {
 
 void emitop(uchar op) {
   emit(op);
+
+  // -O: the callee's frame goes below ours (see fneed)
+  if (op >= 0xC0 && cur_func < nvector) {
+    uchar c = op & 0x3f, n;
+    if (c < cur_func) {
+      n = fneed[c] + frame_base[c + 1] - frame_base[c];
+      if (n > fneed[cur_func]) fneed[cur_func] = n;
+    }
+  }
 
   if (op == '0' || op == '9' || op == '~' || op == '?' || op == 'G' || op == 'B')
     acc_invalidate();
@@ -502,12 +520,16 @@ void gen_reset(void) {
   main_vec = 0xff;
   main_offset = 0;
   nginit = 0;
+  cur_func = 0xff;
+  memset(fneed, 0, sizeof(fneed));
 
   acc_invalidate();
 }
 
 void gen_func_entry(uchar v) {
   uchar i, s;
+
+  cur_func = v;
   
   // main: emit deferred global inits first so they run on entry
   if (v == main_vec) {
@@ -538,6 +560,58 @@ static word gen_memadd(uchar *base, uchar **pp, const void *src, word n) {
 
   *pp += n;
   return off;
+}
+
+// -O: [registers][globals][frames packed by call graph]
+// Fills map[] for the variable slots, returns the first free slot (consts).
+static uchar gen_pack(uchar *map) {
+  uchar s, v, f0, b, e, top;
+
+  // globals 32.. directly after the registers
+  for (s = 32; s < next_glob; s++)
+    map[s] = next_reg + s - 32;
+  f0 = next_reg + next_glob - 32;
+  top = f0;
+
+  // frame of v starts fneed[v] cells above f0
+  for (v = 0; v < nvector; v++) {
+    b = frame_base[v];
+    e = (v + 1 < nvector) ? frame_base[v + 1] : next_slot;
+    for (s = b; s < e; s++)
+      map[s] = f0 + fneed[v] + s - b;
+    if (f0 + fneed[v] + e - b > top)
+      top = f0 + fneed[v] + e - b;
+  }
+
+  // temps allocated before the first frame: own cells on top
+  e = nvector ? frame_base[0] : next_slot;
+  for (s = FRAME_BASE; s < e; s++)
+    map[s] = top++;
+
+  return top;
+}
+
+// after remap: frame bases and symbols follow map[] (also const aliases)
+static void gen_map_syms(uchar *map) {
+  word i;
+  uchar k;
+  Symbol *s;
+
+  for (i = 0; i < nvector; i++)
+    frame_base[i] = map[frame_base[i]];
+
+  for (i = 0; i < nsym; i++) {
+    s = &syms[i];
+    if (s->type == SYM_VAR) {
+      s->address = map[s->address];
+      continue;
+    }
+    // FUNC: address is the vector
+    s->ret_slot = map[s->ret_slot];
+    s->ret_addr_slot = map[s->ret_addr_slot];
+    for (k = 0; k < s->nparams; k++)
+      s->param_slot[k] = map[s->param_slot[k]];
+  }
 }
 
 // Build IVM image (magic IVM\0 + sections). Caller free().
@@ -623,7 +697,9 @@ uchar *build_blob(int *out_len) {
     for (i = 0; i < (int)n0; i++)
       if (!const_is_reloc[i] && const_pool[i] != 0) nn++;
 
-    constidx = (uchar)(CONST_TOP - nn + 1);
+    // vars: -O closes the gaps (gen_pack), consts right after (no gap)
+    constidx = optimize ? gen_pack(map) : next_slot;
+    if (constidx + nn > CONST_TOP + 1) IVM_GEN_FAIL("constants collided with frames");
     k = 0;
     // fill map and write words straight into the blob (no new_pool copy)
     h.con = (word)(p - body);
@@ -757,6 +833,8 @@ uchar *build_blob(int *out_len) {
 
     }
 
+    gen_map_syms(map);
+
     free(map);
   }
 
@@ -787,7 +865,7 @@ uchar *build_blob(int *out_len) {
   // Data section (strings); reloc consts index into this from 0
   h.data = gen_memadd(body, &p, data_pool, data_len);
 
-  h.memsz = CONST_TOP + 1; // compaction TODO
+  h.memsz = constidx + nconst; // vars + consts, no gap
 
   h.constidx = constidx;
 
