@@ -387,13 +387,16 @@ static void sym_write_all(void) {
         if (r[a] < 255) r[a]++;
       }
       break;
-    case 'S': case 'Z':
+    case 'S': //case 'Z':
       if (pc < (word)bin_ptr) {
         uchar a = bin[pc++];
         if (wcnt[a] < 255) wcnt[a]++;
       }
       break;
     case 'I': case 'J':
+      break;
+      // only count L S !!! (thats the byte savers!)
+
       // rmw one slot
       if (pc < (word)bin_ptr) {
         uchar a = bin[pc++];
@@ -402,6 +405,9 @@ static void sym_write_all(void) {
       }
       break;
     case 'U':
+      break;
+      // only count L S !!! (thats the byte savers!)
+
       // Uab: mem[a]+=mem[b] — two slots, both read; a written
       if (pc + 1 < (word)bin_ptr) {
         uchar a = bin[pc++], b = bin[pc++];
@@ -411,6 +417,9 @@ static void sym_write_all(void) {
       }
       break;
     case 'i':
+      break;
+      // only count L S !!! (thats the byte savers!)
+
       // i var limit rel — 3 args; var read (loop head)
       if (pc + 2 < (word)bin_ptr) {
         uchar a = bin[pc++];
@@ -420,6 +429,7 @@ static void sym_write_all(void) {
         if (r[b] < 255) r[b]++;
       }
       break;
+
     case 'n':
       // n back — 1 arg; target slot increment is dynamic; skip only
       if (pc < (word)bin_ptr) pc++;
@@ -461,7 +471,7 @@ static void sym_write_all(void) {
     if (s->pidx) fprintf(sym_fp, "param     ");
     else if (s->scope == 0) fprintf(sym_fp, "global    ");
     else fprintf(sym_fp, "local     ");
-    fprintf(sym_fp, "%-5s  r=%u w=%u",
+    fprintf(sym_fp, "%-5s  L=%u S=%u",
             tbuf, (unsigned)r[s->address], (unsigned)wcnt[s->address]);
 
     // TODO: document what this loop does
