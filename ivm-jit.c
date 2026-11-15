@@ -31,10 +31,15 @@ INSTRUCTIONS: Keeps this section but keep updated for status
 | `U`                      | Present |
 | `j` (down-loop)          | **Missing** — warns only |
 | Array `(` `)`            | Present (needs testing) |
-| / *                      | JSR helpers; still need **PARAX → zp_par** |
+| / *                      | JSR helpers in **ivm-lib.asm** (ACC/PAR in zp ivm_acc/ivm_par); still need **PARAX → zp_par** |
 | ZP optimisation          | **Done, one place** — emop2() + zpmap[] (see below) |
 | Branch emit              | **Done** — emrel/empatch (local), emjump (bytecode target) |
 | ACC const tracking       | **Done** for `)` — const loads ('0' '9' 'L', slot loads) are deferred and dropped when `)` consumes them; every other op flushes them first |
+| Runtime library          | **Done (untested)** — ivm-lib.asm: op* helpers, putchar/getchar trampolines, bump heap. Generated code calls ONLY these (+ zp), never cc65 lib |
+| `-z[XX]` mem in zp       | **Done (untested)** — mem[] at XX, default: ends at target zp top |
+| `-a XXXX` code org       | **Done (untested)** — implies -j (can't run code built for another address) |
+| `-o file` save           | **Done (untested)** — [hdr][ivm-lib][mem image][strings][gap][JIT code], implies -j |
+| `-t target`              | **Done (untested)** — sim6502 (sim65 hdr), atmos (.tap autorun), raw |
 
 ### Zero page
 
@@ -293,6 +298,15 @@ extern void opputnum(void); // there is like a 30 B variant!
 extern void opmul(void);
 extern void opdiv(void);
 extern void opmod(void);
+
+// ivm-lib.asm: generated code must only call these (they are inside the
+// image saved by -o). putchar/getchar trampolines hide the target.
+extern void opputchar(void);  // A = char; A X Y preserved
+extern void opgetchar(void);  // AX = char, $FFFF = EOF
+extern void opputs(void);     // print string at ivm_acc; AX = ivm_acc
+extern void opprintstr(void); // JSR + inline string + 0; AX preserved
+extern void opmalloc(void);   // AX = bytes -> AX = zeroed ptr (bump)
+extern void opfree(void);     // AX = ptr (no-op)
 
 // TODO: word oprandom(void): see my parse.asm in Meteoric C compiler
 
@@ -913,8 +927,8 @@ word ivm_jit(const uchar *code, word code_len,
     }
 
     // I/O — same symbols as ivm-vm.asm
-    case 'N': em2(LDAN, 10); ema(JSR, REF(putchar)); break;
-    case 'E': ema(JSR, REF(putchar)); break;  // emit ACC as char
+    case 'N': em2(LDAN, 10); ema(JSR, REF(opputchar)); break;
+    case 'E': ema(JSR, REF(opputchar)); break;  // emit ACC as char
     case '.':
       emop2(STA, (word)(unsigned)&ivm_acc);
       emop2(STX, (word)((unsigned)&ivm_acc + 1));
@@ -923,13 +937,13 @@ word ivm_jit(const uchar *code, word code_len,
     case 'P':
       emop2(STA, (word)(unsigned)&ivm_acc);
       emop2(STX, (word)((unsigned)&ivm_acc + 1));
-      ema(JSR, REF(jit_puts));
+      ema(JSR, REF(opputs));
       break;
-    case 'O': em2(LDAN, PAR); ema(JSR, REF(putchar)); break;
+    case 'O': em2(LDAN, PAR); ema(JSR, REF(opputchar)); break;
 
     // heap
-    case 'M': { uchar s = PAR; ema(JSR, REF(ivm_zalloc)); emit_store_slot(s); break; }
-    case 'F': { uchar s = PAR; emit_load_slot(s); ema(JSR, REF(ivm_free)); emit_load0(); emit_store_slot(s); break; }
+    case 'M': { uchar s = PAR; ema(JSR, REF(opmalloc)); emit_store_slot(s); break; }
+    case 'F': { uchar s = PAR; emit_load_slot(s); ema(JSR, REF(opfree)); emit_load0(); emit_store_slot(s); break; }
 
     // byte slot
     case 'l': { uchar s = PAR; emop2(LDA, slotlo(s)); em2(LDXN, 0); break; } // ACC = lo(mem[s])
@@ -1088,7 +1102,7 @@ word ivm_jit(const uchar *code, word code_len,
 
     // " inline string — helper prints until 0
     case '"':
-      ema(JSR, REF(printinlinedstring));
+      ema(JSR, REF(opprintstr));
       while (p < end && *p) { em(*p); p++; }
       em(0);
       if (p < end) p++;

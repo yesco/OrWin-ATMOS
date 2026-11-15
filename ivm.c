@@ -274,6 +274,15 @@
   #include "disasm.c"
   static int jit_only = 0;
   static int jit_force_zp = 0;
+  static word  jit_zp = 0;          // -zXX: zp base of mem[] (0: auto)
+  static word  jit_org = 0;         // -a XXXX: org of generated code (0: auto)
+  static char *jit_outfile = NULL;  // -o file
+  static char *jit_target = NULL;   // -t sim6502|atmos|raw
+
+  // ivm-lib.asm (link it FIRST): [start .. end[ is copied by -o
+  extern uchar ivmlib_start[], ivmlib_end[];
+  extern word  ivmlib_entry, ivmlib_heap, ivmlib_heapend, ivmlib_zpsrc;
+  extern uchar ivmlib_zpdst, ivmlib_zplen, ivmlib_spzp;
 #endif
 
 
@@ -1044,11 +1053,13 @@ word  *ivm_callv; // call vectors (abs on cc65 after relocate)
 #pragma bss-name (pop)
 #endif
 
+#ifndef JIT // JIT: these come from ivm-lib.asm
 // C helpers — ASM jsr _opmul etc; ACC/PAR already in ZP
 void opmul(void)    {              ivm_acc *= ivm_par; }
 void opdiv(void)    { if (ivm_par) ivm_acc /= ivm_par; }
 void opmod(void)    { if (ivm_par) ivm_acc %= ivm_par; }
 void opputnum(void) { printf("%u", (unsigned)ivm_acc); }
+#endif // !JIT
 #endif
 
 #ifdef IVMASM
@@ -1732,6 +1743,174 @@ char save_blob(const char *path, uchar *img, int len) {
 
 #ifdef JIT
 
+// ---- -t -z -a -o support -------------------------------------------------
+//
+// -o image (all at fixed addresses, loads at ivmlib_start):
+//   [hdr][ivm-lib: ivmlib_start..ivmlib_end[][mem[] image][strings][0 gap][JIT code]
+// Entry is ivmlib_start: it sets up (sim65 sp, -z copy of mem[] to zp),
+// JSRs the JIT code (ivmlib_entry), then exits (sim65) or RTS (atmos).
+// Heap (opmalloc) bumps from the end of the image up to the target's heapend.
+
+#if defined(__SIM6502__) || defined(__SIM65C02__)
+  #define JIT_DEFAULT_TARGET "sim6502"
+#elif defined(__ATMOS__)
+  #define JIT_DEFAULT_TARGET "atmos"
+#else
+  #define JIT_DEFAULT_TARGET "raw"
+#endif
+
+// hdr: 0 none, 1 sim65, 2 oric tap.  zptop: -z mem[] ends below this.
+typedef struct { const char *name; uchar hdr; word zptop; word heapend; } JitTarget;
+
+static const JitTarget jit_targets[3] = {
+  { "sim6502", 1, 0xFE, 0xF000 },   // sim65: C stack $F000-$FF00 (ivm-lib)
+  { "atmos",   2, 0xE2, 0x9800 },   // cc65 atmos ZP is $E2-$FB; HIRES at $9800
+  { "raw",     0, 0xFE, 0x9800 },
+};
+static const JitTarget *jit_tg;
+
+static ivmvar *jit_memimg;          // -o: copy of mem[], strings relocated
+static uchar  *jit_data;            // blob string section
+static word    jit_membytes, jit_datalen, jit_imgmem, jit_imgdata;
+
+// Decide mem_base / out_org (and const view) before ivm_jit(). 0 = error.
+static int jit_layout(Process *proc, uchar *base, word *mem_base, word *out_org) {
+  BlobHeader *bh = &proc->h.hdr;
+  word cells = bh->memsz ? bh->memsz : MAX_SLOTS;
+  word i;
+
+  if (!jit_target) jit_target = JIT_DEFAULT_TARGET;
+  jit_tg = NULL;
+  for (i = 0; i < 3; i++)
+    if (!strcmp(jit_targets[i].name, jit_target)) jit_tg = &jit_targets[i];
+  if (!jit_tg) { printf("%%JIT: unknown target '%s'\n", jit_target); return 0; }
+  if (strcmp(jit_target, JIT_DEFAULT_TARGET))
+    printf("%%JIT: warning: target %s, but ivm-lib built for %s\n",
+      jit_target, JIT_DEFAULT_TARGET);
+
+  jit_membytes = (word)(cells * 2);
+  jit_data     = base + bh->data;
+  jit_datalen  = (bh->data && bh->len > bh->data) ? (word)(bh->len - bh->data) : 0;
+  jit_imgmem   = (word)(unsigned)ivmlib_end;
+  jit_imgdata  = (word)(jit_imgmem + jit_membytes);
+
+  if (jit_force_zp) {
+    if (!jit_zp) {
+      if (jit_membytes > jit_tg->zptop) {
+        printf("%%JIT: -z: mem[] %u bytes does not fit in zp\n", jit_membytes);
+        return 0;
+      }
+      jit_zp = (word)(jit_tg->zptop - jit_membytes);
+    }
+    // tmp1/tmp2 of the JIT live at $FE/$FF
+    if (jit_zp + jit_membytes > 0xFE) {
+      printf("%%JIT: -z: mem[] $%02X+%u bytes overruns $FE\n", jit_zp, jit_membytes);
+      return 0;
+    }
+    *mem_base = jit_zp;
+    printf("--- JIT: mem[] in zp $%02X-$%02X ---\n",
+      jit_zp, jit_zp + jit_membytes - 1);
+  }
+
+  if (!jit_outfile) {
+    // run in place: live mem[] (or zp copy of it), cc65 heap for 'M'
+    word n = (word)_heapmaxavail();
+    if (n > 512) n -= 256;   // leave some for printf & co
+    ivmlib_heap = (word)(unsigned)malloc(n);
+    ivmlib_heapend = ivmlib_heap ? (word)(ivmlib_heap + n) : 0;
+    if (jit_force_zp)
+      memcpy((void *)(unsigned)jit_zp, proc->h.mem, jit_membytes);
+    else
+      *mem_base = (word)(unsigned)proc->h.mem;
+    if (jit_org) *out_org = jit_org;
+    return 1;
+  }
+
+  // -o: own copy of mem[]; string consts point into the loaded blob,
+  // move them to the strings copy in the image (pool: strings first, 0, ints)
+  jit_memimg = (ivmvar *)malloc(jit_membytes);
+  if (!jit_memimg) { printf("%%JIT: alloc fail\n"); return 0; }
+  memcpy(jit_memimg, proc->h.mem, jit_membytes);
+  if (bh->constidx != 255)
+    for (i = bh->constidx; i < cells && jit_memimg[i]; i++)
+      jit_memimg[i] += (ivmvar)(jit_imgdata - (word)(unsigned)jit_data);
+  lc_constmem = jit_memimg;
+
+  if (!jit_force_zp) *mem_base = jit_imgmem;
+  ivmlib_zpsrc = jit_imgmem;
+  ivmlib_zpdst = (uchar)jit_zp;
+  ivmlib_zplen = jit_force_zp ? (uchar)jit_membytes : 0;
+
+  *out_org = (word)(jit_imgdata + jit_datalen);
+  if (jit_org) {
+    if (jit_org < *out_org) {
+      printf("%%JIT: -a %04X overlaps ivm-lib/mem/strings, min %04X\n",
+        jit_org, *out_org);
+      return 0;
+    }
+    *out_org = jit_org;
+  }
+  return 1;
+}
+
+// Write the -o image. Library vars are patched in place first, so the
+// copied library bytes carry them.
+static int jit_save(uchar *out, word size, word org) {
+  FILE *f;
+  word lib = (word)(unsigned)ivmlib_start;
+  word end = (word)(org + size);              // first byte after image
+  word gap = (word)(org - (jit_imgdata + jit_datalen));
+  uchar h[17];
+  uchar n = 0;
+
+  ivmlib_entry   = org;
+  ivmlib_heap    = (word)((end + 1) & ~1);
+  ivmlib_heapend = jit_tg->heapend;
+  if (ivmlib_heap >= ivmlib_heapend)
+    printf("%%JIT: warning: no heap left ($%04X >= $%04X)\n",
+      ivmlib_heap, ivmlib_heapend);
+
+  if (jit_tg->hdr == 1) {               // sim65: "sim65" ver cpu sp load reset
+    memcpy(h, "sim65", 5);
+    h[5]  = 2;
+    #ifdef __SIM65C02__
+      h[6] = 1;
+    #else
+      h[6] = 0;
+    #endif
+    h[7]  = ivmlib_spzp;
+    h[8]  = (uchar)lib; h[9]  = (uchar)(lib >> 8);   // load
+    h[10] = (uchar)lib; h[11] = (uchar)(lib >> 8);   // reset = ivmlib_start
+    n = 12;
+  } else if (jit_tg->hdr == 2) {        // oric tap, machine code, autorun
+    h[0] = h[1] = h[2] = 0x16; h[3] = 0x24;
+    h[4] = 0; h[5] = 0;
+    h[6] = 0x80;                        // machine code
+    h[7] = 0xC7;                        // autorun (at start address)
+    h[8]  = (uchar)((end - 1) >> 8); h[9]  = (uchar)(end - 1);   // big endian
+    h[10] = (uchar)(lib >> 8);       h[11] = (uchar)lib;
+    h[12] = 0;
+    h[13] = 'I'; h[14] = 'V'; h[15] = 'M'; h[16] = 0;
+    n = 17;
+  }
+
+  f = fopen(jit_outfile, "wb");
+  if (!f) { printf("cannot write %s\n", jit_outfile); return 0; }
+  fwrite(h, 1, n, f);
+  fwrite(ivmlib_start, 1, (unsigned)(ivmlib_end - ivmlib_start), f);
+  fwrite(jit_memimg, 1, jit_membytes, f);
+  fwrite(jit_data, 1, jit_datalen, f);
+  while (gap--) fputc(0, f);
+  fwrite(out, 1, size, f);
+  fclose(f);
+
+  printf("--- JIT: wrote %s (%s) $%04X-$%04X, code $%04X, heap $%04X-$%04X ---\n",
+    jit_outfile, jit_tg->name, lib, end - 1, org, ivmlib_heap, ivmlib_heapend);
+
+  free(jit_memimg); jit_memimg = NULL;
+  return 1;
+}
+
 word jit_compile(Process* proc) {
   BlobHeader *bh = &proc->h.hdr;
 
@@ -1794,7 +1973,11 @@ word jit_compile(Process* proc) {
     lc_constidx = (uchar)bh->constidx;
     lc_constmem = proc->h.mem;
 
- mem_base = 0;
+    mem_base = 0;
+    if (!jit_layout(proc, base, &mem_base, &out_org)) {
+      free(map); free(out);
+      return 0;
+    }
 
     jit_size = ivm_jit(code, code_len, out, out_max, map, code_len,
       mem_base, out_org, vec_bc, frame_base, ncall);
@@ -1826,6 +2009,8 @@ word jit_compile(Process* proc) {
 
       printf("\n--- JIT: emitted %u bytes (BC: %u) of 6502 at org 0x%04X ---\n\n",
         jit_size, code_len, out_org);
+
+      if (jit_outfile) jit_save(out, jit_size, out_org);
 
       // keep generated code buffer; return its address as entry
       free(map);
@@ -1922,9 +2107,18 @@ int main(int argc, char** argv) {
       int a = 1;
       while (a < argc && argv[a][0] == '-') {
         if (argv[a][1] == 'j') jit_only = 1;
-        if (argv[a][1] == 'z') jit_force_zp = 1;
+        else if (argv[a][1] == 'z') {      // -z or -zXX (hex zp base)
+          jit_force_zp = 1;
+          if (argv[a][2]) jit_zp = (word)strtoul(argv[a] + 2, NULL, 16);
+        }
+        else if (argv[a][1] == 'a' && a + 1 < argc)
+          jit_org = (word)strtoul(argv[++a], NULL, 16);
+        else if (argv[a][1] == 'o' && a + 1 < argc) jit_outfile = argv[++a];
+        else if (argv[a][1] == 't' && a + 1 < argc) jit_target  = argv[++a];
         a++;
       }
+      // code built for another address/file can't run here
+      if (jit_org || jit_outfile) jit_only = 1;
       if (a < argc) return run_file((char*)argv[a]);
     }
   #endif

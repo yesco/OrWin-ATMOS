@@ -1,0 +1,428 @@
+;
+; ivm-lib.asm - runtime library for JIT generated code (ivm-jit.c)
+; (C) 2026 Jonas S Karlsson
+;
+; Link this FIRST (before ivm.c) so it sits at a fixed address:
+;
+;   cl65 -t sim6502 -DJIT -o ivm-jit ivm-lib.asm ivm.c
+;   cl65 -t atmos   -DJIT -o ivm-jit.tap ivm-lib.asm ivm.c
+;
+; Newer cc65 renamed the C stack pointer sp -> c_sp: add  -Wa -DUSE_C_SP
+;
+; Everything between _ivmlib_start and _ivmlib_end is copied verbatim
+; by ivm -o, so NOTHING here may reference code outside that range
+; (no cc65 runtime/lib calls). Allowed: zero page, ROM, sim65 paravirt
+; hooks (_write/_read/exit are fixed hook addresses, not code).
+;
+; Calling convention (as cc65 / ivm-vm.asm):
+;   opmul opdiv opmod : _ivm_acc OP= _ivm_par,  AX = result
+;   opputnum opputs   : print _ivm_acc,         AX = _ivm_acc
+;   opputchar         : A = char,               A X Y preserved
+;   opgetchar         : AX = char, $FFFF = EOF
+;   opprintstr        : JSR + inline string + 0, AX preserved
+;   opmalloc          : AX = bytes -> AX = zeroed ptr (0 = fail), bump heap
+;   opfree            : AX = ptr, no-op
+;
+; Uses cc65 zp scratch: ptr1 ptr2 tmp1-tmp4 (as any cc65 lib routine).
+
+        .include "zeropage.inc"
+
+        .importzp _ivm_acc, _ivm_par
+
+        .export _ivmlib_start, _ivmlib_end
+        .export _ivmlib_entry, _ivmlib_heap, _ivmlib_heapend
+        .export _ivmlib_zpsrc, _ivmlib_zpdst, _ivmlib_zplen, _ivmlib_spzp
+
+        .export _opmul, _opdiv, _opmod, _opputnum
+        .export _opputchar, _opgetchar, _opputs, _opprintstr
+        .export _opmalloc, _opfree
+
+
+.ifdef USE_C_SP
+        .define CSP c_sp
+.else
+        .define CSP sp
+.endif
+
+
+
+;;; TODO: this shouldn't be defined, it shoudl be runtime choice.
+;;;   like we might use CC65 to compile and run on .sim to generate
+;;;   for atmos
+
+.if .defined(__SIM6502__) .or .defined(__SIM65C02__)
+	;; .if .defined(__CC65___) ??? TODO:
+        SIM = 1
+        .import _write, _read, exit     ; sim65 paravirt hooks
+        SIM_SP = $FF00                  ; C stack top, stand-alone run
+.elseif .defined(__ATMOS__)
+        ROM_PRCHR  = $0238              ; ROM 1.1: print char in X
+        ROM_GETKEY = $023B              ; ROM 1.1: get key (UNTESTED)
+.else
+        .error "ivm-lib: only sim6502/sim65c02/atmos supported"
+.endif
+
+
+.code
+
+; ===========================================================================
+; Stand-alone entry: load/reset/autorun address of an ivm -o image
+; ===========================================================================
+_ivmlib_start:
+.ifdef SIM
+        ldx     #$FF
+        txs
+        lda     #<SIM_SP
+        sta     CSP
+        lda     #>SIM_SP
+        sta     CSP+1
+.endif
+        ; -z: copy initial mem[] image (globals + consts) to zero page
+        ldy     _ivmlib_zplen
+        beq     @nozp
+        lda     _ivmlib_zpsrc
+        sta     ptr1
+        lda     _ivmlib_zpsrc+1
+        sta     ptr1+1
+        ldx     _ivmlib_zpdst
+        ldy     #0
+@cp:    lda     (ptr1),y
+        sta     $00,x
+        inx
+        iny
+        cpy     _ivmlib_zplen
+        bne     @cp
+@nozp:
+        jsr     @call
+.ifdef SIM
+        jmp     exit                    ; A = exit code (lo of result)
+.else
+        rts                             ; back to BASIC
+.endif
+@call:  lda     _ivmlib_entry           ; via zp: no JMP ($xxFF) bug
+        sta     ptr2
+        lda     _ivmlib_entry+1
+        sta     ptr2+1
+        jmp     (ptr2)
+
+; ---------------------------------------------------------------------------
+; Variables, patched by ivm.c before the image is written (and for runs
+; in place: heap/heapend)
+
+_ivmlib_entry:   .word 0                ; JIT code start (NOPs, JMP main)
+_ivmlib_heap:    .word 0                ; next free heap byte
+_ivmlib_heapend: .word 0                ; first byte after heap
+_ivmlib_zpsrc:   .word 0                ; -z: mem[] image in the file
+_ivmlib_zpdst:   .byte 0                ; -z: zp base
+_ivmlib_zplen:   .byte 0                ; -z: bytes, 0 = mem[] not in zp
+_ivmlib_spzp:                           ; sim65 header needs sp's zp address
+.ifdef SIM
+                 .byte CSP
+.else
+                 .byte 0
+.endif
+
+pcbuf:  .byte   0                       ; char for putchar/getchar
+pcx:    .byte   0
+pcy:    .byte   0
+
+
+; ===========================================================================
+; Character I/O trampolines
+; ===========================================================================
+
+_opputchar:
+        sta     pcbuf
+        stx     pcx
+        sty     pcy
+.ifdef SIM
+        ldx     #1                      ; stdout
+        jsr     pvio
+        jsr     _write                  ; write(1, &pcbuf, 1)
+.else
+        cmp     #$0A                    ; LF -> CR LF
+        bne     @ch
+        ldx     #$0D
+        jsr     ROM_PRCHR
+@ch:    ldx     pcbuf
+        jsr     ROM_PRCHR
+.endif
+        lda     pcbuf
+        ldx     pcx
+        ldy     pcy
+        rts
+
+_opgetchar:
+.ifdef SIM
+        ldx     #0                      ; stdin
+        jsr     pvio
+        jsr     _read                   ; AX = read(0, &pcbuf, 1)
+        cmp     #1
+        bne     @eof
+        lda     pcbuf
+        ldx     #0
+        rts
+@eof:   lda     #$FF
+        tax
+        rts
+.else
+@wait:  jsr     ROM_GETKEY              ; UNTESTED: N=1 when key valid?
+        bpl     @wait
+        and     #$7F
+        ldx     #0
+        rts
+.endif
+
+.ifdef SIM
+; push (fd=X, buf=&pcbuf) on the C stack by hand (no pushax: outside image),
+; AX = count 1. The paravirt hook pops them.
+pvio:   lda     CSP
+        sec
+        sbc     #4
+        sta     CSP
+        bcs     :+
+        dec     CSP+1
+:       ldy     #3
+        lda     #0
+        sta     (CSP),y                 ; fd hi
+        dey
+        txa
+        sta     (CSP),y                 ; fd lo
+        dey
+        lda     #>pcbuf
+        sta     (CSP),y                 ; buf hi
+        dey
+        lda     #<pcbuf
+        sta     (CSP),y                 ; buf lo
+        lda     #1
+        ldx     #0
+        rts
+.endif
+
+; ---------------------------------------------------------------------------
+; P: print 0-terminated string at _ivm_acc
+
+_opputs:
+        lda     _ivm_acc
+        sta     ptr1
+        lda     _ivm_acc+1
+        sta     ptr1+1
+        ora     ptr1
+        beq     retacc                  ; NULL
+@l:     ldy     #0
+        lda     (ptr1),y
+        beq     retacc
+        jsr     _opputchar
+        inc     ptr1
+        bne     @l
+        inc     ptr1+1
+        bne     @l
+retacc: lda     _ivm_acc
+        ldx     _ivm_acc+1
+        rts
+
+; ---------------------------------------------------------------------------
+; ": JSR _opprintstr / .asciiz "..." / next instruction
+
+_opprintstr:
+        sta     tmp3
+        stx     tmp4
+        pla
+        sta     ptr1
+        pla
+        sta     ptr1+1                  ; -> last byte of the JSR
+@n:     inc     ptr1
+        bne     :+
+        inc     ptr1+1
+:       ldy     #0
+        lda     (ptr1),y
+        beq     @done
+        jsr     _opputchar
+        jmp     @n
+@done:  inc     ptr1                    ; skip the 0
+        bne     :+
+        inc     ptr1+1
+:       lda     tmp3
+        ldx     tmp4
+        jmp     (ptr1)
+
+; ---------------------------------------------------------------------------
+; .: print _ivm_acc unsigned decimal
+
+_opputnum:
+        lda     _ivm_acc
+        sta     ptr1
+        lda     _ivm_acc+1
+        sta     ptr1+1
+        lda     #0
+        pha                             ; end marker
+@div:   lda     #0                      ; ptr1 /= 10, A = remainder
+        ldx     #16
+@bit:   asl     ptr1
+        rol     ptr1+1
+        rol     a
+        cmp     #10
+        bcc     @nb
+        sbc     #10                     ; C=1
+        inc     ptr1
+@nb:    dex
+        bne     @bit
+        ora     #'0'
+        pha
+        lda     ptr1
+        ora     ptr1+1
+        bne     @div
+@out:   pla
+        beq     retacc
+        jsr     _opputchar
+        jmp     @out
+
+
+; ===========================================================================
+; Arithmetic: _ivm_acc OP= _ivm_par (unsigned 16 bit)
+; ===========================================================================
+
+_opmul:
+        lda     _ivm_par
+        sta     ptr2
+        lda     _ivm_par+1
+        sta     ptr2+1
+        lda     #0
+        sta     tmp1                    ; result lo
+        sta     tmp2                    ; result hi
+        ldx     #16
+@l:     lsr     ptr2+1
+        ror     ptr2
+        bcc     @n
+        clc
+        lda     tmp1
+        adc     _ivm_acc
+        sta     tmp1
+        lda     tmp2
+        adc     _ivm_acc+1
+        sta     tmp2
+@n:     asl     _ivm_acc
+        rol     _ivm_acc+1
+        dex
+        bne     @l
+        lda     tmp1
+        sta     _ivm_acc
+        lda     tmp2
+        sta     _ivm_acc+1
+        jmp     retacc
+
+_opdiv:
+        jsr     divmod
+        jmp     retacc
+
+_opmod:
+        jsr     divmod
+        bcs     retacc2		         ; /0: unchanged
+        lda     ptr1
+        sta     _ivm_acc
+        lda     ptr1+1
+        sta     _ivm_acc+1
+retacc2:	
+        jmp     retacc
+
+; quotient -> _ivm_acc, remainder -> ptr1. C=1: divisor 0, nothing done.
+divmod:
+        lda     _ivm_par
+        ora     _ivm_par+1
+        bne     :+
+        sec
+        rts
+:       lda     #0
+        sta     ptr1
+        sta     ptr1+1
+        ldx     #16
+@l:     asl     _ivm_acc
+        rol     _ivm_acc+1
+        rol     ptr1
+        rol     ptr1+1
+        php                             ; C: 17th remainder bit
+        lda     ptr1
+        sec
+        sbc     _ivm_par
+        tay
+        lda     ptr1+1
+        sbc     _ivm_par+1
+        bcs     @take                   ; rem >= par
+        plp
+        bcc     @next                   ; rem < par (no 17th bit)
+        php                             ; 17th bit: must subtract
+@take:  plp
+        sta     ptr1+1
+        sty     ptr1
+        inc     _ivm_acc                ; quotient bit
+@next:  dex
+        bne     @l
+        clc
+        rts
+
+
+; ===========================================================================
+; Heap: bump allocator, zeroed (calloc), even sizes. free is a no-op.
+; ===========================================================================
+
+_opmalloc:
+        clc
+        adc     #1
+        and     #$FE
+        sta     tmp1
+        txa
+        adc     #0
+        sta     tmp2                    ; tmp2:tmp1 = (n+1) & ~1
+        bcs     @null                   ; n = $FFFF
+        ora     tmp1
+        beq     @null                   ; n = 0
+        clc
+        lda     _ivmlib_heap
+        adc     tmp1
+        sta     ptr2
+        lda     _ivmlib_heap+1
+        adc     tmp2
+        sta     ptr2+1                  ; ptr2 = new top
+        bcs     @null
+        lda     _ivmlib_heapend
+        cmp     ptr2
+        lda     _ivmlib_heapend+1
+        sbc     ptr2+1
+        bcc     @null                   ; heapend < new top
+        lda     _ivmlib_heap
+        sta     ptr1
+        lda     _ivmlib_heap+1
+        sta     ptr1+1
+        lda     #0
+        tay
+        ldx     tmp2                    ; full pages
+        beq     @part
+@page:  sta     (ptr1),y
+        iny
+        bne     @page
+        inc     ptr1+1
+        dex
+        bne     @page
+@part:  ldy     tmp1                    ; rest
+        beq     @done
+@byte:  dey
+        sta     (ptr1),y
+        bne     @byte
+@done:  lda     _ivmlib_heap            ; result = old heap
+        ldx     _ivmlib_heap+1
+        pha
+        lda     ptr2
+        sta     _ivmlib_heap
+        lda     ptr2+1
+        sta     _ivmlib_heap+1
+        pla
+        rts
+@null:  lda     #0
+        tax
+        rts
+
+_opfree:
+        rts
+
+
+_ivmlib_end:
