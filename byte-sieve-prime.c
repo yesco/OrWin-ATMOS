@@ -33,8 +33,12 @@ int main() {
         prime = i + i + 3; 
         k = i + prime; 
 
+        printf("----------------");
+        printf("%d\n", prime);
+      
         // TODO: for-loop with clear stride...
         while (k <= SIZE) { 
+          printf("%d\n", k);
           flags[k] = 0;
           k += prime; 
         }

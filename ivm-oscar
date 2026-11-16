@@ -5,6 +5,14 @@
 
 name="$1"
 
-time ./oscar -DOSCAR64 -DFILENAME=$name.ivm -tm=c64 -f=$name.ivm -d64=game.d64 -ep ivm.c
+cp $name.ivm oscar.ivm
 
+#time ./oscar -v2 -Os -DOSCAR64 -DFILENAME=$name.ivm -tm=c64 -f=$name.ivm -d64=game.d64 -ep ivm.c
 #time ./oscar -DOSCAR64 -DFILENAME=$name.ivm -Oz -ep ivm.c
+
+#time ./oscar -v2 -Os -DOSCAR64 -DFILENAME=$name.ivm -ep ivm.c
+
+#time ~/GIT/oscar64/bin/oscar64 -DTRACE -v2 -DOSCAR64 -DFILENAME=$name.ivm -ep ivm.c
+
+time ~/GIT/oscar64/bin/oscar64 -v2 -DOSCAR64 -DFILENAME=$name.ivm -ep ivm.c
+

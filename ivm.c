@@ -1660,6 +1660,23 @@ L(op_hibit)
 
 
 
+// Print the stats line, then relocate. img is still blob-relative.
+void blob_ready(const char *path, uchar *img) {
+  // frames start at the lowest frame base: below it registers + globals
+  BlobHeader *h = (BlobHeader *)img;
+  word nf = (word)((h->con - h->call) / 2);
+  uchar v = (uchar)h->constidx;
+
+  printf("BLOB_READY: nf=%u w=%d\n", nf, v);
+  
+  while (nf--) if (img[h->fp + nf] < v) v = img[h->fp + nf];
+
+  printf("--- ivm %s (%u bytes %u BC %u slots (%u var %u params %u const) %u bytes data) ---\n",
+    path, h->len, h->main - h->code, h->memsz,
+    v, h->constidx - v, h->memsz - h->constidx, h->data ? h->len - h->data : 0);
+  relocate(img);
+}
+
 // Load whole IVM image (malloc). Caller may free().
 // Image = BlobHeader (magic "IVM\0", len, …) + body; one buffer, no global required.
 uchar *load_blob(const char *path, int *out_len) {
@@ -1712,18 +1729,7 @@ uchar *load_blob(const char *path, int *out_len) {
   }
 
   if (out_len) *out_len = cap;
-  {
-    // frames start at the lowest frame base: below it registers + globals
-    BlobHeader *h = (BlobHeader *)img;
-    word nf = (word)((h->con - h->call) / 2);
-    uchar v = (uchar)h->constidx;
-    while (nf--) if (img[h->fp + nf] < v) v = img[h->fp + nf];
-    printf("--- ivm %s (%d bytes %u BC %u slots (%u var %u params %u const) %u bytes data) ---\n",
-      path, cap, h->main - h->code, h->memsz,
-      v, h->constidx - v, h->memsz - h->constidx, h->data ? h->len - h->data : 0);
-  }
-
-  relocate(img);
+  blob_ready(path, img);
 
 err:
   if (f) fclose(f);
@@ -2097,13 +2103,24 @@ static int run_loaded_blob(uchar *img, int len) {
 
 int run_file(char* filename) {
   int len;
-  uchar *img= load_blob(filename, &len);
   int r;
+#ifdef OSCAR64
+  // oscar64's emulator can't open files: the blob is built in
+  static uchar img[] = {
+    #embed "oscar.ivm"
+  };
+  len = sizeof(img);
+  blob_ready(filename, img);
+#else
+  uchar *img= load_blob(filename, &len);
   
   if (!img) return -1;
+#endif
     
-  run_loaded_blob(img, len);
+  r = run_loaded_blob(img, len);
+#ifndef OSCAR64
   free(img);
+#endif
 
   #ifdef COUNTOPS
     printf("countops: %ld\n", countops);
@@ -2132,12 +2149,14 @@ static const char usage[] =
 #ifdef OSCAR64
 int main(void) {
   int argc;
-  const char *av[] = {"ivm", #FILENAME, NULL};
+  const char *av[] = {"ivm", #FILENAME, NULL}; // #embed'ed in run_file
   const char **argv = av;
 #else
 int main(int argc, char** argv) {
 #endif
   char *s;
+
+  printf("ivm started.. doing args..\n");
 
   while ((s = (char *)*++argv) && *s == '-')
     switch (s[1]) {
@@ -2151,6 +2170,8 @@ int main(int argc, char** argv) {
     #endif
     default: goto xusage;
     }
+
+  printf("ivm args done\n");
 
   #ifdef JIT
     // code built for another address/file can't run here
