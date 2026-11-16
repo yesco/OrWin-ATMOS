@@ -626,16 +626,18 @@ static void gen_peephole(void) {
 
   // patterns
   for (pc = 0; pc < (word)bin_ptr; pc += n) {
+    // a jump lands here: ACC unknown, code alive again. Until then, dead
+    // code: every byte becomes a DEL (targets are always op starts)
+    n = 1;
+    if (TGT(pc)) dead = kc = 0;
+    if (dead) {
+      DEL(pc);
+      continue;
+    }
+
     a = bin + pc;
     n = ivm_oplen(a);
     if (!n) n = 1;
-
-    // a jump lands here: ACC unknown, code alive again
-    if (TGT(pc)) dead = kc = 0;
-    if (dead) {
-      for (t = 0; t < n; t++) DEL(pc + t);
-      continue;
-    }
 
     // L xx -> xx: one-byte load. No target check: nothing jumps onto an
     // operand, and a jump to the L lands on xx after the squeeze.
