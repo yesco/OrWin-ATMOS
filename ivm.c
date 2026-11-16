@@ -300,6 +300,11 @@
   #endif
 #endif
 
+// 6502 (cc65, oscar64): relocate() turns the blob's offsets into addresses
+#if defined(__CC65__) || defined(OSCAR64)
+  #define IVM_ABS
+#endif
+
 #ifdef COUNTOPS
 // host only; fine when profiling ./ivm-count
 unsigned long countops = 0;
@@ -680,7 +685,7 @@ void relocate(uchar *base) {
   // and are NOT walked): header offsets, vectors, string const words, then 0000.
   // Every word is blob-relative. 0000 ends the walk (also the real zero const).
   v = &h->main;
-#ifdef __CC65__
+#ifdef IVM_ABS
   while (*v) {
     *v = (word)(*v + (word)base);
     v++;
@@ -708,7 +713,7 @@ Process* Nevm(uchar *loaded) {
 
   memcpy(&p->h.hdr, loaded, sizeof(BlobHeader));
 
-  #ifdef __CC65__
+  #ifdef IVM_ABS
     p->h.ipc = (uchar *)(unsigned)p->h.hdr.main;
   #else
     p->h.ipc = loaded + p->h.hdr.main;
@@ -744,37 +749,49 @@ Process* Nevm(uchar *loaded) {
   // 0000 is real zero; ints after are pure values.
   if (bh->con && bh->constidx != 255) {
     word *pool;
-    word nc, i;
-    uchar seen0 = 0;
-    word data_off = bh->data;
+    word nc;
+    // via the pointer: mem[1] indexed past [0] is UB (oscar64 folds it to [0])
+    ivmvar *m = p->h.mem + bh->constidx;
 
-#ifdef __CC65__
+#ifdef IVM_ABS
     pool = (word *)(unsigned)bh->con;
 #else
     pool = (word *)(loaded + bh->con);
 #endif
 
-    nc = (word)(253 - bh->constidx + 1);
-    for (i = 0; i < nc; i++) {
-      word w = pool[i];
-      if (!seen0) {
-        if (w == 0) {
-          seen0 = 1;
-          p->mem[bh->constidx + i] = 0;
-        } else {
+    // consts are the top of mem[]: [constidx, memsz[
+    nc = (word)(cells - bh->constidx);
 #ifdef SOFT_HEAP
-          p->mem[bh->constidx + i] =
-            (word)(SOFT_BASE + (w - data_off));
-#else
-          p->mem[bh->constidx + i] = w;
-#endif
-        }
-      } else {
-        p->mem[bh->constidx + i] = w;
+    {
+      // string blob-offsets until the 0000 -> soft_heap addresses
+      word i, data_off = bh->data;
+      uchar seen0 = 0;
+      for (i = 0; i < nc; i++) {
+        word w = pool[i];
+        if (!w) seen0 = 1;
+        else if (!seen0) w = (word)(SOFT_BASE + (w - data_off));
+        m[i] = w;
       }
     }
+#else
+    // relocate() already made the string words absolute: plain copy
+    memcpy(m, pool, nc * sizeof(ivmvar));
+#endif
+    printf("mem[32]=%u h.mem[32]=%u\n", p->mem[32], p->h.mem[32]);
+    
+    printf("con=$%04X pool=$%04X nc=%u [0..3]=%u %u %u %u\n",
+      bh->con, (unsigned)pool, nc, pool[0], pool[1], pool[2], pool[3]);
   }
 
+//#define PIRNTCONST
+//#ifdef  PRINTCONST
+  {
+    word i;
+    for (i = bh->constidx; i < cells; i++)
+      printf("CONST %u:%u ", i, p->mem[i]); printf("\n");
+  }
+//#endif
+  
   return p;
 }
 
@@ -1107,7 +1124,7 @@ ivmvar run_ivm(Process *p) {
   ivm_ipc = p->h.ipc;
   ivm_fp  = p->h.fp;
   ivm_acc = p->h.acc;
-  #ifdef __CC65__
+  #ifdef IVM_ABS
     // relocated absolute pointers
     ivm_fptab = (uchar *)(unsigned)p->h.hdr.fp;
     ivm_callv = (word *)(unsigned)p->h.hdr.call;
@@ -1149,7 +1166,10 @@ ivmvar run_ivm(Process *p) {
   memcpy(&zp, &p->h, sizeof(zp));
   zp.mem = p->mem;
 
-  #ifdef __CC65__
+  printf("zp.mem=$%04X p->mem=$%04X [43]=%u\n",
+    (unsigned)zp.mem, (unsigned)p->mem, zp.mem[43]);
+  
+  #ifdef IVM_ABS
     // pool only used if needed elsewhere
   #else
     g_loaded = (uchar *)p->h.ipc - p->h.hdr.main;
@@ -1284,7 +1304,7 @@ ZL(op_semi,';')
     // fall through
 op_X:    Z('X')
     // main returns via X into _start's trailing q (no FP_MAIN test)
-    #ifdef __CC65__
+    #ifdef IVM_ABS
       zp.ipc = (uchar *)zp.mem[zp.fp + FR_RET];
     #else
       zp.ipc = g_loaded + zp.mem[zp.fp + FR_RET];
@@ -1599,7 +1619,7 @@ L(op_hibit)
         char v = op & 0x3f;
         char nfp;
         word *callv;
-        #ifdef __CC65__
+        #ifdef IVM_ABS
           nfp = ((uchar *)(unsigned)zp.hdr.fp)[v];
           callv = (word *)(unsigned)zp.hdr.call;
           zp.mem[nfp + FR_PREV] = zp.fp;
@@ -2061,9 +2081,16 @@ static int run_loaded_blob(uchar *img, int len) {
     if (!addr) return -1;
     printf("--- JIT: entry at $%04X ---\n", (unsigned)addr);
     heap0 = ivmlib_heap;  // -rN: every run gets the heap from the start
-  #elif defined(__CC65__)
+  #else
+  {
+    #ifdef IVM_ABS
+      unsigned code = proc->h.hdr.code;   // relocated: absolute
+    #else
+      unsigned code = (unsigned)(size_t)(img + proc->h.hdr.code);
+    #endif
     printf("--- code at $%04X mem[] at $%04X ---\n",
-      proc->h.hdr.code, (unsigned)proc->h.mem);
+      code, (unsigned)(size_t)proc->h.mem);
+  }
   #endif
 
   while (runs) {
