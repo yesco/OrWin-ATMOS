@@ -466,9 +466,10 @@ word sym_find(const char *name, uchar type, uchar local) {
 // the FUNC symbol of vector v
 word sym_func(uchar v) {
   word i;
+  Symbol *s = syms + nsym;
 
   for (i = nsym; i > 0; i--)
-    if (syms[i - 1].type == SYM_FUNC && syms[i - 1].address == v)
+    if ((--s)->type == SYM_FUNC && s->address == v)
       return (word)(i - 1);
 
   return SYM_NONE;
@@ -754,13 +755,14 @@ static void gen_squeeze(void) {
 static uchar gen_pack(uchar *map) {
   uchar s, v, f0, b, e, top;
   word i;
+  Symbol *y;
 
   // registers + globals: only slots a symbol still names, in slot order
   // (failed alts don't give back next_reg / next_glob: those are holes)
   f0 = 0;
   for (s = 0; s < FRAME_BASE; s++)
-    for (i = 0; i < nsym; i++)
-      if (syms[i].type == SYM_VAR && syms[i].address == s) {
+    for (i = 0, y = syms; i < nsym; i++, y++)
+      if (y->type == SYM_VAR && y->address == s) {
         map[s] = f0++;
         break;
       }

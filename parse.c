@@ -905,9 +905,11 @@ static uchar pending_const;    // set by \c after literal "const"
 // Reject stores to const / #define symbols
 void check_store(uchar slot) {
   word i;
-  for (i = 0; i < nsym; i++)
-    if (syms[i].type == SYM_VAR && syms[i].address == slot && syms[i].is_const) {
-      printf("\nconst variable: %s\n", syms[i].name);
+  Symbol *s = syms;   // one pointer step per symbol, no syms + i*size
+
+  for (i = 0; i < nsym; i++, s++)
+    if (s->type == SYM_VAR && s->address == slot && s->is_const) {
+      printf("\nconst variable: %s\n", s->name);
       FAIL("const cannot be modified");
     }
 }
