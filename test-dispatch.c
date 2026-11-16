@@ -2,15 +2,16 @@
 // So every second (1000000 cycles) is equivalant to one cycle
 // in dispatch! test-dispatch-pon.c tests C max dispatch time
 
+// - using switch-case - see BTABLE
 // --- IVM ---
-//    66,959,281 ./ivm test-dispatch
-//    71,260,332  - 2026-11-16, slower 5c more in dispatch
-//   465,003,214 ./imv test-dispatch-inc
-//   408,959,336 ./ivm test-dispatch-pon
-//   414,059,992  - 2026-11-16, slower, more ops?
-// 1,371,959,628 ./ivm test-dispatch-fun - last! and supser expensive!
-// 8,914,999,378 ./ivm-test-dispatch-loop 10 M
-// 8,964,065,027  - 2026-11-16, got somewhat slower...
+//    66,959,281 - dispatch  
+//    71,260,332    - 2026-11-16, slower 5c more in dispatch
+//   465,003,214 - inc
+//   408,959,336 - pon
+//   414,059,992    - 2026-11-16, slower, more ops?
+// 1,371,959,628 - fun - last! and supser expensive!
+// 8,914,999,378 - loop 10 M
+// 8,964,065,027    - 2026-11-16, got somewhat slower...
 //   751,977,998 byte-sieve
 //
 //  68 ops
