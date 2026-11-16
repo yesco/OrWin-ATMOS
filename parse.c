@@ -137,7 +137,7 @@
 // 1. use // comments ONLY
 // 2. prefer dynamic allocations ONLY except for static data
 // 3. design to have an init(filename) method
-// 4. assume there is "unbounded input" read using fgetc()
+// 4. assume there is "unbounded input" read in chunks (fread fills the free buffer)
 //    (buffer a programming line/statement, can reset beginnin of it)
 //  4a. since we're doing backtracking, we may insert explicit \C
 //      commit characters at the end of key rules. This resets the
@@ -518,7 +518,7 @@ static uchar *blobs[NRULES];
 static FILE *src_fp = NULL;
 static char *src_name;
 
-// input line buffer (unbounded source via fgetc; buffer one statement)
+// input line buffer (unbounded source, fread into the slack; \o keeps the current line)
 static uchar *line_buf;
 
 // TODO: seriously 7 state variables, lol
@@ -721,13 +721,15 @@ static word abs_pos(void) {
 static void line_commit(void) {
   word i, rest, drop;
 
-  if (line_pos == 0) return;
-
-  drop = line_pos;
-
-  for (i = 0; i < drop; i++)
-    if (line_buf[i] == '\n')
+  // drop only through the last '\n' before line_pos: the current line
+  // stays whole in the buffer (error report shows it from its start)
+  drop = 0;
+  for (i = 0; i < line_pos; i++)
+    if (line_buf[i] == '\n') {
       line_no_base++;
+      drop = i + 1;
+    }
+  if (!drop) return;
 
   rest = line_len - drop;
   if (rest)
@@ -754,22 +756,23 @@ static void load_nextc(void) {
     return;
   }
 
-  // fetch: one char from source file
-  if (!src_fp) { nextc = 0; return; }
-  ch = fgetc(src_fp);
-  if (ch == EOF) { nextc = 0; return; }
-  file_pos++;
-
-  // grow: expand line_buf if full
-  if (line_len + 1 >= line_cap) {
+  // grow: expand line_buf only if there is no slack left
+  if (line_len >= line_cap) {
     ncap = line_cap ? (word)(line_cap * 2) : 256;
     n = realloc(line_buf, ncap);
     if (!n) FAIL("out of memory (line)");
     line_buf = n;
     line_cap = ncap;
   }
-  line_buf[line_len++] = (uchar)ch;
-  nextc = (uchar)ch;
+
+  // fetch: fill all the slack in one read
+  nextc = 0;
+  if (!src_fp) return;
+  ch = (int)fread(line_buf + line_len, 1, line_cap - line_len, src_fp);
+  if (ch <= 0) return;            // EOF
+  line_len += ch;
+  file_pos += ch;
+  nextc = line_buf[line_pos];
 }
 
 // consume nextc
@@ -2424,32 +2427,21 @@ static void report_reject(void) {
 
     } else {
 
-      word ps[ERR_LINES_BEFORE + 1], nps = 0, k;
+      word k;
+
+      // one more refill, in case the buffer ends at the error
+      line_pos = line_len;
+      load_nextc();
 
       off = want - line_abs;
       if (off > line_len) off = line_len;
 
-      // source is read one char at a time: fetch the rest of the error
-      // line + ERR_LINES_CONTEXT more (we are done parsing, so it's fine)
-      for (k = 0, i = off; i < line_len; i++)
-        if (line_buf[i] == '\n') k++;
-      while (k <= ERR_LINES_CONTEXT) {
-        line_pos = line_len;
-        load_nextc();
-        if (!nextc) break;
-        if (nextc == '\n') k++;
-      }
-
-      // line start / column within buffer; remember a few line starts
-      // before it (whatever \o left in the buffer)
+      // line start / column within buffer
       start = 0;
       line = line_no_base;
       col = 0;
       for (i = 0; i < off; i++) {
         if (line_buf[i] == '\n') {
-          if (nps < ERR_LINES_BEFORE + 1) nps++;
-          for (k = nps - 1; k > 0; k--) ps[k] = ps[k - 1];
-          ps[0] = start;
           line++;
           start = i + 1;
           col = 0;
@@ -2457,14 +2449,14 @@ static void report_reject(void) {
           col++;
       }
 
-      // lines before
-      // (skip empty ones: the first is often the '\n' left by a commit)
-      for (k = nps < ERR_LINES_BEFORE ? nps : ERR_LINES_BEFORE; k > 0; k--)
-        if (line_buf[ps[k - 1]] != '\n')
-          show_line(line - k, ps[k - 1]);
+      // up to ERR_LINES_BEFORE lines before it, as far as the buffer goes
+      for (i = start, k = 0; k < ERR_LINES_BEFORE && i; k++)
+        for (i--; i && line_buf[i - 1] != '\n'; i--)
+          ;
+      for (; k; k--)
+        i = show_line(line - k, i);
 
       // error line text
-// TODO: seems to only print the current
       endpos = show_line(line, start);
 
       // caret under column
