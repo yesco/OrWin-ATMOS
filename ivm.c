@@ -768,15 +768,15 @@ Process* Nevm(uchar *loaded) {
     // via the pointer: mem[1] indexed past [0] is UB (oscar64 folds it to [0])
     ivmvar *m = p->h.mem + bh->constidx;
 
-#ifdef IVM_ABS
-    pool = (word *)(unsigned)bh->con;
-#else
-    pool = (word *)(loaded + bh->con);
-#endif
+    #ifdef IVM_ABS
+      pool = (word *)(unsigned)bh->con;
+    #else
+       pool = (word *)(loaded + bh->con);
+    #endif
 
     // consts are the top of mem[]: [constidx, memsz[
     nc = (word)(cells - bh->constidx);
-#ifdef SOFT_HEAP
+    #ifdef SOFT_HEAP
     {
       // string blob-offsets until the 0000 -> soft_heap addresses
       word i, data_off = bh->data;
@@ -788,25 +788,17 @@ Process* Nevm(uchar *loaded) {
         m[i] = w;
       }
     }
-#else
-    // relocate() already made the string words absolute: plain copy
-    memcpy(m, pool, nc * sizeof(ivmvar));
-#endif
-    printf("mem[32]=%u h.mem[32]=%u\n", p->mem[32], p->h.mem[32]);
+    #else
+      // relocate() already made the string words absolute: plain copy
+      memcpy(m, pool, nc * sizeof(ivmvar));
+    #endif
+
+    // printf("mem[32]=%u h.mem[32]=%u\n", p->mem[32], p->h.mem[32]);
     
-    printf("con=$%04X pool=$%04X nc=%u [0..3]=%u %u %u %u\n",
-      bh->con, (unsigned)pool, nc, pool[0], pool[1], pool[2], pool[3]);
+    //printf("con=$%04X pool=$%04X nc=%u [0..3]=%u %u %u %u\n",
+      //bh->con, (unsigned)pool, nc, pool[0], pool[1], pool[2], pool[3]);
   }
 
-//#define PIRNTCONST
-//#ifdef  PRINTCONST
-  {
-    word i;
-    for (i = bh->constidx; i < cells; i++)
-      printf("CONST %u:%u ", i, p->mem[i]); printf("\n");
-  }
-//#endif
-  
   return p;
 }
 
@@ -1181,9 +1173,6 @@ ivmvar run_ivm(Process *p) {
   memcpy(&zp, &p->h, sizeof(zp));
   zp.mem = p->mem;
 
-  printf("zp.mem=$%04X p->mem=$%04X [43]=%u\n",
-    (unsigned)zp.mem, (unsigned)p->mem, zp.mem[43]);
-  
   #ifdef IVM_ABS
     // pool only used if needed elsewhere
   #else
@@ -1926,9 +1915,9 @@ word jit_compile(Process* proc) {
   uchar *frame_base;
   word *callv;
 
-  // I guess we can Why would this be differnt for CC65?
+  // TODO: I guess we can Why would this be differnt for CC65?
   #ifdef __CC65__
-  base = (uchar *)proc->h.ipc - bh->main;
+    base = (uchar *)proc->h.ipc - bh->main;
   #endif
 
   code = base + bh->code;
@@ -1942,9 +1931,11 @@ word jit_compile(Process* proc) {
   if (ncall > 64) ncall = 64;
 
   // diagnostic
-  printf("--- hdr: call=%u con=%u fp=%u code=%u ncall=%u ---\n",
-    (unsigned)bh->call, (unsigned)bh->con, (unsigned)bh->fp,
-    (unsigned)bh->code, ncall);
+  #if 0
+    printf("--- hdr: call=%u con=%u fp=%u code=%u ncall=%u ---\n",
+      (unsigned)bh->call, (unsigned)bh->con, (unsigned)bh->fp,
+      (unsigned)bh->code, ncall);
+   #endif
 
   for (i = 0; i < ncall; i++)
     vec_bc[i] = callv[i] - bh->code;
