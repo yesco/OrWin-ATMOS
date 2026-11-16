@@ -1422,8 +1422,12 @@ ZL(op_m,   'm') {
 
 ZL(op_F,   'F') ivm_free(PAR); zp.mem[*zp.ipc] = 0;            goto pnext;
 
-ZL(op_I,   'I')  zp.acc = ++zp.mem[*zp.ipc]; goto pnext;
-ZL(op_J,   'J')  zp.acc = --zp.mem[*zp.ipc]; goto pnext;
+ZL(op_I,   'I')  zp.acc = PAR + 1; PAR = zp.acc; goto pnext;
+ZL(op_J,   'J')  zp.acc = PAR - 1; PAR = zp.acc; goto pnext; 
+
+// Fails on oscar! same for 'I'
+// ZL(op_J,   'J')  zp.acc = --zp.mem[*zp.ipc]; goto pnext; 
+
 ZL(op_U,   'U')  zp.acc = (zp.mem[zp.ipc[0]]
                         += zp.mem[zp.ipc[1]]);
                                 zp.ipc += 2; goto xnext; // two args

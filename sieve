@@ -191,43 +191,48 @@ echo
 # ==> NOTE: saves byte-codes, doesn't make faster
 # it's currently 101 bytes, 41 instr, can made 30 by remove redundant!
 
+# ivm-oscar	  	|		44.20x	|309,383,290
 
-#
-# (/ 69.5 7.0) 
+
+# (/ 309.383290 7.0) 
 # (/ 450 469.0)
 # (/ 526 111.0)4.738738738738738 (/ 672 111.0)6.054054054054054
 
-# Target / Variant        |  Size |   Time | vs ASM | Oscar  | vs JIT
+# Target / Variant        |  Size |   Time | vs ASM |  Oscar | vs JIT
 # -------------------------------------------------------------------
-# Orig ASM (hand)         |     - |  7.00s |  1.00x |  0.49x |  0.27x
+# Orig ASM (hand)         |     - |  7.00s |  1.00x |  0.49x |  0.28x
+#                         |       |        |        |        |
+# oscar64 -Os            *| 294 B | 14.40s |  2.06x |  1.00x |  0.58x
 #
-# oscar64 -Os            *| 294 B | 14.40s |  2.06x |  1.00x |  0.56x
+# ivm-jit (-z peephole)  *| 364 B | 25,033 |  3.58x |  1.74x |  1.00x
+# ivm-jit (byte idx)     *| 367 B | 25.56s |  3.65x |  1.77x |  1.02x
+# ivm-jit (memset, no ??) | 385 B | 31.16s |  4.45x |  2.16x |  1.24x
+# ivm-jit (const/*2)      | 450 B | 40.39s |  5.77x |  2.80x |  1.61x
+# ivm-jit (zp baseline)   | 597 B | 55.30s |  7.90x |  3.84x |  2.21x
+# ivm-jit (initial)       | 672 B | 61.00s |  8.71x |  4.24x |  2.44x
+#                         |       |        |        |        |
+# cc65 -Oirs             *| 442 B | 69.50s |  9.93x |  4.83x |  2.78x
 #
-# ivm-jit (-z peephole)  *| 364 B | 25,033 |  3.58x |  1.74x |  !!!!!
-# ivm-jit (byte idx)     *| 367 B | 25.56s |  3.65x |  1.77x |  1.00x
-# ivm-jit (memset, no ??) | 385 B | 31.16s |  4.45x |  2.16x |  1.22x
-# ivm-jit (const/*2)      | 450 B | 40.39s |  5.77x |  2.80x |  1.58x
-# ivm-jit (zp baseline)   | 597 B | 55.30s |  7.90x |  3.84x |  2.16x
-# ivm-jit (initial)       | 672 B | 61.00s |  8.71x |  4.24x |  2.39x
-#
-# cc65 -Oirs             *| 442 B | 69.50s |  9.93x |  4.83x |  2.72x
-#
-# ivm-asm (byte idx)      | 105 BC| 128.4s | 18.34x |  8.92x |  5.02x
-# ivm-asm (ALTCODE=1)     | 101 BC| 133.3s | 19.04x |  9.26x |  5.22x
-# ivm-asm (memset)        | 101 BC| 148.5s | 21.21x | 10.31x |  5.81x
-# ivm-asm (initial)       | 109 BC| 180.0s | 25.71x | 12.50x |  7.04x
-#
-# ivm     (peephole)	  |  95 BC| 629
-# ivm C-interp (latest)   | 101 BC| 561.0s | 80.14x | 38.96x | 21.95x
-# ivm C-interp (initial)  | 109 BC| 697.0s | 99.57x | 48.40x | 27.27x
+# ivm-asm (byte idx)      | 105 BC| 128.4s | 18.34x |  8.92x |  5.13x
+# ivm-asm (ALTCODE=1)     | 101 BC| 133.3s | 19.04x |  9.26x |  5.32x
+# ivm-asm (memset)        | 101 BC| 148.5s | 21.21x | 10.31x |  5.93x
+# ivm-asm (initial)       | 109 BC| 180.0s | 25.71x | 12.50x |  7.19x
+#                         |       |        |        |        |
+# ivm-oscar             * |     - | 309.4s | 44.20x | 21.48x | 12.36x
+#                         |       |        |        |        |
+# ivm     (peephole)      |  95 BC| 629.0s | 89.86x | 43.68x | 25.13x
+# ivm C-interp (latest)   | 101 BC| 561.0s | 80.14x | 38.96x | 22.41x
+# ivm C-interp (initial)  | 109 BC| 697.0s | 99.57x | 48.40x | 27.84x
 #
 #
 # *) actual program size (file) is bigger:
 #
-#    oscar64 : 5772
-#    cc65    : 4194
-#    ivm     :  143 (file.ivm) but should add loader/library ?
-#    jit     :  749 (+ (* 6 2) 367 100 50 50 20 50 100)
+#              FILE  ./ivm    -asm   -jit
+#              ====  ======  =====  =====
+#    oscar64 : 5772  11,518
+#    cc65    : 4194  14,446  12,044 32,439
+#    ivm     :  132
+#    jit     :  749 -- gen 364 B (+ (* 6 2) 364 100 50 50 20 50 100)
 #      libs  :      malloc free opmu opodiv opmod opputnum
 #                   putchar getchar INIT
 
