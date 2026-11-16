@@ -123,7 +123,11 @@ BLOB ≈ 22
 
 `memsz` in the header is still **254** until slot compaction; that is **target VM cells**, not parse memory.
 
----
+
+
+
+
+--------------------------------------------------------
 
 ### What dominates on 6502
 
@@ -249,17 +253,16 @@ cache the current chunk and cold paths use `dmove`.
 
 
 
+
+
+
+=========================================================
+
 # Candidate Example Workloads
 
 
 So the program has to be array-heavy, loop-heavy, integer-only, and preferably non-recursive (or only shallow).
 Good candidate workloads
-
-Program
-
-Why it fits
-
-What it stresses
 
 Sieve of Eratosthenes (e.g. primes to 8k–16k)
 Tight loops, byte array, counting + zero tests
@@ -280,10 +283,17 @@ Realistic branch mix, not pure counting
 Word count / histogram on a built-in string
 Char scan, classifiers, small tables
 Byte loads, if chains, useful output
-Recommendation
-Start with two:
-Sieve — classic, easy to write in the subset, dominated by the specialised loop ops and indexed stores. Good for measuring n/m and memory traffic.
-Small matrix multiply — forces the + / S / * patterns that showed up in the synthetic profile, but in a ratio that looks like real numeric code.
+
+1. Sieve — classic, easy to write in the subset, dominated by the
+   specialised loop ops and indexed stores. Good for measuring n/m and
+   memory traffic.
+
+2. Small matrix multiply — forces the + / S / * patterns that showed
+   up in the synthetic profile, but in a ratio that looks like real
+   numeric code.
+
+3. imacs.c port???
+
 Both are short enough to rewrite by hand, produce a verifiable result (prime count / checksum of the matrix), and give a profile that is no longer “two loops + noise”.
 
 
