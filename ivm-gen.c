@@ -579,8 +579,9 @@ static word gen_memadd(uchar *base, uchar **pp, const void *src, word n) {
 //   S xx L xx   -> S xx          ACC already holds mem[xx]
 //   S xx xx     -> S xx          (xx < 32: one-byte load)
 //   0 X         -> Q             return 0
-//   X/Q/;/B ... -> X/Q/;/B       dead code up to the next jump target or
-//                                function entry (X X at function ends)
+//   X/Q/;/B ... -> X/Q/;/B       dead code up to the next jump target
+//   K zjp       -> zjp           K == 0 (const): always jumps -> dead code
+//   K zjp       ->               K != 0 (const): never jumps
 //
 // NOT done: ?? before G (G is signed > 0: !!-1 jumps, -1 does not),
 //           0; (';' reloads the return value, Q returns 0)
@@ -602,7 +603,8 @@ static void DEL(word x) {
 
 static void gen_peephole(void) {
   word pc, n, t, nb = (word)((bin_ptr >> 3) + 1);
-  uchar *a, dead = 0;
+  word kv = 0, kpc = 0;     // ACC == kv, loaded by the op at kpc (kn bytes)
+  uchar *a, op, kn = 0, kc = 0, dead = 0;
 
   gen_tgt = (uchar *)calloc(nb, 2);
   if (!gen_tgt) IVM_GEN_FAIL("out of memory (peephole)");
@@ -616,7 +618,8 @@ static void gen_peephole(void) {
     t = ivm_jump(a, pc);
     if (t < (word)bin_ptr) SETBIT(gen_tgt, t);
   }
-  // function entries are reached by calls, not jumps: they are targets too
+  // function entries are called, not jumped to: targets too (an empty
+  // function is a lone X right after the previous function's X)
   for (n = 0; n < nvector; n++)
     SETBIT(gen_tgt, vectors[n]);
   SETBIT(gen_tgt, main_offset);
@@ -627,18 +630,19 @@ static void gen_peephole(void) {
     n = ivm_oplen(a);
     if (!n) n = 1;
 
-    // dead code: after X Q ; B nothing runs until the next target
-    if (TGT(pc)) dead = 0;
+    // a jump lands here: ACC unknown, code alive again
+    if (TGT(pc)) dead = kc = 0;
     if (dead) {
       for (t = 0; t < n; t++) DEL(pc + t);
       continue;
     }
-    if (a[0] == 'X' || a[0] == 'Q' || a[0] == ';' || a[0] == 'B') dead = 1;
 
     // L xx -> xx: one-byte load. No target check: nothing jumps onto an
     // operand, and a jump to the L lands on xx after the squeeze.
-    if (a[0] == 'L' && a[1] < 32)
+    if (a[0] == 'L' && a[1] < 32) {
       DEL(pc);
+      n = 1;          // visit the one-byte load next (constant tracking)
+    }
     else if (a[0] == '?' && a[1] == 'G' && a[2] < 64 && !TGT(pc + 1)) {
       DEL(pc); DEL(pc + 1);
       a[2] = OP_ZJP + a[2];
@@ -654,8 +658,42 @@ static void gen_peephole(void) {
       DEL(pc + 2);
     else if (a[0] == '0' && a[1] == 'X' && !TGT(pc + 1)) {
       DEL(pc);
-      a[1] = 'Q';     // (the Q is seen next round: it starts dead code)
+      a[1] = 'Q';
     }
+
+    // what is ACC now? (look at the op as the patterns left it)
+    op = *a;
+    if (op == OP_DEL || op == ' ') continue;  // NOP: ACC as before
+
+    // zjp after a known constant: 0 always jumps (rest dead until the
+    // target), anything else never jumps (drop zjp and the load)
+    if (op == OP_ZJP) {                  // jumps 0: never matters
+      DEL(pc);
+      if (kc) for (t = 0; t < kn; t++) DEL(kpc + t);
+      kc = 0;
+      continue;
+    }
+    if ((uchar)(op - OP_ZJP) < 64 && kc) {
+      if (!kv) dead = 1;
+      else {
+        DEL(pc);
+        for (t = 0; t < kn; t++) DEL(kpc + t);
+      }
+      kc = 0;
+      continue;
+    }
+
+    // ACC := known constant?
+    kc = 1; kpc = pc; kn = (uchar)n;
+    if (op == '0') kv = 0;
+    else if (op == '9') kv = 0xffff;
+    else if (op < 32 && op >= constidx) kv = const_pool[op - constidx];
+    else if (op == 'L' && a[1] >= constidx) kv = const_pool[a[1] - constidx];
+    else kc = 0;
+
+    // nothing after these runs until the next target (X X, code after
+    // return, the other branch of if (0) / if (1) ...)
+    if (op == 'X' || op == 'Q' || op == ';' || op == 'B') dead = 1;
   }
 }
 
@@ -931,8 +969,12 @@ uchar *build_blob(int *out_len) {
   // squeeze the DEL fillers out (fixes jumps, vectors[], main_offset).
   // Must run before frame bases / code / vectors are copied into the blob.
   if (optimize) {
-    gen_peephole();
-    gen_squeeze();
+    // twice: a removed jump's target, or a jump over removed code (zjp+0),
+    // only shows up in the next round
+    for (i = 0; i < 2; i++) {
+      gen_peephole();
+      gen_squeeze();
+    }
   }
 
   // Entry for _start trampoline (call entry_vec then q):
