@@ -19,8 +19,8 @@ rm ivm-jit.x ivm-vm.lst ivm-jit.sim ivm-jit.lst 2>/dev/null
 ./cafix
 
 
-sim65 -c ivm-jit.sim -j $* $name.ivm | grep cycles | sed 's/ cycles//' > $name.cycles.jit
-sim65 -c ivm-jit.sim $* $name.ivm | tee $name.log
+sim65 -c ivm-jit.sim -z -j $* $name.ivm | grep cycles | sed 's/ cycles//' > $name.cycles.jit
+sim65 -c ivm-jit.sim -z $* $name.ivm | tee $name.log
 
 jit=$(cat "$name.cycles.jit")
 jitandrun=$(grep cycles "$name.log" | sed 's/ cycles//')
