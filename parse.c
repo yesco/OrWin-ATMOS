@@ -239,7 +239,8 @@ static void anim_report(void) {
 // 8 = (* 8 29) = 232 bytes bigger each time
 #define STACK_GROW 8
 
-#define ERR_LINES_CONTEXT 4
+#define ERR_LINES_CONTEXT 3   // lines shown after the error line
+#define ERR_LINES_BEFORE  2   // ...and before it, if still buffered
 
 // errors and verbose output goes to:
 #define ERROUT stdout
@@ -2351,7 +2352,7 @@ static int run(word n) {
 
 // "file:line: " prefix of an error line
 static void err_prefix(word line) {
-  eprintf("%s:%u: ", src_name ? src_name : "?", line);
+  eprintf("%s:%u: ", src_name ? src_name : "?", line + 1); // line is 0-based
 }
 
 // print buffered source line starting at i; returns index after its '\n'
@@ -2423,21 +2424,44 @@ static void report_reject(void) {
 
     } else {
 
+      word ps[ERR_LINES_BEFORE + 1], nps = 0, k;
+
       off = want - line_abs;
       if (off > line_len) off = line_len;
 
-      // line start / column within buffer
+      // source is read one char at a time: fetch the rest of the error
+      // line + ERR_LINES_CONTEXT more (we are done parsing, so it's fine)
+      for (k = 0, i = off; i < line_len; i++)
+        if (line_buf[i] == '\n') k++;
+      while (k <= ERR_LINES_CONTEXT) {
+        line_pos = line_len;
+        load_nextc();
+        if (!nextc) break;
+        if (nextc == '\n') k++;
+      }
+
+      // line start / column within buffer; remember a few line starts
+      // before it (whatever \o left in the buffer)
       start = 0;
       line = line_no_base;
       col = 0;
       for (i = 0; i < off; i++) {
         if (line_buf[i] == '\n') {
+          if (nps < ERR_LINES_BEFORE + 1) nps++;
+          for (k = nps - 1; k > 0; k--) ps[k] = ps[k - 1];
+          ps[0] = start;
           line++;
           start = i + 1;
           col = 0;
         } else
           col++;
       }
+
+      // lines before
+      // (skip empty ones: the first is often the '\n' left by a commit)
+      for (k = nps < ERR_LINES_BEFORE ? nps : ERR_LINES_BEFORE; k > 0; k--)
+        if (line_buf[ps[k - 1]] != '\n')
+          show_line(line - k, ps[k - 1]);
 
       // error line text
 // TODO: seems to only print the current
