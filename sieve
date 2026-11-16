@@ -143,9 +143,14 @@ echo
 # jit: const ')'  478 B |	41.4	5.91x	| 41,380,743
 # jit: Lcc(bbcc   469 B	|       40.5    5.78x	| 40,453,871 2.3%
 # jit: *2  -> <<1 450 B |       40.39	5.77x	| 40,389,838
+
+
+# === TODO: no ?? was faster than after OP. some regressed?
+# adding ./ivm -r 10 option so we can (minimize/remove) overhead
 #
+# --- df299c9548b538b5443378482bb86b238a1fb216
 # ivm: memset     101 BC|      623 s   89x	|622,733,340
-#	no ?? (41 instr)|      561 s   80x	|
+#	no ?? (41 instr)|      561 s   80x	|561,055,640
 # asm: memset		|      154 s   22x	|154,385,371
 #       no ??		|      148 s   21x	|148,471,071
 # jit: memset     412 B	|	34.98   5.00x	| 34,984,658
@@ -154,6 +159,7 @@ echo
 # asm:                  |      154		|154,385,591
 # asm: ALTCODE=1 m ( )	|      139 s   19.9x	|139,257,315
 #       no ??		|      133 s   19.0x	|133,343,015
+
 
 
 # --- 0395abf4215ecf7428f131351d35639072dd00a1 (zeropage)
@@ -172,7 +178,7 @@ echo
 
 # --- peephole Lxx XX 0Q and -z
 # ivm              95 B	|			|629,316,715
-# asm			|			|121,566,667
+# asm		   95 B	|			|121,566,667
 # jit		  429 B |			| 27,893,845
 # jit -z 	  364 B	|			| 25,033,395
 #
