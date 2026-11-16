@@ -272,7 +272,6 @@
 #ifdef JIT
   #include "ivm-jit.c"
   #include "disasm.c"
-  static int jit_only = 0;
   static int jit_force_zp = 0;
   static word  jit_zp = 0;          // -zXX: zp base of mem[] (0: auto)
   static word  jit_org = 0;         // -a XXXX: org of generated code (0: auto)
@@ -1713,7 +1712,16 @@ uchar *load_blob(const char *path, int *out_len) {
   }
 
   if (out_len) *out_len = cap;
-  printf("loaded %s (%d bytes)\n", path, cap);
+  {
+    // frames start at the lowest frame base: below it registers + globals
+    BlobHeader *h = (BlobHeader *)img;
+    word nf = (word)((h->con - h->call) / 2);
+    uchar v = (uchar)h->constidx;
+    while (nf--) if (img[h->fp + nf] < v) v = img[h->fp + nf];
+    printf("--- ivm %s (%d bytes %u BC %u slots (%u var %u params %u const) %u bytes data) ---\n",
+      path, cap, h->main - h->code, h->memsz,
+      v, h->constidx - v, h->memsz - h->constidx, h->data ? h->len - h->data : 0);
+  }
 
   relocate(img);
 
@@ -1969,7 +1977,6 @@ word jit_compile(Process* proc) {
 
     lc_main_bc = (word)(bh->main - bh->code);
     lc_main_at = 0;
-    if (bh->memsz <128) printf("--- JIT: using zero-page slots ---\n");
     lc_constidx = (uchar)bh->constidx;
     lc_constmem = proc->h.mem;
 
@@ -1978,6 +1985,7 @@ word jit_compile(Process* proc) {
       free(map); free(out);
       return 0;
     }
+    printf("--- JIT: mem[] at $%04X ---\n", mem_base);
 
     jit_size = ivm_jit(code, code_len, out, out_max, map, code_len,
       mem_base, out_org, vec_bc, frame_base, ncall);
@@ -2028,9 +2036,14 @@ word jit_compile(Process* proc) {
 }
 #endif // JIT
 
+static word runs = 1;   // -rN
+
 static int run_loaded_blob(uchar *img, int len) {
   static word ret; // static so can access in 6502 asm
   static word addr;
+  #ifdef JIT
+    static word heap0;
+  #endif
 
   Process *proc= Nevm(img);
     
@@ -2039,19 +2052,21 @@ static int run_loaded_blob(uchar *img, int len) {
   #ifdef JIT
     printf("--- JIT compiling IVM (blob %d) ---\n", len);
     addr = jit_compile(proc);
-    printf("--- JIT: entry at %u ---\n", (unsigned)addr);
+    if (!addr) return -1;
+    printf("--- JIT: entry at $%04X ---\n", (unsigned)addr);
+    heap0 = ivmlib_heap;  // -rN: every run gets the heap from the start
+  #elif defined(__CC65__)
+    printf("--- code at $%04X mem[] at $%04X ---\n",
+      proc->h.hdr.code, (unsigned)proc->h.mem);
   #endif
 
-  #ifdef JIT
-    if (jit_only) {
-      printf("--- JIT only, not running ---\n");
-      return 0;
-    }
-  #endif
-
-  printf("--- RUN IVM (blob %d) ---\n", len);
+  while (runs) {
+    runs--;
+    printf("\n--- RUN IVM (blob %d) ---\n", len);
 
   #ifdef JIT
+      // NOTE: mem[] is not reset between runs
+      ivmlib_heap = heap0;
       // call the generated 6502 code at addr (JMP + vector table)
       // result returns in A/X (cc65 ACC style)
     __asm__ ("lda %v", addr);
@@ -2063,8 +2078,16 @@ static int run_loaded_blob(uchar *img, int len) {
     ret = run_ivm(proc);
   #endif
 
-  printf("\n--- END ---\n");
-  printf("acc = %u\n", ret);
+    printf("\n--- END ---\n");
+    printf("acc = %u\n\n", ret);
+
+  #ifndef JIT
+    if (runs) {          // fresh mem[] for the next run
+      free(proc);
+      if (!(proc = Nevm(img))) return -1;
+    }
+  #endif
+  }
 
   free(proc);
 
@@ -2094,38 +2117,52 @@ int run_file(char* filename) {
 
 #ifndef MAIN
 
+static const char usage[] =
+  "Usage: ivm [options] file.ivm\n"
+  " -rN     run N times, decimal (default 1, -r0: load only)\n"
+#ifdef JIT
+  " -j      JIT only, don't run (same as -r0)\n"
+  " -z[XX]  mem in zero page (default below $FE, or start $XX)\n"
+  " -aXXXX  code at hex address XXXX (implies -r0)\n"
+  " -oFILE  save image to FILE (implies -r0)\n"
+  " -tNAME  target: sim6502 atmos raw\n"
+#endif
+  ;
+
 #ifdef OSCAR64
 int main(void) {
-  int argc = 2;
-  const char* argv[]= {"ivm", #FILENAME, NULL};
+  int argc;
+  const char *av[] = {"ivm", #FILENAME, NULL};
+  const char **argv = av;
 #else
 int main(int argc, char** argv) {
 #endif
-  
-  #ifdef JIT
-    {
-      int a = 1;
-      while (a < argc && argv[a][0] == '-') {
-        if (argv[a][1] == 'j') jit_only = 1;
-        else if (argv[a][1] == 'z') {      // -z or -zXX (hex zp base)
-          jit_force_zp = 1;
-          if (argv[a][2]) jit_zp = (word)strtoul(argv[a] + 2, NULL, 16);
-        }
-        else if (argv[a][1] == 'a' && a + 1 < argc)
-          jit_org = (word)strtoul(argv[++a], NULL, 16);
-        else if (argv[a][1] == 'o' && a + 1 < argc) jit_outfile = argv[++a];
-        else if (argv[a][1] == 't' && a + 1 < argc) jit_target  = argv[++a];
-        a++;
-      }
-      // code built for another address/file can't run here
-      if (jit_org || jit_outfile) jit_only = 1;
-      if (a < argc) return run_file((char*)argv[a]);
+  char *s;
+
+  while ((s = (char *)*++argv) && *s == '-')
+    switch (s[1]) {
+    case 'r': runs = (word)strtoul(s + 2, NULL, 10); break;
+    #ifdef JIT
+      case 'j': runs = 0; break;
+      case 'z': jit_force_zp = 1; jit_zp = (word)strtoul(s + 2, NULL, 16); break;
+      case 'a': jit_org = (word)strtoul(s + 2, NULL, 16); break;
+      case 'o': jit_outfile = s + 2; break;
+      case 't': jit_target = s + 2; break;
+    #endif
+    default: goto xusage;
     }
+
+  #ifdef JIT
+    // code built for another address/file can't run here
+    if (jit_org || jit_outfile) runs = 0;
   #endif
 
-  if (argc==2)
-    return run_file((char*)argv[1]);
+  if (s) return run_file(s);
+ xusage:
+
+  printf("%s", usage);
 
   return 1;
+  (void)argc;
 }
 #endif // MAIN
