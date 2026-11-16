@@ -12,15 +12,26 @@
 // 8,914,999,378 ./ivm-test-dispatch-loop 10 M
 // 8,964,065,027  - 2026-11-16, got somewhat slower...
 //   751,977,998 byte-sieve
-
+//
 //  68 ops
 // (/ (- 409 66) 68.0) 5.044 c/ops! (linear search CMP #xx / BEQ xx)
 
+
+// --- IVM USE_BTABLE dispatch ---
+//    94,686,785 - dispatch
+//    92,786,560 - nop
+//   118,786,560 - pon
+//   327,800,453 - inc
+//   830,787,333 - fun                     
+// 6,510,594,290 - loop 10M (/ 6510 10) = 651 c
+
+
 // --- IVM-ASM ---
-//    44,034,108 ./ivm-asm test-dispatch  // using ALTCODE+0
-//    95,074,135 ./ivm-asm test-dispatch-inc
-//   214,054,457 ./ivm-asm test-dispatch-fun (call + return)
-// 1,603,014,148 ./ivm-asm test-dispatch-loop
+//    44,034,108 -dispatch  // using ALTCODE+0
+//    95,074,135 -inc
+//   214,054,457 -fun (call + return)
+// 1,603,014,148 -loop
+
 
 // --- IVM-ASM: UPDATED with FASTDISPATCH ALTCODE=0
 
@@ -28,20 +39,28 @@
 //    85,964,138 - inc
 //   204,884,444 - fun
 // 1,512,825,132 - loop 10 M ops
+
 //   184,577,647 - byte-sieve
+
 
 // --- IVM-ASM: AND ALTCODE=1 ---
 //    28,133,473 - dispatch
 //    79,184,563 - inc
 //   218,974,445 - fun  SLOWER! :-(
 // 1,302,964,133 - loop ALTCODE=1 
+
 //   ? crash     - byte-sieve
 
+
+// TODO: time to do ivm-asm again!!!
+
+
 // -- JIT w const ----
-//       598,503 - dispatch    47. x   !
+//       598,503 - dispatch    47. x  !
 //    17,508,004 - inc          4.5x
 //    20,468,599 - fun         10.7x  !
 //   550,272,728 - loop         2.4x
+
 //    58,556,915 - byte-sieve   3.15x
 
 // -- with i + n loop opt --
@@ -50,6 +69,7 @@
 //    18,248,449 - fun
 //   210,381,273 - loop 10M
 //    30,253,218 - byte-sieve
+
 
 
 // n++; == "Ivv" one dispatch, read param, read memory, inc, write

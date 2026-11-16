@@ -285,7 +285,22 @@
 #endif
 
 
-#define USE_LABELS
+// --------------------------------------------------------
+// OPTIONS
+
+// --- Method of DISPATCH
+// 
+// (default: switch linear search - very slow on cc65: 66c - 550c)
+// = byte-sieve-prime =
+// 629379221 c - default (/ 385844385 629379221.0) = 39% faster
+// 385844385 c - USE_BTABLE - binary if-tree dispatch w goto
+
+// - uses array of labels and goto *arr[op] - CC65 cannot!
+//#define USE_LABELS
+#define USE_BTABLE
+
+
+// - 
 //#define COUNTOPS
 
 // TODO: just ifndef 6502 or if "onhost"
@@ -1209,72 +1224,21 @@ ivmvar run_ivm(Process *p) {
     goto xnext;
   }
 
-  // Dispatch: USE_LABELS → goto *vt[oi] (oi is uchar, never an expression).
-  // Array is 128 entries (indices 0..127); hibit opcodes use op_hibit.
-  // Z(c) → "case c:" when switch path, empty when label path.
+  // Dispatch, one of three:
+  //   (default)   switch: cc65 makes a compare cascade (slow for late cases)
+  //   USE_LABELS  ivm-jtable.c: goto *vt[op] (gcc/clang; unreliable on cc65)
+  //   USE_BTABLE  ivm-btable.c: binary search with plain gotos (any compiler)
+  // The label modes need the op labels: ZL(label, c) is "label:" there,
+  // "case c:" in the switch.
 
-#ifdef USE_LABELS
-  {
-    static void *vt[128];
-    static uchar inited;
-    if (!inited) {
-      // TODO: just one big static array assign? (or doesn't work cc65?)
-      // build once in a local table, then memcpy → static (no per-op ifdefs)
-      void *t[128];
-      uchar k;
+#if defined(USE_LABELS)
+  #include "ivm-jtable.c"
+#elif defined(USE_BTABLE)
+  #include "ivm-btable.c"
+#endif
 
-      for (k = 0; k < 128; k++) t[k] = &&op_unk;
-
-      t['q'] = &&op_q;   t['Q'] = &&op_Q;   t['X'] = &&op_X;   t[';'] = &&op_semi;
-
-      t['8'] = &&op_8;
-      t['1'] = &&op_17;   t['2'] = &&op_17;  t['3'] = &&op_17;
-      t['4'] = &&op_17;   t['5'] = &&op_17;  t['6'] = &&op_17; t['7'] = &&op_17;
-
-      t['+'] = &&op_add;  t['-'] = &&op_sub; t['*'] = &&op_mul;
-      t['/'] = &&op_div;  t['%'] = &&op_mod;
-      t['&'] = &&op_and;  t['|'] = &&op_or;  t['^'] = &&op_xor;
-      t['{'] = &&op_shl;  t['}'] = &&op_shr;
-//      t['{'] = &&op_shlm; t['}'] = &&op_shrm;
-
-      t['L'] = &&op_L;    t['S'] = &&op_S;   t['Z'] = &&op_Z;
-      t['C'] = &&op_C;
-      t['l'] = &&op_l;    t['s'] = &&op_s;
-
-      t['I'] = &&op_I;    t['J'] = &&op_J;   t['U'] = &&op_U;
-
-      t['M'] = &&op_M;    t['F'] = &&op_F;
-      t['m'] = &&op_m;
-      t['@'] = &&op_at;   t['!'] = &&op_bang;
-      t['r'] = &&op_r;    t['w'] = &&op_w;
-      t['\'']= &&op_ri;   t[','] = &&op_wi;
-      t['('] = &&op_idxl; t[')'] = &&op_idxs;
-      t['['] = &&op_bidxl;t[']'] = &&op_bidxs;
-
-      t['i'] = &&op_i;    t['n'] = &&op_n;   
-
-      t['<'] = &&op_lt;   t['='] = &&op_eq;  t['>'] = &&op_gt;
-      t['?'] = &&op_not;  t['~'] = &&op_bnot;
-
-      t[' '] = &&op_sp;    t[127] = &&op_DEL; // DEL: NOP too
-
-      t['0'] = &&op_0;    t['9'] = &&op_9;
-
-      t['K'] = &&op_K;    t['E'] = &&op_E;   t['N'] = &&op_N;
-      t['P'] = &&op_P;    t['O'] = &&op_O;   t['W'] = &&op_W;
-      t['.'] = &&op_dot;  t['"'] = &&op_str;
-
-      t['G'] = &&op_G;    t['B'] = &&op_B;
-
-      t['x'] = &&op_x;    t['y'] = &&op_y;   t['z'] = &&op_z;
-
-      memcpy(vt, t, sizeof(vt));
-      inited = 1;
-    }
-
-    if (op & 0x80) goto op_hibit;
-    goto *vt[op];
-  }
+#if defined(USE_LABELS) || defined(USE_BTABLE)
+  #define IVM_GOTO
 
   #define Z(c)
   #define ZL(label, c) label:
@@ -1377,21 +1341,24 @@ ZL(op_ri,  '\'') CHKP(zp.mem[*zp.ipc], 1); zp.acc = soft_heap[zp.mem[*zp.ipc]++]
 ZL(op_wi,  ',' ) CHKP(zp.mem[*zp.ipc], 1); soft_heap[zp.mem[*zp.ipc]++] = (uchar)zp.acc; goto pnext;
 #endif
 
-// indexed: (aaii, aa is index of base address, ii is index var
+// ( aa ii - word index read
 ZL(op_idxl,'(')
     CHKP(PAR + 2UL * zp.mem[zp.ipc[1]], 2);
     zp.acc = IVM_PTR(PAR)[zp.mem[zp.ipc[1]]];
     zp.ipc += 2; goto xnext; // 2 args
+// ) aa ii - word index write
 ZL(op_idxs,')')
     CHKP(PAR + 2UL * zp.mem[zp.ipc[1]], 2);
     IVM_PTR(PAR)[zp.mem[zp.ipc[1]]] = zp.acc;
     zp.ipc += 2; goto xnext; // 2 args
 
-ZL(op_idxl,'[')
+// [ aa ii - byte index read
+ZL(op_bidxl,'[')
     CHKP(PAR + zp.mem[zp.ipc[1]], 2);
     zp.acc = ((uchar*)(IVM_PTR(PAR)))[zp.mem[zp.ipc[1]]];
     zp.ipc += 2; goto xnext; // 2 args
-ZL(op_idxs,']')
+// ] aa ii - byte index write
+ZL(op_bidxs,']')
     CHKP(PAR + zp.mem[zp.ipc[1]], 2);
     ((uchar*)(IVM_PTR(PAR)))[zp.mem[zp.ipc[1]]] = zp.acc;
     zp.ipc += 2; goto xnext; // 2 args
@@ -1399,26 +1366,11 @@ ZL(op_idxs,']')
 // M: malloc: operand = slot of pointer var; ACC = size in bytes
 ZL(op_M,   'M') zp.acc = zp.mem[*zp.ipc] = ivm_zalloc(zp.acc); goto pnext;
 
-// m: memset bytes. ACC=count, ipc[0]=ptr slot, ipc[1]=value slot.
-// Fills ((char*)mem[pp])[0..ACC-1] with low byte of mem[vv].
-ZL(op_m,   'm') {
-  uchar *p = (uchar *)IVM_PTR(PAR);
-  uchar v  = (uchar)zp.mem[zp.ipc[1]];
-
-  word n   = zp.acc;
-
-  //  printf("\n<<< 'm'emset: %u %u %u\n", p, v, n);
-    
-  // 743932708 - no, loop high level
-  
-  // 646536594 - slow!
-  // while (n--) *p++ = v;
-
-  // 622898428 - memset
-  memset(p, v, n);
-  
+// m ptr val - memset ACC bytes
+// TODO: we need same for Word (?) consider o p operator
+ZL(op_m,   'm')
+  memset((uchar *)IVM_PTR(PAR), (uchar)zp.mem[zp.ipc[1]], zp.acc);
   zp.ipc += 2; goto xnext;
-}
 
 ZL(op_F,   'F') ivm_free(PAR); zp.mem[*zp.ipc] = 0;            goto pnext;
 
@@ -1611,7 +1563,7 @@ ZL(op_z,   'z')  zp.acc= sys(3, zp.acc, zp.ipc); zp.ipc+= 3; goto xnext;
 
 ZL(op_DEL,  127) goto xnext;
 
-  #ifndef USE_LABELS
+  #ifndef IVM_GOTO
   default:
   #endif
 
@@ -1653,7 +1605,7 @@ L(op_hibit)
 
 #undef Z
 
-#ifndef USE_LABELS
+#ifndef IVM_GOTO
   } // switch
 #endif
 
