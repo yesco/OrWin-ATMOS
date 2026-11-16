@@ -1801,7 +1801,7 @@ static void free_rules(void) {
 // note: '>' is load-time only (not stored)
 //       '<' becomes HIBIT(x), x=1..31 (alt jump) or HIBIT('<')
 static int is_dir(uchar e) {
-  return isdigit(e) || strchr("insfdprlxywmzkcahvgetou+{}#='?", e) != NULL;
+  return isdigit(e) || strchr("insfdprlxywmzkcahvgetou+{}#='?*", e) != NULL;
 }
 
 static void build_one_rule(uchar r, char *rhs) {
@@ -2268,6 +2268,17 @@ int step(void) {
   // NEWLINE
   else if (c == HIBIT('n')) ok = match_newline();
 
+  // \*c: skip input up to and including the next c (Kleene ".*c")
+  //   \*\n: to end of line   \*>: through '>'   (\*\[ \*\| for [ |)
+  else if (c == HIBIT('*')) {
+    uchar stop = a[1] == HIBIT('n') ? '\n' : (uchar)(a[1] & 0x7f);
+    if (!a[1]) FAIL("bad \\* in grammar");
+    while (nextc && nextc != stop) skip();
+    ok = got(stop);
+    note_progress();
+    adv = 2;
+  }
+
   // "STRING" value
   else if (c == HIBIT('s')) ok = match_str(0);
 
@@ -2378,8 +2389,10 @@ static void report_reject(void) {
     eprintf("EXPECTED: rule %c", r);
     r -= 'A';
     {
-      uchar **alts = rule[r];
-      if (alts && alts[a])
+      uchar **alts = rule[r], k;
+      for (k = 0; alts && k < a && alts[k]; k++)
+        ;  // alts[] ends at NULL: a may be stale
+      if (alts && k == a && alts[a])
       { eprintf(" alt %u \"", a); show_alt(alts[a]); eputc('"'); }
     }
 

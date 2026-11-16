@@ -54,7 +54,7 @@ static void ivm_print_one(FILE *fp, const uchar *code, unsigned len, unsigned *p
   }
   if (c >= 0x80) {
     // zjp: jump forward if ACC == 0 - same as the "?G rr" it replaced
-    fprintf(fp, "?G%02x ", (unsigned)(c & 0x3f));
+    fprintf(fp, "zj%02x ", (unsigned)(c & 0x3f));
     *pi = i + 1;
     return;
   }
@@ -108,7 +108,7 @@ unsigned ivm_print_code_range(
     ivm_print_one(fp, code, end, &i);
     if (i <= before) i = before + 1;
 
-    if (wrap && ((strchr("ijnGBmN;XQ", ch) != NULL) || ++n >= wrap)) {
+    if (wrap && ((strchr("ijnGBmN;XQq", ch) != NULL) || ++n >= wrap)) {
       fputc('\n', fp);
       n = 0;
     }

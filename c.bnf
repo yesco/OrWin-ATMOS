@@ -28,9 +28,11 @@
 # - Program starts with P
 P=D
 
-D=#include <\+.h>\n\o\<|#define \c\+ \d[\g]\o|#define \c\+ \s[\g]\o
-|#include "\+.h"\n\o\<
-|#include <\+.c>\n\o\<
+# - #define NAME number|"string" -> const; any other # line is skipped
+#   (\c only after a full match: a failed alt must not leave it set)
+D=#define \+ \d\c[\g]\n\o\<
+|#define \+ \s\c[\g]\n\o\<
+|#\*\n\o\<
 |V\o\<|F\o\<|
 
 # - Declarations: optional register\r -> REGISTER slot 0..31
@@ -353,6 +355,8 @@ Tokens:
 
   \d  number -> const address (CONST_TOP down, via lit_addr)
   \s  string (match only)
+  \*c skip input up to and including the next c (\*\n: rest of line;
+      write \*\[ \*\| for [ |)
   \u  emit string bytes + \0 (opening " already matched; ["] emits the " opcode)
 
 Control:

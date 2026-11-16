@@ -612,8 +612,14 @@ static void gen_peephole(void) {
 // TODO: maybe pirnt inverted if deleted? set flag?
     
 //    printf("optimize '%c' %02x n=%u\n", isprint(a[0])?a[0]:' ', a[1], n);
-    if (a[0] == 'L' && a[1] < 32 && !TGT(pc) && !TGT(pc + 1)) {
+
+    // TODO: Lxx => 0  where xx is const and == 0 !!!!
+
+    if (a[0] == 'L' && a[1] < 32) {
       a[0] = OP_DEL;
+    }
+    else if (a[0] == 'X' && a[1] == 'X' && !TGT(pc + 1)) {
+      a[1] = OP_DEL;
     }
     else if (a[0] == '?' && a[1] == 'G' && a[2] < 64 && !TGT(pc + 1)) {
       a[0] = a[1] = OP_DEL;
