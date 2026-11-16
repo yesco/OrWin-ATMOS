@@ -285,7 +285,7 @@
 #endif
 
 
-
+#define USE_LABELS
 //#define COUNTOPS
 
 // TODO: just ifndef 6502 or if "onhost"
@@ -1422,8 +1422,14 @@ ZL(op_m,   'm') {
 
 ZL(op_F,   'F') ivm_free(PAR); zp.mem[*zp.ipc] = 0;            goto pnext;
 
+// TODO: fails on oscar64
+#ifndef OSCAR64
+ZL(op_I,   'I')  zp.acc = ++zp.mem[*zp.ipc]; goto pnext;
+ZL(op_J,   'J')  zp.acc = --zp.mem[*zp.ipc]; goto pnext;
+#else
 ZL(op_I,   'I')  zp.acc = PAR + 1; PAR = zp.acc; goto pnext;
 ZL(op_J,   'J')  zp.acc = PAR - 1; PAR = zp.acc; goto pnext; 
+#endif
 
 // Fails on oscar! same for 'I'
 // ZL(op_J,   'J')  zp.acc = --zp.mem[*zp.ipc]; goto pnext; 
