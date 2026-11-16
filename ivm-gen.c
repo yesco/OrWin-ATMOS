@@ -573,26 +573,40 @@ static word gen_memadd(uchar *base, uchar **pp, const void *src, word n) {
 // A pattern is only applied if no jump lands INSIDE it (on its first
 // byte is fine): tgt[] bitmap of all jump targets.
 //
-//   L xx        -> xx            if xx < 31 (single byte load)
+//   L xx        -> xx            one-byte load (xx < 32, final slots)
 //   ? G rr      -> zjp+rr        jump if ACC == 0 (rr < 64)
 //   ? ? ?       -> ?             !!!x == !x
 //   S xx L xx   -> S xx          ACC already holds mem[xx]
 //   S xx xx     -> S xx          (xx < 32: one-byte load)
 //   0 X         -> Q             return 0
+//   X/Q/;/B ... -> X/Q/;/B       dead code up to the next jump target or
+//                                function entry (X X at function ends)
 //
 // NOT done: ?? before G (G is signed > 0: !!-1 jumps, -1 does not),
 //           0; (';' reloads the return value, Q returns 0)
 #define OP_DEL 0x7f
 #define OP_ZJP 0x80
 
-#define TGT(x) (tgt[(x) >> 3] & (1 << ((x) & 7)))
+// one bitmap allocation, two halves: jump targets, DELs (op positions only)
+static uchar *gen_tgt, *gen_del;
+
+#define BIT(m, x)    ((m)[(x) >> 3] & (1 << ((x) & 7)))
+#define SETBIT(m, x) ((m)[(x) >> 3] |= (1 << ((x) & 7)))
+#define TGT(x)       BIT(gen_tgt, x)
+
+// replace the op byte at x by a DEL (squeezed out later)
+static void DEL(word x) {
+  bin[x] = OP_DEL;
+  SETBIT(gen_del, x);
+}
 
 static void gen_peephole(void) {
-  word pc, n, t;
-  uchar *a, *tgt;
+  word pc, n, t, nb = (word)((bin_ptr >> 3) + 1);
+  uchar *a, dead = 0;
 
-  tgt = (uchar *)calloc((bin_ptr >> 3) + 1, 1);
-  if (!tgt) IVM_GEN_FAIL("out of memory (peephole)");
+  gen_tgt = (uchar *)calloc(nb, 2);
+  if (!gen_tgt) IVM_GEN_FAIL("out of memory (peephole)");
+  gen_del = gen_tgt + nb;
 
   // jump targets
   for (pc = 0; pc < (word)bin_ptr; pc += n) {
@@ -600,84 +614,66 @@ static void gen_peephole(void) {
     n = ivm_oplen(a);
     if (!n) n = 1;
     t = ivm_jump(a, pc);
-    if (t < (word)bin_ptr) tgt[t >> 3] |= 1 << (t & 7);
+    if (t < (word)bin_ptr) SETBIT(gen_tgt, t);
   }
+  // function entries are reached by calls, not jumps: they are targets too
+  for (n = 0; n < nvector; n++)
+    SETBIT(gen_tgt, vectors[n]);
+  SETBIT(gen_tgt, main_offset);
 
-  // peephole
+  // patterns
   for (pc = 0; pc < (word)bin_ptr; pc += n) {
     a = bin + pc;
     n = ivm_oplen(a);
     if (!n) n = 1;
 
-// TODO: maybe pirnt inverted if deleted? set flag?
-    
-//    printf("optimize '%c' %02x n=%u\n", isprint(a[0])?a[0]:' ', a[1], n);
-
-    // TODO: Lxx => 0  where xx is const and == 0 !!!!
-
-    if (a[0] == 'L' && a[1] < 32) {
-      a[0] = OP_DEL;
+    // dead code: after X Q ; B nothing runs until the next target
+    if (TGT(pc)) dead = 0;
+    if (dead) {
+      for (t = 0; t < n; t++) DEL(pc + t);
+      continue;
     }
-    else if (a[0] == 'X' && a[1] == 'X' && !TGT(pc + 1)) {
-      a[1] = OP_DEL;
-    }
+    if (a[0] == 'X' || a[0] == 'Q' || a[0] == ';' || a[0] == 'B') dead = 1;
+
+    // L xx -> xx: one-byte load. No target check: nothing jumps onto an
+    // operand, and a jump to the L lands on xx after the squeeze.
+    if (a[0] == 'L' && a[1] < 32)
+      DEL(pc);
     else if (a[0] == '?' && a[1] == 'G' && a[2] < 64 && !TGT(pc + 1)) {
-      a[0] = a[1] = OP_DEL;
+      DEL(pc); DEL(pc + 1);
       a[2] = OP_ZJP + a[2];
     }
     else if (a[0] == '?' && a[1] == '?' && a[2] == '?'
-             && !TGT(pc + 1) && !TGT(pc + 2))
-      a[0] = a[1] = OP_DEL;
-    else if (a[0] == 'S' && a[2] == 'L' && a[3] == a[1] && !TGT(pc + 2))
-      a[2] = a[3] = OP_DEL;
+             && !TGT(pc + 1) && !TGT(pc + 2)) {
+      DEL(pc); DEL(pc + 1);
+    }
+    else if (a[0] == 'S' && a[2] == 'L' && a[3] == a[1] && !TGT(pc + 2)) {
+      DEL(pc + 2); DEL(pc + 3);
+    }
     else if (a[0] == 'S' && a[2] == a[1] && a[1] < 32 && !TGT(pc + 2))
-      a[2] = OP_DEL;
+      DEL(pc + 2);
     else if (a[0] == '0' && a[1] == 'X' && !TGT(pc + 1)) {
-      a[0] = OP_DEL;
-      a[1] = 'Q';
+      DEL(pc);
+      a[1] = 'Q';     // (the Q is seen next round: it starts dead code)
     }
   }
-
-  free(tgt);
 }
 
-// number of DELs in dels[0..nd[ before position x (dels[] is sorted)
-static word gen_dels_before(word *dels, word nd, word x) {
-  word lo = 0, hi = nd, m;
+// DELs in [lo, hi[
+static word gen_dels(word lo, word hi) {
+  word d = 0;
 
-  while (lo < hi) {
-    m = (lo + hi) >> 1;
-    if (dels[m] < x) lo = m + 1; else hi = m;
-  }
-  return lo;
+  for (; lo < hi; lo++)
+    if (BIT(gen_del, lo)) d++;
+  return d;
 }
 
-#define NEWPOS(x) ((word)((x) - gen_dels_before(dels, nd, (x))))
-
-// remove the DEL ops, fix all jumps, vectors[] and main_offset
+// remove the DELs, fix all jumps, vectors[] and main_offset
 static void gen_squeeze(void) {
-  word pc, n, nd, t, r, *dels;
+  word pc, n, t, r;
   uchar *a, i, k;
 
-  // DEL positions (only real ops: a 0x7f operand is data)
-  nd = 0;
-  for (pc = 0; pc < (word)bin_ptr; pc += n) {
-    n = ivm_oplen(bin + pc);
-    if (!n) n = 1;
-    if (bin[pc] == OP_DEL) nd++;
-  }
-  if (!nd) return;
-
-  dels = (word *)malloc(nd * sizeof(word));
-  if (!dels) IVM_GEN_FAIL("out of memory (squeeze)");
-  nd = 0;
-  for (pc = 0; pc < (word)bin_ptr; pc += n) {
-    n = ivm_oplen(bin + pc);
-    if (!n) n = 1;
-    if (bin[pc] == OP_DEL) dels[nd++] = pc;
-  }
-
-  // jumps: new distance between the new positions (still old layout)
+  // jumps: rel -= DELs between the jump and its target
   for (pc = 0; pc < (word)bin_ptr; pc += n) {
     a = bin + pc;
     n = ivm_oplen(a);
@@ -685,32 +681,24 @@ static void gen_squeeze(void) {
     t = ivm_jump(a, pc);
     if (t == 0xffff) continue;
 
-    if ((uchar)(*a - OP_ZJP) < 64) {
-      a[0] = (uchar)(OP_ZJP + NEWPOS(t) - NEWPOS(pc) - 1);
-      continue;
-    }
+    if ((uchar)(*a - OP_ZJP) < 64) { *a -= gen_dels(pc + 1, t); continue; }
     i = ivm_opinfo(*a);
     k = OPI_NARGS(i);
-    r = NEWPOS(pc) + k + 1;             // after the rel byte
-    a[k] = (uchar)((i & OPI_BACK) ? r - NEWPOS(t) : NEWPOS(t) - r);
+    r = pc + k + 1;                       // after the rel byte
+    a[k] -= (i & OPI_BACK) ? gen_dels(t, r) : gen_dels(r, t);
   }
 
+  // (a count from 0 per vector: nvector * code length bit tests)
   for (k = 0; k < nvector; k++)
-    vectors[k] = NEWPOS(vectors[k]);
-  main_offset = NEWPOS(main_offset);
+    vectors[k] -= gen_dels(0, vectors[k]);
+  main_offset -= gen_dels(0, main_offset);
 
-  // compact
-  r = 0;
-  for (pc = 0; pc < (word)bin_ptr; pc += n) {
-    n = ivm_oplen(bin + pc);
-    if (!n) n = 1;
-    if (bin[pc] == OP_DEL) continue;
-    memmove(bin + r, bin + pc, n);
-    r += n;
-  }
+  // compact: DEL bits are only set on ops, so a byte loop is enough
+  for (pc = r = 0; pc < (word)bin_ptr; pc++)
+    if (!BIT(gen_del, pc)) bin[r++] = bin[pc];
   bin_ptr = r;
 
-  free(dels);
+  free(gen_tgt);
 }
 
 // -O: [registers][globals][frames packed by call graph]
@@ -800,16 +788,6 @@ uchar *build_blob(int *out_len) {
   word v;
   uchar has0;
   uchar tramp[2];
-  
-#if 0
-  // -O: peephole, then squeeze the DEL fillers out (fixes jumps/vectors)
- if (optimize) {
-printf("OPTIMIZE! %u\n", bin_ptr);
-    gen_peephole();
-    gen_squeeze();
-printf("OPTIMIZE! %u\n", bin_ptr);
-  }
-#endif
   
   // Pascal program body has main_offset but no FUNC vector — add one for _start
   nv = nvector;
@@ -949,15 +927,13 @@ printf("OPTIMIZE! %u\n", bin_ptr);
     free(map);
   }
 
-#if 1
-  // -O: peephole, then squeeze the DEL fillers out (fixes jumps/vectors)
+  // -O: peephole on the FINAL slot numbers (after the remap above), then
+  // squeeze the DEL fillers out (fixes jumps, vectors[], main_offset).
+  // Must run before frame bases / code / vectors are copied into the blob.
   if (optimize) {
-printf("OPTIMIZE! %u\n", bin_ptr);
     gen_peephole();
     gen_squeeze();
-printf("OPTIMIZE! %u\n", bin_ptr);
   }
-#endif
 
   // Entry for _start trampoline (call entry_vec then q):
   // 1) main_vec set — normal C "main"
