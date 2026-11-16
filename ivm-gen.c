@@ -605,6 +605,7 @@ static void gen_peephole(void) {
   word pc, n, t, nb = (word)((bin_ptr >> 3) + 1);
   word kv = 0, kpc = 0;     // ACC == kv, loaded by the op at kpc (kn bytes)
   uchar *a, op, kn = 0, kc = 0, dead = 0;
+  uchar a0, a1, a2, a3, t1, t2;
 
   gen_tgt = (uchar *)calloc(nb, 2);
   if (!gen_tgt) IVM_GEN_FAIL("out of memory (peephole)");
@@ -639,26 +640,33 @@ static void gen_peephole(void) {
     n = ivm_oplen(a);
     if (!n) n = 1;
 
+    a0 =  a[0];
+    a1 =  a[1];
+    a2 =  a[2];
+    a3 =  a[3];
+    
+    t1 = !TGT(pc + 1);
+    t2 = !TGT(pc + 2);
+    
     // L xx -> xx: one-byte load. No target check: nothing jumps onto an
     // operand, and a jump to the L lands on xx after the squeeze.
-    if (a[0] == 'L' && a[1] < 32) {
+    if (a0 == 'L' && a1 < 32) {
       DEL(pc);
       n = 1;          // visit the one-byte load next (constant tracking)
     }
-    else if (a[0] == '?' && a[1] == 'G' && a[2] < 64 && !TGT(pc + 1)) {
+    else if (a0 == '?' && a1 == 'G' && a2 < 64 && t1) {
       DEL(pc); DEL(pc + 1);
       a[2] = OP_ZJP + a[2];
     }
-    else if (a[0] == '?' && a[1] == '?' && a[2] == '?'
-             && !TGT(pc + 1) && !TGT(pc + 2)) {
+    else if (a0 == '?' && a1 == '?' && a2 == '?' && t1 && t2) {
       DEL(pc); DEL(pc + 1);
     }
-    else if (a[0] == 'S' && a[2] == 'L' && a[3] == a[1] && !TGT(pc + 2)) {
+    else if (a0 == 'S' && a2 == 'L' && a3 == a1 && t2) {
       DEL(pc + 2); DEL(pc + 3);
     }
-    else if (a[0] == 'S' && a[2] == a[1] && a[1] < 32 && !TGT(pc + 2))
+    else if (a0 == 'S' && a2 == a1 && a1 < 32 && t2)
       DEL(pc + 2);
-    else if (a[0] == '0' && a[1] == 'X' && !TGT(pc + 1)) {
+    else if (a0 == '0' && a1 == 'X' && t1) {
       DEL(pc);
       a[1] = 'Q';
     }
