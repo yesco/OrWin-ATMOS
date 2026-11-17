@@ -60,6 +60,7 @@
 //   \f         declare function: name = ret-value cell of a new frame + vector
 //   \p         declare parameter (frame cell base+4+n); \r ends the list
 //   \r         end of param list OR flag REGISTER after literal "register"
+//   \b         flag REGISTER after literal "register" (use this, not \r)
 //   \d         number / char literal
 //   \s         string const "..." → data pool + reloc pointer (capture)
 //   \u         emit string body + 0 into bytecode (opening " already matched)
@@ -76,8 +77,11 @@
 //   \1..\9     emit slot/result byte from nth value capture
 //   \aN        force address of capture N
 //   \lN        load capture N if not ACC
-//   \cN \hN    lo / hi byte of const capture N -- isn't \c3 same as \3 ???
-//   \t         temp slot
+//   \cN \hN    lo / hi byte of const capture N -- \c3 is NOT \3
+//              \3 emits the SLOT of capture 3 (where the value
+//              lives, for "L xx"), \c3 the low byte of the VALUE of a const
+//              capture (e.g. a loop step or a 'k' case byte inline)
+//   \t         temp slot (becomes a slot result)
 //   \e         end/temp helper (see run_production)
 //   \g         global init store
 //   \v         call opcode for matched function
@@ -88,11 +92,11 @@
 //   [] alone   no code, result is ACC
 //
 // Directive chars used (ASCII order, match + production):
-//   # + 0-9 < = > ? ' a c d e f g h i k l m n o p r s t u v w x y z { }
+//   # + 0-9 < = > ? ' a b c d e f g h i k l m n o p r s t u v w x y z { }
 //   (A-Z are rule names; space is the ws-gap directive)
 //
 // Free (not directives; ok as \X literal or future ops):
-//   ! " $ % & ( ) * , - . / : ; @ ^ _ ` b j q ~
+//   ! " $ % & ( ) * , - . / : ; @ ^ _ ` j q ~
 //
 // Explicit stack — no recursive match.
 //
@@ -180,12 +184,15 @@
 
 #include <ctype.h>
 // TODO:
+// A: (on the note below) with cc65 -Os, isalpha() etc. are inline table
+//   lookups (lda c / tax / lda __ctype,x / and #mask), about as big as
+//   ((c|32)-'a') < 26. Little to gain: measure one spot before changing all.
 
 /*
 7. tolower(c) / isalpha / isalnum / isxdigit — cc65 emulation overhead
 
 These map to __ctype_* lookups. Each ≈ 8–10 bytes inline. In tight
-inner loops (match_num, match_ident_raw, match_lit, hexval) they cost
+inner loops (match_num, read_ident, match_lit, hexval) they cost
 more than a hand-rolled check. Rewriting isalpha(c) as ((c|32)-'a' <
 26) (≈5 bytes) in those 4 hot spots saves ~15–20 bytes and is
 faster. Not a function call, but the same "tighten duplicated idiom"
@@ -264,6 +271,25 @@ static void anim_report(void) {
 
 
 
+// Change .ext
+// "dir/foo.c" -> "foo" + ext (".ivm", ".sym") into out[128]
+static void change_ext(char *out, const char *path, const char *ext) {
+  word n = 0;
+  const char *base = path, *s;
+  char *dot = 0;
+
+  for (s = path; *s; s++)
+    if (*s == '/' || *s == '\\') base = s + 1;
+
+  for (s = base; *s && n < 128 - 5; s++) {
+    out[n++] = *s;
+    if (*s == '.') dot = out + n - 1;
+  }
+
+  if (dot) n = (word)(dot - out);
+  strcpy(out + n, ext);
+}
+
 // shared emit + real const addresses
 #ifdef SYMS
 static FILE *sym_fp;
@@ -276,6 +302,9 @@ static void note_store(uchar addr) { if (sym_w[addr] < 255) sym_w[addr]++; }
 #else
 
 // TODO: use macros instead this take space
+// A: ivm-gen.c declares them as functions ("void note_load(uchar);"), so a
+//   macro here breaks that line. Needs #ifdef SYMS around the prototypes
+//   in ivm-gen.c; then "#define note_load(a)" saves the calls.
 static void note_load(uchar addr) { (void)addr; }
 static void note_store(uchar addr) { (void)addr; }
 
@@ -291,11 +320,22 @@ static jmp_buf fail_jmp;
 static const char *fail_msg;
 static const char *fail_file;   // optional: file name for "cannot open"
 
+// a function, not inline longjmp(): each FAIL() is then just "msg; jsr"
+static void fail(const char *msg) {
 #ifdef __CC65__
-  #define FAIL(msg)  longjmp(fail_jmp, (int)(msg))
+  longjmp(fail_jmp, (int)msg);
 #else
-  #define FAIL(msg)  do { fail_msg = (msg); longjmp(fail_jmp, 1); } while (0)
+  fail_msg = msg;
+  longjmp(fail_jmp, 1);
 #endif
+}
+#define FAIL(msg)  fail(msg)
+
+// malloc/realloc that FAILs instead of returning NULL (p NULL: malloc)
+static void *xrealloc(void *p, word n) {
+  if (!(p = realloc(p, n))) FAIL("out of memory");
+  return p;
+}
 
 // ivm-gen.c still uses the old name
 #define IVM_GEN_FAIL(msg) FAIL(msg)
@@ -306,12 +346,27 @@ static const char *fail_file;   // optional: file name for "cannot open"
 
 
 // TODO: move out to parse-syms.c
+// A: fine: everything from here to #endif // SYMS can be one #include,
+//   same bytes. Needs sym_r/sym_w/note_* (above) and change_ext().
 
 
 
 // ------------------------------------------------------------
 #ifdef SYMS
 static uchar frame_sz[MAX_VECTORS];
+
+// size of frame v: distance to the next higher frame base, else the size
+// noted at alloc time (frame_sz), at least the 4 header cells
+static uchar frame_size(uchar v) {
+  uchar j, ob, sz = 0, fb = frame_base[v];
+
+  for (j = 0; j < nvector; j++) {
+    ob = frame_base[j];
+    if (ob > fb && (!sz || (uchar)(ob - fb) < sz)) sz = (uchar)(ob - fb);
+  }
+  if (!sz) sz = frame_sz[v] ? frame_sz[v] : 4;
+  return sz;
+}
 
 static void sym_type_str(Symbol *s, char *buf) {
   buf[0] = (char)(s->vtype ? s->vtype : 'w');
@@ -330,21 +385,10 @@ static void sym_patch(char kind, word at, word to, int rel, uchar vec) {
 // open NAME.sym for writing
 static void sym_open(const char *path) {
   char out[128];
-  word n = 0;
-  const char *base = path, *s, *dot = 0;
 
   // TODO: these rewrites happen in several places
-  for (s = path; *s; s++)
-    if (*s == '/' || *s == '\\') base = s + 1;
-
-  for (s = base; *s && n < sizeof(out) - 5; s++) {
-    out[n++] = *s;
-    if (*s == '.') dot = out + n - 1;
-  }
-
-  if (dot) n = (word)(dot - out);
-  out[n++] = '.'; out[n++] = 's'; out[n++] = 'y'; out[n++] = 'm';
-  out[n] = 0;
+  // A: done: change_ext() is now shared with the .ivm name in main()
+  change_ext(out, path, ".sym");
 
   memset(sym_r, 0, sizeof(sym_r));
   memset(sym_w, 0, sizeof(sym_w));
@@ -409,7 +453,9 @@ static void sym_write_all(void) {
     }
   }
 
-  // TODO: document what this loop does
+  // one line per variable: slot, name, global/local/param, type, how
+  // often it's loaded (L) and stored (S) in the final code, and which
+  // function's frame it's in.
   for (i = 0; i < nsym; i++) {
 
     s = &syms[i];
@@ -422,19 +468,11 @@ static void sym_write_all(void) {
     fprintf(sym_fp, "%-5s  L=%u S=%u",
             tbuf, (unsigned)r[s->address], (unsigned)wcnt[s->address]);
 
-    // TODO: document what this loop does
+    // find the function whose frame holds this variable (a param or
+    // local): the frame is [frame_base[v], +frame_size(v)). Prints Vnn.
     for (v = 0; v < nvector; v++) {
-      uchar vsz = 0;
       fb = frame_base[v];
-      for (j = 0; j < nvector; j++) {
-        uchar ob = frame_base[j];
-        if (ob > fb) {
-          uchar gap = (uchar)(ob - fb);
-          if (!vsz || gap < vsz) vsz = gap;
-        }
-      }
-      if (!vsz) vsz = frame_sz[v] ? frame_sz[v] : 4;
-      if (s->address >= fb && s->address < (uchar)(fb + vsz)) {
+      if (s->address >= fb && s->address < (uchar)(fb + frame_size(v))) {
         fprintf(sym_fp, "  V%02x", v);
         break;
       }
@@ -443,31 +481,24 @@ static void sym_write_all(void) {
     fputc('\n', sym_fp);
   }
 
-  // TODO: document what this loop does
+  // one line per function: entry address, vector, frame base and
+  // size, how often it's called, and its parameter list.
   for (i = 0; i < nsym; i++) {
     s = &syms[i];
     if (s->type != SYM_FUNC) continue;
     v = s->address;
     fb = frame_base[v];
-    sz = 0;
-
-    for (j = 0; j < nvector; j++) {
-      uchar ob = frame_base[j];
-      if (ob > fb) {
-        uchar gap = (uchar)(ob - fb);
-        if (!sz || gap < sz) sz = gap;
-      }
-    }
-    if (!sz) sz = frame_sz[v] ? frame_sz[v] : 4;
+    sz = frame_size(v);
 
     fprintf(sym_fp, "%04x  V%02x  %-20s  fp=%02x  sz=%02x  c=%u",
             (unsigned)vectors[v], v, s->name, fb, sz, (unsigned)ccall[v]);
 
-    // TODO: document what this loop does
+    // print the parameters in order (pidx 1..n)
     for (j = 0; j < s->nparams; j++) {
       word k;
 
-      // TODO: document what this loop does
+      // find the variable for parameter j: pidx j+1 and its slot (the
+      // last one was moved to fp+3 by params_done)
       for (k = 0; k < nsym; k++) {
         if (syms[k].type != SYM_VAR || syms[k].pidx != j + 1) continue;
         if (syms[k].address != s->param_slot[j] &&
@@ -483,10 +514,13 @@ static void sym_write_all(void) {
   }
 
   // TODO: document what this loop does
+  // A: call graph: for each function, the functions it calls
   for (v = 0; v < nvector; v++) {
     fprintf(sym_fp, "V%02x:", v);
 
     // TODO: document what this loop does
+    // A: bit j of cmask[v] = V(v) calls V(j), from the first loop
+    //   (only 16 bits: callees >= 16 aren't shown)
     for (j = 0; j < nvector && j < 16; j++)
       if (cmask[v] & (word)(1u << j))
         fprintf(sym_fp, " V%02x", j);
@@ -498,18 +532,6 @@ static void sym_write_all(void) {
 }
 #endif // SYMS
 
-
-// ------------------------------------------------------------
-
-// TODO: WTF - why rename "abstraction" ???
-
-#define code_buf ((uchar *)bin)
-#define code_len bin_ptr
-
-// TODO: describe semantic meaning
-uchar *g_loaded;
-
-// host libc already has strndup/memmem — keep ivm library, avoid name clash
 
 // ------------------------------------------------------------
 
@@ -546,13 +568,25 @@ static char *src_name;
 // input line buffer (unbounded source, fread into the slack; \o keeps the current line)
 static uchar *line_buf;
 
-// TODO: seriously 7 state variables, lol
+// TODO: seriously 6 state variables, lol
+// A: 6 now. They are:
+//
+//   line_buf/line_cap  the buffer and its size
+//   line_len           bytes in it
+//   line_pos           cursor (nextc is line_buf[line_pos])
+//   line_abs           file offset of line_buf[0] (abs_pos = abs + pos)
+//   line_no_base       line number of line_buf[0], for error messages
+//
+//   max_pos_abs        furthest position reached, for error messages
+//
+// The first 5 are the minimum for a sliding window. line_no_base could be
+// counted at error time only if the buffer were never dropped by \o.
+
 static word line_no_base;
 static word line_len;
 static word line_cap;
 static word line_pos;       // cursor in line_buf
 static word line_abs;       // absolute file offset of line_buf[0]
-static word file_pos;       // ftell-style count of bytes read from file
 static word max_pos_abs;    // furthest absolute position
 
 // ------------------------------------------------------------
@@ -560,6 +594,7 @@ static word max_pos_abs;    // furthest absolute position
 // Used ONLY for error reporting (not during matching).
 // far_stack[i] = rule letter ('A'+rule), far_alt[i] = alt index in that rule.
 // Updated in note_progress when abs_pos advances.
+
 static uchar far_stack[MAX_STACK];
 static uchar far_alt[MAX_STACK];
 static uchar far_sp;
@@ -572,11 +607,19 @@ static uchar ignore_case;   // default 1
 // FRAME struct storage
 
 // TODO: too big!
+// A: 49 bytes now The big ones:
+//
+//   prod_cap[10] 20 B (index 0 unused: [9] saves 2 B but needs n-1 code)
+//   patch[4] 8 B. rip could be a uchar if no alt gets over 255 bytes.
+//
+// It's per stack level (up to MAX_STACK, grown by STACK_GROW), and push
+// copies the whole Frame: smaller Frame = less RAM and faster push/pop.
+
 typedef struct {
   uchar rule;
 
-// alts: pointer into the NULL-terminated rule[r] alt list
-// rip:  offset into *alts (rule instruction pointer)
+  // alts: pointer into the NULL-terminated rule[r] alt list
+  // rip:  offset into *alts (rule instruction pointer)
   uchar **alts;
   word rip;
 
@@ -593,18 +636,18 @@ typedef struct {
 
   word result;
 
-  word code_save; // code_len at alt entry (backtrack)
+  word code_save; // bin_ptr at alt entry (backtrack)
   uchar slot_save;    // next_slot at alt entry (backtrack frees slots)
   uchar func_vec;     // vector of the function matched by \i in THIS frame (for \v)
   uchar arg_i;        // call args stored so far (rule Z, for \k)
   uchar npatch;       // pending forward jumps (\x pushes, \y pops)
   word patch[4];
   word mark;          // \m loop start (for \z)
-  word restart;       // \> restart ip for \< (0 = full rule restart)
 } Frame;
 
 // stack[0..sp-1] = suspended parents; cur = active frame (by value).
 // Push/pop copy the whole Frame (cheaper on cc65 than many cur.field ops).
+
 static Frame *stack;
 static uchar stack_cap;
 static uchar sp;     // number of saved parents
@@ -612,6 +655,7 @@ static Frame cur;    // working frame — access as cur.field (absolute on 6502)
 
 // Symbols and scopes (\+ \f \p \i \{ \}) live in ivm-gen.c, allocated on demand:
 //   sym_add / sym_find / sym_func / sym_truncate, scope_enter / scope_leave
+//
 // Function frames use the tpi.c layout, frame_base[vec] goes into the blob:
 //   base+0 ret addr, +1 ret value (= function name), +2 prev fp,
 //   +3 last param (JSR stores ACC there), +4.. other params, then locals
@@ -619,16 +663,17 @@ static Frame cur;    // working frame — access as cur.field (absolute on 6502)
 // longest identifier (stack buffers only)
 #define NAME_LEN   32
 
-// the identifier just matched by match_ident_raw (shared, no arguments)
+// the identifier just matched by read_ident (shared, no arguments)
 static char  id_buf[NAME_LEN];
 
 // TODO: I'm sure when error it's in id_mmatch???
+// A: last_undef is filled by note_undef() from id_buf, in match_ident (\i)
+//   when the name isn't declared. Only report_reject() prints it.
 
+// data for error reporting
 static char  last_undef[NAME_LEN]; // furthest undefined ident (for reject msg)
 
-// TODO: use a damn state, or assign a error string?
-static uchar had_undef;            // sticky: saw undefined ident
-static uchar had_undef_func;       // sticky: it was a function call
+static uchar undef_kind;           // sticky: 0 none, 1 undefined var, 2 function
 
 static word  undef_pos_abs;        // sticky: position of that ident
 
@@ -639,7 +684,7 @@ static uchar last_func_vec; // function being declared by \f (for \p \r)
 
 uchar next_slot; // next free slot index for \+ decls / temps
 
-// const + bin from ivm-gen.c (code_buf/code_len macros)
+// const + bin / bin_ptr from ivm-gen.c
 #define VAL_ACC  0xffff
 
 // Type of the declaration currently being parsed (set by matching I/T).
@@ -715,14 +760,7 @@ static void show_alt(uchar *a) {
   #endif
 
 /// TODO: use or remove? prefer save bytes for cc65, use it if can
-static void v1_indent(void) {
-  uchar i;
-
-  if (verbose < 1) return;
-
-  for (i = 0; i < sp; i++)
-    eputc(' ');
-}
+// A: removed v1_indent(): nothing called it.
 
 #else
 
@@ -774,7 +812,6 @@ static uchar nextc;
 static void load_nextc(void) {
   int ch;
   word ncap;
-  uchar *n;
 
   // need: already buffered at line_pos?
   if (line_pos < line_len) {
@@ -785,9 +822,7 @@ static void load_nextc(void) {
   // grow: expand line_buf only if there is no slack left
   if (line_len >= line_cap) {
     ncap = line_cap ? (word)(line_cap * 2) : 256;
-    n = realloc(line_buf, ncap);
-    if (!n) FAIL("out of memory (line)");
-    line_buf = n;
+    line_buf = xrealloc(line_buf, ncap);
     line_cap = ncap;
   }
 
@@ -797,7 +832,6 @@ static void load_nextc(void) {
   ch = (int)fread(line_buf + line_len, 1, line_cap - line_len, src_fp);
   if (ch <= 0) return;            // EOF
   line_len += ch;
-  file_pos += ch;
   nextc = line_buf[line_pos];
 }
 
@@ -905,7 +939,8 @@ static uchar const_slot(unsigned int v) {
 static void record_capture(word val) {
   uchar n = cur.prod_n;
 
-  // TODO: < 9 WHAT ???
+  // captures are \1..\9 = prod_cap[1..9] (0 unused). n < 9: room for
+  // one more. A 10th value only becomes the result. \N can't get it
   if (n < 9) {
     cur.prod_n = ++n;
     cur.prod_cap[n] = val;
@@ -944,6 +979,10 @@ void check_store(uchar slot) {
 
 // 3 functions doing the same thing? 
 // TODO: one code, array of 3?
+// A: they differ in more than the counter: alloc_slot is the frame/temp
+//   bump (+ SYMS frame size), registers keep next_slot above them when
+//   !optimize, globals fall back to alloc_slot when !optimize. A table
+//   {counter, limit, msg} would cover the bump part only: little saved.
 
 // Global variable allocation
 static uchar alloc_slot(void) {
@@ -957,6 +996,8 @@ static uchar alloc_slot(void) {
 #ifdef SYMS
   // TODO: make a function or macro this disturbes readabilty
   //   and doesn't cpature purpose of code give good name
+  // A: it records the largest frame size for the .sym file (SYMS only,
+  //   frame_size() reads it). As a function: note_frame_size().
   if (last_func_vec != 0xff) {
     uchar fb = frame_base[last_func_vec];
     uchar nsz = (uchar)(next_slot - fb);
@@ -1002,6 +1043,9 @@ static uchar alloc_global_slot(void) {
 // TODO: I think we do this a lot, but in tpi.c
 //   we had "elaborate" redordering as well as clever
 //   associtiveity and other simple tricks -- peep hole?
+// A: this is only the spill (S tmp). The peephole is gen_peephole() in
+//   ivm-gen.c, run with -O on the final code; tpi.c's reordering would
+//   go there (on bytecode), not here.
 
 // Force a refernce to a physical slot needed for param to ops!
 //
@@ -1043,6 +1087,14 @@ static uchar *run_production(uchar *p) {
 
   // TODO: give examples, and "PROVE" this is is always correct
   //   or can we detect and give error when it's not?
+  // A: e.g. "X=E<E [<\2]": when the production runs, the code for
+  //   both E's is already emitted, and ACC holds the value of the LAST
+  //   one. So at most one capture can really be in ACC: the last one
+  //   matched. Spilling it (S tmp) before the production's bytes is
+  //   correct, because nothing has touched ACC since. If two captures are
+  //   VAL_ACC, the earlier one is already lost (see the E+E+E note below).
+  //   Detect: count VAL_ACC captures here; more than one is a grammar
+  //   bug, could FAIL("ACC clobbered") (debug builds only, costs bytes).
   for (q = p; (e = *q) && e != HIBIT(']'); q++) {
 
     n = q[1];
@@ -1052,8 +1104,6 @@ static uchar *run_production(uchar *p) {
 
     if (n <= cur.prod_n && cur.prod_cap[n] == VAL_ACC)
       force_addr(n);
-
-    // TDOO: should 1..9 be relative to frame pointer?
   }
 
   // parse [ ... ]
@@ -1073,6 +1123,10 @@ static uchar *run_production(uchar *p) {
         w = cap_val(e - HIBIT('0'));
 // TODO: how can we force an expression which is passed already if
 //   we didn't save it "X=E+E+E [\1+\2+\3]" -- does this work???
+// A: no. All three E's leave their value in ACC, so when the production
+//   runs, only \3 is still in ACC; \1 and \2 were overwritten. Write it
+//   left-recursive instead (E+E then +E), or spill each one as it's
+//   matched: "X=E[S\t]+E[S\t]+E...".
 
         if (w == VAL_ACC) w = force_addr(e - HIBIT('0'));
         emit(as_addr(w & 0xff));
@@ -1118,7 +1172,10 @@ static uchar *run_production(uchar *p) {
       case HIBIT('t'): case HIBIT('e'):
         b = alloc_slot();
         if (e == HIBIT('e')) {
-          // TDOO: replace with better loop/test code-gen
+          // TODO: replace with better loop/test code-gen
+          // A: \e makes "i < n" into "i <= n-1" for the i/n loop ops,
+          //   at the cost of a temp + 2 ops. A loop op with < (exclusive)
+          //   would remove it: then \e isn't needed at all.
           emitop2('S', b);
           emitop2('J', b);
         } else
@@ -1133,7 +1190,7 @@ static uchar *run_production(uchar *p) {
         emit(0);
         b = cur.npatch;
         if (b < 4) {
-          cur.patch[b] = code_len - 1;
+          cur.patch[b] = bin_ptr - 1;
           cur.npatch = b + 1;
         }
         break;
@@ -1144,12 +1201,12 @@ static uchar *run_production(uchar *p) {
         if (b) {
           cur.npatch = --b;
           w = cur.patch[b];
-          if (code_len - (w + 1) > 255) FAIL("jump too far");
-          code_buf[w] = code_len - (w + 1);
+          if (bin_ptr - (w + 1) > 255) FAIL("jump too far");
+          bin[w] = bin_ptr - (w + 1);
 
           #ifdef SYMS
-            sym_patch('F', (word)w, (word)code_len,
-              (int)code_buf[w], last_func_vec);
+            sym_patch('F', (word)w, (word)bin_ptr,
+              (int)bin[w], last_func_vec);
           #endif
         }
         break;
@@ -1166,16 +1223,16 @@ static uchar *run_production(uchar *p) {
 
       // \m: remember loop start - destination for B call
       case HIBIT('m'):
-        cur.mark = code_len;
+        cur.mark = bin_ptr;
         break;
 
       // \z: backward jump delta to the mark (after the B opcode)
       case HIBIT('z'):
-        w = code_len + 1 - cur.mark;
+        w = bin_ptr + 1 - cur.mark;
         if (w > 255) FAIL("loop body too large");
         emit(w);
 #ifdef SYMS
-        sym_patch('B', (word)(code_len - 1), (word)cur.mark,
+        sym_patch('B', (word)(bin_ptr - 1), (word)cur.mark,
                   (int)w, last_func_vec);
 #endif
         break;
@@ -1226,7 +1283,11 @@ static uchar *run_production(uchar *p) {
           }
           break;
         }
-        // TODO: describe meaning
+
+        // A global initializer ("int g = 5;" outside any function)
+        // has no code to go into: nothing runs at scope 0. So it's
+        // recorded in ginit_*, and gen_func_entry() emits Z/C stores
+        // at the start of main. Inside a function it's a plain L+S.
         if (scope_depth == 0) {
           if (nginit >= MAX_GINIT)
             FAIL("too many global inits");
@@ -1235,6 +1296,11 @@ static uchar *run_production(uchar *p) {
           nginit++;
           vlog("  ginit defer slot %u <- const %u\n", dest, src);
         } else {
+          // TODO: we have better ways of generating this
+          //   a) Z dd            dd := 0;
+          //   b) 9 dd            dd := -1  or 0xffff;
+          //   c) C dd ss         dd := ss;
+          //   d) C d1 ss S d2... d2 := d1 := ss;
           emitop2('L', src);
           emitop2('S', dest);
         }
@@ -1243,6 +1309,11 @@ static uchar *run_production(uchar *p) {
         // LITERAL BYTE (like a op-letter)
       default:
         // TODO:O why strip bit? Is his for the "quoted"
+        // A: a \X inside a production that isn't a production directive,
+        //   e.g. [\d] or [\s]: it was stored with the hibit by
+        //   build_one_rule (is_dir), so emit the plain letter. Plain
+        //   letters in [ ] have no hibit and go to emit(e) below.
+        // emit quoted \[ and /] basically
         emit(e & 0x7f);
       }
 
@@ -1299,9 +1370,17 @@ static uchar ncomments;
 //
 // They all sound the same, what's the SEMANTIC diffeerence
 // What's there different USAGES?
+// A: skip_hspace: SOURCE, spaces/tabs/CR only, never '\n' (for \n and
+//      for '(' after a name: must not cross a newline)
+//    skipsp: GRAMMAR text, a char* in load_bnf (not the source at all)
+//    skip_ws: SOURCE, all whitespace incl. newlines, and comments: what
+//      literals and the ws-gap use
 
 
 // TODO: move to LINEBUF - why we have two?
+// A: two source skippers because \n needs one that stops at '\n'
+//   (skip_hspace) and everything else wants one that eats newlines and
+//   comments (skip_ws). Both could move next to the LINE BUFFER code.
 static void skip_hspace(void) {
   while (nextc == ' ' || nextc == '\t' || nextc == '\r')
     skip();
@@ -1315,45 +1394,32 @@ static char *skipsp(char *p) {
   return p;
 }
 
+// copy a non-space run (max 3 chars) from p to dst, NUL-terminated; its length
+static uchar copy_tok(char *dst, char *p) {
+  uchar i = 0;
+  char c;
+
+  while ((c = *p++) && c != ' ' && c != '\t' && i + 1 < COMM_START_MAX)
+    dst[i++] = c;
+  dst[i] = 0;
+  return i;
+}
+
 // Parse one #= directive body (after the "#="). Returns 1 on success.
 // Forms:  "{ }" | "/* */" | "//"   (whitespace separates start/end)
-//
-// OMB: too much code for a "trivial thing" (in our minds)
-static int comments_add_from_line(char *p) {
+static uchar comments_add_from_line(char *p) {
   CommentStyle *cs;
-  word i;
-  char c;
 
   if (ncomments >= MAX_COMMENTS) return 0;
   p = skipsp(p);
-  if (!*p) return 0;
 
   cs = &comments[ncomments];
-  cs->start_len = 0;
-  cs->end_len = 0;
-  cs->start[0] = 0;
-  cs->end[0] = 0;
 
   // start delimiter: non-space run
-  i = 0;
-  while ((c = *p) && c != ' ' && c != '\t' && i + 1 < COMM_START_MAX) {
-    cs->start[i++] = c;
-    p++;
-  }
-  cs->start[i] = 0;
-  cs->start_len = i;
-  if (!cs->start_len) return 0;
-
-  p = skipsp(p);
+  if (!(cs->start_len = copy_tok(cs->start, p))) return 0;
 
   // optional end delimiter => block comment; none => line comment
-  i = 0;
-  while ((c = *p) && c != ' ' && c != '\t' && i + 1 < COMM_END_MAX) {
-    cs->end[i++] = c;
-    p++;
-  }
-  cs->end[i] = 0;
-  cs->end_len = i;
+  cs->end_len = copy_tok(cs->end, skipsp(p + cs->start_len));
 
   ncomments++;
   return 1;
@@ -1367,7 +1433,7 @@ static void comments_set_default(void) {
 
 // True if source at line_pos starts with s[0..len). Does not consume.
 // Uses skip/load_nextc so fetch/grow lives in one place only.
-static int match_at(const char *s, uchar len) {
+static uchar match_at(const char *s, uchar len) {
   uchar i;
   word save;
 
@@ -1439,7 +1505,7 @@ static void skip_ws(void) {
 
 
 // \n in BNF: hspace, >=1 newline, hspace; then comments via skip_ws
-static int match_newline(void) {
+static uchar match_newline(void) {
   word nnl;
 
   skip_hspace();
@@ -1454,9 +1520,8 @@ static int match_newline(void) {
   return 1;
 }
 
-// match an identifier into id_buf
-// TODO: you mean READ_IDENT ???
-static int match_ident_raw(void) {
+// read and identifier into id_buf
+static uchar read_ident(void) {
   word n;
 
   skip_ws();
@@ -1476,39 +1541,28 @@ static int match_ident_raw(void) {
   return 1;
 }
 
-// next non-blank source char after line_pos; nothing consumed or captured
-// TODO: used in one place, why is this not just nextc???
-//   just rewrite the code???
-static uchar peek_char(void) {
-  word sv = line_pos;
-  uchar sc = nextc, c;
-
-  while (is_ws(nextc))
-    skip();
-  c = nextc;
-  line_pos = sv;
-  nextc = sc;
-  return c;
-}
-
-
 // \i — ident must already be in scope; result = its slot
 //   name followed by ( is looked up as a function (like tpi.c), else a variable
 
 // Record undefined ident (id_buf) for reject message
 // (keep furthest; funcs win over vars)
 static void note_undef(uchar is_func, word pos) {
-  if (!is_func && had_undef_func) return;
-  if (had_undef && pos < undef_pos_abs) return;
+  // TODO: 2 what? and you're going to match to err string
+  //   why aren't we just assigning the err string? LOL
+  if (!is_func && undef_kind == 2) return;
+  if (undef_kind && pos < undef_pos_abs) return;
 
 // TODO: just print error message, why are you copying things?
 //   just FAIL already maybe with a printf?
+// A: an undefined name is not an error yet: this alt fails, another one
+//   may match (backtracking). Only when the whole parse fails do we know,
+//   and by then id_buf holds some later name: so keep a copy of the
+//   furthest one for the report.
 
   strncpy(last_undef, id_buf, NAME_LEN - 1);
   last_undef[NAME_LEN - 1] = 0;
 
-  had_undef = 1;                   // FAIL: undef var: NAME
-  had_undef_func = is_func;        // FAIL: call to undef FUNCTION
+  undef_kind = is_func + 1;        // 1: undef var NAME, 2: undef FUNCTION
 
   undef_pos_abs = pos;
 }
@@ -1534,23 +1588,22 @@ static void set_decl_type(Symbol *s) {
 }
 
 // \1..\9 — like \i, but slot must equal capture n (same variable).
-// Fail quietly (no had_undef): rule should fall through to next alt.
-static int match_ident_same(uchar n) {
+// Fail quietly (no undef_kind): rule should fall through to next alt.
+static uchar match_ident_same(uchar n) {
   word i, expect;
   uchar slot;
   Symbol *s;
 
-  // TODO: shouldn't this be tested during parsing \c3 etc?
   if (n < 1 || n > cur.prod_n) return 0;
 
   expect = cur.prod_cap[n];
   if (expect == VAL_ACC) return 0;
 
-  // TODO: rnema to read_ident()
-  if (!match_ident_raw()) return 0;
+  if (!read_ident()) return 0;
 
   i = sym_find(id_buf, SYM_VAR, 0);
-  if (i == SYM_NONE) return 0; // not defined: just fail this alt
+  // not defined: just fail this alt
+  if (i == SYM_NONE) return 0; 
 
   s = &syms[i];
   slot = s->address;
@@ -1559,17 +1612,22 @@ static int match_ident_same(uchar n) {
   return 1;
 }
 
-static int match_ident(void) {
+static uchar match_ident(void) {
   uchar c, slot;
   word start_abs, i;
   Symbol *s;
 
   start_abs = abs_pos();
-  if (!match_ident_raw()) return 0;
+  if (!read_ident()) return 0;
 
-  c = peek_char();
+  // next char after the name, no newline crossed: '(' means a call
+  skip_hspace();
+  c = nextc;
 
-  // TODO: how about function pointers, lol
+  // TODO: rewrite sym_find to take c, if it's '(' it's function
+  //   otherwise look for var...SYM_FUNC = '(' BTW will make things work!
+  // TODO: we're doing many sym_find( SYM_VAR ) make it a function,
+  //  saves passing an argument, I think? 
   i = sym_find(id_buf, (c == '(') ? SYM_FUNC : SYM_VAR, 0);
 
   if (i == SYM_NONE) {
@@ -1600,13 +1658,13 @@ static int match_ident(void) {
 }
 
 // \+ — read and declare ident into current scope; result = new slot
-static int match_ident_decl(void) {
+static uchar match_ident_decl(void) {
   uchar slot;
   word i;
   uchar is_reg = pending_register;
 
   pending_register = 0;
-  if (!match_ident_raw()) return 0;
+  if (!read_ident()) return 0;
 
   i = sym_find(id_buf, SYM_VAR, 1);
   if (i != SYM_NONE)
@@ -1634,17 +1692,22 @@ static int match_ident_decl(void) {
 
 
 // TODO: match_ident_decl and func_decl must be dduplicates....
+// A: they only share read_ident + sym_find. \+ allocates one slot by
+//   scope/register; \f allocates a 4-cell frame, a vector, a FUNC
+//   symbol and the return-value variable, and sets main/pending entry.
 
 
 
 // \f — declare function: new frame + vector index; mark entry at current bin_ptr later
-static int match_ident_func_decl(void) {
+static uchar match_ident_func_decl(void) {
   uchar base, vec;
   Symbol *s;
 
   // TODO: aren't we always gonno do a lookup to see if it exist
   //   (ok, could be scope restricted)
-  if (!match_ident_raw()) return 0;
+  // A: yes, both look up first. \+ reuses the existing slot (same name
+  //   again in the same scope); \f fails the alt on a 2nd definition.
+  if (!read_ident()) return 0;
   if (sym_find(id_buf, SYM_FUNC, 1) != SYM_NONE) return 0; // declared twice
 
   if (nvector >= (uchar)(MAX_VECTORS - 1)) FAIL("too many functions");
@@ -1694,12 +1757,12 @@ static int match_ident_func_decl(void) {
 }
 
 // \p — declare parameter n of the function just declared by \f
-static int match_param_decl(void) {
+static uchar match_param_decl(void) {
   uchar k, slot, v;
   word i;
   Symbol *s;
 
-  if (!match_ident_raw()) return 0;
+  if (!read_ident()) return 0;
   v = last_func_vec;
   if (v == 0xff) return 0;
 
@@ -1707,6 +1770,15 @@ static int match_param_decl(void) {
   // (rewinds on backtrack)
   // TODO: explain better: searching a scope_depth
   //   how does this not go into prev scopes???
+  // A: F = \f\{(A)\r B: the params are declared right after \{, so
+  //   they are the only syms with pidx at this scope_depth. An earlier
+  //   function's params were at the same depth, but its \} dropped
+  //   them (sym_truncate), so they are not in syms[] any more.
+
+  // TODO: I'm just suprised scope mgt is not in syms in ivm-gen.c?
+  //   it's like essential to symbols. That I need to ask what it
+  //   does means it should have a name. Is exactly this done
+  //   in more places?
   k = 0;
   for (s = syms, i = 0; i < nsym; i++, s++)
     if (s->scope == scope_depth && s->pidx) k++;
@@ -1730,7 +1802,7 @@ static int match_param_decl(void) {
 }
 
 // \r — end of parameter list (no input): the last param lives at fp+3
-static int params_done(void) {
+static uchar params_done(void) {
   uchar v, n;
   word i, f;
   Symbol *fs, *t, *lastp;
@@ -1742,9 +1814,17 @@ static int params_done(void) {
 
   // nothing is added below: pointer stays valid
   // TODO: pointer what? why?
+  // A: fs points into syms[]: safe only because nothing below calls
+  //   sym_add (which may realloc syms and move it)
   fs = &syms[f];
 
   // TODO: loop to find WHAT?
+  // A: collect this function's parameters (pidx, this scope), in
+  //   declaration order, into fs->param_slot[]; lastp = the last one
+
+  // TODO: why not just add them when \k is run? then no looping
+  //   needed. We already have a pointer to the function symbol...
+  //   I'm assuming \k assigns them slots
   n = 0;
   lastp = NULL;
   for (t = syms, i = 0; i < nsym; i++, t++) {
@@ -1755,8 +1835,14 @@ static int params_done(void) {
     }
   }
   // TODO: what if we didn't find WHAT?
+  // A: n == 0: no parameters (f() or f(void)): nothing to move,
+  //   nparams = 0
+  // TODO: we should 
+
   if (n) {
     // its old cell was the top one: reuse it for locals
+    // TODO: 3 ? I'm sure it has a OFF_LASTPARAM define.
+    //   don't put random numbers in code!
     lastp->address = frame_base[v] + 3;
     fs->param_slot[n - 1] = lastp->address;
     next_slot--; 
@@ -1779,7 +1865,7 @@ static const char esc_out[] = "\n\t\r\a\b\f\v";
 
 // After a leading '\\' has been consumed: decode one escape into *out.
 // Advances line_pos. Returns 0 on failure (EOF / bad \x).
-static int decode_escape(uchar *out) {
+static uchar decode_escape(uchar *out) {
   uchar c, v, i;
   char *s;
 
@@ -1792,6 +1878,9 @@ static int decode_escape(uchar *out) {
     v = 0;
 
     // TODO: check if can use same as in match_digits?
+    // A: could: match_num's digit conversion (toupper - '0' ...) works
+    //   for hex too. Here it's limited to 2 digits; a shared digit(c)
+    //   helper would also replace hexval(): a few bytes.
 
     for (i = 0; i < 2 && isxdigit(nextc); i++) {
       v = (v << 4) + hexval(nextc);
@@ -1808,12 +1897,7 @@ static int decode_escape(uchar *out) {
 
 // Next body character of a "..." or '...' string (handles \\ escapes).
 // Returns 0 on failure; 1 and *out on success. Does not consume the closer.
-
-// TODO: int, os if (!read..>) return 0; 
-//   needs to check two return byte values?
-//   uchar instead?
-
-static int read_c_char(uchar *out) {
+static uchar read_c_char(uchar *out) {
   uchar c;
 
   if (!nextc) return 0;
@@ -1830,7 +1914,7 @@ static int read_c_char(uchar *out) {
 // \s / \u — quoted "..." string
 // emit_code=0 (\s): match "..." → data_pool + reloc pointer const (capture)
 // emit_code=1 (\u): opening " already matched; emit body bytes + 0 into bytecode
-static int match_str(uchar emit_code) {
+static uchar match_str(uchar emit_code) {
   uchar c;
   word off = 0;
   uchar slot;
@@ -1866,7 +1950,7 @@ static int match_str(uchar emit_code) {
   return 1;
 }
 
-static int match_num(void) {
+static uchar match_num(void) {
   word ty;
   uchar c;
   uchar base = 10;
@@ -1905,6 +1989,8 @@ static int match_num(void) {
     for (;;) {
 
       // TODO: negative!
+      // A: leave it to the grammar: "-" then \d, emit 0 - x (or a
+      //   neg op). Here "a -1" would read -1 and lose the minus.
 
       // Convert (HEX) character to its numeric value
       // (- 28827 28807) = saved 20 bytes
@@ -1950,13 +2036,13 @@ static void free_rules(void) {
 // \X is a directive (stored with the hibit) or a quoted literal char e
 // note: '>' is load-time only (not stored)
 //       '<' becomes HIBIT(x), x=1..31 (alt jump) or HIBIT('<')
-static int is_dir(uchar e) {
-  return isdigit(e) || strchr("insfdprlxywmzkcahvgetou+{}#='?*", e) != NULL;
+static uchar is_dir(uchar e) {
+  return isdigit(e) || strchr("insfdprlxywmzkcahvgetoub+{}#='?*", e) != NULL;
 }
 
 static void build_one_rule(uchar r, char *rhs) {
   char *p;
-  uchar *blob, **altp, e, inprod, hex;
+  uchar *blob, **altp, e, inprod, verbatim;
   word a, bi, na, alt_starts[MAX_ALTS];
   uchar taildest;   // 1-based alt index for \> / \< (0 = none yet)
 
@@ -1969,8 +2055,7 @@ static void build_one_rule(uchar r, char *rhs) {
   // \< becomes HIBIT(x) (x=1..31) = jump to alt x-1, or HIBIT('<') if no \> yet
   // build contiguous string with 0 separators between alts.
 
-  blob = malloc(strlen(rhs) + 2);
-  if (!blob) FAIL("out of memory (rule)");
+  blob = xrealloc(NULL, strlen(rhs) + 2);
 
   free(blobs[r]);
   free(rule[r]);
@@ -1979,19 +2064,20 @@ static void build_one_rule(uchar r, char *rhs) {
   bi = 0;
   na = 0;
   inprod = 0;
-  hex = 0;
+  verbatim = 0;
   taildest = 0;
   alt_starts[na++] = 0;
 
   for (p = rhs; (e = *p); p++) {
 
-    if (hex) {
+    if (verbatim) {
       
       // Generic copy next "hex" bytes - rename
+      // A: renamed to verbatim (only \# uses it so far)
 
       // \#xx: the two hex digits are data (may be A-F),
       // stored as they are
-      hex--;
+      verbatim--;
 
     } else if (e == '\\' && p[1]) {
 
@@ -2022,9 +2108,10 @@ static void build_one_rule(uchar r, char *rhs) {
       blob[bi++] = 0;
 
       if (na >= MAX_ALTS) {
-        eprintf("\nrule %c: more than %u alts\n", 'A' + r, (unsigned)MAX_ALTS);
         // TODO: don't repeat message
-        FAIL("too many alts in rule (MAX_ALTS)");
+        // A: done: the rule letter here, the rest in the FAIL message
+        eprintf("\nrule %c: ", 'A' + r);
+        FAIL("too many alts (MAX_ALTS)");
       }
       alt_starts[na++] = bi;
       continue;
@@ -2050,21 +2137,23 @@ static void build_one_rule(uchar r, char *rhs) {
     blob[bi++] = e;
 
     // \#xx => copy next two chars verbatim
-    if (e == HIBIT('#')) hex = 2;
+    if (e == HIBIT('#')) verbatim = 2;
     
   }
 
   blob[bi++] = 0;
 
-  // TODO: xalloc() once for all, maybe record __LINE__
-  altp = malloc(sizeof(uchar *) * (na + 1));
-  if (!altp) FAIL("out of memory (rule)");
+  altp = xrealloc(NULL, sizeof(uchar *) * (na + 1));
 
   // create and fill an array of pointers to ALTs
   for (a = 0; a < na; a++)
     altp[a] = blob + alt_starts[a];
 
   // end with 0 -- TODO: just make all allocs clean/zero?
+  // A: calloc would clear all of it for this one store: no gain
+
+  // TODO: I mean if xrealloc always made new bytes allocated
+  //   0 we wouldn't need to null things out later... like here!
   altp[na] = NULL;
   
   rule[r] = altp;
@@ -2077,6 +2166,12 @@ static void build_one_rule(uchar r, char *rhs) {
 //   be malloced separately, however these are big buffers?
 //   do all ALTS need to fit inside a MAX_ACCUM?
 //   why not just read and fill it fully?
+//
+// A: line and acc are only used while loading, then freed. acc collects
+//   ONE rule: its first line plus all "|" continuation lines, so yes, all
+//   alts of one rule must fit in MAX_ACCUM. build_one_rule then copies it
+//   into one exact-size malloc. Reading lines straight into acc+acc_len
+//   would save the 1 KB line buffer and the copy loop below.
 
 #define MAX_LINE 1024
 #define MAX_ACCUM 4096
@@ -2084,13 +2179,11 @@ static void build_one_rule(uchar r, char *rhs) {
 
 static void load_bnf(const char *path) {
   FILE *f;
-  char *line = malloc(MAX_LINE);
-  char *acc = malloc(MAX_ACCUM);
+  char *line = xrealloc(NULL, MAX_LINE);
+  char *acc = xrealloc(NULL, MAX_ACCUM);
   uchar cr;
   char *nl, *eq, *p, c;
   word acc_len, have_cur;
-  
-  if (!line || !acc) FAIL("out of memory (grammar)");
   
   free_rules();
 
@@ -2146,6 +2239,8 @@ static void load_bnf(const char *path) {
     }
 
     // TODO: why" it's just copying?
+    // A: yes: append this line (or its part after "X=") to acc, because
+    //   fgets reuses line for the next line
     while ((c = *p) && acc_len + 1 < MAX_ACCUM) {
       acc[acc_len++] = c;
       p++;
@@ -2164,19 +2259,18 @@ static void load_bnf(const char *path) {
   free(acc);
 }
 
-// ---- stack ----
 
-// TODO: ramblingn text? rewrite to more consiice
-//
-// snapshot the input/code/scope state of the newest frame as the
-// start of an alt (used by push and by tail-recursion \<)
-// Snapshot undo info for the current alt. Does not change alts/rip.
+// ------------------------------------------------------------
+// STACK
+
+// Remember where the current alt starts (input, symbols, scope, slots,
+// code), so a failing alt can be undone. Doesn't move alts/rip.
 static void alt_mark(void) {
   cur.save_abs = abs_pos();
   cur.nsym_save = nsym;
   cur.scope_save = scope_depth;
   cur.slot_save = next_slot;
-  cur.code_save = code_len;
+  cur.code_save = bin_ptr;
   cur.prod_n = 0;
 }
 
@@ -2192,24 +2286,27 @@ static void goto_alt(uchar n) {
 }
 
 static void push(uchar r) {
+  if (!rule[r]) FAIL("rule not defined");
   if (sp >= MAX_STACK) FAIL("stack overflow");
 
   if (sp >= stack_cap) {
-    Frame *ns;
     uchar ncap = stack_cap + STACK_GROW;
 
     // TDOO: check that it minimizes the malloc() block?
+    // A: it grows by STACK_GROW frames and never shrinks: the block is the
+    //   deepest the parse got, rounded up to 8 frames
     
     if (ncap > MAX_STACK) ncap = MAX_STACK;
-    ns = realloc(stack, ncap * sizeof(Frame));
-    if (!ns) FAIL("out of memory (stack)");
-    stack = ns;
+    stack = xrealloc(stack, ncap * sizeof(Frame));
     stack_cap = ncap;
   }
 
   // program main begin → blob.main
 
   // TDOO: what? code not clear
+  // A: Pascal: "program x; ... begin ... end." The main block B is called
+  //   straight from rule P, so its start is main's entry (main_offset).
+  //   C doesn't get here: its main is a \f function (main_vec).
 
   if (r == 'B' - 'A' && sp > 0 && cur.rule == 'P' - 'A')
     main_offset = bin_ptr;
@@ -2224,12 +2321,13 @@ static void push(uchar r) {
   cur.arg_i = 0;
   cur.npatch = 0;
   cur.mark = 0;
-  cur.restart = 0;
   cur.result = 0;
 
   memset(cur.prod_cap, 0, sizeof(cur.prod_cap));
 
   // TODO: init (?) why ehere?
+  // A: the new frame starts at its first alt, and goto_alt() also
+  //   snapshots the undo info (alt_mark) for that alt
   goto_alt(0);
 }
 
@@ -2241,24 +2339,28 @@ static void restore_scope(void) {
   next_slot = cur.slot_save;
 }
 
-// TODO: desribe better
+// frame_rewind: Undo the current alt before trying the next one.
+// drop its code, captures and patches,
+// rewind the input to where the alt started.
 
 // Back to alt start, codegen undo:
 // - input only if not committed away.
 // Returns 0 if save_abs < line_abs (\o dropped that text)
 // — caller fail-fasts.
 static int frame_rewind(void) {
-  code_len = cur.code_save;
+  bin_ptr = cur.code_save;
   cur.prod_n = 0;
   cur.npatch = 0;
 
-  // TODO: what? describe
+  // Function entry code (and main's global inits) is emitted lazily,
+  // by the first emit after \f (pending_func_entry). If this rewind
+  // threw away that code, ask for it again.
   
   // re-arm function entry if rewind ate gen_func_entry / ginit bytes
   if (last_func_vec != 0xff) {
-    if (last_func_vec < MAX_VECTORS && vectors[last_func_vec] > code_len)
+    if (last_func_vec < MAX_VECTORS && vectors[last_func_vec] > bin_ptr)
       pending_func_entry = last_func_vec;
-    else if (last_func_vec == main_vec && main_offset >= code_len)
+    else if (last_func_vec == main_vec && main_offset >= bin_ptr)
       pending_func_entry = last_func_vec;
   }
 
@@ -2283,10 +2385,15 @@ static int frame_rewind(void) {
 // Fail / pop lives only at fail_alt — normal path just follows *ap and *src.
 //
 // Returns 1 if more to do, 0 if parse finished (stack empty).
-int step(void) {
+
+// TODO: is there a simple way to make this work, without a
+//   wrapping function call?
+
+//int run(uchar steps) {
+
+int run() {
   uchar *alt, *a;
-  uchar c, e, rch;
-  int ok;
+  uchar c, e, rch, ok;
   word adv;
 
   if (sp == 0) return 0;
@@ -2298,6 +2405,13 @@ int step(void) {
   // TODO: why isn't this fixed up at the end before exit
   //   Write the code to ALWAYS leave it in  clear state!
   //   so we can drop into LITERAL directly!
+  // A: the 0 is the alt's end marker, not leftover state: reaching it IS
+  //   "alt matched". It has to be tested first, because a 0 would
+  //   otherwise go into the literal path as a char to match.
+
+  // TODO: I'm SAYING that it looks messy - at lest,
+  //   it's more like an ACCEPT (which stops this rule fromm backtrack).
+  //   maybe name it such and make it a function with clear purpose!
 
   // end of alt → accept (pop), parent advances past the call
   if (!c) {
@@ -2305,14 +2419,17 @@ int step(void) {
     vlog("ok %c alt %u -> @%u\n", rch, (unsigned)(cur.alts - rule[cur.rule]), abs_pos());
 
     #ifdef VERBOSE
-      if (verbose >= 2 && code_len > cur.code_save && rch == 'K') {
+      if (verbose >= 2 && bin_ptr > cur.code_save && rch == 'K') {
         eprintf(NORMAL "GEN:          [ ");
-        ivm_print_code_range(ERROUT, code_buf, cur.code_save, code_len, 0);
+        ivm_print_code_range(ERROUT, bin, cur.code_save, bin_ptr, 0);
         eprintf("]\n");
       }
     #endif
 
-    // TODO: describe what it does do???
+    // ???
+    // return to the caller: its frame comes back from the stack, the
+    // child's result becomes the caller's next capture, and the caller
+    // steps over its rule-call byte
     {
       word child_res = cur.result;
       anim_pop();
@@ -2366,7 +2483,6 @@ int step(void) {
   // RULE
   if (c >= HIBIT('A') && c <= HIBIT('Z')) {
     uchar r = c - HIBIT('A');
-    if (!rule[r]) FAIL("rule not defined");
     vlog("  call %c from %c @%u\n", c & 0x7f, 'A' + cur.rule, abs_pos());
     push(r);
     return 1;
@@ -2381,19 +2497,12 @@ int step(void) {
   ok = 1;
   adv = 1;
 
-  // TAIL-RECURSE rule ( go back beginning )
-  // TODO: combine with below!
-  if (c == HIBIT('<')) {
-    goto_alt(0);
-    vlog("  tail %c @%u\n", 'A' + cur.rule, abs_pos());
-    return 1;
-  }
-
-  // TAIL-RECURSE to specific ALT
-  if (c >= HIBIT(1) && c <= HIBIT(31)) {
-    // \> target: jump to that alt (1-based code stored as HIBIT(n))
-    goto_alt((uchar)(c - HIBIT(1)));
-    vlog("  tail>%u %c @%u\n", (unsigned)(c - HIBIT(1)), 'A' + cur.rule, abs_pos());
+  // TAIL-RECURSE rule ( go back beginning or previoius \>)
+  //   encoded as HIBIT(1..31): alt n-1
+  if (c == HIBIT('<') || c <= HIBIT(31)) {
+    e = (c == HIBIT('<')) ? 0 : (uchar)(c - HIBIT(1));
+    goto_alt(e);
+    vlog("  tail>%u %c @%u\n", (unsigned)e, 'A' + cur.rule, abs_pos());
     return 1;
   }
 
@@ -2447,8 +2556,6 @@ int step(void) {
   else if (c == HIBIT('f')) ok = match_ident_func_decl();
   else if (c == HIBIT('p')) ok = match_param_decl();
   else if (c == HIBIT('r')) {
-    // TODO: clashes with \r register! - resolve 
-    //   maybe this one is no longer needed???
     if (last_func_vec != 0xff)
       ok = params_done();
     else {
@@ -2456,6 +2563,10 @@ int step(void) {
       ok = 1;
     }
   }
+  // REGISTER flag SET ("register\b"): \r does it too, but only when
+  // last_func_vec happens to be 0xff (see above)
+  else if (c == HIBIT('b')) pending_register = 1;
+
   // CONSTANT flag SET
   else if (c == HIBIT('c')) {
     pending_const = 1;
@@ -2495,16 +2606,25 @@ int step(void) {
 
   // OK
   // TODO: why not retun inside these rules instead?
+  // A: then each would need its own "cur.rip += adv; return 1" or
+  //   "goto fail_alt": shared here once is smaller
+
+  // TODO: Since falling out of a if branch is a jump, we know 
+  //   we're OK, so not need the flag, just goto OK: ???
+
   if (ok) {
     vlog("  ok \\%c @%u\n", c & 0x7f, abs_pos());
     cur.rip += adv;
     return 1;
   }
 
+  // TODO: Funny how you make FAIL the default and OK the exception...
 
   // TODO: maybe fail earlier and just jump???
+  // A: the failing ones only set ok = 0 and fall to here, which is the
+  //   jump. The "if (!ok)" was redundant (ok is 0 here) and is gone.
   
-  if (!ok) vlog("  fail \\%c @%u\n", c & 0x7f, abs_pos());
+  vlog("  fail \\%c @%u\n", c & 0x7f, abs_pos());
 
 fail_alt:
   // next alt, or pop if none left / mark committed away
@@ -2526,26 +2646,6 @@ fail_alt:
   sp--;
   cur = stack[sp];
   goto fail_alt;
-}
-
-
-// TODO: for efficiency merge into one call it run()
-
-// run up to n steps
-// ~50-200 us/step on 6502 @ 1MHz → n=1000 ≈ 50-200 ms
-static int run(word n) {
-  do {
-
-    if (!step()) {
-      // TODO: just to be sure? lol
-      emit('q');
-
-      return 0; // done
-    }
-
-  } while (--n);
-
-  return 1; // more work (time slice)
 }
 
 
@@ -2604,16 +2704,18 @@ static void report_reject(void) {
     eprintf("\n");
   }
 
-  if (had_undef && had_undef_func)
+  // TODO: name the error messages and assign them?
+  //   regarding last_undef maybe just always print it as context?
+  if (undef_kind == 2)
     eprintf("ERROR: undefined function: %s\n", last_undef);
-  else if (had_undef)
+  else if (undef_kind)
     eprintf("ERROR: identifier \"%s\" not defined here\n", last_undef);
 
   // Show error from line_buf only — no rewind/fseek (cc65-friendly).
   // line_no_base tracks the line number of line_buf[0] across \C commits.
   eprintf("REJECT:\n");
   {
-    word want = (had_undef && undef_pos_abs) ? undef_pos_abs : max_pos_abs;
+    word want = (undef_kind && undef_pos_abs) ? undef_pos_abs : max_pos_abs;
     word start, off, col, line, endpos;
     word nlines;
 
@@ -2690,6 +2792,8 @@ static void init(char *bnf_path, char *src_path) {
 
 
 // TODO: a line like this is 22 bytes!
+// A: FAIL is a function now: fail(msg) instead of an inline longjmp,
+//   so each FAIL is about the message pointer plus one jsr.
 
   if (!src_fp) FAIL("cannot open source");
 
@@ -2698,6 +2802,12 @@ static void init(char *bnf_path, char *src_path) {
 
 // TODO: do a memset then set needd values?
 //   if theses were on static struct, just bzero!
+// A: right: statics start at 0 and init() runs once per program run, so
+//   every "= 0" below is only needed if init() is ever called again. Put
+//   the line/parse state in one static struct: then one memset.
+
+// TODO: do it! That state should have been one struct to start with
+//   then rewind is just memmove or struct assign!
 
   line_buf = NULL;
   line_no_base = 0;
@@ -2705,7 +2815,6 @@ static void init(char *bnf_path, char *src_path) {
   line_len = 0;
   line_pos = 0;
   line_abs = 0;
-  file_pos = 0;
   load_nextc();     // prime nextc (reads the first source char)
   max_pos_abs = 0;
   far_sp = 0;
@@ -2715,8 +2824,7 @@ static void init(char *bnf_path, char *src_path) {
 
   memset(&cur, 0, sizeof(cur));
 
-  had_undef = 0;
-  had_undef_func = 0;
+  undef_kind = 0;
   undef_pos_abs = 0;
   last_undef[0] = 0;
 
@@ -2734,11 +2842,6 @@ static void init(char *bnf_path, char *src_path) {
   sym_reset();
 
   // get started with rule P
-
-// TODO: this should be a more general error inside rule???
-//   CHECK in PUSH??? 
-
-  if (!rule['P' - 'A']) FAIL("rule P missing");
   push('P' - 'A');
 }
 
@@ -2748,8 +2851,8 @@ static void shutdown(void) {
   src_fp = NULL;
 
   #if 0
-    printf("\nLINEBUF: no_base=%u len=%u cap=%u pos=%u abs=%u file_pos=%u\n",
-      line_no_base, line_len, line_cap, line_pos, line_abs, file_pos);
+    printf("\nLINEBUF: no_base=%u len=%u cap=%u pos=%u abs=%u\n",
+      line_no_base, line_len, line_cap, line_pos, line_abs);
     // shows garbage after valid
     printf("\n>>>>>LINEBUF>>>>\n%s\n<<<<<\n", line_buf);
   #endif
@@ -2777,7 +2880,6 @@ int main(int argc, char **argv) {
   char *srcpath = NULL;
   char *arg;
   word i;
-  int rc;
   int err;
   int blen;
   uchar *blob;
@@ -2790,13 +2892,16 @@ int main(int argc, char **argv) {
   for (i = 1; i < argc; i++) {
     arg = argv[i];
 
-    // TODO: 4 function calls - use a switch?
-         if (strcmp(arg, "-v") == 0) verbose++;
-    else if (strcmp(arg, "-O") == 0) optimize = 1;
-    else if (strcmp(arg, "-i") == 0) ignore_case = 1; // LOL
+    if (arg[0] == '-' && arg[1] && !arg[2])
+      switch (arg[1]) {
+      case 'v': verbose++;       continue;
+      case 'O': optimize = 1;    continue;
+      case 'i': ignore_case = 1; continue; // LOL
+      default: ;// TODO: give error
+      }
 
     // Fill in args in order (default)
-    else if (!bnf)                   bnf = arg;
+         if (!bnf)                   bnf = arg;
     else if (!srcpath)               srcpath = arg;
   }
 
@@ -2826,36 +2931,39 @@ int main(int argc, char **argv) {
   // setup
   init(bnf, srcpath);
 
-#ifdef VERBOSE
-  // TODO: move to extra module
-  //
-  // print rules
-  if (verbose >= 2) {
-
-    eprintf("--- rules ---\n");
-    for (i = 0; i < NRULES; i++)
-
-      if (rule[i]) {
-        eprintf("%c =", 'A' + (int)i);
-        for (a = 0; rule[i][a]; a++) {
-          if (a) eprintf("|");
-          show_alt(rule[i][a]);
+  #ifdef VERBOSE
+    // TODO: move to extra module
+    // A: it's VERBOSE only (no bytes in the cc65 build): fine either way
+    //
+    // print rules
+    if (verbose >= 2) {
+   
+      eprintf("--- rules ---\n");
+      for (i = 0; i < NRULES; i++)
+  
+        if (rule[i]) {
+          eprintf("%c =", 'A' + (int)i);
+          for (a = 0; rule[i][a]; a++) {
+            if (a) eprintf("|");
+            show_alt(rule[i][a]);
+          }
+          eprintf("\n");
         }
-        eprintf("\n");
-      }
-  }
-  if (verbose) eprintf("--- parse ---\n");
-#endif
+    }
+    if (verbose) eprintf("--- parse ---\n");
+  #endif
 
-  // run in chunks of 10000 steps until done
-  do {
-    rc = run(10000);
-  } while (rc == 1);
+  // run until done
+  while (run())
+    ;
+
+  // TODO: just to be sure? lol
+  // A: not needed for C: main's X returns into the _start trampoline's q.
+  //   Kept: a Pascal program body (no FUNC, no X) probably relies on it to
+  //   stop. One byte, and it never runs for C.
+  emit('q');
 
   anim_report();
-  
-  // consistency check
-  if (rc) FAIL("syntax error");
 
   // OK
   skip_ws();
@@ -2864,19 +2972,19 @@ int main(int argc, char **argv) {
   eprintf("--- ACCEPT ---\n");
 
 #ifdef VERBOSE
-  eprintf("--- BYTECODE (%u bytes) ---\n", (unsigned)code_len);
+  eprintf("--- BYTECODE (%u bytes) ---\n", (unsigned)bin_ptr);
 
-  ivm_print_code(ERROUT, code_buf, code_len);
+  ivm_print_code(ERROUT, bin, bin_ptr);
   eputc('\n');
 
-  eprintf("--- HEXDUMP (%u bytes) ---\n", (unsigned)code_len);
+  eprintf("--- HEXDUMP (%u bytes) ---\n", (unsigned)bin_ptr);
   // dump hex
-  for (i = 0; i < code_len; i++) {
-    eprintf("%02x", code_buf[i]);
+  for (i = 0; i < bin_ptr; i++) {
+    eprintf("%02x", bin[i]);
     if ((i & 15) == 15) eputc('\n');
     else eputc(' ');
   }
-  if (code_len & 15) eputc('\n');
+  if (bin_ptr & 15) eputc('\n');
 #endif
 
   {
@@ -2885,8 +2993,8 @@ int main(int argc, char **argv) {
     blob = build_blob(&blen);
 
     #ifdef VERBOSE
-    eprintf("--- BLOB (%d bytes) main=%u nvector=%d ---\n",
-      blen, main_offset, nvector);
+      eprintf("--- BLOB (%d bytes) main=%u nvector=%d ---\n",
+        blen, main_offset, nvector);
     #endif
 
     if (blob) {
@@ -2894,27 +3002,16 @@ int main(int argc, char **argv) {
       // SAVE .ivm next to source (foo.c → foo.ivm)
       {
         char out[128];
-        const char *base, *s, *dot;
         FILE *of;
-        word n;
-        char ch;
 
         // find base and last '.' position
         // TODO: strrchr ???
-        base = src_name ? src_name : "out";
-        for (s = base; (ch = *s); s++)
-          if (ch == '/' || ch == '\\') base = s + 1;
-        n = 0; dot = 0;
-        for (s = base; (ch = *s) && n < sizeof(out) - 5; s++) {
-          out[n++] = ch;
-          if (ch == '.') dot = out + n - 1;
-        }
-
+        // A: strrchr needs two calls ('/' and '\\') plus one for '.', and the
+        //   copy is still needed: the loop in out_name() is as small. Shared
+        //   with sym_open() now.
         // change name test.p => test.ivm
-        if (dot) n = (word)(dot - out);
-        out[n++] = '.'; out[n++] = 'i'; out[n++] = 'v'; out[n++] = 'm';
-        out[n] = 0;
-
+        change_ext(out, src_name ? src_name : "out", ".ivm");
+        
         of = fopen(out, "wb");
         if (!of) { eprintf("--- SAVE file fail: %s ---\n", out); exit(1); }
 

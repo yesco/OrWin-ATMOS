@@ -26,7 +26,7 @@
 #= //
 
 # - Program starts with P
-P=D
+P=DY
 
 # - #define NAME number|"string" -> const; any other # line is skipped
 #   (\c only after a full match: a failed alt must not leave it set)
@@ -35,9 +35,9 @@ D=#define \+ \d\c[\g]\n\o\<
 |#\*\n\o\<
 |V\o\<|F\o\<|
 
-# - Declarations: optional register\r -> REGISTER slot 0..31
+# - Declarations: optional register\b -> REGISTER slot 0..31
 # -O: REGISTER 0..31, other globals 32..95, frames at 96+
-V=const\c T M;|register\r T M;|T M;
+V=const\c T M;|register\b T M;|T M;
 M=\+=S[\g]U|\+=E[S\1]U|\+U|
 
 # - TODO: deep recursion might be bad...

@@ -374,8 +374,12 @@ uchar lit_addr(unsigned int v) {
 // index (nsym-1) and use &syms[idx] again afterwards.
 // ---------------------------------------------------------------------------
 #define SYM_ANY   0xff
+
+// TODO: why can't this just be 0?
+
 #define SYM_NONE  0xffff
 #define SYM_GROW  16
+
 //#define SYM_GROW  250
 
 typedef enum { SYM_VAR, SYM_FUNC } SymbolType;
