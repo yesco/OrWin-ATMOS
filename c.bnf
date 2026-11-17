@@ -26,7 +26,7 @@
 #= //
 
 # - Program starts with P
-P=DY
+P=D
 
 # - #define NAME number|"string" -> const; any other # line is skipped
 #   (\c only after a full match: a failed alt must not leave it set)

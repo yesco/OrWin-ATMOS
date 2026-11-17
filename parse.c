@@ -345,192 +345,10 @@ static void *xrealloc(void *p, word n) {
 
 
 
-// TODO: move out to parse-syms.c
-// A: fine: everything from here to #endif // SYMS can be one #include,
-//   same bytes. Needs sym_r/sym_w/note_* (above) and change_ext().
-
-
-
-// ------------------------------------------------------------
+// .sym file writer (SYMS only)
 #ifdef SYMS
-static uchar frame_sz[MAX_VECTORS];
-
-// size of frame v: distance to the next higher frame base, else the size
-// noted at alloc time (frame_sz), at least the 4 header cells
-static uchar frame_size(uchar v) {
-  uchar j, ob, sz = 0, fb = frame_base[v];
-
-  for (j = 0; j < nvector; j++) {
-    ob = frame_base[j];
-    if (ob > fb && (!sz || (uchar)(ob - fb) < sz)) sz = (uchar)(ob - fb);
-  }
-  if (!sz) sz = frame_sz[v] ? frame_sz[v] : 4;
-  return sz;
-}
-
-static void sym_type_str(Symbol *s, char *buf) {
-  buf[0] = (char)(s->vtype ? s->vtype : 'w');
-  buf[1] = 0;
-  if (s->is_ptr) { buf[1] = '*'; buf[2] = 0; }
-}
-
-// stream one patch line when resolved — no arrays
-static void sym_patch(char kind, word at, word to, int rel, uchar vec) {
-  if (!sym_fp) return;
-  fprintf(sym_fp, "  %c   %04x    %04x    %+d", kind, at, to, rel);
-  if (vec != 0xff) fprintf(sym_fp, "     V%02x", vec);
-  fputc('\n', sym_fp);
-}
-
-// open NAME.sym for writing
-static void sym_open(const char *path) {
-  char out[128];
-
-  // TODO: these rewrites happen in several places
-  // A: done: change_ext() is now shared with the .ivm name in main()
-  change_ext(out, path, ".sym");
-
-  memset(sym_r, 0, sizeof(sym_r));
-  memset(sym_w, 0, sizeof(sym_w));
-  memset(frame_sz, 0, sizeof(frame_sz));
-
-  sym_fp = fopen(out, "w");
-  if (sym_fp)
-    fprintf(sym_fp, "# %s\n# num  tag  name  scope  type  refs\n", out);
-}
-
-static void sym_write_all(void) {
-  word i, j, pc;
-  uchar v, fb, sz, op;
-  char tbuf[4];
-  Symbol *s;
-  // reuse the static note_* arrays: 512 bytes less on the cc65 C stack
-  uchar *r = sym_r, *wcnt = sym_w;
-  uchar ccall[MAX_VECTORS];
-  word cmask[MAX_VECTORS];
-
-  if (!sym_fp) return;
-
-  memset(sym_r, 0, sizeof(sym_r));
-  memset(sym_w, 0, sizeof(sym_w));
-  memset(ccall, 0, sizeof(ccall));
-  memset(cmask, 0, sizeof(cmask));
-
-  // Final bytecode only — emit-time note_* is inflated by backtracking
-  // Parses bytecode to figure out number of read and write references
-  // (that can potentiall by replaced by one byte ops)
-  for (pc = 0; pc < (word)bin_ptr; ) {
-
-    op = bin[pc];
-    j = ivm_oplen(bin + pc);
-    pc += j ? j : 1;
-
-    // only count L S !!! (thats the byte savers!) - <32 is a one-byte L
-    if (op < 32) {
-      if (r[op] < 255) r[op]++;
-      continue;
-    }
-    if (op == 'L' && r[bin[pc - 1]] < 255) r[bin[pc - 1]]++;
-    if (op == 'S' && wcnt[bin[pc - 1]] < 255) wcnt[bin[pc - 1]]++;
-
-    if (op >= 0xC0) {
-      uchar callee = (uchar)(op - 0xC0);
-      uchar caller = 0xff;
-      word at = (word)(pc - 1);
-
-      if (callee < MAX_VECTORS && ccall[callee] < 255)
-        ccall[callee]++;
-
-      for (i = 0; i < nvector; i++) {
-        word a = vectors[i], b = (word)bin_ptr;
-        for (j = 0; j < nvector; j++)
-          if (vectors[j] > a && vectors[j] < b) b = vectors[j];
-        if (at >= a && at < b) { caller = (uchar)i; break; }
-      }
-
-      if (caller != 0xff && callee < 16)
-        cmask[caller] |= (word)(1u << callee);
-    }
-  }
-
-  // one line per variable: slot, name, global/local/param, type, how
-  // often it's loaded (L) and stored (S) in the final code, and which
-  // function's frame it's in.
-  for (i = 0; i < nsym; i++) {
-
-    s = &syms[i];
-    if (s->type != SYM_VAR) continue;
-    sym_type_str(s, tbuf);
-    fprintf(sym_fp, "  %02x  M  %-20s  ", s->address, s->name);
-    if (s->pidx) fprintf(sym_fp, "param     ");
-    else if (s->scope == 0) fprintf(sym_fp, "global    ");
-    else fprintf(sym_fp, "local     ");
-    fprintf(sym_fp, "%-5s  L=%u S=%u",
-            tbuf, (unsigned)r[s->address], (unsigned)wcnt[s->address]);
-
-    // find the function whose frame holds this variable (a param or
-    // local): the frame is [frame_base[v], +frame_size(v)). Prints Vnn.
-    for (v = 0; v < nvector; v++) {
-      fb = frame_base[v];
-      if (s->address >= fb && s->address < (uchar)(fb + frame_size(v))) {
-        fprintf(sym_fp, "  V%02x", v);
-        break;
-      }
-    }
-
-    fputc('\n', sym_fp);
-  }
-
-  // one line per function: entry address, vector, frame base and
-  // size, how often it's called, and its parameter list.
-  for (i = 0; i < nsym; i++) {
-    s = &syms[i];
-    if (s->type != SYM_FUNC) continue;
-    v = s->address;
-    fb = frame_base[v];
-    sz = frame_size(v);
-
-    fprintf(sym_fp, "%04x  V%02x  %-20s  fp=%02x  sz=%02x  c=%u",
-            (unsigned)vectors[v], v, s->name, fb, sz, (unsigned)ccall[v]);
-
-    // print the parameters in order (pidx 1..n)
-    for (j = 0; j < s->nparams; j++) {
-      word k;
-
-      // find the variable for parameter j: pidx j+1 and its slot (the
-      // last one was moved to fp+3 by params_done)
-      for (k = 0; k < nsym; k++) {
-        if (syms[k].type != SYM_VAR || syms[k].pidx != j + 1) continue;
-        if (syms[k].address != s->param_slot[j] &&
-            !(j + 1 == s->nparams &&
-              syms[k].address == (uchar)(frame_base[v] + 3)))
-          continue;
-        sym_type_str(&syms[k], tbuf);
-        fprintf(sym_fp, "%s%s %s", j ? "," : "  ", tbuf, syms[k].name);
-        break;
-      }
-    }
-    fputc('\n', sym_fp);
-  }
-
-  // TODO: document what this loop does
-  // A: call graph: for each function, the functions it calls
-  for (v = 0; v < nvector; v++) {
-    fprintf(sym_fp, "V%02x:", v);
-
-    // TODO: document what this loop does
-    // A: bit j of cmask[v] = V(v) calls V(j), from the first loop
-    //   (only 16 bits: callees >= 16 aren't shown)
-    for (j = 0; j < nvector && j < 16; j++)
-      if (cmask[v] & (word)(1u << j))
-        fprintf(sym_fp, " V%02x", j);
-    fputc('\n', sym_fp);
-  }
-
-  fclose(sym_fp);
-  sym_fp = 0;
-}
-#endif // SYMS
+  #include "parse-syms.c"
+#endif
 
 
 // ------------------------------------------------------------
@@ -637,6 +455,7 @@ typedef struct {
   word result;
 
   word code_save; // bin_ptr at alt entry (backtrack)
+  uchar ginit_save;   // ginit_len at alt entry (global init code, backtrack)
   uchar slot_save;    // next_slot at alt entry (backtrack frees slots)
   uchar func_vec;     // vector of the function matched by \i in THIS frame (for \v)
   uchar arg_i;        // call args stored so far (rule Z, for \k)
@@ -801,7 +620,7 @@ static void line_commit(void) {
 
   line_abs = (word)(line_abs + drop);
   line_len = rest;
-  line_pos = 0;
+  line_pos -= drop;   // same source position (was = 0: re-parsed the line!)
 }
 
 
@@ -1078,9 +897,8 @@ static word force_addr(uchar n) {
 // quiet: GEN is printed only when the owning alt accepts (pop)
 static uchar *run_production(uchar *p) {
   uchar n, b, e, adv, cv, dest, src, *q;
-  word w, f;
+  word w;
   unsigned int val;
-  Symbol *fs;
 
   // ACC captures this production refers to are spilled FIRST, so the
   // spill code lands before the bytes that use it (\l takes ACC as is)
@@ -1242,15 +1060,9 @@ static uchar *run_production(uchar *p) {
       // (the rule that matched \i and called Z)
       case HIBIT('k'):
         cv = (sp >= 1) ? stack[sp - 1].func_vec : 0xff;
-        f = (cv == 0xff) ? SYM_NONE : sym_func(cv);
-        if (f == SYM_NONE) FAIL("call of unknown function");
-        fs = &syms[f];
-        b = cur.arg_i;
-        if ((word)(b + 1) >= fs->nparams)
-          FAIL("too many arguments");
+        if (cv == 0xff) FAIL("call of unknown function");
         // (the "S" opcode is not missing: the BNF has [S\k], \k is only the slot)
-        emit(fs->param_slot[b]);
-        cur.arg_i = b + 1;
+        emit(arg_slot(cv, cur.arg_i++));
         break;
 
       // \#xx: emit raw hex byte (e.g. \#00 for NUL, \#20 for space)
@@ -1289,12 +1101,8 @@ static uchar *run_production(uchar *p) {
         // recorded in ginit_*, and gen_func_entry() emits Z/C stores
         // at the start of main. Inside a function it's a plain L+S.
         if (scope_depth == 0) {
-          if (nginit >= MAX_GINIT)
-            FAIL("too many global inits");
-          ginit_slot[nginit] = dest;
-          ginit_src[nginit]  = src;
-          nginit++;
-          vlog("  ginit defer slot %u <- const %u\n", dest, src);
+          gen_ginit(dest, src);    // code now, into main's prologue
+          vlog("  ginit slot %u <- const %u\n", dest, src);
         } else {
           // TODO: we have better ways of generating this
           //   a) Z dd            dd := 0;
@@ -1698,159 +1506,42 @@ static uchar match_ident_decl(void) {
 
 
 
-// \f — declare function: new frame + vector index; mark entry at current bin_ptr later
+// \f — declare function: new frame + vector (func_begin in ivm-gen.c)
 static uchar match_ident_func_decl(void) {
-  uchar base, vec;
-  Symbol *s;
+  uchar vec;
 
-  // TODO: aren't we always gonno do a lookup to see if it exist
-  //   (ok, could be scope restricted)
-  // A: yes, both look up first. \+ reuses the existing slot (same name
-  //   again in the same scope); \f fails the alt on a 2nd definition.
   if (!read_ident()) return 0;
-  if (sym_find(id_buf, SYM_FUNC, 1) != SYM_NONE) return 0; // declared twice
-
-  if (nvector >= (uchar)(MAX_VECTORS - 1)) FAIL("too many functions");
-
-  // FRAME LAYOUT: base+0 ret addr:
-  //
-  // +1 ret value (the function name)
-  // +2 prev fp
-  // +3 last param (JSR stores ACC there)
-  // +4.. other params, then locals
-  //
-  // Optimize: frames start at FRAME_BASE (96), after global bands 0..95
-
-  if (optimize && next_slot < FRAME_BASE)
-    next_slot = FRAME_BASE;
-
-  base = next_slot;
-  if (base >= CONST_TOP - 40) FAIL("out of slots");
-  next_slot = base + 4;
-
-  vec = nvector;
-  s = sym_add(id_buf, SYM_FUNC, vec);
-  s->ret_addr_slot = base;
-  s->ret_slot = base + 1;
-
-  // return value variable: only visible inside the body (dropped by \})
-  s = sym_add(id_buf, SYM_VAR, base + 1);
-  s->scope = scope_depth + 1;
-
-  frame_base[vec] = base;
+  vec = func_begin(id_buf);
+  if (vec == 0xff) return 0;   // declared twice
 
   #ifdef SYMS
     frame_sz[vec] = 4; // ret/val/prev/ACC at minimum
   #endif
 
-  nvector++;
   last_func_vec = vec;
-  pending_func_entry = vec;
-  if (strcmp(id_buf, "main") == 0)
-    main_vec = vec;
+  record_capture(frame_base[vec] + 1);
 
-  record_capture(base + 1);
-
-  vlog("  func '%s' slot %u vec %u frame %u\n", id_buf, (unsigned)(base + 1), (unsigned)vec, (unsigned)base);
+  vlog("  func '%s' slot %u vec %u frame %u\n", id_buf,
+    (unsigned)(frame_base[vec] + 1), (unsigned)vec, (unsigned)frame_base[vec]);
 
   return 1;
 }
 
-// \p — declare parameter n of the function just declared by \f
+// \p — declare the next parameter of the function just declared by \f
+//   (param_add in ivm-gen.c: slot base+4+k, k from next_slot, no loops)
 static uchar match_param_decl(void) {
-  uchar k, slot, v;
-  word i;
   Symbol *s;
 
   if (!read_ident()) return 0;
-  v = last_func_vec;
-  if (v == 0xff) return 0;
-
-  // parameter number = params already in this scope
-  // (rewinds on backtrack)
-  // TODO: explain better: searching a scope_depth
-  //   how does this not go into prev scopes???
-  // A: F = \f\{(A)\r B: the params are declared right after \{, so
-  //   they are the only syms with pidx at this scope_depth. An earlier
-  //   function's params were at the same depth, but its \} dropped
-  //   them (sym_truncate), so they are not in syms[] any more.
-
-  // TODO: I'm just suprised scope mgt is not in syms in ivm-gen.c?
-  //   it's like essential to symbols. That I need to ask what it
-  //   does means it should have a name. Is exactly this done
-  //   in more places?
-  k = 0;
-  for (s = syms, i = 0; i < nsym; i++, s++)
-    if (s->scope == scope_depth && s->pidx) k++;
-
-  if (k >= MAX_PARAMS) FAIL("too many parameters");
-
-  if (sym_find(id_buf, SYM_VAR, 1) != SYM_NONE) return 0;
-  slot = frame_base[v] + 4 + k;
-  s = sym_add(id_buf, SYM_VAR, slot);
-  s->pidx = k + 1;
+  if (last_func_vec == 0xff) return 0;
+  if (!(s = param_add(last_func_vec, id_buf))) return 0;
   set_decl_type(s);
 
-  if (next_slot <= slot) next_slot = slot + 1;
-
-  record_capture(MAKE_CAP(slot, cur_type));
+  record_capture(MAKE_CAP(s->address, cur_type));
 
   vlog("  param '%s' #%u slot %u type %c%s\n",
-       id_buf, (unsigned)k, (unsigned)slot,
+       id_buf, (unsigned)(s->pidx - 1), (unsigned)s->address,
        (char)(CAP_TYPE(cur_type) >> 8), CAP_IS_PTR(cur_type) ? "*" : "");
-  return 1;
-}
-
-// \r — end of parameter list (no input): the last param lives at fp+3
-static uchar params_done(void) {
-  uchar v, n;
-  word i, f;
-  Symbol *fs, *t, *lastp;
-
-  v = last_func_vec;
-  if (v == 0xff) return 0;
-  f = sym_func(v);
-  if (f == SYM_NONE) return 0;
-
-  // nothing is added below: pointer stays valid
-  // TODO: pointer what? why?
-  // A: fs points into syms[]: safe only because nothing below calls
-  //   sym_add (which may realloc syms and move it)
-  fs = &syms[f];
-
-  // TODO: loop to find WHAT?
-  // A: collect this function's parameters (pidx, this scope), in
-  //   declaration order, into fs->param_slot[]; lastp = the last one
-
-  // TODO: why not just add them when \k is run? then no looping
-  //   needed. We already have a pointer to the function symbol...
-  //   I'm assuming \k assigns them slots
-  n = 0;
-  lastp = NULL;
-  for (t = syms, i = 0; i < nsym; i++, t++) {
-    if (t->scope == scope_depth && t->pidx) {
-      fs->param_slot[n] = t->address;
-      lastp = t;
-      n++;
-    }
-  }
-  // TODO: what if we didn't find WHAT?
-  // A: n == 0: no parameters (f() or f(void)): nothing to move,
-  //   nparams = 0
-  // TODO: we should 
-
-  if (n) {
-    // its old cell was the top one: reuse it for locals
-    // TODO: 3 ? I'm sure it has a OFF_LASTPARAM define.
-    //   don't put random numbers in code!
-    lastp->address = frame_base[v] + 3;
-    fs->param_slot[n - 1] = lastp->address;
-    next_slot--; 
-  }
-
-  fs->nparams = n;
-  vlog("  params done vec %u n=%u\n", (unsigned)v, (unsigned)n);
-
   return 1;
 }
 
@@ -2271,6 +1962,7 @@ static void alt_mark(void) {
   cur.scope_save = scope_depth;
   cur.slot_save = next_slot;
   cur.code_save = bin_ptr;
+  cur.ginit_save = ginit_len;
   cur.prod_n = 0;
 }
 
@@ -2286,7 +1978,12 @@ static void goto_alt(uchar n) {
 }
 
 static void push(uchar r) {
-  if (!rule[r]) FAIL("rule not defined");
+  // the STACK in the report is the furthest-position snapshot, not this
+  // one: so say which rule is missing, and who called it
+  if (!rule[r]) {
+    eprintf("\nrule %c (called from %c): ", 'A' + r, sp ? 'A' + cur.rule : '-');
+    FAIL("rule not defined");
+  }
   if (sp >= MAX_STACK) FAIL("stack overflow");
 
   if (sp >= stack_cap) {
@@ -2349,6 +2046,10 @@ static void restore_scope(void) {
 // — caller fail-fasts.
 static int frame_rewind(void) {
   bin_ptr = cur.code_save;
+  if (ginit_len != cur.ginit_save) {
+    ginit_len = cur.ginit_save;
+    ginit_acc = 0xff;   // ACC after the kept init code: unknown
+  }
   cur.prod_n = 0;
   cur.npatch = 0;
 
@@ -2556,12 +2257,13 @@ int run() {
   else if (c == HIBIT('f')) ok = match_ident_func_decl();
   else if (c == HIBIT('p')) ok = match_param_decl();
   else if (c == HIBIT('r')) {
-    if (last_func_vec != 0xff)
-      ok = params_done();
-    else {
+    // end of params: params_end() (ivm-gen.c) moves the last to fp+3
+    if (last_func_vec != 0xff) {
+      params_end(last_func_vec);
+      vlog("  params done vec %u n=%u\n", (unsigned)last_func_vec,
+        (unsigned)frame_nparams[last_func_vec]);
+    } else
       pending_register = 1;
-      ok = 1;
-    }
   }
   // REGISTER flag SET ("register\b"): \r does it too, but only when
   // last_func_vec happens to be 0xff (see above)
@@ -2680,9 +2382,10 @@ static void report_reject(void) {
           abs_pos(), max_pos_abs);
 
   eprintf("STACK:");
-  if (far_sp == 0) eprintf(" (empty)");
+  if (far_sp < 2) eprintf(" (empty)");
 
-  for (i = 0; i < far_sp; i++)
+  // [0] is the empty frame init() pushes P over: not a rule (the "A80")
+  for (i = 1; i < far_sp; i++)
     eprintf(" %c%u", far_stack[i], (unsigned)far_alt[i]);
 
   eprintf("\n");

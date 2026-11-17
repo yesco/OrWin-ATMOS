@@ -80,6 +80,7 @@ void check_store(uchar ix);
 
 uint16_t vectors[MAX_VECTORS];
 uchar frame_base[MAX_VECTORS];
+uchar frame_nparams[MAX_VECTORS]; // parameters of function v (set by params_end)
 uchar nvector;
 
 // -O frame packing: frames of functions never active at the same time
@@ -102,13 +103,15 @@ uchar main_vec;           // vector index of function "main", 0xff = none
 // The current func_entry being compiled
 uchar pending_func_entry; // 0xff = none
 
-// Deferred global initializers: applied at the start of main()
+// Global initializers ("int g = 5;" at scope 0): nothing runs there, so
+// their code is generated right away into ginit_code[], and copied to the
+// start of main by gen_func_entry().
 #ifndef MAX_GINIT
   #define MAX_GINIT 64
 #endif
-uchar ginit_slot[MAX_GINIT]; // destination var slot
-uchar ginit_src[MAX_GINIT];  // source const slot
-uchar nginit;
+uchar ginit_code[MAX_GINIT * 2];   // same RAM as the old slot+src arrays
+uchar ginit_len;
+uchar ginit_acc;   // const slot the init code leaves in ACC, 0xff none
 
 
 void gen_func_entry(uchar v);
@@ -364,7 +367,7 @@ uchar lit_addr(unsigned int v) {
 //
 //   VAR   address = slot
 //   FUNC  address = vector index, ret_addr_slot = frame base,
-//         ret_slot = return value cell, nparams/param_slot = parameters
+//         ret_slot = return value cell (parameters: see func_begin)
 //
 // scope: depth the name lives in; scope_leave() drops everything declared at
 // the depth being left (names are appended, so those are the newest ones).
@@ -403,9 +406,9 @@ typedef struct {
   // type + pidx: could pack (pidx>0 => param; type==FUNC => function)
   SymbolType type;
   uchar pidx;          // parameter number + 1 (0 = not a parameter)
-  uchar nparams;
 
-  uchar param_slot[MAX_PARAMS];
+  // FUNC: parameter count is frame_nparams[vector], their slots follow
+  // from frame_base[] (func_begin / param_add / params_end / arg_slot)
 
 } Symbol;
 
@@ -439,7 +442,6 @@ Symbol *sym_add(const char *name, SymbolType type, uchar address) {
   s->name = nm;
   s->type = type;
   s->address = address;
-  s->nparams = 0;
   s->ret_slot = 0xff;
   s->ret_addr_slot = 0xff;
   s->is_ptr = 0;
@@ -515,6 +517,108 @@ void scope_leave(void) {
   scope_depth--;
 }
 
+// ---------------------------------------------------------------------------
+// Functions: frame + vector + symbols, all in one place (\f \p \r \k)
+//
+// Frame of function v at base = frame_base[v]:
+//   base+0 ret addr, +1 ret value (the function name), +2 prev fp,
+//   +3 last param (the call leaves it in ACC, JSR stores it there),
+//   +4.. the other params in order, then locals.
+// Params take the next slots, so param k is base+4+k and the count is just
+// next_slot - base - 4: no symbol table walks, and backtracking (which
+// restores next_slot) undoes it for free.
+// ---------------------------------------------------------------------------
+
+// declare function name: new frame (4 header cells) + vector.
+// Returns the vector, 0xff if name is already a function here.
+uchar func_begin(const char *name) {
+  uchar base, vec;
+  Symbol *s;
+
+  if (sym_find(name, SYM_FUNC, 1) != SYM_NONE) return 0xff;
+  if (nvector >= (uchar)(MAX_VECTORS - 1)) IVM_GEN_FAIL("too many functions");
+
+  // -O: frames start at FRAME_BASE (96), after the global bands 0..95
+  if (optimize && next_slot < FRAME_BASE)
+    next_slot = FRAME_BASE;
+
+  base = next_slot;
+  if (base >= CONST_TOP - 40) IVM_GEN_FAIL("out of slots");
+  next_slot = base + 4;
+
+  vec = nvector++;
+  s = sym_add(name, SYM_FUNC, vec);
+  s->ret_addr_slot = base;
+  s->ret_slot = base + 1;
+
+  // return value variable: only visible inside the body (dropped by \})
+  s = sym_add(name, SYM_VAR, base + 1);
+  s->scope = scope_depth + 1;
+
+  frame_base[vec] = base;
+  frame_nparams[vec] = 0;
+  pending_func_entry = vec;
+  if (strcmp(name, "main") == 0)
+    main_vec = vec;
+
+  return vec;
+}
+
+// next parameter of function v (base+4+k). NULL if declared twice.
+Symbol *param_add(uchar v, const char *name) {
+  uchar slot = next_slot;
+  Symbol *s;
+
+  if (sym_find(name, SYM_VAR, 1) != SYM_NONE) return NULL;
+  s = sym_add(name, SYM_VAR, slot);
+  s->pidx = (uchar)(slot - frame_base[v] - 3);   // k + 1
+  next_slot = slot + 1;
+
+  return s;
+}
+
+// end of the parameter list of v: the last param is the newest symbol, it
+// moves to base+3, and its cell is free again (for locals)
+void params_end(uchar v) {
+  uchar n = (uchar)(next_slot - frame_base[v] - 4);
+
+  if (n) {
+    syms[nsym - 1].address = frame_base[v] + 3;
+    next_slot--;
+  }
+  frame_nparams[v] = n;
+}
+
+// slot for argument b of a call to v (the last argument stays in ACC)
+uchar arg_slot(uchar v, uchar b) {
+  if ((word)(b + 1) >= frame_nparams[v]) IVM_GEN_FAIL("too many arguments");
+  return frame_base[v] + 4 + b;
+}
+
+// global init "dest = value of const slot src", as code, now:
+//   value 0            Z dest
+//   same src as last   S dest          (C leaves the value in ACC)
+//   else               C dest src
+void gen_ginit(uchar dest, uchar src) {
+  uchar *p = ginit_code + ginit_len;
+
+  if (ginit_len > sizeof(ginit_code) - 3) IVM_GEN_FAIL("too many global inits");
+
+  if (isconst(src) && !const_val(src)) {
+    *p++ = 'Z';
+    *p++ = dest;
+  } else if (src == ginit_acc) {
+    *p++ = 'S';
+    *p++ = dest;
+  } else {
+    *p++ = 'C';
+    *p++ = dest;
+    *p++ = src;
+    ginit_acc = src;
+  }
+  ginit_len = (uchar)(p - ginit_code);
+}
+
 // emitload/emitstore live in tpi.c (frame-relative); parse uses emit/emitop2
 
 void gen_reset(void) {
@@ -528,7 +632,8 @@ void gen_reset(void) {
   pending_func_entry = 0xff;
   main_vec = 0xff;
   main_offset = 0;
-  nginit = 0;
+  ginit_len = 0;
+  ginit_acc = 0xff;
   cur_func = 0xff;
   memset(fneed, 0, sizeof(fneed));
 
@@ -536,21 +641,15 @@ void gen_reset(void) {
 }
 
 void gen_func_entry(uchar v) {
-  uchar i, s;
-
   cur_func = v;
   
-  // main: emit deferred global inits first so they run on entry
+  // main: the global init code goes first, so it runs on entry
   if (v == main_vec) {
     main_offset = (word)bin_ptr;
-    for (i = 0; i < nginit; i++) {
-      s= ginit_src[i];
-      if (s == IMM0) {
-        emitop2('Z', ginit_slot[i]);
-      } else {
-        emitop2('C', ginit_slot[i]); emit(ginit_src[i]);
-      }
-    }
+    if (bin_ptr + ginit_len >= MAX_BIN_LEN - 1)
+      IVM_GEN_FAIL("bytecode buffer overflow");
+    memcpy(bin + bin_ptr, ginit_code, ginit_len);
+    bin_ptr += ginit_len;
   }
 
   if (v < (uchar)MAX_VECTORS)
@@ -793,7 +892,6 @@ static uchar gen_pack(uchar *map) {
 // after remap: frame bases and symbols follow map[] (also const aliases)
 static void gen_map_syms(uchar *map) {
   word i;
-  uchar k;
   Symbol *s;
 
   for (i = 0; i < nvector; i++)
@@ -808,8 +906,6 @@ static void gen_map_syms(uchar *map) {
     // FUNC: address is the vector
     s->ret_slot = map[s->ret_slot];
     s->ret_addr_slot = map[s->ret_addr_slot];
-    for (k = 0; k < s->nparams; k++)
-      s->param_slot[k] = map[s->param_slot[k]];
   }
 }
 
