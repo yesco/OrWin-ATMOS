@@ -1,13 +1,31 @@
 # jsk notes:
 
-- 21 B: 7x: forward jumps: bxx + jmp = if can shorten save 21 B!
 - 27 B: memset (+ 4 B load size deferred)
   - lots of setup (clc+adc)
   - possibly use shared library?
-- 4 B: for should leave index in ACC
--     'B' opcode redundant, if loop back to 'i' j k then use n m!
+-  3 B: m - malloc sizes constant, don't need to LDA xx TAY ...  CMP BEQ,
+           just delay and do ... LDY xx BEQ (- 3 bytes)
+- 12 B (16) -> 10 B (12) i+i == i<<1
+-  4 B: reorder: "prime = i + i + 3;  k = i + prime;" => "...; k = prime + i;"
+
+------- 5b '[' 00 05 9b 05 ------
+   A3AA sta $fe
+   A3AC txa 
+   A3AD clc 
+   A3AE adc $df
+   A3B0 sta $ff
+   A3B2 ldy $de
+   A3B4 lda ($fe),y
+   A3B6 ldx #$00
+------- 9b '�' 05 2b 05 2b ------
+   A3B8 cmp #$00
+   A3BA  bne +4	=> $A3C0
+   A3BC cpx #$00
+   A3BE  beq +0	=> $A3C0
+
+
+TODO: 'B' opcode redundant, if loop back to 'i' j k then use n m!
       the idea is that 'n' behaves different depending on destination op!
-- 2 B: U - less juggling just save A directly, reload cheaper than TAY TYA
 
 BUG: 'I' and 'J' doesn't wrap around will give 16 bit number
     and when used as direct arg will read hibyte... 
@@ -15,9 +33,13 @@ BUG: 'I' and 'J' doesn't wrap around will give 16 bit number
 --- 
 
 DONE:
+- saved  8 B: [ zjmp - it's a byte simplify zjmp
+- saved  5 B: forward jumps: bxx + jmp = if can shorten save 2 byte per forward
 - saved 12 B! 364-356: 8 B: for (i = 0; i <= SIZE; i++) { 
 - saved 21 B: i n duplicates the test - fixed
 - saved  3 B: I J lazy load - 2.8% in speed!
+- saved  2 B: U - less juggling just save A directly, reload cheaper than TAY TYA
+- saved  4 B: for should leave index in ACC
 
 
 ## - 'n' INC optimiation -1c +2 B - LOL

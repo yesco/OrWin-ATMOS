@@ -814,6 +814,10 @@ static void emit_belem_ptr(uchar base, uchar idx) {
 // An op that calls none of these is reported ("ACC not declared").
 enum { ACC_AX, ACC_PEND, ACC_LOST };
 static uchar acc_at, acc_hk, acc_s;
+// with ACC in AX: acc_x0  X == 0 (ACC is a byte), kept by KEEP ops
+//                 acc_z   Z == (ACC == 0): set by an op for the NEXT op only
+//                 (lc_z: taken over at the start of each op)
+static uchar acc_x0, acc_z, lc_z;
 static word  acc_k;
 static uchar lc_acc_said;   // acc_* calls by the current op
 static uchar lc_op;         // current op (messages)
@@ -827,7 +831,7 @@ static int is_label(word bc) {
 static void acc_flush(void) {
   if (acc_at == ACC_PEND) {
     if (acc_hk) emit_load_const(acc_k); else emit_load_slot(acc_s);
-    acc_at = ACC_AX;
+    acc_at = ACC_AX; acc_x0 = 0;
   }
 }
 static void acc_need(void) {
@@ -835,7 +839,7 @@ static void acc_need(void) {
   if (acc_at == ACC_LOST) {
     printf("%%JIT: '%c' at bc %u needs ACC, but it was lost\n",
       lc_op, (unsigned)lc_bc);
-    acc_at = ACC_AX;
+    acc_at = ACC_AX; acc_x0 = 0;
   }
   acc_flush();
 }
@@ -847,8 +851,10 @@ static void acc_drop(void) {
 static void acc_lost(void) { acc_drop(); }
 static void acc_ax(void) {
   lc_acc_said++;
-  acc_at = ACC_AX; acc_hk = 0; acc_s = 0xff;
+  acc_at = ACC_AX; acc_hk = 0; acc_s = 0xff; acc_x0 = 0;
 }
+// AX = a byte result, X = 0 (z: and Z == (ACC == 0) for the next op)
+static void acc_ax_byte(uchar z) { acc_ax(); acc_x0 = 1; acc_z = z; }
 static void acc_ax_slot(uchar s) {
   acc_ax();
   acc_s = s;
@@ -870,9 +876,21 @@ static void acc_write(uchar s) {
   if (acc_at == ACC_PEND && !acc_hk) acc_flush();  // old mem[s] into AX
   acc_s = 0xff;
 }
+// ACC *= 2 (i+i, i*2, 2*i): from the pending slot, or in AX. NEW
+static void emit_acc_double(void) {
+  if (acc_at == ACC_PEND && !acc_hk) {
+    emop2(LDA, slotlo(acc_s)); em(ASLA); em(TAY);
+    emop2(LDA, slothi(acc_s)); em(ROLA); em(TAX); em(TYA);
+  } else {
+    acc_need();
+    em(ASLA); em(TAY); em(TXA); em(ROLA); em(TAX); em(TYA);
+  }
+  acc_ax();
+}
+
 static void acc_label(void) {
   acc_flush();
-  acc_at = ACC_AX; acc_hk = 0; acc_s = 0xff;
+  acc_at = ACC_AX; acc_hk = 0; acc_s = 0xff; acc_x0 = 0;
 }
 
 // a jump to a while head (lc_ksa, b) must arrive with AX == its slot. Catches
@@ -953,7 +971,7 @@ static word ivm_jit1(const uchar *code, word code_len,
   lc_nloop = 0;
   lc_nksa = 0;
   lc_err = 0;
-  acc_at = ACC_AX; acc_hk = 0; acc_s = 0xff;
+  acc_at = ACC_AX; acc_hk = 0; acc_s = 0xff; acc_x0 = 0; acc_z = 0;
   lc_out_org = out_org;
   lc_ncall = ncall;
   lc_fbase = frame_base;
@@ -1070,6 +1088,7 @@ static word ivm_jit1(const uchar *code, word code_len,
     // NEXT op
     op = *p++;
     lc_op = op; lc_bc = bc_pc; lc_acc_said = 0;
+    lc_z = acc_z && !is_label(bc_pc) && acc_at == ACC_AX; acc_z = 0;
 
     #ifdef JIT_TRACE
       printf("------- %02x '%c' %02x %02x %02x %02x ------\n",
@@ -1089,9 +1108,13 @@ static word ivm_jit1(const uchar *code, word code_len,
         word dest = (word)((p - code) + (op & 0x3f));
         word fx;
         acc_need();                      // in, KEEP
-        em2(CMPN, 0); fx = emrel(BNE);
-        em2(CPXN, 0); emjump(BEQ, dest);
-        empatch(fx);
+        if (lc_z) emjump(BEQ, dest);                        // Z is ACC == 0
+        else if (acc_x0) { em2(CMPN, 0); emjump(BEQ, dest); }   // X == 0
+        else {
+          em2(CMPN, 0); fx = emrel(BNE);
+          em2(CPXN, 0); emjump(BEQ, dest);
+          empatch(fx);
+        }
 
       } else {
 
@@ -1181,6 +1204,11 @@ static word ivm_jit1(const uchar *code, word code_len,
                       op == '&' ? (a & b) : op == '|' ? (a | b) : (a ^ b)));
         break;
       }
+      if (op == '+' && acc_s == s &&             // ACC == mem[s] (AX or
+          (acc_at == ACC_AX || (acc_at == ACC_PEND && !acc_hk))) {  // pend)
+        emit_acc_double();                         // ACC == mem[s]: i + i
+        break;
+      }
       if (op == '+') em(CLC); else if (op == '-') em(SEC);
       if (acc_at == ACC_PEND) {
         // load each byte straight from where ACC is: no LDX / TXA
@@ -1208,7 +1236,7 @@ static word ivm_jit1(const uchar *code, word code_len,
       em2(LDAN, 0);
       empatch(fx3);
       em2(LDXN, 0);
-      acc_ax();
+      acc_ax_byte(0);
       break;
     }
     // '<': ACC < mem  <=>  borrow in ACC - mem  <=>  !C
@@ -1218,7 +1246,7 @@ static word ivm_jit1(const uchar *code, word code_len,
       emit_alub(CMP, s, 0); em(TXA);               // C from lo compare
       emit_alub(SBC, s, 1);                        // C = ACC >= mem
       em2(LDAN, 0); em(TAX); em(ROLA); em2(EORN, 1);   // A = !C, X = 0
-      acc_ax();
+      acc_ax_byte(1);
       break;
     }
     // '>': ACC > mem  <=>  mem - ACC borrows  <=>  !C of (mem + ~ACC + 1)
@@ -1228,13 +1256,23 @@ static word ivm_jit1(const uchar *code, word code_len,
       em(SEC); em2(EORN, 0xff); emit_alub(ADC, s, 0);
       em(TXA); em2(EORN, 0xff); emit_alub(ADC, s, 1);
       em2(LDAN, 0); em(TAX); em(ROLA); em2(EORN, 1);   // A = !C, X = 0
-      acc_ax();
+      acc_ax_byte(1);
       break;
     }
 
     // * / % — helpers as in ivm-vm.asm (ACC op PAR); TODO: PARAX into zp_par
     case '*': case '/': case '%': {
       uchar s = PAR;
+      if (op == '*' && is_const(s) && const_val(s) == 2) {   // i * 2
+        emit_acc_double();
+        break;
+      }
+      if (op == '*' && acc_at == ACC_PEND && acc_hk && acc_k == 2 &&
+          !is_const(s)) {                                     // 2 * i
+        acc_ps(s);
+        emit_acc_double();
+        break;
+      }
       acc_need();
       emop2(STA, ACC_ADR);
       emop2(STX, (word)(ACC_ADR + 1));
@@ -1311,8 +1349,8 @@ static word ivm_jit1(const uchar *code, word code_len,
     case 'l': {                                    // NEW = lo(mem[s])
       uchar s = PAR;
       acc_drop();
-      emop2(LDA, slotlo(s)); em2(LDXN, 0);
-      acc_ax();
+      em2(LDXN, 0); emop2(LDA, slotlo(s));
+      acc_ax_byte(1);
       break;
     }
     case 's': {                                    // in, KEEP: AX untouched
@@ -1331,8 +1369,8 @@ static word ivm_jit1(const uchar *code, word code_len,
       uchar s = PAR, zp;
       acc_drop();
       zp = emit_ptr(s);
-      em2(LDYN, 0); em2(LDAIY, zp); em2(LDXN, 0);
-      acc_ax();
+      em2(LDYN, 0); em2(LDXN, 0); em2(LDAIY, zp);
+      acc_ax_byte(1);
       break;
     }
     // ': ACC = *(uchar*)ptr; ptr++   (post-increment byte read)
@@ -1342,7 +1380,7 @@ static word ivm_jit1(const uchar *code, word code_len,
       zp = emit_ptr(s);
       em2(LDYN, 0); em2(LDAIY, zp); em2(LDXN, 0);
       emit_inc(s);
-      acc_ax();
+      acc_ax_byte(0);
       break;
     }
     // w: *(uchar*)ptr = ACC     ,: the same, then ptr++
@@ -1427,8 +1465,8 @@ static word ivm_jit1(const uchar *code, word code_len,
       if (acc_at == ACC_AX && acc_s == idx) emit_belem_ptr_ax(base);  // in AX
       else                                  emit_belem_ptr(base, idx);
       acc_drop();
-      em2(LDAIY, tmp1); em2(LDXN, 0);
-      acc_ax();
+      em2(LDXN, 0); em2(LDAIY, tmp1);      // LDA last: Z == (ACC == 0)
+      acc_ax_byte(1);
       break;
     }
     // ] bb ii : ((uchar*)base)[idx] = ACC
@@ -1450,10 +1488,10 @@ static word ivm_jit1(const uchar *code, word code_len,
     // ?: ACC = !ACC
     case '?':                                      // in, NEW
       acc_need();
-      em2(STXZ, tmp1); em2(ORAZ, tmp1);
-      em2(BEQ, 6); em2(LDAN, 0); em2(LDXN, 0); em2(BEQ, 4);
-      em2(LDAN, 1); em2(LDXN, 0);
-      acc_ax();
+      if (!acc_x0) { em2(STXZ, tmp1); em2(ORAZ, tmp1); }   // A = lo | hi
+      em2(CMPN, 1);                                         // C = ACC != 0
+      em2(LDAN, 0); em(TAX); em(ROLA); em2(EORN, 1);        // A = !C, X = 0
+      acc_ax_byte(1);
       break;
     // ~: ACC = ~ACC
     case '~':                                      // in, NEW
@@ -1469,6 +1507,11 @@ static word ivm_jit1(const uchar *code, word code_len,
       word dest = (word)((p - code) + rel);
       word fn, fgo, fz;
       acc_need();
+      if (acc_x0) {                       // X == 0: ACC > 0 <=> A != 0
+        if (!lc_z) em2(CMPN, 0);
+        emjump(BNE, dest);
+        break;
+      }
       em2(CPXN, 0x80); fn = emrel(BCS);   // negative -> no jump
       em(TAY);         fgo = emrel(BNE);  // lo != 0: > 0 (Y is scratch)
       em2(CPXN, 0);    fz = emrel(BEQ);   // == 0 -> no jump
