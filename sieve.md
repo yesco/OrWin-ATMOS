@@ -5,9 +5,9 @@
   - lots of setup (clc+adc)
   - possibly use shared library?
 - 4 B: for should leave index in ACC
-- 
-  
-
+-     'B' opcode redundant, if loop back to 'i' j k then use n m!
+      the idea is that 'n' behaves different depending on destination op!
+- 2 B: U - less juggling just save A directly, reload cheaper than TAY TYA
 
 BUG: 'I' and 'J' doesn't wrap around will give 16 bit number
     and when used as direct arg will read hibyte... 
@@ -16,8 +16,8 @@ BUG: 'I' and 'J' doesn't wrap around will give 16 bit number
 
 DONE:
 - saved 12 B! 364-356: 8 B: for (i = 0; i <= SIZE; i++) { 
-- saved 21 B: 'i' 'n' duplicates the test - fixed
-    
+- saved 21 B: i n duplicates the test - fixed
+- saved  3 B: I J lazy load - 2.8% in speed!
 
 
 

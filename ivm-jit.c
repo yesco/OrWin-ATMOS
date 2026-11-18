@@ -26,15 +26,15 @@ INSTRUCTIONS: Keeps this section but keep updated for status
 | Calls (vector table)     | **Done** — JMP + word table at start, JSR abs |
 | Call frame               | **Done** — fixed addresses from frame_base, AX stored at fp+FR_ACC on entry |
 | Compares `<` `=` `>`     | **Done** — boolean in ACC, UNSIGNED (needs testing) |
-| Loops `i` / `n` / `B` | **Present** — unsigned. Rotated: `i` = JMP to the test in `n` (patched there, lc_loop[]), one compare per loop. If the body starts by reading the loop var, the test leaves it in AX (lc_ks) and that load / `[` index is free; a `B` back to such a body start loads it first (lc_ksa[]) |
-| `G`                      | Legacy, to be addressed later |
+| Loops `i` / `n` / `B` | **Present** — unsigned. Rotated: `i` = JMP to the test in `n` (patched there, lc_loop[]), one compare per loop. If the body starts by reading the loop var, the test leaves it in AX and that load / `[` index is free; a `B` back to such a body start loads it first (lc_ksa[]) |
+| `G`                      | **Done** — keeps AX (CPX #$80 / TAY / CPX #0), as the contract says |
 | `U`                      | Present |
 | `j` (down-loop)          | **Missing** — warns only |
 | Array `(` `)`            | Present (needs testing) |
 | / *                      | JSR helpers in **ivm-lib.asm** (ACC/PAR in zp ivm_acc/ivm_par); still need **PARAX → zp_par** |
 | ZP optimisation          | **Done, one place** — emop2() + zpmap[] (see below) |
 | Branch emit              | **Done** — emrel/empatch (local), emjump (bytecode target) |
-| ACC const tracking       | **Done** for `)` — const loads ('0' '9' 'L', slot loads) are deferred and dropped when `)` consumes them; every other op flushes them first |
+| ACC state                | **Done** — acc_at AX/PEND/LOST + acc_s (slot AX equals) + acc_k (const). Every op declares its ivm-walk.c contract: acc_need (in: loads a pending const/slot, error if LOST), acc_keep, acc_drop/acc_lost, acc_ax, acc_ax_slot, acc_pk/acc_ps (lazy const/slot), acc_write. Undeclared op → `ACC use not declared`. Labels (prescan, lc_lbl) flush. Pending users: `+ - & \| ^` load from the source (no TXA), const folding (also `~`), `)` `]` store from the source. acc_dead(): KEEP ops (N O F) don't save a dead ACC. -z pointer ops `r w ' , @ !` use (slot),Y directly. Contract breaks fixed: Z N O G F s w , ! ; m |
 | Runtime library          | **Done (untested)** — ivm-lib.asm: op* helpers, putchar/getchar trampolines, bump heap. Generated code calls ONLY these (+ zp), never cc65 lib |
 | `-z[XX]` mem in zp       | **Done (untested)** — mem[] at XX, default: ends at target zp top |
 | `-a XXXX` code org       | **Done (untested)** — implies -j (can't run code built for another address) |
@@ -99,6 +99,8 @@ Simplyfy function calling code:
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>
+
+#include "ivm-walk.c"     // ivm_oplen, ivm_jump: label prescan
 
 // HOSTSIM: not built by cc65 (host): the generated code runs in cpu6502.c,
 // and the ivm-lib.asm routines are traps implemented in C (see the end of
@@ -657,11 +659,9 @@ static struct { word ibc, at; uchar ax; } lc_loop[MAX_LOOPS];
 static uchar lc_nloop;
 
 // "AX == mem[slot]" at a loop body start: the body is only entered from the
-// test, which leaves the loop var in AX. lc_ks: AX holds mem[lc_ks] before
-// the next op (0xff = unknown), set by 'i' only. lc_ksa[]: those body
-// starts, so a 'B' jumping back to one (a while at the top of a for body)
-// loads the slot first and the assumption holds on that path too.
-static uchar lc_ks;
+// test, which leaves the loop var in AX. lc_ksa[]: those body starts (the
+// label there sets acc_ax_slot), so a 'B' jumping back to one (a while at
+// the top of a for body) loads the slot first: true on that path too.
 static struct { word bc; uchar slot; } lc_ksa[MAX_LOOPS * 2];
 static uchar lc_nksa;
 
@@ -720,35 +720,114 @@ static void emit_belem_ptr(uchar base, uchar idx) {
   else                emop2(LDY, slotlo(base));
 }
 
-// ---- "ACC holds a known constant" tracking, lazy load ----------------------
-// lc_kc/lc_kv: ACC is known to hold lc_kv after the op just emitted.
-// lc_kp: that load has NOT been emitted yet (pending). The main loop clears
-// both before every op and emits the pending load before the next op,
-// unless that op is ')' which stores the constant itself and never needs it.
-// Pending loads are emitted BEFORE the next op's map[] entry, so a jump
-// landing on that op skips them and the fall-through path still gets them.
-static uchar lc_kc, lc_kp;
-static word  lc_kv;
+// ---- ACC state: where the IVM ACC is, and what is known about it --------
+// Per op contract: ivm-walk.c "ACC contract" (in / KEEP SLOT NEW UNDEF).
+//
+//   acc_at  ACC_AX    ACC is in A/X
+//           ACC_PEND  not loaded yet: it is the const acc_k (acc_hk), or
+//                     mem[acc_s]. acc_need() emits the load, only if asked.
+//           ACC_LOST  an op destroyed it (UNDEF): acc_need() reports it
+//   acc_hk/acc_k  ACC == const acc_k        (in AX or pending)
+//   acc_s         ACC == mem[acc_s], 0xff = no
+//
+// Every op says what it does with ACC; nothing is special-cased in the loop:
+//   in:  acc_need()         ACC must be in A/X now (loads a pending one)
+//        or look at acc_at / acc_hk / acc_s and do better (immediates...)
+//   out: acc_keep()         unchanged: a pending ACC stays pending
+//        acc_drop()         about to be overwritten: pending load not emitted
+//        acc_ax()           new value in A/X, nothing known about it
+//        acc_ax_slot(s)     new value in A/X, == mem[s]
+//        acc_pk(v)          new value: the const v (load later, if needed)
+//        acc_ps(s)          new value: mem[s] (load later, if needed)
+//        acc_lost()         destroyed (UNDEF)
+//   acc_write(s)  before the op writes mem[s]: a pending mem[s] is loaded
+//                 first, and "ACC == mem[s]" is forgotten
+// Labels (jump targets, function entries): acc_label() emits a pending load
+// BEFORE the label (so only fall-through runs it), then ACC is in AX with
+// nothing known. lc_lbl[] has every label (prescan, ivm-walk.c ivm_jump).
+// Stores through pointers ( ! , w ) ] m ) are assumed never to hit mem[]
+// (no & of a variable), so they keep what is known about ACC.
+// An op that calls none of these is reported ("ACC not declared").
+enum { ACC_AX, ACC_PEND, ACC_LOST };
+static uchar acc_at, acc_hk, acc_s;
+static word  acc_k;
+static uchar lc_acc_said;   // acc_* calls by the current op
+static uchar lc_op;         // current op (messages)
+static word  lc_bc;         // its bytecode pc
+static uchar *lc_lbl;       // label bitmap, one bit per bytecode pc
 
-// known, already emitted
-static void kc_set(word v)  { lc_kc = 1; lc_kv = v; }
-// known, emit lazily
-static void kc_load(word v) { lc_kc = 1; lc_kv = v; lc_kp = 1; }
-
-static void kc_slot(uchar s) { if (is_const(s)) kc_set(const_val(s)); }
-
-static void load_slot_lazy(uchar s) {
-  if (is_const(s)) kc_load(const_val(s)); else emit_load_slot(s);
+static int is_label(word bc) {
+  return lc_lbl && (lc_lbl[bc >> 3] & (1 << (bc & 7)));
 }
 
-// Is bc a pending forward-jump target? (ACC state is unknown there.)
-// Backward targets are loop tops right after 'i', which clears the state.
-static int is_fwd_target(word bc) {
-  word k;
-  for (k = 0; k < lc_nfix; k++)
-    if (lc_fix[k].bc_target == bc) return 1;
-  return 0;
+// emit a pending load (no message if lost)
+static void acc_flush(void) {
+  if (acc_at == ACC_PEND) {
+    if (acc_hk) emit_load_const(acc_k); else emit_load_slot(acc_s);
+    acc_at = ACC_AX;
+  }
 }
+static void acc_need(void) {
+  lc_acc_said++;
+  if (acc_at == ACC_LOST) {
+    printf("%%JIT: '%c' at bc %u needs ACC, but it was lost\n",
+      lc_op, (unsigned)lc_bc);
+    acc_at = ACC_AX;
+  }
+  acc_flush();
+}
+static void acc_keep(void) { lc_acc_said++; }
+static void acc_drop(void) {
+  lc_acc_said++;
+  acc_at = ACC_LOST; acc_hk = 0; acc_s = 0xff;
+}
+static void acc_lost(void) { acc_drop(); }
+static void acc_ax(void) {
+  lc_acc_said++;
+  acc_at = ACC_AX; acc_hk = 0; acc_s = 0xff;
+}
+static void acc_ax_slot(uchar s) {
+  acc_ax();
+  acc_s = s;
+  if (is_const(s)) { acc_hk = 1; acc_k = const_val(s); }
+}
+static void acc_pk(word v) {
+  lc_acc_said++;
+  acc_at = ACC_PEND; acc_hk = 1; acc_k = v; acc_s = 0xff;
+}
+static void acc_ps(uchar s) {
+  lc_acc_said++;
+  if (acc_at == ACC_AX && acc_s == s) return;     // already in AX
+  if (is_const(s)) { acc_pk(const_val(s)); return; }
+  acc_at = ACC_PEND; acc_hk = 0; acc_s = s;
+}
+static void acc_write(uchar s) {
+  lc_acc_said++;
+  if (acc_s != s) return;
+  if (acc_at == ACC_PEND && !acc_hk) acc_flush();  // old mem[s] into AX
+  acc_s = 0xff;
+}
+static void acc_label(void) {
+  acc_flush();
+  acc_at = ACC_AX; acc_hk = 0; acc_s = 0xff;
+}
+
+// next op (at bc) does not read ACC and is not a label: ACC is dead, so
+// a KEEP op needn't save it (ivm-walk.c contract: "- SLOT/NEW/UNDEF")
+static int acc_dead(const uchar *c, word bc, word len) {
+  uchar op = c[bc];
+  if (bc >= len || is_label(bc)) return 0;
+  return op < 32 || (op != 'n' && strchr("09Q12345678@r'l([KLCUIJ;i", op));
+}
+
+// lo / hi byte of a pending ACC (const or slot) into A: LDA #k / LDA slot
+static void emit_lda_pend(uchar hi) {
+  if (acc_hk) em2(LDAN, (uchar)(hi ? acc_k >> 8 : acc_k));
+  else        emop2(LDA, hi ? slothi(acc_s) : slotlo(acc_s));
+}
+
+// mem[s] usable as a zero-page pointer: (zp),Y straight on the slot
+static int ptr_zp(uchar s) { return slotlo(s) < 0xff; }
 
 static int is_fn_entry(word bc) {
   word k;
@@ -777,10 +856,6 @@ word ivm_jit(const uchar *code, word code_len,
   const uchar *p, *end;
   word i, bc_pc;
   uchar op;
-  uchar kp;                     // ...and its load still pending (not emitted)?
-  uchar kc;                     // ACC known constant before this op?
-  word  kv;                     // ...and its value
-  uchar ks;                     // AX == mem[ks] before this op (0xff no)
   #ifdef JIT_TRACE
   word ostart;
   #endif
@@ -793,9 +868,9 @@ word ivm_jit(const uchar *code, word code_len,
   lc_map = map; lc_mapn = map_n; lc_mem = mem_base;
   lc_nfix = 0;
   lc_nloop = 0;
-  lc_ks = 0xff; lc_nksa = 0;
+  lc_nksa = 0;
   lc_err = 0;
-  lc_kc = 0; lc_kp = 0;
+  acc_at = ACC_AX; acc_hk = 0; acc_s = 0xff;
   lc_out_org = out_org;
   lc_ncall = ncall;
   lc_fbase = frame_base;
@@ -804,6 +879,25 @@ word ivm_jit(const uchar *code, word code_len,
 
   for (i = 0; i < code_len; i++)
     map[i] = 0xffff;
+
+  // labels: every jump target, loop body starts (n jumps there), function
+  // entries and main's trampoline. 'i' / 'n' rel are not used by the JIT.
+  lc_lbl = (uchar *)calloc((code_len >> 3) + 1, 1);
+  if (lc_lbl) {
+    word t, n;
+    #define LBL(x) if ((x) < code_len) lc_lbl[(x) >> 3] |= (uchar)(1 << ((x) & 7))
+    for (i = 0; i < code_len; i += n) {
+      n = ivm_oplen(code + i);
+      if (!n) n = 1;
+      if (code[i] == 'i') { LBL(i + 4); continue; }
+      if (code[i] == 'n') continue;
+      t = ivm_jump(code + i, i);
+      if (t != 0xffff) LBL(t);
+    }
+    for (i = 0; vec_bc && i < ncall; i++) LBL(vec_bc[i]);
+    LBL(lc_main_bc);
+    #undef LBL
+  }
 
   // NOP until odd absolute address
   while (((out_org + lc_at) & 1) == 0)
@@ -820,29 +914,19 @@ word ivm_jit(const uchar *code, word code_len,
   p = code;
   end = code + code_len;
 
+  #ifdef JIT_TRACE
   ostart = lc_at;
-  
+  #endif
+
   while (p < end) {
     bc_pc = (word)(p - code);
 
-    // state left by the previous op; default for this op: unknown after
-    kc = lc_kc; kv = lc_kv; kp = lc_kp; lc_kc = 0; lc_kp = 0;
-    ks = lc_ks; lc_ks = 0xff;
-
-    // a label (jump target / function entry) here: ACC is not what the
-    // previous op left on every path
-    if (kc && (is_fwd_target(bc_pc) || is_fn_entry(bc_pc))) kc = 0;
-
-    // emit the deferred constant load unless ')' consumes it itself.
-    // Done BEFORE map[bc_pc] so jumps to this op do not run it.
-    if (kp && !(kc && (code[bc_pc] == ')' || code[bc_pc] == ']'))) {
-      emit_load_const(kv);
-      #ifdef JIT_TRACE
-        // Not sure I like the duplication, lol
-        printf("------- deferred const load ------\n");
-        disasm((char *)(lc_out + ostart), (char *)(lc_out + lc_at), 0);
-        ostart = lc_at;
-      #endif
+    // a label here: ACC is not what the previous op left on every path.
+    // A pending load is emitted BEFORE map[bc_pc]: jumps here skip it.
+    if (is_label(bc_pc)) {
+      acc_label();
+      for (i = 0; i < lc_nksa; i++)      // loop body start: AX = loop var
+        if (lc_ksa[i].bc == bc_pc) { acc_ax_slot(lc_ksa[i].slot); break; }
     }
 
     // Catch function entries (?)
@@ -862,6 +946,7 @@ word ivm_jit(const uchar *code, word code_len,
           lc_cur_frame = frame_base[i];
           // first in function: mem[fp+FR_ACC] = AX (incoming arg / ACC home)
           emit_store_slot((uchar)(lc_cur_frame + FR_ACC));
+          acc_ax_slot((uchar)(lc_cur_frame + FR_ACC));
           break;
         }
       }
@@ -869,14 +954,15 @@ word ivm_jit(const uchar *code, word code_len,
 
     // NEXT op
     op = *p++;
+    lc_op = op; lc_bc = bc_pc; lc_acc_said = 0;
 
     #ifdef JIT_TRACE
       printf("------- %02x '%c' %02x %02x %02x %02x ------\n",
         op, isprint(op) ? op : ' ', p[0], p[1], p[2], p[3]);
     #endif
 
-    // 0..31: fast load mem[op] (nothing if AX already holds it)
-    if (op < 32) { if (op != ks) load_slot_lazy(op); continue; }
+    // 0..31: fast load mem[op] (lazily; nothing if AX already holds it)
+    if (op < 32) { acc_ps(op); goto report; }
 
     // hibit: vector call ($C0+) or zjp
     if (op & 0x80) {
@@ -887,6 +973,7 @@ word ivm_jit(const uchar *code, word code_len,
         //   CMP #0; BNE skip; CPX #0; BEQ dest; skip:
         word dest = (word)((p - code) + (op & 0x3f));
         word fx;
+        acc_need();                      // in, KEEP
         em2(CMPN, 0); fx = emrel(BNE);
         em2(CPXN, 0); emjump(BEQ, dest);
         empatch(fx);
@@ -896,6 +983,7 @@ word ivm_jit(const uchar *code, word code_len,
         // One byte vector call.
         // Only vectors that exist in the call table are real calls.
         uchar v = (uchar)(op - 0xC0);
+        acc_need();                      // arg in AX -> result in AX
         if (v < lc_ncall) {
           word dest = 0;
           if (lc_vecmark + v * 2 + 1 < lc_max)
@@ -918,6 +1006,7 @@ word ivm_jit(const uchar *code, word code_len,
           }
           printf("\n");
         }
+        acc_ax();
 
       }
       goto report;
@@ -927,43 +1016,76 @@ word ivm_jit(const uchar *code, word code_len,
     #define PAR (*p++)
 
     switch (op) {
-    // control
-    case 'q': em(RTS); break;
+    // control: q / X return ACC, Q returns 0, ; the return value cell
+    case 'q': case 'X': acc_need(); em(RTS); acc_ax(); break;
+    case 'Q': acc_drop(); emit_load0(); em(RTS); acc_ax(); break;
+    case ';':
+      acc_drop();
+      emit_load_slot((uchar)(lc_cur_frame + 1));   // FR_VAL
+      em(RTS);
+      acc_ax();
+      break;
 
-    // returns
-    case 'Q': emit_load0(); // fall into return
-    case 'X': case ';': em(RTS); break;
-
-    // constants
-    case '0': kc_load(0); break;
-    case '9': kc_load(0xffff); break;
+    // constants: loaded only if an op needs them in AX
+    case '0': acc_pk(0); break;
+    case '9': acc_pk(0xffff); break;
 
     // load/store
-    case 'L': { uchar s = PAR; if (s != ks) load_slot_lazy(s); break; }
-    case 'S': emit_store_slot(PAR); break;
-    case 'Z': emit_load0(); emit_store_slot(PAR); break;
+    case 'L': acc_ps(PAR); break;
+    case 'S': {                                    // in, KEEP (+SLOT)
+      uchar s = PAR;
+      acc_need();
+      if (acc_s != s) { emit_store_slot(s); acc_s = s; }  // else: already
+      break;
+    }
+    case 'Z': {                                    // KEEP: AX untouched
+      uchar s = PAR;
+      acc_write(s);
+      em2(LDYN, 0); emop2(STY, slotlo(s)); emop2(STY, slothi(s));
+      break;
+    }
 
     // frame args: fixed addresses from frame_base (no runtime fp)
     // '8' = first arg / ACC home at fp+FR_ACC
     // '1'..'7' = fp+FR_ACC+(op-'0')
-    case '8': emit_load_slot((uchar)(lc_cur_frame + FR_ACC)); break;
+    case '8': acc_ps((uchar)(lc_cur_frame + FR_ACC)); break;
     case '1': case '2': case '3': case '4':
     case '5': case '6': case '7':
-      emit_load_slot((uchar)(lc_cur_frame + FR_ACC + (op - '0')));
+      acc_ps((uchar)(lc_cur_frame + FR_ACC + (op - '0')));
       break;
 
-    // arith / logic (emit_lohiop)
-    case '+': em(CLC); emit_lohiop(ADC, PAR); break;
-    case '-': em(SEC); emit_lohiop(SBC, PAR); break;
-    case '&':          emit_lohiop(AND_, PAR); break;
-    case '|':          emit_lohiop(ORA, PAR); break;
-    case '^':          emit_lohiop(EOR, PAR); break;
+    // arith / logic: in, NEW
+    case '+': case '-': case '&': case '|': case '^': {
+      uchar s = PAR;
+      uchar ins = op == '+' ? ADC : op == '-' ? SBC : op == '&' ? AND_ :
+                  op == '|' ? ORA : EOR;
+      if (acc_at == ACC_PEND && acc_hk && is_const(s)) {
+        // const OP const: fold
+        word a = acc_k, b = const_val(s);
+        acc_pk((word)(op == '+' ? a + b : op == '-' ? a - b :
+                      op == '&' ? (a & b) : op == '|' ? (a | b) : (a ^ b)));
+        break;
+      }
+      if (op == '+') em(CLC); else if (op == '-') em(SEC);
+      if (acc_at == ACC_PEND) {
+        // load each byte straight from where ACC is: no LDX / TXA
+        emit_lda_pend(0); emit_alub(ins, s, 0); em(TAY);
+        emit_lda_pend(1); emit_alub(ins, s, 1); em(TAX); em(TYA);
+        acc_ax();
+        break;
+      }
+      acc_need();
+      emit_lohiop(ins, s);
+      acc_ax();
+      break;
+    }
 
     // compares → boolean ACC (0 or 1), X = 0.  UNSIGNED.
     // '=': CMP lo, CPX hi; 14-16 B (+1 per non-zp operand)
     case '=': {
       uchar s = PAR;
       word fx1, fx2, fx3;
+      acc_need();
       emit_alub(CMP, s, 0); fx1 = emrel(BNE);      // lo differs → ne
       emit_alub(CPX, s, 1); fx2 = emrel(BNE);      // hi differs → ne
       em2(LDAN, 1);         fx3 = emrel(BNE);      // Z=0 after LDA #1: always
@@ -971,28 +1093,34 @@ word ivm_jit(const uchar *code, word code_len,
       em2(LDAN, 0);
       empatch(fx3);
       em2(LDXN, 0);
+      acc_ax();
       break;
     }
     // '<': ACC < mem  <=>  borrow in ACC - mem  <=>  !C
     case '<': {
       uchar s = PAR;
+      acc_need();
       emit_alub(CMP, s, 0); em(TXA);               // C from lo compare
       emit_alub(SBC, s, 1);                        // C = ACC >= mem
       em2(LDAN, 0); em(TAX); em(ROLA); em2(EORN, 1);   // A = !C, X = 0
+      acc_ax();
       break;
     }
     // '>': ACC > mem  <=>  mem - ACC borrows  <=>  !C of (mem + ~ACC + 1)
     case '>': {
       uchar s = PAR;
+      acc_need();
       em(SEC); em2(EORN, 0xff); emit_alub(ADC, s, 0);
       em(TXA); em2(EORN, 0xff); emit_alub(ADC, s, 1);
       em2(LDAN, 0); em(TAX); em(ROLA); em2(EORN, 1);   // A = !C, X = 0
+      acc_ax();
       break;
     }
 
     // * / % — helpers as in ivm-vm.asm (ACC op PAR); TODO: PARAX into zp_par
     case '*': case '/': case '%': {
       uchar s = PAR;
+      acc_need();
       emop2(STA, ACC_ADR);
       emop2(STX, (word)(ACC_ADR + 1));
       emit_load_slot(s);
@@ -1003,72 +1131,129 @@ word ivm_jit(const uchar *code, word code_len,
       else ema(JSR, REF(opmod));
       emop2(LDA, ACC_ADR);
       emop2(LDX, (word)(ACC_ADR + 1));
+      acc_ax();
       break;
     }
 
     // I: INC lo; BNE skip; INC hi; reload ACC
-    case 'I': {
+    case 'I': {                                    // -, SLOT
       uchar s = PAR;
       word fx;
+      acc_drop();
       emop2(INC_, slotlo(s));
       fx = emrel(BNE);
       emop2(INC_, slothi(s));
       empatch(fx);
-      load_slot_lazy(s);
+      acc_ps(s);
       break;
     }
     // J: LDA lo; BNE skip; DEC hi; DEC lo; reload ACC
-    case 'J': {
+    case 'J': {                                    // -, SLOT
       uchar s = PAR;
       word fx;
+      acc_drop();
       emop2(LDA, slotlo(s));
       fx = emrel(BNE);
       emop2(DEC_, slothi(s));
       empatch(fx);
       emop2(DEC_, slotlo(s));
-      load_slot_lazy(s);
+      acc_ps(s);
       break;
     }
 
-    // I/O — same symbols as ivm-vm.asm
-    case 'N': em2(LDAN, 10); ema(JSR, REF(opputchar)); break;
-    case 'E': ema(JSR, REF(opputchar)); break;  // emit ACC as char
-    case '.':
+    // I/O — same symbols as ivm-vm.asm. putchar keeps A X Y.
+    case 'N': case 'O': {                          // KEEP
+      uchar c = (uchar)(op == 'N' ? 10 : PAR);
+      uchar save = acc_at == ACC_AX && !acc_dead(code, (word)(p - code), code_len);
+      if (save) em(TAY);                           // pending: nothing to save
+      em2(LDAN, c); ema(JSR, REF(opputchar));
+      if (save) em(TYA); else if (acc_at == ACC_AX) acc_lost();
+      if (!lc_acc_said) acc_keep();
+      break;
+    }
+    case 'E': acc_need(); ema(JSR, REF(opputchar)); break;  // ACC as char
+    case '.': case 'P':                            // in, KEEP (AX = ivm_acc)
+      acc_need();
       emop2(STA, ACC_ADR);
       emop2(STX, (word)(ACC_ADR + 1));
-      ema(JSR, REF(opputnum));
+      ema(JSR, op == '.' ? REF(opputnum) : REF(opputs));
       break;
-    case 'P':
-      emop2(STA, ACC_ADR);
-      emop2(STX, (word)(ACC_ADR + 1));
-      ema(JSR, REF(opputs));
-      break;
-    case 'O': em2(LDAN, PAR); ema(JSR, REF(opputchar)); break;
 
     // heap
-    case 'M': { uchar s = PAR; ema(JSR, REF(opmalloc)); emit_store_slot(s); break; }
-    case 'F': { uchar s = PAR; emit_load_slot(s); ema(JSR, REF(opfree)); emit_load0(); emit_store_slot(s); break; }
-
-    // byte slot
-    case 'l': { uchar s = PAR; emop2(LDA, slotlo(s)); em2(LDXN, 0); break; } // ACC = lo(mem[s])
-    case 's': { uchar s = PAR; emop2(STA, slotlo(s)); em2(LDAN, 0); emop2(STA, slothi(s)); break; }
-
-    case 'r': {
+    case 'M': {                                    // in (bytes), SLOT
       uchar s = PAR;
-      emit_load_slot(s); emit_ax_to_tmp1();
-      em2(LDYN, 0); em2(LDAIY, tmp1); em2(LDXN, 0);
+      acc_need();
+      acc_write(s);
+      ema(JSR, REF(opmalloc)); emit_store_slot(s);
+      acc_ax_slot(s);
       break;
     }
-    case 'w': {
+    case 'F': {                                    // KEEP
+      uchar s = PAR, save;
+      acc_write(s);
+      save = acc_at == ACC_AX && !acc_dead(code, (word)(p - code), code_len);
+      if (save) { em(PHA); em(TXA); em(PHA); }
+      emit_load_slot(s); ema(JSR, REF(opfree));
+      em2(LDYN, 0); emop2(STY, slotlo(s)); emop2(STY, slothi(s));
+      if (save) { em(PLA); em(TAX); em(PLA); }
+      if (save || acc_at != ACC_AX) acc_keep(); else acc_lost();
+      break;
+    }
+
+    // byte slot
+    case 'l': {                                    // NEW = lo(mem[s])
       uchar s = PAR;
-      em(TAY); emit_load_slot(s); emit_ax_to_tmp1();
-      em(TYA); em2(LDYN, 0); em2(STAIY, tmp1);
+      acc_drop();
+      emop2(LDA, slotlo(s)); em2(LDXN, 0);
+      acc_ax();
+      break;
+    }
+    case 's': {                                    // in, KEEP: AX untouched
+      uchar s = PAR;
+      acc_need();
+      acc_write(s);
+      emop2(STA, slotlo(s)); em2(LDYN, 0); emop2(STY, slothi(s));
+      break;
+    }
+
+    // pointer ops. With -z the pointer slot itself is a zp pointer:
+    // (slot),Y, no copy to tmp1/tmp2.
+    case 'r': {                                    // NEW = *(uchar*)mem[s]
+      uchar s = PAR;
+      acc_drop();
+      if (ptr_zp(s)) em2(LDYN, 0), em2(LDAIY, (uchar)slotlo(s));
+      else {
+        emit_load_slot(s); emit_ax_to_tmp1();
+        em2(LDYN, 0); em2(LDAIY, tmp1);
+      }
+      em2(LDXN, 0);
+      acc_ax();
+      break;
+    }
+    case 'w': {                                    // in, KEEP
+      uchar s = PAR;
+      acc_need();
+      if (ptr_zp(s)) { em2(LDYN, 0); em2(STAIY, (uchar)slotlo(s)); break; }
+      em(PHA);
+      emop2(LDA, slotlo(s)); em2(STAZ, tmp1);
+      emop2(LDA, slothi(s)); em2(STAZ, tmp2);
+      em(PLA); em2(LDYN, 0); em2(STAIY, tmp1);
       break;
     }
 
     // ': ACC = *(uchar*)ptr; ptr++   (post-increment byte read)
-    case '\'': {
+    case '\'': {                                   // NEW
       uchar s = PAR;
+      word fx;
+      acc_drop();
+      if (ptr_zp(s)) {
+        em2(LDYN, 0); em2(LDAIY, (uchar)slotlo(s));
+        emop2(INC_, slotlo(s)); fx = emrel(BNE); emop2(INC_, slothi(s));
+        empatch(fx);
+        em2(LDXN, 0);
+        acc_ax();
+        break;
+      }
       emit_load_slot(s); emit_ax_to_tmp1();
       em2(LDYN, 0); em2(LDAIY, tmp1); em(PHA);
       em(CLC);
@@ -1077,72 +1262,81 @@ word ivm_jit(const uchar *code, word code_len,
       em2(LDAZ, tmp1); emop2(STA, slotlo(s));
       em2(LDAZ, tmp2); emop2(STA, slothi(s));
       em(PLA); em2(LDXN, 0);
+      acc_ax();
       break;
     }
     // ,: *(uchar*)ptr = ACC; ptr++
-    case ',': {
+    case ',': {                                    // in, KEEP
       uchar s = PAR;
-// TODO: if in zeropage should be easier code! no need copy and use tmp1!
-//   any other places that benefit from ZP?
-      em(TAY); emit_load_slot(s); emit_ax_to_tmp1();
-      em(TYA); em2(LDYN, 0); em2(STAIY, tmp1);
-      em(CLC);
-      em2(LDAZ, tmp1); em2(ADCN, 1); em2(STAZ, tmp1);
-      em2(LDAZ, tmp2); em2(ADCN, 0); em2(STAZ, tmp2);
-      em2(LDAZ, tmp1); emop2(STA, slotlo(s));
-      em2(LDAZ, tmp2); emop2(STA, slothi(s));
+      word fx;
+      acc_need();
+      acc_write(s);
+      if (ptr_zp(s)) {
+        em2(LDYN, 0); em2(STAIY, (uchar)slotlo(s));
+      } else {
+        em(PHA);
+        emop2(LDA, slotlo(s)); em2(STAZ, tmp1);
+        emop2(LDA, slothi(s)); em2(STAZ, tmp2);
+        em(PLA); em2(LDYN, 0); em2(STAIY, tmp1);
+      }
+      emop2(INC_, slotlo(s)); fx = emrel(BNE); emop2(INC_, slothi(s));
+      empatch(fx);
       break;
     }
 
     // @: ACC = *(word*)mem[s]
-    case '@': {
+    case '@': {                                    // NEW
       uchar s = PAR;
-// TODO: if in zeropage should be easier code! no need copy and use tmp1!
-//   any other places that benefit from ZP?
-      emit_load_slot(s); emit_ax_to_tmp1();
-      em2(LDYN, 0); em2(LDAIY, tmp1); em(PHA);
-      em(INY); em2(LDAIY, tmp1); em(TAX); em(PLA);
+      acc_drop();
+      if (ptr_zp(s)) {
+        em2(LDYN, 1); em2(LDAIY, (uchar)slotlo(s)); em(TAX);
+        em(DEY);      em2(LDAIY, (uchar)slotlo(s));
+      } else {
+        emit_load_slot(s); emit_ax_to_tmp1();
+        em2(LDYN, 0); em2(LDAIY, tmp1); em(PHA);
+        em(INY); em2(LDAIY, tmp1); em(TAX); em(PLA);
+      }
+      acc_ax();
       break;
     }
     // !: *(word*)mem[s] = ACC
-    case '!': {
+    case '!': {                                    // in, KEEP
       uchar s = PAR;
-      // AX=value, need *mem[s]=AX.  Save value, load ptr to tmp1, store via (tmp1),Y
-      em(TAY);                             // lo in Y
-      em(TXA); em(PHA);                    // hi on stack
-      em(TYA); em(PHA);                    // lo on stack
-// TODO: if in zeropage should be easier code! no need copy and use tmp1!
-//   any other places that benefit from ZP?
-      emit_load_slot(s); emit_ax_to_tmp1();
-      em(PLA); em2(LDYN, 0); em2(STAIY, tmp1);
-      em(INY); em(PLA); em2(STAIY, tmp1);
+      uchar zp = (uchar)(ptr_zp(s) ? slotlo(s) : tmp1);
+      acc_need();
+      em(PHA);
+      if (!ptr_zp(s)) {
+        emop2(LDA, slotlo(s)); em2(STAZ, tmp1);
+        emop2(LDA, slothi(s)); em2(STAZ, tmp2);
+      }
+      em(TXA); em2(LDYN, 1); em2(STAIY, zp);
+      em(PLA); em(DEY);      em2(STAIY, zp);
       break;
     }
 
     // (: ACC = ((word*)base)[idx]
-    case '(': {
+    case '(': {                                    // NEW
       uchar base = PAR, idx = PAR;
+      acc_drop();
       emit_elem_ptr(base, idx);            // tmp1/tmp2 = &base[idx]
       // load word: hi first, then lo, no stack traffic
       em2(LDYN, 1); em2(LDAIY, tmp1); em(TAX);
       em(DEY);      em2(LDAIY, tmp1);
+      acc_ax();
       break;
     }
-    // ): ((word*)base)[idx] = ACC   (ACC preserved)
-    case ')': {
+    // ): ((word*)base)[idx] = ACC
+    case ')': {                                    // in, KEEP
       uchar base = PAR, idx = PAR;
-      if (kc) {
-        // ACC is a known constant (its load may not even be emitted:
-        // see top of loop): nothing to save, store immediates. Ends with
-        // AX == kv either way.
-        uchar lo = (uchar)(kv & 0xff), hi = (uchar)(kv >> 8);
+      if (acc_at == ACC_PEND) {
+        // ACC still where it is (const / slot): store its bytes from there,
+        // it stays pending
         emit_elem_ptr(base, idx);          // tmp1/tmp2 = &base[idx]
-        em2(LDYN, 1); em2(LDAN, hi); em2(STAIY, tmp1); em(TAX);   // X = hi
-        em(DEY);
-        if (lo != hi) em2(LDAN, lo);       // A = lo (already, if lo == hi)
-        em2(STAIY, tmp1);
-        kc_set(kv);                        // AX == kv still holds
+        em2(LDYN, 1); emit_lda_pend(1); em2(STAIY, tmp1);
+        em(DEY);      emit_lda_pend(0); em2(STAIY, tmp1);
+        acc_keep();
       } else {
+        acc_need();
         em(PHA); em(TXA); em(PHA);         // save ACC: lo, then hi
         emit_elem_ptr(base, idx);          // tmp1/tmp2 = &base[idx]
         // pop hi → store, pop lo → store; AX ends up = original ACC
@@ -1153,23 +1347,24 @@ word ivm_jit(const uchar *code, word code_len,
     }
 
     // [ bb ii : ACC = ((uchar*)base)[idx]
-    case '[': {
+    case '[': {                                    // NEW
       uchar base = PAR, idx = PAR;
-      if (idx == ks) emit_belem_ptr_ax(base);   // index already in AX
-      else           emit_belem_ptr(base, idx);
+      if (acc_at == ACC_AX && acc_s == idx) emit_belem_ptr_ax(base);  // in AX
+      else                                  emit_belem_ptr(base, idx);
+      acc_drop();
       em2(LDAIY, tmp1); em2(LDXN, 0);
+      acc_ax();
       break;
     }
-    // ] bb ii : ((uchar*)base)[idx] = ACC   (ACC preserved)
-    case ']': {
+    // ] bb ii : ((uchar*)base)[idx] = ACC
+    case ']': {                                    // in, KEEP
       uchar base = PAR, idx = PAR;
-      if (kc) {                            // const: load may not be emitted
-        uchar lo = (uchar)(kv & 0xff), hi = (uchar)(kv >> 8);
+      if (acc_at == ACC_PEND) {            // store from where ACC is
         emit_belem_ptr(base, idx);
-        em2(LDAN, lo); em2(STAIY, tmp1);
-        if (lo == hi) em(TAX); else em2(LDXN, hi);
-        kc_set(kv);
+        emit_lda_pend(0); em2(STAIY, tmp1);
+        acc_keep();
       } else {
+        acc_need();
         em(PHA);                           // X untouched by the helper
         emit_belem_ptr(base, idx);
         em(PLA); em2(STAIY, tmp1);
@@ -1178,27 +1373,31 @@ word ivm_jit(const uchar *code, word code_len,
     }
       
     // ?: ACC = !ACC
-    case '?':
+    case '?':                                      // in, NEW
+      acc_need();
       em2(STXZ, tmp1); em2(ORAZ, tmp1);
       em2(BEQ, 6); em2(LDAN, 0); em2(LDXN, 0); em2(BEQ, 4);
       em2(LDAN, 1); em2(LDXN, 0);
+      acc_ax();
       break;
     // ~: ACC = ~ACC
-    case '~':
+    case '~':                                      // in, NEW
+      if (acc_at == ACC_PEND && acc_hk) { acc_pk((word)~acc_k); break; }
+      acc_need();
       em2(EORN, 0xff); em(TAY); em(TXA); em2(EORN, 0xff); em(TAX); em(TYA);
+      acc_ax();
       break;
 
-    // G: if ((int16_t)ACC > 0) pc += rel8
+    // G: if ((int16_t)ACC > 0) pc += rel8     (in, KEEP: AX not touched)
     case 'G': {
       word rel = PAR;
       word dest = (word)((p - code) + rel);
-      word fn, fz;
-      // sign must come from the HIGH byte only (ORA of lo|hi would put
-      // lo bit 7 into N)
-      em2(STAZ, tmp1); em(TXA);
-      fn = emrel(BMI);             // negative → skip
-      em2(ORAZ, tmp1);             // Z if hi|lo == 0
-      fz = emrel(BEQ);             // zero → skip
+      word fn, fgo, fz;
+      acc_need();
+      em2(CPXN, 0x80); fn = emrel(BCS);   // negative -> no jump
+      em(TAY);         fgo = emrel(BNE);  // lo != 0: > 0 (Y is scratch)
+      em2(CPXN, 0);    fz = emrel(BEQ);   // == 0 -> no jump
+      empatch(fgo);
       emjump(JMP, dest);
       empatch(fn); empatch(fz);
       break;
@@ -1208,31 +1407,43 @@ word ivm_jit(const uchar *code, word code_len,
       word rel = PAR;
       word dest = (word)((p - code) - rel);
       uchar k;
+      acc_flush();                         // the label there expects AX
+      acc_keep();
       // back to a loop body start that expects AX = its loop var
       for (k = 0; k < lc_nksa; k++)
-        if (lc_ksa[k].bc == dest) { emit_load_slot(lc_ksa[k].slot); break; }
+        if (lc_ksa[k].bc == dest) {
+          if (!(acc_at == ACC_AX && acc_s == lc_ksa[k].slot))
+            emit_load_slot(lc_ksa[k].slot);
+          break;
+        }
       emjump(JMP, dest);
+      acc_ax();
       break;
     }
 
-    // " inline string — helper prints until 0
+    // " inline string — helper prints until 0 (keeps A X)
     case '"':
       ema(JSR, REF(opprintstr));
       while (p < end && *p) { em(*p); p++; }
       em(0);
       if (p < end) p++;
+      acc_keep();
       break;
 
-    case ' ': break; // spacer
-    case 127: break; // DEL: peephole filler (squeezed out by ivm-gen)
+    case ' ': acc_keep(); break; // spacer
+    case 127: acc_keep(); break; // DEL: peephole filler (squeezed out by ivm-gen)
 
     // C: copy mem[s] -> mem[d], result in ACC. Two slot operands.
-    case 'C': {
+    case 'C': {                                    // -, SLOT (d)
       uchar d = PAR;
       uchar s = PAR;
-      emit_load_slot(s);
+      if (!(acc_at == ACC_AX && acc_s == s)) {
+        acc_drop();
+        emit_load_slot(s);
+      }
       emit_store_slot(d);
-      kc_slot(s);
+      acc_ax_slot(d);
+      if (is_const(s)) { acc_hk = 1; acc_k = const_val(s); }
       break;
     }
 
@@ -1248,8 +1459,7 @@ word ivm_jit(const uchar *code, word code_len,
       uchar slot = p[0], ax;
       ax = (b < end) && (b[0] == slot || (b[0] == 'L' && b[1] == slot) ||
                          (b[0] == '[' && b[2] == slot));
-      if (ax) {
-        lc_ks = slot;              // body starts with AX = loop var
+      if (ax) {                    // body start: AX = loop var (loop top)
         if (lc_nksa < MAX_LOOPS * 2) {
           lc_ksa[lc_nksa].bc = (word)(bc_pc + 4);
           lc_ksa[lc_nksa].slot = slot;
@@ -1257,6 +1467,7 @@ word ivm_jit(const uchar *code, word code_len,
         }
       }
       p += 3;                      // slot lim skip: 'n' reads slot, lim
+      acc_lost();                  // -, UNDEF (the body start is a label)
       em(JMP);
       if (lc_nloop < MAX_LOOPS) {
         lc_loop[lc_nloop].ibc = bc_pc;
@@ -1279,6 +1490,7 @@ word ivm_jit(const uchar *code, word code_len,
       const uchar *ip = p - back;       // operand_pos - back + 1
       word ibc, fx;
       uchar k, ax = 0;
+      acc_lost();                  // -, UNDEF
       if (ip < code || *ip != 'i') {
         // can't find matching i; just consume
         break;
@@ -1303,17 +1515,22 @@ word ivm_jit(const uchar *code, word code_len,
       }
       // body = bc pc after the i (backward: short branch when it fits)
       emit_loop_test(ip[1], ip[2], (word)(ibc + 4), ax);
+      if (ax) acc_ax_slot(ip[1]);  // loop done: AX = the loop var
       break;
     }
 
     // U: mem[a] += mem[b]; ACC = result. Two slot operands.
-    case 'U': {
+    case 'U': {                                    // -, SLOT (a)
       uchar a = PAR;
       uchar b = PAR;
-      emit_load_slot(a);
+      if (!(acc_at == ACC_AX && acc_s == a)) {
+        acc_drop();
+        emit_load_slot(a);
+      }
       em(CLC);
       emit_lohiop(ADC, b);
       emit_store_slot(a);
+      acc_ax_slot(a);
       break;
     }
 
@@ -1323,6 +1540,7 @@ word ivm_jit(const uchar *code, word code_len,
       uchar skip = PAR;
       printf("%%Warning: unimpl op 'j' (slot %u skip %u) — skipping\n",
         slot, skip);
+      acc_lost();
       break;
     }
 
@@ -1333,6 +1551,11 @@ word ivm_jit(const uchar *code, word code_len,
       uchar ptr = PAR;
       uchar val = PAR;
       word fx;
+      // in (count), KEEP: the code below uses A X Y. A pending count stays
+      // pending (its source is unchanged), else it is lost.
+      uchar pend = (acc_at == ACC_PEND), phk = acc_hk, ps = acc_s;
+      word pk = acc_k;
+      acc_need();
 
 // 27 Bytes TODO: move out to subroutine, nothing is "special"
 
@@ -1361,6 +1584,8 @@ word ivm_jit(const uchar *code, word code_len,
       em(DEX);                            // 1
       em2(BPL, (uchar)-10);               // 2 → loop (Y==0: 256 bytes)
 
+      if (pend) { acc_at = ACC_PEND; acc_hk = phk; acc_k = pk; acc_s = ps; }
+      else acc_lost();
       break;
     }
 
@@ -1368,14 +1593,17 @@ word ivm_jit(const uchar *code, word code_len,
       printf("%%ERROR: unimpl op 0x%02X '%c' at bc %u — continuing\n",
         op, (op >= 32 && op < 127) ? op : '.',
         (unsigned)(p - code - 1));
+      acc_lost();
       break;
 
     }
 
     #undef PAR
 
-  report: ;
-    
+  report:
+    if (!lc_acc_said)
+      printf("%%JIT: '%c' at bc %u: ACC use not declared\n", op, (unsigned)bc_pc);
+
   #ifdef JIT_TRACE
     disasm((char *)(lc_out + ostart), (char *)(lc_out + lc_at), 0);
     ostart= lc_at;
@@ -1383,8 +1611,8 @@ word ivm_jit(const uchar *code, word code_len,
 
   }
 
-  // pending load at end of code
-  if (lc_kp) emit_load_const(lc_kv);
+  free(lc_lbl);
+  lc_lbl = NULL;
 
   if (lc_err) {
     printf("%%JIT: short branch out of range\n");
