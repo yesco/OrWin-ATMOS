@@ -5,7 +5,8 @@
   - lots of setup (clc+adc)
   - possibly use shared library?
 - saved 12 B! 364-356: 8 B: for (i = 0; i <= SIZE; i++) { 
-
+- 4 B: for should leave index in ACC
+- n duplicates the test
   
 
 

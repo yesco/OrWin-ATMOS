@@ -26,7 +26,7 @@ INSTRUCTIONS: Keeps this section but keep updated for status
 | Calls (vector table)     | **Done** — JMP + word table at start, JSR abs |
 | Call frame               | **Done** — fixed addresses from frame_base, AX stored at fp+FR_ACC on entry |
 | Compares `<` `=` `>`     | **Done** — boolean in ACC, UNSIGNED (needs testing) |
-| Loops `i` / `n` / `B` | **Present** — unsigned (carry), needs testing |
+| Loops `i` / `n` / `B` | **Present** — unsigned. Rotated: `i` = JMP to the test in `n` (patched there, lc_loop[]), one compare per loop. If the body starts by reading the loop var, the test leaves it in AX (lc_ks) and that load / `[` index is free; a `B` back to such a body start loads it first (lc_ksa[]) |
 | `G`                      | Legacy, to be addressed later |
 | `U`                      | Present |
 | `j` (down-loop)          | **Missing** — warns only |
@@ -568,7 +568,6 @@ static void emit_alub(uchar ins, uchar s, uchar hi) {
 // UNSIGNED 16-bit compare: C = (mem[lim] >= mem[slot]).
 // CMP on the low byte starts the carry chain (same as SEC;SBC, 1 byte
 // shorter), SBC on the high byte finishes it. Only A is clobbered.
-// Used by 'i' and 'n'.
 static void emit_lim_minus_slot(uchar lim, uchar slot) {
   if (is_const(lim)) {
     word v = const_val(lim);
@@ -582,6 +581,63 @@ static void emit_lim_minus_slot(uchar lim, uchar slot) {
     emop2(LDA, slothi(lim));
     emop2(SBC, slothi(slot));
   }
+}
+
+// for-loop test (in 'n' only, 'i' jumps to it): branch back to bytecode
+// pc body while mem[slot] <= lim, else fall through (loop done). UNSIGNED.
+// ax = 0: lim - slot (10 cycles), AX not touched.
+// ax = 1: the body starts by reading the loop var: AX = mem[slot] first,
+//   then CPX/CMP, which only read A and X (13-14 cycles, the body's load
+//   is free):  CPX hi; BNE t; CMP lo; t:   C = AX >= lim, Z = AX == lim
+//   Const lim: i <= lim  <=>  i < lim+1 (folded here): one BCC.
+static void emit_loop_test(uchar slot, uchar lim, word body, uchar ax) {
+  word fx;
+
+  if (!ax) {
+    emit_lim_minus_slot(lim, slot);
+    emjump(BCS, body);
+    return;
+  }
+  emit_load_slot(slot);
+  if (is_const(lim)) {
+    word v = const_val(lim);
+    if (v == 0xffff) { emjump(JMP, body); return; }   // always true
+    v++;
+    em2(CPXN, (uchar)(v >> 8)); fx = emrel(BNE);
+    em2(CMPN, (uchar)v);        empatch(fx);
+    emjump(BCC, body);
+  } else {
+    emop2(CPX, slothi(lim)); fx = emrel(BNE);
+    emop2(CMP, slotlo(lim)); empatch(fx);
+    emjump(BEQ, body);                                // == (Z only if hi ==)
+    emjump(BCC, body);                                // <
+  }
+}
+
+// open loops: 'i' emits "JMP test" with an empty operand, its 'n' patches
+// it (loops nest, so this is a stack). ibc = bytecode pc of the 'i'.
+#define MAX_LOOPS 8
+static struct { word ibc, at; uchar ax; } lc_loop[MAX_LOOPS];
+static uchar lc_nloop;
+
+// "AX == mem[slot]" at a loop body start: the body is only entered from the
+// test, which leaves the loop var in AX. lc_ks: AX holds mem[lc_ks] before
+// the next op (0xff = unknown), set by 'i' only. lc_ksa[]: those body
+// starts, so a 'B' jumping back to one (a while at the top of a for body)
+// loads the slot first and the assumption holds on that path too.
+static uchar lc_ks;
+static struct { word bc; uchar slot; } lc_ksa[MAX_LOOPS * 2];
+static uchar lc_nksa;
+
+// Byte element pointer like emit_belem_ptr, index already in AX
+static void emit_belem_ptr_ax(uchar base) {
+  em2(STAZ, tmp1);
+  em(TXA);
+  em(CLC);
+  emit_alub(ADC, base, 1);
+  em2(STAZ, tmp2);
+  if (is_const(base)) em2(LDYN, const_val(base));
+  else                emop2(LDY, slotlo(base));
 }
 
 // Word indexing address calculation
@@ -688,6 +744,7 @@ word ivm_jit(const uchar *code, word code_len,
   uchar kp;                     // ...and its load still pending (not emitted)?
   uchar kc;                     // ACC known constant before this op?
   word  kv;                     // ...and its value
+  uchar ks;                     // AX == mem[ks] before this op (0xff no)
   #ifdef JIT_TRACE
   word ostart;
   #endif
@@ -699,6 +756,8 @@ word ivm_jit(const uchar *code, word code_len,
   lc_out = out; lc_at = 0; lc_max = out_max;
   lc_map = map; lc_mapn = map_n; lc_mem = mem_base;
   lc_nfix = 0;
+  lc_nloop = 0;
+  lc_ks = 0xff; lc_nksa = 0;
   lc_err = 0;
   lc_kc = 0; lc_kp = 0;
   lc_out_org = out_org;
@@ -730,6 +789,7 @@ word ivm_jit(const uchar *code, word code_len,
 
     // state left by the previous op; default for this op: unknown after
     kc = lc_kc; kv = lc_kv; kp = lc_kp; lc_kc = 0; lc_kp = 0;
+    ks = lc_ks; lc_ks = 0xff;
     // a label (jump target / function entry) here: ACC is not what the
     // previous op left on every path
     if (kc && (is_fwd_target(bc_pc) || is_fn_entry(bc_pc))) kc = 0;
@@ -772,8 +832,8 @@ word ivm_jit(const uchar *code, word code_len,
 
     op = *p++;
 
-    // 0..31: fast load mem[op]
-    if (op < 32) { load_slot_lazy(op); continue; }
+    // 0..31: fast load mem[op] (nothing if AX already holds it)
+    if (op < 32) { if (op != ks) load_slot_lazy(op); continue; }
 
     // hibit: vector call ($C0+) or zjp
     if (op & 0x80) {
@@ -842,7 +902,7 @@ word ivm_jit(const uchar *code, word code_len,
     case '9': kc_load(0xffff); break;
 
     // load/store
-    case 'L': load_slot_lazy(PAR); break;
+    case 'L': { uchar s = PAR; if (s != ks) load_slot_lazy(s); break; }
     case 'S': emit_store_slot(PAR); break;
     case 'Z': emit_load0(); emit_store_slot(PAR); break;
 
@@ -1055,7 +1115,8 @@ word ivm_jit(const uchar *code, word code_len,
     // [ bb ii : ACC = ((uchar*)base)[idx]
     case '[': {
       uchar base = PAR, idx = PAR;
-      emit_belem_ptr(base, idx);
+      if (idx == ks) emit_belem_ptr_ax(base);   // index already in AX
+      else           emit_belem_ptr(base, idx);
       em2(LDAIY, tmp1); em2(LDXN, 0);
       break;
     }
@@ -1106,6 +1167,10 @@ word ivm_jit(const uchar *code, word code_len,
     case 'B': {
       word rel = PAR;
       word dest = (word)((p - code) - rel);
+      uchar k;
+      // back to a loop body start that expects AX = its loop var
+      for (k = 0; k < lc_nksa; k++)
+        if (lc_ksa[k].bc == dest) { emit_load_slot(lc_ksa[k].slot); break; }
       emjump(JMP, dest);
       break;
     }
@@ -1131,45 +1196,73 @@ word ivm_jit(const uchar *code, word code_len,
       break;
     }
 
-    // i: FOR slot lim skip
-    // if mem[slot] > mem[lim]: branch forward past body; else fall through.
+    // i: FOR slot lim skip -- rotated loop: the test is only in 'n'
+    //   i:    JMP test          (operand patched by the matching 'n')
+    //   body: ...               (AX = mem[slot] here, from the test)
+    //   n:    INC slot; test: LDA/LDX slot; CPX/CMP lim; Bcc body
+    //   exit:                   (falls out of the test: skip is not used)
     case 'i': {
-      uchar slot = PAR;
-      uchar lim  = PAR;
-      uchar skip = PAR;
-      word dest = (word)((p - code) + skip);
-      emit_lim_minus_slot(lim, slot);
-      emjump(BCC, dest);           // lim < slot (unsigned) → skip body
+      // does the body start by reading the loop var? (a load of it, or
+      // '[' with it as index): then the test leaves it in AX
+      const uchar *b = p + 3;
+      uchar slot = p[0], ax;
+      ax = (b < end) && (b[0] == slot || (b[0] == 'L' && b[1] == slot) ||
+                         (b[0] == '[' && b[2] == slot));
+      if (ax) {
+        lc_ks = slot;              // body starts with AX = loop var
+        if (lc_nksa < MAX_LOOPS * 2) {
+          lc_ksa[lc_nksa].bc = (word)(bc_pc + 4);
+          lc_ksa[lc_nksa].slot = slot;
+          lc_nksa++;
+        }
+      }
+      p += 3;                      // slot lim skip: 'n' reads slot, lim
+      em(JMP);
+      if (lc_nloop < MAX_LOOPS) {
+        lc_loop[lc_nloop].ibc = bc_pc;
+        lc_loop[lc_nloop].at  = lc_at;
+        lc_loop[lc_nloop].ax  = ax;
+        lc_nloop++;
+      } else
+        printf("%%JIT: loops nested too deep\n");
+      em(0); em(0);
       break;
     }
 
     // n: NEXT back
-    // increment the loop slot (from the matching i) and branch back
-    // if still <= lim; else fall through.
+    // increment the loop slot (from the matching i), then the loop test
+    // ('i' jumps here too): back to the body while <= lim, else fall out.
     case 'n': {
       uchar back = PAR;
       // the i is `back` bytes before this operand
       // i layout: slot, lim, skip — we need those
       const uchar *ip = p - back;       // operand_pos - back + 1
-      uchar slot, lim;
-      word loop_top;
-      word fx;
+      word ibc, fx;
+      uchar k, ax = 0;
       if (ip < code || *ip != 'i') {
         // can't find matching i; just consume
         break;
       }
-      slot = ip[1];
-      lim  = ip[2];
-      loop_top = (word)((ip + 4) - code);  // bc pc of body start
+      ibc = (word)(ip - code);
       // increment slot
-      emop2(INC_, slotlo(slot));
+      emop2(INC_, slotlo(ip[1]));
       fx = emrel(BNE);
-      emop2(INC_, slothi(slot));
+      emop2(INC_, slothi(ip[1]));
       empatch(fx);
-      // slot <= lim (unsigned)  <=>  C set → loop
-      // (backward: distance known, short branch when it fits)
-      emit_lim_minus_slot(lim, slot);
-      emjump(BCS, loop_top);
+      // test: patch the i's JMP to here (newest open loop is ours)
+      for (k = lc_nloop; k-- > 0; ) {
+        if (lc_loop[k].ibc != ibc) continue;
+        if (lc_loop[k].at + 1 < lc_max) {
+          word abs = (word)(lc_out_org + lc_at);
+          lc_out[lc_loop[k].at]     = (uchar)(abs & 0xff);
+          lc_out[lc_loop[k].at + 1] = (uchar)(abs >> 8);
+        }
+        ax = lc_loop[k].ax;
+        lc_nloop = k;
+        break;
+      }
+      // body = bc pc after the i (backward: short branch when it fits)
+      emit_loop_test(ip[1], ip[2], (word)(ibc + 4), ax);
       break;
     }
 

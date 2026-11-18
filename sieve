@@ -193,9 +193,13 @@ echo
 
 # ivm-oscar	  	|		44.20x	|309,383,290
 
-# - opt jit byte-sieve-primes.c - sieve.md
-# jit -z 	  364 B	|			| 25,033,395
-# jit for	  356 B	|			| 24,856,097
+# - opt jit byte-sieve-primes.c - sieve.md CMP oscar64
+# oscar64 -Os	  294 B	|       14.4s   1x 	| best C for 6502 (4594 B)
+# jit -z 	  364 B	|		1.74x	| 25,033,395
+# jit for	  356 B	|		1.726x	| 24,856,097
+# jit 'i' 'n'     335 B |		1.738x 	| 24,757,775
+
+# (/ 25.033395 14.40)1.7384302083333332
 
 
 # (/ 309.383290 7.0) 
