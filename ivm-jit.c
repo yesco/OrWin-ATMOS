@@ -825,10 +825,18 @@ static void acc_label(void) {
 
 // next op (at bc) does not read ACC and is not a label: ACC is dead, so
 // a KEEP op needn't save it (ivm-walk.c contract: "- SLOT/NEW/UNDEF")
-static int acc_dead(const uchar *c, word bc, word len) {
+static int acc_unread(const uchar *c, word bc) {
   uchar op = c[bc];
-  if (bc >= len || is_label(bc)) return 0;
   return op < 32 || (op != 'n' && strchr("09Q12345678@r'l([KLCUIJ;i", op));
+}
+static int acc_dead(const uchar *c, word bc, word len) {
+  return bc < len && !is_label(bc) && acc_unread(c, bc);
+}
+static int is_fn_entry(word bc);
+// label whose first op doesn't read ACC (not a function entry: that one
+// stores AX): jumps to it and code falling into it needn't load ACC
+static int acc_free_label(const uchar *c, word bc) {
+  return !is_fn_entry(bc) && bc != lc_main_bc && acc_unread(c, bc);
 }
 
 // lo / hi byte of a pending ACC (const or slot) into A: LDA #k / LDA slot
@@ -934,7 +942,7 @@ word ivm_jit(const uchar *code, word code_len,
     // a label here: ACC is not what the previous op left on every path.
     // A pending load is emitted BEFORE map[bc_pc]: jumps here skip it.
     if (is_label(bc_pc)) {
-      acc_label();
+      if (acc_free_label(code, bc_pc)) acc_lost(); else acc_label();
       for (i = 0; i < lc_nksa; i++)      // loop body start: AX = loop var
         if (lc_ksa[i].bc == bc_pc) { acc_ax_slot(lc_ksa[i].slot); break; }
     }
@@ -1377,7 +1385,7 @@ word ivm_jit(const uchar *code, word code_len,
       word rel = PAR;
       word dest = (word)((p - code) - rel);
       uchar k;
-      acc_flush();                         // the label there expects AX
+      if (!acc_free_label(code, dest)) acc_flush();  // label expects AX
       acc_keep();
       // back to a loop body start that expects AX = its loop var
       for (k = 0; k < lc_nksa; k++)
@@ -1490,14 +1498,18 @@ word ivm_jit(const uchar *code, word code_len,
     case 'U': {                                    // -, SLOT (a)
       uchar a = PAR;
       uchar b = PAR;
-      if (!(acc_at == ACC_AX && acc_s == a)) {
-        acc_drop();
-        emit_load_slot(a);
-      }
+      // byte by byte in memory, ACC = mem[a] left pending: no juggling
       em(CLC);
-      emit_lohiop(ADC, b);
-      emit_store_slot(a);
-      acc_ax_slot(a);
+      if (acc_at == ACC_AX && acc_s == a) {        // lo, hi already in A, X
+        emit_alub(ADC, b, 0); emop2(STA, slotlo(a));
+        em(TXA);
+      } else {
+        acc_drop();
+        emop2(LDA, slotlo(a)); emit_alub(ADC, b, 0); emop2(STA, slotlo(a));
+        emop2(LDA, slothi(a));
+      }
+      emit_alub(ADC, b, 1); emop2(STA, slothi(a));
+      acc_ps(a);
       break;
     }
 
