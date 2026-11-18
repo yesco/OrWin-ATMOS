@@ -495,9 +495,12 @@ static void empatch(word fix) {
 // bop = a branch opcode, or JMP for unconditional.
 // Already-emitted target (loop close): exact, short if it fits, no fixup.
 // Not emitted yet (forward): long form, absolute address patched at the end.
+static void ksa_check(word bc_target);
 static void emjump(uchar bop, word bc_target) {
   word t = (bc_target < lc_mapn) ? lc_map[bc_target] : 0xffff;
   word at;
+
+  ksa_check(bc_target);
 
   if (t != 0xffff) {
     if (bop == JMP) { ema(JMP, (word)(lc_out_org + t)); return; }
@@ -676,8 +679,9 @@ static uchar lc_nloop;
 // - a label starting with a slot load, reached only by fall-through and
 //   'B' (a while head), if the fall-in has AX == slot: each 'B' loads it
 //   unless AX already has it (prescan adds, the label keeps or drops them)
-static struct { word bc; uchar slot; } lc_ksa[MAX_LOOPS * 4];
+static struct { word bc; uchar slot, b; } lc_ksa[MAX_LOOPS * 4];  // b: by 'B'
 static uchar lc_nksa;
+
 
 // Byte element pointer like emit_belem_ptr, index already in AX
 static void emit_belem_ptr_ax(uchar base) {
@@ -826,6 +830,17 @@ static void acc_label(void) {
   acc_at = ACC_AX; acc_hk = 0; acc_s = 0xff;
 }
 
+// a jump to a while head (lc_ksa, b) must arrive with AX == its slot. Catches
+// a jump op the prescan (ivm-walk.c ivm_jump) does not know.
+static void ksa_check(word bc_target) {
+  uchar k;
+  for (k = 0; k < lc_nksa; k++)
+    if (lc_ksa[k].bc == bc_target && lc_ksa[k].b &&
+        !(acc_at == ACC_AX && acc_s == lc_ksa[k].slot))
+      printf("%%JIT: jump to bc %u without AX == slot %u\n",
+             (unsigned)bc_target, lc_ksa[k].slot);
+}
+
 // next op (at bc) does not read ACC and is not a label: ACC is dead, so
 // a KEEP op needn't save it (ivm-walk.c contract: "- SLOT/NEW/UNDEF")
 static int acc_unread(const uchar *c, word bc) {
@@ -920,6 +935,7 @@ word ivm_jit(const uchar *code, word code_len,
           t != lc_main_bc) {
         lc_ksa[lc_nksa].bc = t;
         lc_ksa[lc_nksa].slot = code[t] < 32 ? code[t] : code[t + 1];
+        lc_ksa[lc_nksa].b = 1;
         lc_nksa++;
       }
     }
@@ -1420,6 +1436,7 @@ word ivm_jit(const uchar *code, word code_len,
         if (lc_ksa[k].bc == dest) {
           if (!(acc_at == ACC_AX && acc_s == lc_ksa[k].slot))
             emit_load_slot(lc_ksa[k].slot);
+          acc_ax_slot(lc_ksa[k].slot);
           break;
         }
       emjump(JMP, dest);
@@ -1469,6 +1486,7 @@ word ivm_jit(const uchar *code, word code_len,
         if (lc_nksa < MAX_LOOPS * 4) {
           lc_ksa[lc_nksa].bc = (word)(bc_pc + 4);
           lc_ksa[lc_nksa].slot = slot;
+          lc_ksa[lc_nksa].b = 0;
           lc_nksa++;
         }
       }
