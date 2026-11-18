@@ -1651,8 +1651,6 @@ void blob_ready(const char *path, uchar *img) {
   word nf = (word)((h->con - h->call) / 2);
   uchar v = (uchar)h->constidx;
 
-  printf("BLOB_READY: nf=%u w=%d\n", nf, v);
-  
   while (nf--) if (img[h->fp + nf] < v) v = img[h->fp + nf];
 
   printf("--- ivm %s (%u bytes %u BC %u slots (%u var %u params %u const) %u bytes data) ---\n",
@@ -1992,6 +1990,7 @@ word jit_compile(Process* proc) {
         printf("--- entry -> main at 0x%04X ---\n", main_addr);
       }
 
+    #ifdef VERBOSE
       // hexdump
       printf("--- HEXDUMP (%u bytes) ---\n", (unsigned)jit_size);
       {
@@ -2006,7 +2005,8 @@ word jit_compile(Process* proc) {
       // disasm
       printf("--- DISASM ---\n");
       disasm((char *)out, (char *)(out + jit_size), 2);
-
+    #endif VERBOSE
+      
       printf("\n--- JIT: emitted %u bytes (BC: %u) of 6502 at org 0x%04X ---\n\n",
         jit_size, code_len, out_org);
 

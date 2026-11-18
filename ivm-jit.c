@@ -11,8 +11,9 @@
 //   ZX zp,X   ZY zp,Y   IX (zp,X)   IY (zp),Y   I (abs) indirect
 //   Exception: the plain abs forms of AND/INC/DEC are AND_ INC_ DEC_
 //
-// #define JIT 1
-#define JIT_TRACE 1   // per-op trace + disassembly; comment out for quiet
+#ifdef VERBOSE
+  #define JIT_TRACE 1   // per-op trace + disassembly; comment out for quiet
+#endif
 
 
 /*
@@ -26,7 +27,7 @@ INSTRUCTIONS: Keeps this section but keep updated for status
 | Calls (vector table)     | **Done** — JMP + word table at start, JSR abs |
 | Call frame               | **Done** — fixed addresses from frame_base, AX stored at fp+FR_ACC on entry |
 | Compares `<` `=` `>`     | **Done** — boolean in ACC, UNSIGNED (needs testing) |
-| Loops `i` / `n` / `B` | **Present** — unsigned. `i` closed by a `B` back to it (`while (v <= lim)`, i_exit_b): rotated too, the `B` has the test (loop_close), AX = v in the body and after. Closed by `n`, rotated: `i` = JMP to the test in `n` (patched there, lc_loop[]), one compare per loop. If the body starts by reading the loop var, the test leaves it in AX and that load / `[` index is free; a `B` back to such a body start loads it first (lc_ksa[]) |
+| Loops `i` / `n` / `B` | **Present** — unsigned. `i` closed by a `B` back to it (`while (v <= lim)`, i_exit_b): rotated too, the `B` has the test (loop_close), AX = v in the body and after. Stride loop (is_stride: body ends `U v s; B`): `U` leaves Y = lo, A = hi, the `B` tests those (`cmp/cpy`), body start has v in Y/A (lc_yas: `[` `]` index), `i` sets Y/A then JMPs to the test. Closed by `n`, rotated: `i` = JMP to the test in `n` (patched there, lc_loop[]), one compare per loop. If the body starts by reading the loop var, the test leaves it in AX and that load / `[` index is free; a `B` back to such a body start loads it first (lc_ksa[]) |
 | `G`                      | **Done** — keeps AX (CPX #$80 / TAY / CPX #0), as the contract says |
 | `U`                      | Present |
 | `j` (down-loop)          | **Missing** — warns only |
@@ -668,6 +669,33 @@ static word i_exit_b(const uchar *c, word i, word len) {
   return 0xffff;
 }
 
+// stride loop: 'i' at ibc closed by "U v s; B" (v its loop var, the 'B' no
+// jump target): 'U' leaves Y = lo, A = hi, the 'B' tests those
+static int is_label(word bc);
+static int is_stride(const uchar *c, word ibc, word len) {
+  word ex = i_exit_b(c, ibc, len);
+  return ex != 0xffff && ex >= ibc + 9 && c[ex - 5] == 'U' &&
+         c[ex - 4] == c[ibc + 1] && !is_label((word)(ex - 2));
+}
+
+// Y = lo, A = hi of the loop var: to body while <= lim (as emit_loop_test)
+static void emit_loop_test_ya(uchar lim, word body) {
+  word fx;
+  if (is_const(lim)) {
+    word v = const_val(lim);
+    if (v == 0xffff) { emjump(JMP, body); return; }   // always true
+    v++;
+    em2(CMPN, (uchar)(v >> 8)); fx = emrel(BNE);
+    em2(CPYN, (uchar)v);        empatch(fx);
+    emjump(BCC, body);
+  } else {
+    emit_alub(CMP, lim, 1); fx = emrel(BNE);
+    emit_alub(CPY, lim, 0); empatch(fx);
+    emjump(BEQ, body);
+    emjump(BCC, body);
+  }
+}
+
 static void emit_loop_test(uchar slot, uchar lim, word body, uchar ax) {
   word fx;
 
@@ -724,6 +752,16 @@ static uchar loop_close(word ibc) {
 static struct { word bc; uchar slot, b; } lc_ksa[MAX_LOOPS * 4];  // b: by 'B'
 static uchar lc_nksa;
 
+
+// Byte element pointer like emit_belem_ptr, index in Y (lo) and A (hi)
+static void emit_belem_ptr_ya(uchar base) {
+  em2(STYZ, tmp1);
+  em(CLC);
+  emit_alub(ADC, base, 1);
+  em2(STAZ, tmp2);
+  if (is_const(base)) em2(LDYN, const_val(base));
+  else                emop2(LDY, slotlo(base));
+}
 
 // Byte element pointer like emit_belem_ptr, index already in AX
 static void emit_belem_ptr_ax(uchar base) {
@@ -821,6 +859,11 @@ static uchar acc_x0, acc_z, lc_z;
 // while no code is emitted after it was taken (lc_axs_at), 0xff unknown.
 static uchar lc_axs;
 static word  lc_axs_at;
+// stride loop (while ... { body; U v s; B }): the test is on Y = lo, A = hi
+// of v, as left by the 'U'. lc_yas: the slot in Y/A at this op's start
+// (the body start, lc_ya_bc), valid like lc_axs while no code is emitted.
+static uchar lc_yas, lc_ya_next;
+static word  lc_yas_at, lc_ya_bc;
 static word  acc_k;
 static uchar lc_acc_said;   // acc_* calls by the current op
 static uchar lc_op;         // current op (messages)
@@ -976,6 +1019,7 @@ static word ivm_jit1(const uchar *code, word code_len,
   lc_err = 0;
   acc_at = ACC_AX; acc_hk = 0; acc_s = 0xff; acc_x0 = 0; acc_z = 0;
   lc_axs = 0xff; lc_axs_at = 0xffff;
+  lc_yas = 0xff; lc_yas_at = 0xffff; lc_ya_bc = 0xffff;
   lc_out_org = out_org;
   lc_ncall = ncall;
   lc_fbase = frame_base;
@@ -997,6 +1041,9 @@ static word ivm_jit1(const uchar *code, word code_len,
       if (code[i] == 'i') { LBL(i + 4); continue; }  // body start
       if (code[i] == 'n') continue;
       t = ivm_jump(code + i, i);
+      if (code[i] == 'B' && t < code_len && code[t] == 'i' &&
+          i_exit_b(code, t, code_len) == i + 2)
+        t = 0xffff;                // closes a rotated while: no jump to 'i'
       if (t != 0xffff) LBL(t);
       // 'B' to a slot load: candidate "AX == slot" label
       if (code[i] == 'B' && t < code_len && lc_nksa < MAX_LOOPS * 4 &&
@@ -1056,6 +1103,7 @@ static word ivm_jit1(const uchar *code, word code_len,
       if (i < lc_nksa && !(acc_at == ACC_AX && acc_s == lc_ksa[i].slot))
         lc_ksa[i].bc = 0xffff, i = lc_nksa;
       if (i < lc_nksa) acc_ax_slot(lc_ksa[i].slot);
+      else if (bc_pc == lc_ya_bc) acc_lost();     // stride body: Y/A = var
       else if (acc_free_label(code, bc_pc)) acc_lost();
       else acc_label();
     }
@@ -1088,6 +1136,8 @@ static word ivm_jit1(const uchar *code, word code_len,
     lc_op = op; lc_bc = bc_pc; lc_acc_said = 0;
     if (acc_at == ACC_AX) { lc_axs = acc_s; lc_axs_at = lc_at; }
     else if (lc_at != lc_axs_at || is_label(bc_pc)) lc_axs = 0xff;
+    if (bc_pc == lc_ya_bc) { lc_yas = lc_ya_next; lc_yas_at = lc_at; }
+    else if (lc_at != lc_yas_at) lc_yas = 0xff;
     lc_z = (!is_label(bc_pc) && acc_at == ACC_AX) ? acc_z : 0; acc_z = 0;
 
     #ifdef JIT_TRACE
@@ -1473,6 +1523,7 @@ static word ivm_jit1(const uchar *code, word code_len,
     case '[': {                                    // NEW
       uchar base = PAR, idx = PAR;
       if (lc_axs == idx) emit_belem_ptr_ax(base);  // index in AX
+      else if (lc_yas == idx) emit_belem_ptr_ya(base);  // in Y/A (stride)
       else                                  emit_belem_ptr(base, idx);
       acc_drop();
       {                                    // next: zjp, ACC dead after it?
@@ -1494,6 +1545,7 @@ static word ivm_jit1(const uchar *code, word code_len,
       uchar base = PAR, idx = PAR;
       if (acc_at == ACC_PEND) {            // store from where ACC is
         if (lc_axs == idx) emit_belem_ptr_ax(base);   // index still in AX
+        else if (lc_yas == idx) emit_belem_ptr_ya(base);  // Y/A (stride)
         else               emit_belem_ptr(base, idx);
         emit_lda_pend(0); em2(STAIY, tmp1);
         acc_keep();
@@ -1546,6 +1598,13 @@ static word ivm_jit1(const uchar *code, word code_len,
       word rel = PAR;
       word dest = (word)((p - code) - rel);
       uchar k;
+      if (code[dest] == 'i' && i_exit_b(code, dest, code_len) == p - code &&
+          is_stride(code, dest, code_len)) {
+        acc_lost();                // stride: Y/A from the 'U' just before
+        loop_close(dest);
+        emit_loop_test_ya(code[dest + 2], (word)(dest + 4));
+        break;                     // fell out: Y/A = var, ACC undefined
+      }
       if (code[dest] == 'i' && i_exit_b(code, dest, code_len) == p - code) {
         acc_lost();                // closes a while: the test is here
         loop_close(dest);
@@ -1604,6 +1663,28 @@ static word ivm_jit1(const uchar *code, word code_len,
       // '[' with it as index): then the test leaves it in AX
       const uchar *b = p + 3;
       uchar slot = p[0], ax;
+      if (is_stride(code, bc_pc, code_len)) {      // test on Y/A: set them
+        uchar lim = p[1];
+        (void)lim;
+        p += 3;
+        if (lc_axs == slot || (acc_at == ACC_AX && acc_s == slot)) {
+          em(TAY); em(TXA);
+        } else {
+          emop2(LDY, slotlo(slot)); emop2(LDA, slothi(slot));
+        }
+        acc_lost();
+        lc_ya_next = slot; lc_ya_bc = (word)(bc_pc + 4);
+        em(JMP);
+        if (lc_nloop < MAX_LOOPS) {
+          lc_loop[lc_nloop].ibc = bc_pc;
+          lc_loop[lc_nloop].at  = lc_at;
+          lc_loop[lc_nloop].ax  = 0;
+          lc_nloop++;
+        } else
+          printf("%%JIT: loops nested too deep\n");
+        em(0); em(0);
+        break;
+      }
       // while (closed by 'B'): no increment, the test always loads it
       ax = i_exit_b(code, bc_pc, code_len) != 0xffff ||
            ((b < end) && (b[0] == slot || (b[0] == 'L' && b[1] == slot) ||
@@ -1660,6 +1741,21 @@ static word ivm_jit1(const uchar *code, word code_len,
     case 'U': {                                    // -, SLOT (a)
       uchar a = PAR;
       uchar b = PAR;
+      // stride loop: next is its closing 'B': leave Y = lo, A = hi
+      if (p[0] == 'B') {
+        word d = (word)((p + 2 - code) - p[1]);
+        if (code[d] == 'i' && code[d + 1] == a &&
+            i_exit_b(code, d, code_len) == (word)(p + 2 - code) &&
+            is_stride(code, d, code_len)) {
+          acc_drop();
+          em(CLC);
+          emop2(LDA, slotlo(a)); emit_alub(ADC, b, 0); emop2(STA, slotlo(a));
+          em(TAY);
+          emop2(LDA, slothi(a)); emit_alub(ADC, b, 1); emop2(STA, slothi(a));
+          acc_lost();              // -, SLOT: ACC unused, the 'B' follows
+          break;
+        }
+      }
       // byte by byte in memory, ACC = mem[a] left pending: no juggling
       em(CLC);
       if (acc_at == ACC_AX && acc_s == a) {        // lo, hi already in A, X

@@ -5,10 +5,6 @@ echo "ARGS: $*"
 
 rm ivm-jit.x ivm-vm.lst ivm-jit.sim ivm-jit.lst 2>/dev/null
 
-#rm ivm-jit.x 2>/dev/null
-#clang -DJIT -g ivm.c -o ivm-jit.x || exit 1
-#time ./ivm-jit.x $name.ivm
-
 #cl65 -DJIT -Oirs -C sim6502.cfg -t sim6502  -l ivm-jit.s -vm -m ivm-jit.map -o ivm-jit.sim ivm-lib.asm ivm.c  || exit 1
 #cl65 -DJIT -Oirs -C sim6502.cfg -t sim6502 -vm -m ivm-jit.map -o ivm-jit.sim ivm-lib.asm ivm.c || exit 1
 #cl65 -DJIT -Oirs -g -C sim6502.cfg -t sim6502 -l ivm-jit.raw.lst -vm -m ivm-jit.map -o ivm-jit.sim ivm-lib.asm ivm.c || exit 1

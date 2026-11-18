@@ -223,10 +223,11 @@ echo
 # jit  i+i        271 B |               1.126x  | 16,221,424
 # jit  AX2ndchnse 267 B |               1.093s  | 15,732,468
 # jit  rotate 'i' 266 B |               1.050s  | 15,114,367
-# jit  p=..;x=3+p;262 B |               1.052s  | 15,140,138 - LOL
-#   (smaller faster => slower, locatin in memory and pages)
+# jit  p=..;x=3+p;262 B |               1.052s  | 15,140,138 - LOL (smaller faster => slower,   locatin in memory and pages)
+# jit stride opt  261 B |               1.002s  | 14,428,576
+# ---!!!!!!!---------- WE ON PAR W OSCAR64 in SPEED!!!----------
 #
-# (/ 15.140138 14.40) 1.0513984722222223
+# (/ 14.428576 14.40) 1.0019844444444443
 
 
 # (/ 309.383290 7.0) 
