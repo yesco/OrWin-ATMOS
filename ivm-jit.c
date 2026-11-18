@@ -26,7 +26,7 @@ INSTRUCTIONS: Keeps this section but keep updated for status
 | Calls (vector table)     | **Done** — JMP + word table at start, JSR abs |
 | Call frame               | **Done** — fixed addresses from frame_base, AX stored at fp+FR_ACC on entry |
 | Compares `<` `=` `>`     | **Done** — boolean in ACC, UNSIGNED (needs testing) |
-| Loops `i` / `n` / `B` | **Present** — unsigned. `i` closed by a `B` back to it (`while (v <= lim)`, i_exit_b): plain test, exit if > lim, AX = v after. Closed by `n`, rotated: `i` = JMP to the test in `n` (patched there, lc_loop[]), one compare per loop. If the body starts by reading the loop var, the test leaves it in AX and that load / `[` index is free; a `B` back to such a body start loads it first (lc_ksa[]) |
+| Loops `i` / `n` / `B` | **Present** — unsigned. `i` closed by a `B` back to it (`while (v <= lim)`, i_exit_b): rotated too, the `B` has the test (loop_close), AX = v in the body and after. Closed by `n`, rotated: `i` = JMP to the test in `n` (patched there, lc_loop[]), one compare per loop. If the body starts by reading the loop var, the test leaves it in AX and that load / `[` index is free; a `B` back to such a body start loads it first (lc_ksa[]) |
 | `G`                      | **Done** — keeps AX (CPX #$80 / TAY / CPX #0), as the contract says |
 | `U`                      | Present |
 | `j` (down-loop)          | **Missing** — warns only |
@@ -660,32 +660,12 @@ static void emit_lim_minus_slot(uchar lim, uchar slot) {
 //   is free):  CPX hi; BNE t; CMP lo; t:   C = AX >= lim, Z = AX == lim
 //   Const lim: i <= lim  <=>  i < lim+1 (folded here): one BCC.
 // 'i' closed by a 'B' back to it (while (v <= lim)): its exit, else 0xffff.
-// Such an 'i' is a plain test; closed by 'n' it is the rotated for loop.
+// Rotated like the for loop ('n'), the 'B' has the test (no increment).
 static word i_exit_b(const uchar *c, word i, word len) {
   word t = ivm_jump(c + i, i);
   if (t >= 2 && t <= len && c[t - 2] == 'B' && (word)(t - c[t - 1]) == i)
     return t;
   return 0xffff;
-}
-
-// AX = mem[slot]: jump to exit if AX > lim (unsigned), AX kept
-static void emit_loop_exit(uchar slot, uchar lim, word exit) {
-  word fx, fz;
-  (void)slot;
-  if (is_const(lim)) {
-    word v = const_val(lim);
-    if (v == 0xffff) return;                          // never
-    v++;
-    em2(CPXN, (uchar)(v >> 8)); fx = emrel(BNE);
-    em2(CMPN, (uchar)v);        empatch(fx);
-    emjump(BCS, exit);                                // >= lim + 1
-  } else {
-    emop2(CPX, slothi(lim)); fx = emrel(BNE);
-    emop2(CMP, slotlo(lim)); empatch(fx);
-    fz = emrel(BEQ);                                  // == lim: stay
-    emjump(BCS, exit);                                // >
-    empatch(fz);
-  }
 }
 
 static void emit_loop_test(uchar slot, uchar lim, word body, uchar ax) {
@@ -717,6 +697,22 @@ static void emit_loop_test(uchar slot, uchar lim, word body, uchar ax) {
 #define MAX_LOOPS 8
 static struct { word ibc, at; uchar ax; } lc_loop[MAX_LOOPS];
 static uchar lc_nloop;
+
+// patch the JMP of the open loop at 'i' ibc to here (its test); its ax
+static uchar loop_close(word ibc) {
+  uchar k;
+  for (k = lc_nloop; k-- > 0; ) {
+    if (lc_loop[k].ibc != ibc) continue;
+    if (lc_loop[k].at + 1 < lc_max) {
+      word abs = (word)(lc_out_org + lc_at);
+      lc_out[lc_loop[k].at]     = (uchar)(abs & 0xff);
+      lc_out[lc_loop[k].at + 1] = (uchar)(abs >> 8);
+    }
+    lc_nloop = k;
+    return lc_loop[k].ax;
+  }
+  return 0;
+}
 
 // "AX == mem[slot]" at a label. lc_ksa[]: such labels; every jump there
 // makes it true, so the load at the label is free:
@@ -816,7 +812,9 @@ enum { ACC_AX, ACC_PEND, ACC_LOST };
 static uchar acc_at, acc_hk, acc_s;
 // with ACC in AX: acc_x0  X == 0 (ACC is a byte), kept by KEEP ops
 //                 acc_z   Z == (ACC == 0): set by an op for the NEXT op only
-//                 (lc_z: taken over at the start of each op)
+//                 (lc_z: taken over at the start of each op). 2: X is NOT
+//                 set (byte in A only): next op is a zjp after which ACC
+//                 is dead, it uses BEQ and then drops ACC
 static uchar acc_x0, acc_z, lc_z;
 // lc_axs: the slot physically in AX at this op's start, also when ACC is
 // pending elsewhere (a const after 'i': AX still = the loop var). Valid
@@ -996,11 +994,7 @@ static word ivm_jit1(const uchar *code, word code_len,
     for (i = 0; i < code_len; i += n) {
       n = ivm_oplen(code + i);
       if (!n) n = 1;
-      if (code[i] == 'i') {        // rotated: body start; while: exit
-        t = i_exit_b(code, i, code_len);
-        if (t != 0xffff) LBL(t); else LBL(i + 4);
-        continue;
-      }
+      if (code[i] == 'i') { LBL(i + 4); continue; }  // body start
       if (code[i] == 'n') continue;
       t = ivm_jump(code + i, i);
       if (t != 0xffff) LBL(t);
@@ -1021,9 +1015,7 @@ static word ivm_jit1(const uchar *code, word code_len,
     for (i = 0; i < code_len; i += n) {
       n = ivm_oplen(code + i);
       if (!n) n = 1;
-      t = code[i] == 'i' ? (i_exit_b(code, i, code_len) != 0xffff ?
-          i_exit_b(code, i, code_len) : (word)(i + 4)) :
-          code[i] == 'n' || code[i] == 'B'
+      t = code[i] == 'i' ? (word)(i + 4) : code[i] == 'n' || code[i] == 'B'
           ? 0xffff : ivm_jump(code + i, i);
       if (t != 0xffff) {
         uchar k;
@@ -1096,7 +1088,7 @@ static word ivm_jit1(const uchar *code, word code_len,
     lc_op = op; lc_bc = bc_pc; lc_acc_said = 0;
     if (acc_at == ACC_AX) { lc_axs = acc_s; lc_axs_at = lc_at; }
     else if (lc_at != lc_axs_at || is_label(bc_pc)) lc_axs = 0xff;
-    lc_z = acc_z && !is_label(bc_pc) && acc_at == ACC_AX; acc_z = 0;
+    lc_z = (!is_label(bc_pc) && acc_at == ACC_AX) ? acc_z : 0; acc_z = 0;
 
     #ifdef JIT_TRACE
       printf("------- %02x '%c' %02x %02x %02x %02x ------\n",
@@ -1116,7 +1108,10 @@ static word ivm_jit1(const uchar *code, word code_len,
         word dest = (word)((p - code) + (op & 0x3f));
         word fx;
         acc_need();                      // in, KEEP
-        if (lc_z) emjump(BEQ, dest);                        // Z is ACC == 0
+        if (lc_z) {                                         // Z is ACC == 0
+          emjump(BEQ, dest);
+          if (lc_z == 2) { acc_lost(); goto report; }       // X never set
+        }
         else if (acc_x0) { em2(CMPN, 0); emjump(BEQ, dest); }   // X == 0
         else {
           em2(CMPN, 0); fx = emrel(BNE);
@@ -1473,6 +1468,16 @@ static word ivm_jit1(const uchar *code, word code_len,
       if (lc_axs == idx) emit_belem_ptr_ax(base);  // index in AX
       else                                  emit_belem_ptr(base, idx);
       acc_drop();
+      {                                    // next: zjp, ACC dead after it?
+        word nb = (word)(p - code), t;
+        if (nb + 1 < code_len && (uchar)(code[nb] - 0x80) < 64 &&
+            !is_label(nb) && acc_unread(code, (word)(nb + 1)) &&
+            (t = ivm_jump(code + nb, nb)) < code_len && acc_unread(code, t)) {
+          em2(LDAIY, tmp1);                // only A: Z == (byte == 0)
+          acc_ax(); acc_z = 2;
+          break;
+        }
+      }
       em2(LDXN, 0); em2(LDAIY, tmp1);      // LDA last: Z == (ACC == 0)
       acc_ax_byte(1);
       break;
@@ -1534,6 +1539,13 @@ static word ivm_jit1(const uchar *code, word code_len,
       word rel = PAR;
       word dest = (word)((p - code) - rel);
       uchar k;
+      if (code[dest] == 'i' && i_exit_b(code, dest, code_len) == p - code) {
+        acc_lost();                // closes a while: the test is here
+        loop_close(dest);
+        emit_loop_test(code[dest + 1], code[dest + 2], (word)(dest + 4), 1);
+        acc_ax_slot(code[dest + 1]);   // fell out: AX = the var
+        break;
+      }
       if (!acc_free_label(code, dest)) acc_flush();  // label expects AX
       acc_keep();
       // back to a loop body start that expects AX = its loop var
@@ -1585,20 +1597,10 @@ static word ivm_jit1(const uchar *code, word code_len,
       // '[' with it as index): then the test leaves it in AX
       const uchar *b = p + 3;
       uchar slot = p[0], ax;
-      word ex = i_exit_b(code, bc_pc, code_len);
-      if (ex != 0xffff) {          // while (v <= lim): plain test, the 'B'
-        uchar lim = p[1];          // at the end jumps back here. -, SLOT
-        p += 3;
-        if (!(acc_at == ACC_AX && acc_s == slot)) {
-          acc_drop();
-          emit_load_slot(slot);
-        }
-        emit_loop_exit(slot, lim, ex);
-        acc_ax_slot(slot);
-        break;
-      }
-      ax = (b < end) && (b[0] == slot || (b[0] == 'L' && b[1] == slot) ||
-                         (b[0] == '[' && b[2] == slot));
+      // while (closed by 'B'): no increment, the test always loads it
+      ax = i_exit_b(code, bc_pc, code_len) != 0xffff ||
+           ((b < end) && (b[0] == slot || (b[0] == 'L' && b[1] == slot) ||
+                          (b[0] == '[' && b[2] == slot)));
       if (ax) {                    // body start: AX = loop var (loop top)
         if (lc_nksa < MAX_LOOPS * 4) {
           lc_ksa[lc_nksa].bc = (word)(bc_pc + 4);
@@ -1631,7 +1633,7 @@ static word ivm_jit1(const uchar *code, word code_len,
       // i layout: slot, lim, skip — we need those
       const uchar *ip = p - back;       // operand_pos - back + 1
       word ibc;
-      uchar k, ax = 0;
+      uchar ax;
       acc_lost();                  // -, UNDEF
       if (ip < code || *ip != 'i') {
         // can't find matching i; just consume
@@ -1640,18 +1642,7 @@ static word ivm_jit1(const uchar *code, word code_len,
       ibc = (word)(ip - code);
       // increment slot
       emit_inc(ip[1]);
-      // test: patch the i's JMP to here (newest open loop is ours)
-      for (k = lc_nloop; k-- > 0; ) {
-        if (lc_loop[k].ibc != ibc) continue;
-        if (lc_loop[k].at + 1 < lc_max) {
-          word abs = (word)(lc_out_org + lc_at);
-          lc_out[lc_loop[k].at]     = (uchar)(abs & 0xff);
-          lc_out[lc_loop[k].at + 1] = (uchar)(abs >> 8);
-        }
-        ax = lc_loop[k].ax;
-        lc_nloop = k;
-        break;
-      }
+      ax = loop_close(ibc);        // the i's JMP lands on the test
       // body = bc pc after the i (backward: short branch when it fits)
       emit_loop_test(ip[1], ip[2], (word)(ibc + 4), ax);
       if (ax) acc_ax_slot(ip[1]);  // loop done: AX = the loop var

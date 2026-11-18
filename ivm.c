@@ -160,7 +160,7 @@
 //  K - key = getchar (waits?)
 //  L - load var
 //  M - calloc to variable and acc "Mvv"
-//  N - print newline 
+//  N - print newline
 //  O - output next byte "O:" putchar(':')
 //  P - print string from ACC global address, acc points to \0
 //  Q - "Quit" local function == return 0;
