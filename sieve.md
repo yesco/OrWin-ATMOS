@@ -1,6 +1,6 @@
 # jsk notes:
 
-- 33 B: 11x: forward jumps: bxx + jmp = if can shorten save 33 B!
+- 21 B: 7x: forward jumps: bxx + jmp = if can shorten save 21 B!
 - 27 B: memset (+ 4 B load size deferred)
   - lots of setup (clc+adc)
   - possibly use shared library?
@@ -18,6 +18,66 @@ DONE:
 - saved 12 B! 364-356: 8 B: for (i = 0; i <= SIZE; i++) { 
 - saved 21 B: i n duplicates the test - fixed
 - saved  3 B: I J lazy load - 2.8% in speed!
+
+
+## - 'n' INC optimiation -1c +2 B - LOL
+
+Let me count it exactly rather than guess:
+
+**The inner `while (k <= SIZE)` loop (the one with `U`) runs 149,990
+  times** over the 10 iterations. So 1 cycle saved there is 150k
+  cycles, about **0.7%** of the 22.2 M total.
+
+**Your `n` trick would go on the outer `i` loop, which runs 81,910
+  times.** The inner loop has no `n`; it's `U` + `B`.
+
+- **Now:** `INC lo; BNE +2` (taken, 3c); `INC hi`.
+
+- **Your version:** `INC lo; BEQ stub` (not taken, 2c), so 1c saved
+    255 times out of 256. At each wrap you pay about 4c extra for the
+    taken BEQ, `INC hi` and `JMP` back, and there are 32 wraps per
+    pass.
+
+- **Net:** about 8,000 cycles per pass, so roughly **80k cycles
+    (0.36%) for +3 bytes**, plus the work of emitting stubs after the
+    code. It isn't worth it yet.
+
+**The real cost is the inner loop itself.** These are my estimates
+  from the trace, per run of the loop:
+
+| op | cycles |
+|---|---|
+| `07` reload k | 6 |
+| `>` build a 0/1 result | 20 |
+| `?` invert it | 13 |
+| zjp test it | 5 |
+| `]` flags[k]=0 | 28 |
+| `U` k += prime | 20 |
+| `B` | 3 |
+| **total** | **~95 × 150k = 14.3 M** |
+
+So the inner loop is about **64% of the whole run**. The test `k <=
+SIZE` alone takes `07 > ? zjp`, about 44 cycles, to build a 0/1
+result, invert it, and test it. A fused compare-and-branch would be
+about 12 cycles, still with k in zp:
+
+```
+lda k ; cmp #<8191 ; lda k+1 ; sbc #>8191 ; bcs exit
+```
+
+That saves about 32 cycles per run, roughly **4.8 M cycles, about
+20%**. By the same scaling as before, that puts it around **1.25×
+Oscar**, and it also saves bytes, since `?` and the zjp sequence go
+away.
+
+It could be done in either of two places. Either the JIT spots `>
+?`/`< ?`/`= ?` followed by a zjp and emits one branch, or
+ivm-gen/c.bnf emits a single compare-and-jump op. If you want, I'll do
+the JIT peephole next, since it fits the ACC API: the fused op is "in,
+KEEP" and needs no bool in AX.
+
+
+
 
 
 

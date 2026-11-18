@@ -669,11 +669,14 @@ static void emit_loop_test(uchar slot, uchar lim, word body, uchar ax) {
 static struct { word ibc, at; uchar ax; } lc_loop[MAX_LOOPS];
 static uchar lc_nloop;
 
-// "AX == mem[slot]" at a loop body start: the body is only entered from the
-// test, which leaves the loop var in AX. lc_ksa[]: those body starts (the
-// label there sets acc_ax_slot), so a 'B' jumping back to one (a while at
-// the top of a for body) loads the slot first: true on that path too.
-static struct { word bc; uchar slot; } lc_ksa[MAX_LOOPS * 2];
+// "AX == mem[slot]" at a label. lc_ksa[]: such labels; every jump there
+// makes it true, so the load at the label is free:
+// - loop body start: only entered from the 'n' test, which leaves the loop
+//   var in AX ('i' adds these)
+// - a label starting with a slot load, reached only by fall-through and
+//   'B' (a while head), if the fall-in has AX == slot: each 'B' loads it
+//   unless AX already has it (prescan adds, the label keeps or drops them)
+static struct { word bc; uchar slot; } lc_ksa[MAX_LOOPS * 4];
 static uchar lc_nksa;
 
 // Byte element pointer like emit_belem_ptr, index already in AX
@@ -911,10 +914,30 @@ word ivm_jit(const uchar *code, word code_len,
       if (code[i] == 'n') continue;
       t = ivm_jump(code + i, i);
       if (t != 0xffff) LBL(t);
+      // 'B' to a slot load: candidate "AX == slot" label
+      if (code[i] == 'B' && t < code_len && lc_nksa < MAX_LOOPS * 4 &&
+          (code[t] < 32 || code[t] == 'L') && !is_fn_entry(t) &&
+          t != lc_main_bc) {
+        lc_ksa[lc_nksa].bc = t;
+        lc_ksa[lc_nksa].slot = code[t] < 32 ? code[t] : code[t + 1];
+        lc_nksa++;
+      }
     }
     for (i = 0; vec_bc && i < ncall; i++) LBL(vec_bc[i]);
     LBL(lc_main_bc);
     #undef LBL
+    // ... but not if any other jump goes there
+    for (i = 0; i < code_len; i += n) {
+      n = ivm_oplen(code + i);
+      if (!n) n = 1;
+      t = code[i] == 'i' ? (word)(i + 4) : code[i] == 'n' || code[i] == 'B'
+          ? 0xffff : ivm_jump(code + i, i);
+      if (t != 0xffff) {
+        uchar k;
+        for (k = 0; k < lc_nksa; k++)
+          if (lc_ksa[k].bc == t) lc_ksa[k].bc = 0xffff;
+      }
+    }
   }
 
   // NOP until odd absolute address
@@ -942,9 +965,14 @@ word ivm_jit(const uchar *code, word code_len,
     // a label here: ACC is not what the previous op left on every path.
     // A pending load is emitted BEFORE map[bc_pc]: jumps here skip it.
     if (is_label(bc_pc)) {
-      if (acc_free_label(code, bc_pc)) acc_lost(); else acc_label();
-      for (i = 0; i < lc_nksa; i++)      // loop body start: AX = loop var
-        if (lc_ksa[i].bc == bc_pc) { acc_ax_slot(lc_ksa[i].slot); break; }
+      // lc_ksa: only worth it if the fall-in has AX == slot already
+      // ('i': its JMP said so), else drop it: the 'B's come later
+      for (i = 0; i < lc_nksa && lc_ksa[i].bc != bc_pc; i++) ;
+      if (i < lc_nksa && !(acc_at == ACC_AX && acc_s == lc_ksa[i].slot))
+        lc_ksa[i].bc = 0xffff, i = lc_nksa;
+      if (i < lc_nksa) acc_ax_slot(lc_ksa[i].slot);
+      else if (acc_free_label(code, bc_pc)) acc_lost();
+      else acc_label();
     }
 
     // Catch function entries (?)
@@ -1438,14 +1466,15 @@ word ivm_jit(const uchar *code, word code_len,
       ax = (b < end) && (b[0] == slot || (b[0] == 'L' && b[1] == slot) ||
                          (b[0] == '[' && b[2] == slot));
       if (ax) {                    // body start: AX = loop var (loop top)
-        if (lc_nksa < MAX_LOOPS * 2) {
+        if (lc_nksa < MAX_LOOPS * 4) {
           lc_ksa[lc_nksa].bc = (word)(bc_pc + 4);
           lc_ksa[lc_nksa].slot = slot;
           lc_nksa++;
         }
       }
       p += 3;                      // slot lim skip: 'n' reads slot, lim
-      acc_lost();                  // -, UNDEF (the body start is a label)
+      if (ax) acc_ax_slot(slot);   // unreachable after the JMP: no fall-in
+      else acc_lost();             // load at the body start. -, UNDEF
       em(JMP);
       if (lc_nloop < MAX_LOOPS) {
         lc_loop[lc_nloop].ibc = bc_pc;
