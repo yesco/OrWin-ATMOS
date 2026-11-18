@@ -33,7 +33,7 @@ INSTRUCTIONS: Keeps this section but keep updated for status
 | Array `(` `)`            | Present (needs testing) |
 | / *                      | JSR helpers in **ivm-lib.asm** (ACC/PAR in zp ivm_acc/ivm_par); still need **PARAX → zp_par** |
 | ZP optimisation          | **Done, one place** — emop2() + zpmap[] (see below) |
-| Branch emit              | **Done** — emrel/empatch (local), emjump (bytecode target) |
+| Branch emit              | **Done** — emrel/empatch (local), emjump (bytecode target); forward short by estimate (JIT_BC_SCALE), retry if too far |
 | ACC state                | **Done** — acc_at AX/PEND/LOST + acc_s (slot AX equals) + acc_k (const). Every op declares its ivm-walk.c contract: acc_need (in: loads a pending const/slot, error if LOST), acc_keep, acc_drop/acc_lost, acc_ax, acc_ax_slot, acc_pk/acc_ps (lazy const/slot), acc_write. Undeclared op → `ACC use not declared`. Labels (prescan, lc_lbl) flush. Pending users: `+ - & \| ^` load from the source (no TXA), const folding (also `~`), `)` `]` store from the source. acc_dead(): KEEP ops (N O F) don't save a dead ACC. -z pointer ops `r w ' , @ !` use (slot),Y directly. Contract breaks fixed: Z N O G F s w , ! ; m |
 | Runtime library          | **Done (untested)** — ivm-lib.asm: op* helpers, putchar/getchar trampolines, bump heap. Generated code calls ONLY these (+ zp), never cc65 lib |
 | `-z[XX]` mem in zp       | **Done (untested)** — mem[] at XX, default: ends at target zp top |
@@ -66,10 +66,11 @@ emop2()/emit_alub() instruction.
       - target already emitted (backward, i.e. loop close): exact
         distance known → short branch if it fits, else reversed
         branch + JMP abs. Unconditional is JMP abs. No fixup.
-      - target not emitted yet (forward): long form (reversed branch
-        over a JMP abs), absolute operand patched at the end (lc_fix).
-      Future -O: forward short form + "this one failed" bitmap keyed
-      by bytecode pc, re-run the whole pass until no new failures.
+      - target not emitted yet (forward): short branch if the bytecode
+        distance * JIT_BC_SCALE fits, else long form (reversed branch
+        over a JMP abs); patched at the end (lc_fix). A short one that
+        doesn't fit marks its op in lc_long[] ("this one failed") and
+        ivm_jit() runs ivm_jit1() again. JMP stays JMP.
 
 ### Call vectors
 
@@ -410,10 +411,18 @@ static word   lc_at, lc_max;
 static word  *lc_map, lc_mapn, lc_mem;
 static uchar  lc_err;         // set when a short branch is out of range
 
-typedef struct { word at, bc_target; } LcFix;
+// forward branch: short if the target looks near, estimated as bytecode
+// distance * JIT_BC_SCALE code bytes. A short one that doesn't fit when
+// patched marks its op in lc_long[] and the whole JIT runs again.
+#define JIT_BC_SCALE 4
+
+typedef struct { word at, bc_target, bc_from; uchar sh; } LcFix;
 
 static LcFix lc_fix[256];
 static word  lc_nfix;
+static word  lc_bc;           // bytecode pc of the current op
+static uchar *lc_long;        // ops whose forward branches must be long
+#define IS_LONG(bc) (lc_long && (lc_long[(bc) >> 3] & (1 << ((bc) & 7))))
 
 // jump vector table at start of code (word per vector)
 static word  lc_vecmark;      // offset in out[] of vector table
@@ -513,15 +522,23 @@ static void emjump(uchar bop, word bc_target) {
     return;
   }
 
-  if (bop != JMP) em2(rev_branch(bop), 3);    // opposite cond skips the JMP
-  em(JMP);
-  at = lc_at;
-  em(0); em(0);
-  if (lc_nfix < 256) {
+  if (lc_nfix >= 256) { lc_err = 1; return; }
+  lc_fix[lc_nfix].bc_target = bc_target;
+  lc_fix[lc_nfix].bc_from = lc_bc;
+  lc_fix[lc_nfix].sh = 0;
+  if (bop != JMP && !IS_LONG(lc_bc) &&
+      (long)(bc_target - lc_bc) * JIT_BC_SCALE <= 127) {
+    em2(bop, 0);                              // short, offset patched
+    lc_fix[lc_nfix].at = (word)(lc_at - 1);
+    lc_fix[lc_nfix].sh = 1;
+  } else {
+    if (bop != JMP) em2(rev_branch(bop), 3);  // opposite cond skips the JMP
+    em(JMP);
+    at = lc_at;
+    em(0); em(0);
     lc_fix[lc_nfix].at = at;
-    lc_fix[lc_nfix].bc_target = bc_target;
-    lc_nfix++;
   }
+  lc_nfix++;
 }
 
 
@@ -800,7 +817,6 @@ static uchar acc_at, acc_hk, acc_s;
 static word  acc_k;
 static uchar lc_acc_said;   // acc_* calls by the current op
 static uchar lc_op;         // current op (messages)
-static word  lc_bc;         // its bytecode pc
 static uchar *lc_lbl;       // label bitmap, one bit per bytecode pc
 
 static int is_label(word bc) {
@@ -911,7 +927,9 @@ static int is_fn_entry(word bc) {
 // Frames: frame_base[v] known at transpile; entry stores AX to fp+FR_ACC.
 #define FR_ACC 3
 
-word ivm_jit(const uchar *code, word code_len,
+static uchar lc_retry;        // a short forward branch didn't fit
+
+static word ivm_jit1(const uchar *code, word code_len,
   uchar *out, word out_max,
   word *map, word map_n,
   word mem_base,
@@ -1709,6 +1727,17 @@ word ivm_jit(const uchar *code, word code_len,
       return 0;
     }
 
+    if (lc_fix[i].sh) {                     // short: rel8 from after it
+      int off = (int)mapped - (int)(lc_fix[i].at + 1);
+      if (off > 127) {                        // estimate too low: long next
+        word b = lc_fix[i].bc_from;
+        if (lc_long) lc_long[b >> 3] |= (uchar)(1 << (b & 7));
+        lc_retry = 1;
+      }
+      lc_out[lc_fix[i].at] = (uchar)off;
+      continue;
+    }
+
     // write absolute JMP target (long form)
     if (lc_fix[i].at + 1 < lc_max) {
       word abs = (word)(lc_out_org + mapped);
@@ -1718,6 +1747,28 @@ word ivm_jit(const uchar *code, word code_len,
   }
 
   return lc_at;
+}
+
+// ivm_jit1 again until every short forward branch fits
+word ivm_jit(const uchar *code, word code_len,
+  uchar *out, word out_max,
+  word *map, word map_n,
+  word mem_base,
+  word out_org,
+  const word *vec_bc, const uchar *frame_base, uchar ncall)
+{
+  word r;
+  uchar n = 0;
+  lc_long = (uchar *)calloc((code_len >> 3) + 1, 1);
+  do {
+    lc_retry = 0;
+    r = ivm_jit1(code, code_len, out, out_max, map, map_n, mem_base,
+                 out_org, vec_bc, frame_base, ncall);
+    if (lc_retry) printf("%%JIT: short branch too far, again\n");
+  } while (lc_retry && r && ++n < 8);
+  free(lc_long);
+  lc_long = NULL;
+  return lc_retry ? 0 : r;
 }
 
 #ifdef HOSTSIM
