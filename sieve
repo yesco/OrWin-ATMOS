@@ -226,7 +226,9 @@ echo
 # jit  p=..;x=3+p;262 B |               1.052s  | 15,140,138 - LOL (smaller faster => slower,   locatin in memory and pages)
 # jit stride opt  261 B |               1.002s  | 14,428,576
 # ---!!!!!!!---------- WE ON PAR W OSCAR64 in SPEED!!!----------
+# This optimization "RUN" was done in only 5 hours of work!
 #
+
 # (/ 14.428576 14.40) 1.0019844444444443
 
 
@@ -238,48 +240,50 @@ echo
 #
 # Target / Variant        | Size  | Time   | vs ASM |vs Oscar| vs JIT
 # -------------------------------------------------------------------
-# Orig ASM (hand)         |  ?    |  7.00s |  1---x |  0.49x |  0.28x
+# Orig ASM (hand)         |  ?    |  7.00s |  1---x |  0.49x |  0.50x
 #                         |       |        |        |        |
-# oscar64 -Os            *| 294 B | 14.40s |  2.06x |  1---x |  0.58x
-#                         |       |        |        |        |  ^UPDATEv
-# ivm-jit (byte opt)      | 324 B | 22.26s  ....    |  1.55x  ......
-# ivm-jit (-z peephole)  *| 364 B | 25.03s |  3.58x |  1.74x |  1---x
-# ivm-jit (byte idx)      | 367 B | 25.56s |  3.65x |  1.77x |  1.02x
-# ivm-jit (memset,no??)   | 385 B | 31.16s |  4.45x |  2.16x |  1.24x
-# ivm-jit (const/*2)      | 450 B | 40.39s |  5.77x |  2.80x |  1.61x
-# ivm-jit (zp baseline)   | 597 B | 55.30s |  7.90x |  3.84x |  2.21x
-# ivm-jit (initial)       | 672 B | 61.00s |  8.71x |  4.24x |  2.44x
+# oscar64 -Os            *| 294 B | 14.40s |  2.06x |  1---x |  1.02x
+# ivm-jit (stride opt)   *| 260 B | 14.12s |  2.02x |  0.98x |  1---x
+# ivm-jit (byte opt)      | 324 B | 22.26s |  3.18x |  1.55x |  1.58x
+# ivm-jit (-z peephole)   | 364 B | 25.03s |  3.58x |  1.74x |  1.77x
+# ivm-jit (byte idx)      | 367 B | 25.56s |  3.65x |  1.77x |  1.81x
+# ivm-jit (memset,no??)   | 385 B | 31.16s |  4.45x |  2.16x |  2.21x
+# ivm-jit (const/*2)      | 450 B | 40.39s |  5.77x |  2.80x |  2.86x
+# ivm-jit (zp baseline)   | 597 B | 55.30s |  7.90x |  3.84x |  3.92x
+# ivm-jit (initial)       | 672 B | 61.00s |  8.71x |  4.24x |  4.32x
 #                         |       |        |        |        |
-# cc65 -Oirs             *| 442 B | 69.50s |  9.93x |  4.83x |  2.78x
+# cc65 -Oirs             *| 442 B | 69.50s |  9.93x |  4.83x |  4.92x
 #
-# ivm-asm (while<= 'i')   |  89 BC| 103.15 | 14.73x |  7.16x |  4.12x
-# ivm-asm (peephole)	  |  90 BC| 121.5s | 17.34x |  8.44x |  4.85x
-# ivm-asm (byte idx)      | 105 BC| 128.4s | 18.34x |  8.92x |  5.13x
-# ivm-asm (ALTCODE=1)     | 101 BC| 133.3s | 19.04x |  9.26x |  5.32x
-# ivm-asm (memset)        | 101 BC| 148.5s | 21.21x | 10.31x |  5.93x
-# ivm-asm (initial)       | 109 BC| 180.0s | 25.71x | 12.50x |  7.19x
+# ivm-asm (while<= 'i')   |  89 BC| 103.15 | 14.73x |  7.16x |  7.31x
+# ivm-asm (peephole)	  |  90 BC| 121.5s | 17.34x |  8.44x |  8.61x
+# ivm-asm (byte idx)      | 105 BC| 128.4s | 18.34x |  8.92x |  9.10x
+# ivm-asm (ALTCODE=1)     | 101 BC| 133.3s | 19.04x |  9.26x |  9.44x
+# ivm-asm (memset)        | 101 BC| 148.5s | 21.21x | 10.31x | 10.52x
+# ivm-asm (initial)       | 109 BC| 180.0s | 25.71x | 12.50x | 12.75x
 #                         |       |        |        |        |
-# ivm-oscar              *|     - | 309.4s | 44.20x | 21.48x | 12.36x
+# ivm-oscar              *|     - | 309.4s | 44.20x | 21.48x | 21.92x
 #                         |       |        |        |        |
-# ivm (while<= 'i')       |  89 BC| 340.3s | 48.61x | 23.63x | 13.60x
-# ivm (btable disp) +368 B|  94 BC| 385.8s | 55.11x | 26.79x | 15.41x
-# ivm (peephole)          |  95 BC| 629.0s | 89.86x | 43.68x | 25.13x
-# ivm C-interp (initial)  | 109 BC| 697.0s | 99.57x | 48.40x | 27.84x
+# ivm (while<= 'i')       |  89 BC| 340.3s | 48.61x | 23.63x | 24.11x
+# ivm (btable disp) +368 B|  94 BC| 385.8s | 55.11x | 26.79x | 27.33x
+# ivm (peephole)          |  95 BC| 629.0s | 89.86x | 43.68x | 44.56x
+# ivm C-interp (initial)  | 109 BC| 697.0s | 99.57x | 48.40x | 49.38x
 #
 # *) actual program size (file) is bigger:
+# ivm-jit: 260 B from 88 BC, JIT time 511,760 c (0.51s) on the 6502,
+#   run 14,116,156 c. Times = cycles at 1 MHz.
 
 
 # === THE BEST OF THE BEST - FASTER ===
 #
 # Target / Variant        |  Size |   Time | vs C   | vs ASM | vs JIT
 # -------------------------------------------------------------------
-# oscar64 -Os            *| 294 B | 14.40s | 26.79x |  8.92x |  1.74x
-# ivm-jit (-z peephole)  *| 364 B | 25.03s | 15.41x |  5.13x |  1.00x
-# cc65 -Oirs             *| 442 B | 69.50s |  5.55x |  1.85x |       
-# ivm-asm (byte idx)      | 105 BC| 128.4s |  3.00x |  1.00x |       
-# ivm-oscar              *|  94 BC| 309.4s |  1.25x |        |       
-# ivm (btable disp) +368 B|  94 BC| 385.8s |  1.00x |        |       
-#
+# ivm-jit (stride opt)   *| 260 B | 14.12s | 24.11x |  7.31x |  1.00x
+# oscar64 -Os            *| 294 B | 14.40s | 23.63x |  7.16x |  0.98x
+# cc65 -Oirs             *| 442 B | 69.50s |  4.90x |  1.48x |       
+# ivm-asm (while<= 'i')   |  89 BC| 103.15 |  3.30x |  1.00x |       
+# ivm-oscar              *|  94 BC| 309.4s |  1.10x |        |       
+# ivm (while<= 'i')       |  89 BC| 340.3s |  1.00x |        |
+
 #
 #
 #              FILE  ./ivm    -asm   -jit
