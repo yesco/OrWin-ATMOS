@@ -35,6 +35,24 @@
 //   0xc0..0xff  call vector op - 0xc0
 //   0x7f DEL    NOP; filler of the peephole, removed by gen_squeeze()
 
+// ACC contract (VM = truth; every impl must honour KEEP, the compiler and
+// peephole may rely on it). in: op reads ACC.  out:
+//   KEEP  ACC unchanged       SLOT  ACC == mem[1st slot operand] after
+//   NEW   new value           UNDEF don't rely on it (impls differ)
+//
+//   in  out    ops
+//   -   KEEP   ' ' DEL B O N W Z
+//   in  KEEP   S(+SLOT) ! , w s ) ] m . P E zjp X(returns it)
+//   -   SLOT   L <32 C(dst) U(1st) I J
+//   in  SLOT   M(acc = mem[s] = alloc(acc))
+//   -   NEW    0 9 Q 1..8 @ r ' l ( [ K
+//   in  NEW    + - * / % & | ^ { } < = > ? ~ x y z call(arg -> result)
+//   -   UNDEF  i n (VM: loop var; JIT: clobbered) F
+//   ;   NEW    ACC = return value cell, then return
+//
+// JIT status (ivm-jit.c) vs this contract, 2026-11:
+//   all honoured (acc_* in ivm-jit.c)    missing: { } W K x y z k j
+//   l: was sign-extended by host VM
 #define OPI_SLOTS    0x07
 #define OPI_NARGS(i) (((i) >> 3) & 3)
 #define OPI_REL      0x20

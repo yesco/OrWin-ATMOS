@@ -587,9 +587,20 @@ static void emit_lohiop(uchar ins, uchar s) {
   em(TAX); em(TYA);
 }
 
-static void emit_ax_to_tmp1(void) {
-  em2(STAZ, tmp1);
-  em2(STXZ, tmp2);
+// mem[s]++ (word)
+static void emit_inc(uchar s) {
+  word fx;
+  emop2(INC_, slotlo(s)); fx = emrel(BNE); emop2(INC_, slothi(s));
+  empatch(fx);
+}
+
+// zp pointer holding mem[s] for (zp),Y: with -z the slot itself, else a
+// copy in tmp1/tmp2 (clobbers A)
+static uchar emit_ptr(uchar s) {
+  if (slotlo(s) < 0xff) return (uchar)slotlo(s);
+  emop2(LDA, slotlo(s)); em2(STAZ, tmp1);
+  emop2(LDA, slothi(s)); em2(STAZ, tmp2);
+  return tmp1;
 }
 
 // reg OP (lo or hi byte of mem[s]); const-aware. For ADC/SBC/AND/ORA/EOR
@@ -827,7 +838,6 @@ static void emit_lda_pend(uchar hi) {
 }
 
 // mem[s] usable as a zero-page pointer: (zp),Y straight on the slot
-static int ptr_zp(uchar s) { return slotlo(s) < 0xff; }
 
 static int is_fn_entry(word bc) {
   word k;
@@ -1138,12 +1148,8 @@ word ivm_jit(const uchar *code, word code_len,
     // I: INC lo; BNE skip; INC hi; reload ACC
     case 'I': {                                    // -, SLOT
       uchar s = PAR;
-      word fx;
       acc_drop();
-      emop2(INC_, slotlo(s));
-      fx = emrel(BNE);
-      emop2(INC_, slothi(s));
-      empatch(fx);
+      emit_inc(s);
       acc_ps(s);
       break;
     }
@@ -1188,15 +1194,11 @@ word ivm_jit(const uchar *code, word code_len,
       acc_ax_slot(s);
       break;
     }
-    case 'F': {                                    // KEEP
-      uchar s = PAR, save;
-      acc_write(s);
-      save = acc_at == ACC_AX && !acc_dead(code, (word)(p - code), code_len);
-      if (save) { em(PHA); em(TXA); em(PHA); }
+    case 'F': {                                    // -, UNDEF
+      uchar s = PAR;
+      acc_drop();
       emit_load_slot(s); ema(JSR, REF(opfree));
       em2(LDYN, 0); emop2(STY, slotlo(s)); emop2(STY, slothi(s));
-      if (save) { em(PLA); em(TAX); em(PLA); }
-      if (save || acc_at != ACC_AX) acc_keep(); else acc_lost();
       break;
     }
 
@@ -1210,105 +1212,73 @@ word ivm_jit(const uchar *code, word code_len,
     }
     case 's': {                                    // in, KEEP: AX untouched
       uchar s = PAR;
-      acc_need();
       acc_write(s);
+      if (acc_at == ACC_PEND) emit_lda_pend(0), acc_keep();  // stays pending
+      else acc_need();
       emop2(STA, slotlo(s)); em2(LDYN, 0); emop2(STY, slothi(s));
       break;
     }
 
-    // pointer ops. With -z the pointer slot itself is a zp pointer:
-    // (slot),Y, no copy to tmp1/tmp2.
+    // pointer ops: (zp),Y via emit_ptr(). A pending ACC is stored from where
+    // it is and stays pending (mem[] slots are not reachable by pointers),
+    // only an ACC in AX is saved around the pointer copy.
     case 'r': {                                    // NEW = *(uchar*)mem[s]
-      uchar s = PAR;
+      uchar s = PAR, zp;
       acc_drop();
-      if (ptr_zp(s)) em2(LDYN, 0), em2(LDAIY, (uchar)slotlo(s));
-      else {
-        emit_load_slot(s); emit_ax_to_tmp1();
-        em2(LDYN, 0); em2(LDAIY, tmp1);
-      }
-      em2(LDXN, 0);
+      zp = emit_ptr(s);
+      em2(LDYN, 0); em2(LDAIY, zp); em2(LDXN, 0);
       acc_ax();
       break;
     }
-    case 'w': {                                    // in, KEEP
-      uchar s = PAR;
-      acc_need();
-      if (ptr_zp(s)) { em2(LDYN, 0); em2(STAIY, (uchar)slotlo(s)); break; }
-      em(PHA);
-      emop2(LDA, slotlo(s)); em2(STAZ, tmp1);
-      emop2(LDA, slothi(s)); em2(STAZ, tmp2);
-      em(PLA); em2(LDYN, 0); em2(STAIY, tmp1);
-      break;
-    }
-
     // ': ACC = *(uchar*)ptr; ptr++   (post-increment byte read)
     case '\'': {                                   // NEW
-      uchar s = PAR;
-      word fx;
+      uchar s = PAR, zp;
       acc_drop();
-      if (ptr_zp(s)) {
-        em2(LDYN, 0); em2(LDAIY, (uchar)slotlo(s));
-        emop2(INC_, slotlo(s)); fx = emrel(BNE); emop2(INC_, slothi(s));
-        empatch(fx);
-        em2(LDXN, 0);
-        acc_ax();
-        break;
-      }
-      emit_load_slot(s); emit_ax_to_tmp1();
-      em2(LDYN, 0); em2(LDAIY, tmp1); em(PHA);
-      em(CLC);
-      em2(LDAZ, tmp1); em2(ADCN, 1); em2(STAZ, tmp1);
-      em2(LDAZ, tmp2); em2(ADCN, 0); em2(STAZ, tmp2);
-      em2(LDAZ, tmp1); emop2(STA, slotlo(s));
-      em2(LDAZ, tmp2); emop2(STA, slothi(s));
-      em(PLA); em2(LDXN, 0);
+      zp = emit_ptr(s);
+      em2(LDYN, 0); em2(LDAIY, zp); em2(LDXN, 0);
+      emit_inc(s);
       acc_ax();
       break;
     }
-    // ,: *(uchar*)ptr = ACC; ptr++
-    case ',': {                                    // in, KEEP
-      uchar s = PAR;
-      word fx;
-      acc_need();
-      acc_write(s);
-      if (ptr_zp(s)) {
-        em2(LDYN, 0); em2(STAIY, (uchar)slotlo(s));
-      } else {
-        em(PHA);
-        emop2(LDA, slotlo(s)); em2(STAZ, tmp1);
-        emop2(LDA, slothi(s)); em2(STAZ, tmp2);
-        em(PLA); em2(LDYN, 0); em2(STAIY, tmp1);
-      }
-      emop2(INC_, slotlo(s)); fx = emrel(BNE); emop2(INC_, slothi(s));
-      empatch(fx);
+    // w: *(uchar*)ptr = ACC     ,: the same, then ptr++
+    case 'w': case ',': {                          // in, KEEP
+      uchar s = PAR, zp, pend;
+      if (op == ',') acc_write(s);
+      pend = acc_at == ACC_PEND;
+      if (!pend) acc_need();
+      if (!pend && slotlo(s) == 0xff) em(PHA);
+      zp = emit_ptr(s);
+      if (!pend && slotlo(s) == 0xff) em(PLA);
+      if (pend) emit_lda_pend(0);
+      em2(LDYN, 0); em2(STAIY, zp);
+      if (op == ',') emit_inc(s);
+      acc_keep();
       break;
     }
 
     // @: ACC = *(word*)mem[s]
     case '@': {                                    // NEW
-      uchar s = PAR;
+      uchar s = PAR, zp;
       acc_drop();
-      if (ptr_zp(s)) {
-        em2(LDYN, 1); em2(LDAIY, (uchar)slotlo(s)); em(TAX);
-        em(DEY);      em2(LDAIY, (uchar)slotlo(s));
-      } else {
-        emit_load_slot(s); emit_ax_to_tmp1();
-        em2(LDYN, 0); em2(LDAIY, tmp1); em(PHA);
-        em(INY); em2(LDAIY, tmp1); em(TAX); em(PLA);
-      }
+      zp = emit_ptr(s);
+      em2(LDYN, 1); em2(LDAIY, zp); em(TAX);
+      em(DEY);      em2(LDAIY, zp);
       acc_ax();
       break;
     }
     // !: *(word*)mem[s] = ACC
     case '!': {                                    // in, KEEP
-      uchar s = PAR;
-      uchar zp = (uchar)(ptr_zp(s) ? slotlo(s) : tmp1);
+      uchar s = PAR, zp;
+      if (acc_at == ACC_PEND) {
+        zp = emit_ptr(s);
+        em2(LDYN, 1); emit_lda_pend(1); em2(STAIY, zp);
+        em(DEY);      emit_lda_pend(0); em2(STAIY, zp);
+        acc_keep();
+        break;
+      }
       acc_need();
       em(PHA);
-      if (!ptr_zp(s)) {
-        emop2(LDA, slotlo(s)); em2(STAZ, tmp1);
-        emop2(LDA, slothi(s)); em2(STAZ, tmp2);
-      }
+      zp = emit_ptr(s);
       em(TXA); em2(LDYN, 1); em2(STAIY, zp);
       em(PLA); em(DEY);      em2(STAIY, zp);
       break;
@@ -1488,7 +1458,7 @@ word ivm_jit(const uchar *code, word code_len,
       // the i is `back` bytes before this operand
       // i layout: slot, lim, skip — we need those
       const uchar *ip = p - back;       // operand_pos - back + 1
-      word ibc, fx;
+      word ibc;
       uchar k, ax = 0;
       acc_lost();                  // -, UNDEF
       if (ip < code || *ip != 'i') {
@@ -1497,10 +1467,7 @@ word ivm_jit(const uchar *code, word code_len,
       }
       ibc = (word)(ip - code);
       // increment slot
-      emop2(INC_, slotlo(ip[1]));
-      fx = emrel(BNE);
-      emop2(INC_, slothi(ip[1]));
-      empatch(fx);
+      emit_inc(ip[1]);
       // test: patch the i's JMP to here (newest open loop is ours)
       for (k = lc_nloop; k-- > 0; ) {
         if (lc_loop[k].ibc != ibc) continue;
