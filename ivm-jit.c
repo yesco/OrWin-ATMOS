@@ -827,7 +827,7 @@ static void acc_label(void) {
 // a KEEP op needn't save it (ivm-walk.c contract: "- SLOT/NEW/UNDEF")
 static int acc_unread(const uchar *c, word bc) {
   uchar op = c[bc];
-  return op < 32 || (op != 'n' && strchr("09Q12345678@r'l([KLCUIJ;i", op));
+  return op < 32 || strchr("09Q12345678@r'l([KLCUIJ;in", op);
 }
 static int acc_dead(const uchar *c, word bc, word len) {
   return bc < len && !is_label(bc) && acc_unread(c, bc);
