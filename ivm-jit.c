@@ -26,7 +26,7 @@ INSTRUCTIONS: Keeps this section but keep updated for status
 | Calls (vector table)     | **Done** — JMP + word table at start, JSR abs |
 | Call frame               | **Done** — fixed addresses from frame_base, AX stored at fp+FR_ACC on entry |
 | Compares `<` `=` `>`     | **Done** — boolean in ACC, UNSIGNED (needs testing) |
-| Loops `i` / `n` / `B` | **Present** — unsigned. Rotated: `i` = JMP to the test in `n` (patched there, lc_loop[]), one compare per loop. If the body starts by reading the loop var, the test leaves it in AX and that load / `[` index is free; a `B` back to such a body start loads it first (lc_ksa[]) |
+| Loops `i` / `n` / `B` | **Present** — unsigned. `i` closed by a `B` back to it (`while (v <= lim)`, i_exit_b): plain test, exit if > lim, AX = v after. Closed by `n`, rotated: `i` = JMP to the test in `n` (patched there, lc_loop[]), one compare per loop. If the body starts by reading the loop var, the test leaves it in AX and that load / `[` index is free; a `B` back to such a body start loads it first (lc_ksa[]) |
 | `G`                      | **Done** — keeps AX (CPX #$80 / TAY / CPX #0), as the contract says |
 | `U`                      | Present |
 | `j` (down-loop)          | **Missing** — warns only |
@@ -642,6 +642,35 @@ static void emit_lim_minus_slot(uchar lim, uchar slot) {
 //   then CPX/CMP, which only read A and X (13-14 cycles, the body's load
 //   is free):  CPX hi; BNE t; CMP lo; t:   C = AX >= lim, Z = AX == lim
 //   Const lim: i <= lim  <=>  i < lim+1 (folded here): one BCC.
+// 'i' closed by a 'B' back to it (while (v <= lim)): its exit, else 0xffff.
+// Such an 'i' is a plain test; closed by 'n' it is the rotated for loop.
+static word i_exit_b(const uchar *c, word i, word len) {
+  word t = ivm_jump(c + i, i);
+  if (t >= 2 && t <= len && c[t - 2] == 'B' && (word)(t - c[t - 1]) == i)
+    return t;
+  return 0xffff;
+}
+
+// AX = mem[slot]: jump to exit if AX > lim (unsigned), AX kept
+static void emit_loop_exit(uchar slot, uchar lim, word exit) {
+  word fx, fz;
+  (void)slot;
+  if (is_const(lim)) {
+    word v = const_val(lim);
+    if (v == 0xffff) return;                          // never
+    v++;
+    em2(CPXN, (uchar)(v >> 8)); fx = emrel(BNE);
+    em2(CMPN, (uchar)v);        empatch(fx);
+    emjump(BCS, exit);                                // >= lim + 1
+  } else {
+    emop2(CPX, slothi(lim)); fx = emrel(BNE);
+    emop2(CMP, slotlo(lim)); empatch(fx);
+    fz = emrel(BEQ);                                  // == lim: stay
+    emjump(BCS, exit);                                // >
+    empatch(fz);
+  }
+}
+
 static void emit_loop_test(uchar slot, uchar lim, word body, uchar ax) {
   word fx;
 
@@ -925,7 +954,11 @@ word ivm_jit(const uchar *code, word code_len,
     for (i = 0; i < code_len; i += n) {
       n = ivm_oplen(code + i);
       if (!n) n = 1;
-      if (code[i] == 'i') { LBL(i + 4); continue; }
+      if (code[i] == 'i') {        // rotated: body start; while: exit
+        t = i_exit_b(code, i, code_len);
+        if (t != 0xffff) LBL(t); else LBL(i + 4);
+        continue;
+      }
       if (code[i] == 'n') continue;
       t = ivm_jump(code + i, i);
       if (t != 0xffff) LBL(t);
@@ -946,7 +979,9 @@ word ivm_jit(const uchar *code, word code_len,
     for (i = 0; i < code_len; i += n) {
       n = ivm_oplen(code + i);
       if (!n) n = 1;
-      t = code[i] == 'i' ? (word)(i + 4) : code[i] == 'n' || code[i] == 'B'
+      t = code[i] == 'i' ? (i_exit_b(code, i, code_len) != 0xffff ?
+          i_exit_b(code, i, code_len) : (word)(i + 4)) :
+          code[i] == 'n' || code[i] == 'B'
           ? 0xffff : ivm_jump(code + i, i);
       if (t != 0xffff) {
         uchar k;
@@ -1480,6 +1515,18 @@ word ivm_jit(const uchar *code, word code_len,
       // '[' with it as index): then the test leaves it in AX
       const uchar *b = p + 3;
       uchar slot = p[0], ax;
+      word ex = i_exit_b(code, bc_pc, code_len);
+      if (ex != 0xffff) {          // while (v <= lim): plain test, the 'B'
+        uchar lim = p[1];          // at the end jumps back here. -, SLOT
+        p += 3;
+        if (!(acc_at == ACC_AX && acc_s == slot)) {
+          acc_drop();
+          emit_load_slot(slot);
+        }
+        emit_loop_exit(slot, lim, ex);
+        acc_ax_slot(slot);
+        break;
+      }
       ax = (b < end) && (b[0] == slot || (b[0] == 'L' && b[1] == slot) ||
                          (b[0] == '[' && b[2] == slot));
       if (ax) {                    // body start: AX = loop var (loop top)

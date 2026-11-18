@@ -184,7 +184,12 @@ echo
 
 # --- peephole Lxx XX 0Q and -z
 # ivm              95 B	|			|629,316,715
+# ivm (btable disp)94 BC|                       |385,...
+# ivm              89 B |                       |340,305,927
+#
+# asm: byte idx         |      128 s   18.35x	|128,431,679
 # asm		   95 B	|			|121,566,667
+#
 # jit		  429 B |			| 27,893,845
 # jit -z 	  364 B	|			| 25,033,395
 #
@@ -194,7 +199,13 @@ echo
 # ivm-oscar	  	|		44.20x	|309,383,290
 
 # - opt jit byte-sieve-primes.c - sieve.md CMP oscar64
+# ivm 			|	340s		|340,305,927
+# asm		   95 B	|			|121,566,667
+# jit-asm 	   90 BC|	          	|121,492,447
+#   while<= 'i'	   89 BC|                       |103,149,265
+#
 # oscar64 -Os	  294 B	|       14.4s   1x 	| best C for 6502 (4594 B)
+#
 # jit -z 	  364 B	|		1.738x	| 25,033,395
 # jit for	  356 B	|		1.726x	| 24,856,097
 # jit 'i' 'n'     335 B |		1.719x 	| 24,757,775
@@ -205,9 +216,11 @@ echo
 # jit   'n' fix   320 B	|		1.555x 	| 22,385,008
 # jit   opt '<'	  320 B	|		1.553x 	| 22,362,371
 # jit   	  321 B	|		1.546x 	| 22,257,695
+# jit  whle<= 'i' 288 B | 		1.194x 	| 17,195,146
 #
-#
-# (/ 22.257695 14.40) 1.5456732638888888
+
+
+# (/ 17.195146 14.40) 1.1941073611111113
 
 
 # (/ 309.383290 7.0) 
@@ -221,7 +234,8 @@ echo
 # Orig ASM (hand)         |  ?    |  7.00s |  1---x |  0.49x |  0.28x
 #                         |       |        |        |        |
 # oscar64 -Os            *| 294 B | 14.40s |  2.06x |  1---x |  0.58x
-#                         |       |        |        |        |
+#                         |       |        |        |        |  ^UPDATEv
+# ivm-jit (byte opt)      | 324 B | 22.26s  ....    |  1.55x  ......
 # ivm-jit (-z peephole)  *| 364 B | 25.03s |  3.58x |  1.74x |  1---x
 # ivm-jit (byte idx)      | 367 B | 25.56s |  3.65x |  1.77x |  1.02x
 # ivm-jit (memset,no??)   | 385 B | 31.16s |  4.45x |  2.16x |  1.24x
@@ -231,6 +245,8 @@ echo
 #                         |       |        |        |        |
 # cc65 -Oirs             *| 442 B | 69.50s |  9.93x |  4.83x |  2.78x
 #
+# ivm-asm (while<= 'i')   |  89 BC| 103.15 | 14.73x |  7.16x |  4.12x
+# ivm-asm (peephole)	  |  90 BC| 121.5s | 17.34x |  8.44x |  4.85x
 # ivm-asm (byte idx)      | 105 BC| 128.4s | 18.34x |  8.92x |  5.13x
 # ivm-asm (ALTCODE=1)     | 101 BC| 133.3s | 19.04x |  9.26x |  5.32x
 # ivm-asm (memset)        | 101 BC| 148.5s | 21.21x | 10.31x |  5.93x
@@ -238,7 +254,8 @@ echo
 #                         |       |        |        |        |
 # ivm-oscar              *|     - | 309.4s | 44.20x | 21.48x | 12.36x
 #                         |       |        |        |        |
-# ivm (btable disp) +368 B|  94 BC| 385.8s | 55.11x | 26.79  | 15.41x
+# ivm (while<= 'i')       |  89 BC| 340.3s | 48.61x | 23.63x | 13.60x
+# ivm (btable disp) +368 B|  94 BC| 385.8s | 55.11x | 26.79x | 15.41x
 # ivm (peephole)          |  95 BC| 629.0s | 89.86x | 43.68x | 25.13x
 # ivm C-interp (initial)  | 109 BC| 697.0s | 99.57x | 48.40x | 27.84x
 #
