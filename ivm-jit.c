@@ -34,7 +34,7 @@ INSTRUCTIONS: Keeps this section but keep updated for status
 | / *                      | JSR helpers in **ivm-lib.asm** (ACC/PAR in zp ivm_acc/ivm_par); still need **PARAX → zp_par** |
 | ZP optimisation          | **Done, one place** — emop2() + zpmap[] (see below) |
 | Branch emit              | **Done** — emrel/empatch (local), emjump (bytecode target); forward short by estimate (JIT_BC_SCALE), retry if too far |
-| ACC state                | **Done** — acc_at AX/PEND/LOST + acc_s (slot AX equals) + acc_k (const). Every op declares its ivm-walk.c contract: acc_need (in: loads a pending const/slot, error if LOST), acc_keep, acc_drop/acc_lost, acc_ax, acc_ax_slot, acc_pk/acc_ps (lazy const/slot), acc_write. Undeclared op → `ACC use not declared`. Labels (prescan, lc_lbl) flush. Pending users: `+ - & \| ^` load from the source (no TXA), const folding (also `~`), `)` `]` store from the source. acc_dead(): KEEP ops (N O F) don't save a dead ACC. -z pointer ops `r w ' , @ !` use (slot),Y directly. Contract breaks fixed: Z N O G F s w , ! ; m |
+| ACC state                | **Done** — lc_axs: slot physically in AX while ACC is pending (`[` `]` index). acc_x0 (X = 0) / acc_z (Z = ACC==0, next op): zjp `beq`, G `bne`. acc_at AX/PEND/LOST + acc_s (slot AX equals) + acc_k (const). Every op declares its ivm-walk.c contract: acc_need (in: loads a pending const/slot, error if LOST), acc_keep, acc_drop/acc_lost, acc_ax, acc_ax_slot, acc_pk/acc_ps (lazy const/slot), acc_write. Undeclared op → `ACC use not declared`. Labels (prescan, lc_lbl) flush. Pending users: `+ - & \| ^` load from the source (no TXA), const folding (also `~`), `)` `]` store from the source. acc_dead(): KEEP ops (N O F) don't save a dead ACC. -z pointer ops `r w ' , @ !` use (slot),Y directly. Contract breaks fixed: Z N O G F s w , ! ; m |
 | Runtime library          | **Done (untested)** — ivm-lib.asm: op* helpers, putchar/getchar trampolines, bump heap. Generated code calls ONLY these (+ zp), never cc65 lib |
 | `-z[XX]` mem in zp       | **Done (untested)** — mem[] at XX, default: ends at target zp top |
 | `-a XXXX` code org       | **Done (untested)** — implies -j (can't run code built for another address) |
@@ -818,6 +818,11 @@ static uchar acc_at, acc_hk, acc_s;
 //                 acc_z   Z == (ACC == 0): set by an op for the NEXT op only
 //                 (lc_z: taken over at the start of each op)
 static uchar acc_x0, acc_z, lc_z;
+// lc_axs: the slot physically in AX at this op's start, also when ACC is
+// pending elsewhere (a const after 'i': AX still = the loop var). Valid
+// while no code is emitted after it was taken (lc_axs_at), 0xff unknown.
+static uchar lc_axs;
+static word  lc_axs_at;
 static word  acc_k;
 static uchar lc_acc_said;   // acc_* calls by the current op
 static uchar lc_op;         // current op (messages)
@@ -972,6 +977,7 @@ static word ivm_jit1(const uchar *code, word code_len,
   lc_nksa = 0;
   lc_err = 0;
   acc_at = ACC_AX; acc_hk = 0; acc_s = 0xff; acc_x0 = 0; acc_z = 0;
+  lc_axs = 0xff; lc_axs_at = 0xffff;
   lc_out_org = out_org;
   lc_ncall = ncall;
   lc_fbase = frame_base;
@@ -1088,6 +1094,8 @@ static word ivm_jit1(const uchar *code, word code_len,
     // NEXT op
     op = *p++;
     lc_op = op; lc_bc = bc_pc; lc_acc_said = 0;
+    if (acc_at == ACC_AX) { lc_axs = acc_s; lc_axs_at = lc_at; }
+    else if (lc_at != lc_axs_at || is_label(bc_pc)) lc_axs = 0xff;
     lc_z = acc_z && !is_label(bc_pc) && acc_at == ACC_AX; acc_z = 0;
 
     #ifdef JIT_TRACE
@@ -1462,7 +1470,7 @@ static word ivm_jit1(const uchar *code, word code_len,
     // [ bb ii : ACC = ((uchar*)base)[idx]
     case '[': {                                    // NEW
       uchar base = PAR, idx = PAR;
-      if (acc_at == ACC_AX && acc_s == idx) emit_belem_ptr_ax(base);  // in AX
+      if (lc_axs == idx) emit_belem_ptr_ax(base);  // index in AX
       else                                  emit_belem_ptr(base, idx);
       acc_drop();
       em2(LDXN, 0); em2(LDAIY, tmp1);      // LDA last: Z == (ACC == 0)
@@ -1473,7 +1481,8 @@ static word ivm_jit1(const uchar *code, word code_len,
     case ']': {                                    // in, KEEP
       uchar base = PAR, idx = PAR;
       if (acc_at == ACC_PEND) {            // store from where ACC is
-        emit_belem_ptr(base, idx);
+        if (lc_axs == idx) emit_belem_ptr_ax(base);   // index still in AX
+        else               emit_belem_ptr(base, idx);
         emit_lda_pend(0); em2(STAIY, tmp1);
         acc_keep();
       } else {
