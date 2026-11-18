@@ -41,6 +41,7 @@ INSTRUCTIONS: Keeps this section but keep updated for status
 | `-o file` save           | **Done (untested)** — [hdr][ivm-lib][mem image][strings][gap][JIT code], implies -j |
 | `-t target`              | **Done (untested)** — sim6502 (sim65 hdr), atmos (.tap autorun), raw |
 | zjp 0x80+rel             | **Done (untested)** — jump if ACC == 0; replaces the old 0x80..0xBF one-byte slot load |
+| HOSTSIM (host)           | **Done** — not cc65: code runs in cpu6502.c (cycle exact), lib routines are C traps (0 cycles); sim_run_blob() |
 
 ### Zero page
 
@@ -98,6 +99,14 @@ Simplyfy function calling code:
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>
+
+// HOSTSIM: not built by cc65 (host): the generated code runs in cpu6502.c,
+// and the ivm-lib.asm routines are traps implemented in C (see the end of
+// this file: sim_run_blob). -DNOHOSTSIM turns it off.
+// (Not "SIM": that is the sim65 target in ivm-lib.asm.)
+#if !defined(__CC65__) && !defined(NOHOSTSIM)
+  #define HOSTSIM
+#endif
 
 // INSTRUCTION: Keep all OPS defined on 6502 here
 //   Don't randomly remove because not used "today"
@@ -287,14 +296,17 @@ Simplyfy function calling code:
 // Branch conditions come in pairs differing by this bit (BNE<->BEQ etc).
 #define BRFLIP 0x20
 
+#ifndef HOSTSIM
 extern ivmvar ivm_acc;
 extern ivmvar ivm_par;
+#endif
 
 
 
 // TODO: emit as native asm to USR using tmp1 as first arg, ACC as second
 //   result in ACC: * / % outputnum
 
+#ifndef HOSTSIM
 extern void opputnum(void); // there is like a 30 B variant!
 extern void opmul(void);
 extern void opdiv(void);
@@ -308,6 +320,7 @@ extern void opputs(void);     // print string at ivm_acc; AX = ivm_acc
 extern void opprintstr(void); // JSR + inline string + 0; AX preserved
 extern void opmalloc(void);   // AX = bytes -> AX = zeroed ptr (bump)
 extern void opfree(void);     // AX = ptr (no-op)
+#endif
 
 // TODO: word oprandom(void): see my parse.asm in Meteoric C compiler
 
@@ -317,6 +330,7 @@ extern void opfree(void);     // AX = ptr (no-op)
 //   the asm should use ACC to be printing advancing it at END
 //   it holds next byte, or for printinlined string,
 //   the return address
+#ifndef HOSTSIM
 void jit_puts(void) {
   // print the string at ivm_acc (set by the P emitter)
   unsigned char *s = (unsigned char *)(unsigned)ivm_acc;
@@ -352,16 +366,38 @@ pis_done:
 pis_out:
   __asm__ ("jmp ($fe)");
 }
+#endif // !HOSTSIM
 
 
+#ifndef HOSTSIM
 extern char* disasm(char* mc, char* end, char indent);
+#endif
 
 
 extern ivmvar ivm_zalloc(ivmvar n);
 extern void   ivm_free(ivmvar p);
 
 
-#define REF(f) ((word)(unsigned long)(void *)(f))
+#ifdef HOSTSIM
+  #include "cpu6502.c"
+
+  // ivm-lib routines: trap addresses (cpu_trap runs them in C), and the
+  // ivm_acc / ivm_par words in the 64K
+  enum {
+    SIM_opputnum = 0xFF00, SIM_opmul, SIM_opdiv, SIM_opmod,
+    SIM_opputchar, SIM_opgetchar, SIM_opputs, SIM_opprintstr,
+    SIM_opmalloc, SIM_opfree, SIM_end
+  };
+  #define REF(f) ((word)SIM_##f)
+  // address of ivm_acc / ivm_par as the generated code sees it
+  #define ACC_ADR 0x0200
+  #define PAR_ADR 0x0202
+  char *disasm(char *mc, char *end, char indent);   // HOSTSIM: cpu6502.c
+#else
+  #define REF(f) ((word)(unsigned long)(void *)(f))
+  #define ACC_ADR ((word)(unsigned)&ivm_acc)
+  #define PAR_ADR ((word)(unsigned)&ivm_par)
+#endif
 
 // zero-page scratch word (lo at tmp1, hi at tmp2) — single named base, not magic 0xfe elsewhere
 static uchar tmp1 = 0xfe;
@@ -956,16 +992,16 @@ word ivm_jit(const uchar *code, word code_len,
     // * / % — helpers as in ivm-vm.asm (ACC op PAR); TODO: PARAX into zp_par
     case '*': case '/': case '%': {
       uchar s = PAR;
-      emop2(STA, (word)(unsigned)&ivm_acc);
-      emop2(STX, (word)((unsigned)&ivm_acc + 1));
+      emop2(STA, ACC_ADR);
+      emop2(STX, (word)(ACC_ADR + 1));
       emit_load_slot(s);
-      emop2(STA, (word)(unsigned)&ivm_par);
-      emop2(STX, (word)((unsigned)&ivm_par + 1));
+      emop2(STA, PAR_ADR);
+      emop2(STX, (word)(PAR_ADR + 1));
       if (op == '*') ema(JSR, REF(opmul));
       else if (op == '/') ema(JSR, REF(opdiv));
       else ema(JSR, REF(opmod));
-      emop2(LDA, (word)(unsigned)&ivm_acc);
-      emop2(LDX, (word)((unsigned)&ivm_acc + 1));
+      emop2(LDA, ACC_ADR);
+      emop2(LDX, (word)(ACC_ADR + 1));
       break;
     }
 
@@ -1000,13 +1036,13 @@ word ivm_jit(const uchar *code, word code_len,
     case 'N': em2(LDAN, 10); ema(JSR, REF(opputchar)); break;
     case 'E': ema(JSR, REF(opputchar)); break;  // emit ACC as char
     case '.':
-      emop2(STA, (word)(unsigned)&ivm_acc);
-      emop2(STX, (word)((unsigned)&ivm_acc + 1));
+      emop2(STA, ACC_ADR);
+      emop2(STX, (word)(ACC_ADR + 1));
       ema(JSR, REF(opputnum));
       break;
     case 'P':
-      emop2(STA, (word)(unsigned)&ivm_acc);
-      emop2(STX, (word)((unsigned)&ivm_acc + 1));
+      emop2(STA, ACC_ADR);
+      emop2(STX, (word)(ACC_ADR + 1));
       ema(JSR, REF(opputs));
       break;
     case 'O': em2(LDAN, PAR); ema(JSR, REF(opputchar)); break;
@@ -1376,5 +1412,189 @@ word ivm_jit(const uchar *code, word code_len,
 
   return lc_at;
 }
+
+#ifdef HOSTSIM
+// ---------------------------------------------------------------------------
+// HOSTSIM: run on the host. sim_run_blob() lays an .ivm blob out in the 64K of
+// cpu6502.c, JIT-compiles it there and runs it:
+//
+//   $0000-$00FF  zero page: -z mem[] (top down, below tmp1/tmp2 $FE/$FF)
+//   $0200        ivm_acc, ivm_par
+//   $0300        mem[] (without -z), then the strings
+//   org          JIT code ($1000 default, -a XXXX), then the heap to $F000
+//   $FF00        ivm-lib traps (SIM_*), $FFF0 cpu_call sentinel
+//
+// Lib calls run in C and cost 0 cycles: cycle counts are the JIT code only.
+// ---------------------------------------------------------------------------
+static word sim_heap, sim_heapend;
+static unsigned long sim_traps;
+
+#define SIM_W(a)  (cpu_mem[(word)(a)] | (cpu_mem[(word)((a) + 1)] << 8))
+#define SIM_SETW(a, v) (cpu_mem[(word)(a)] = (uchar)(v), \
+                        cpu_mem[(word)((a) + 1)] = (uchar)((v) >> 8))
+#define SIM_AX(c, v) ((c)->a = (uchar)(v), (c)->x = (uchar)((v) >> 8))
+
+// JIT_TRACE and jit_compile use disasm() on out[]: copy the bytes to where
+// they will run, and list them from there
+char *disasm(char *mc, char *end, char indent) {
+  word at = (word)(lc_out_org + (mc - (char *)lc_out)), stop;
+  char buf[40];
+  int i;
+
+  memcpy(cpu_mem + at, mc, (size_t)(end - mc));
+  stop = (word)(at + (end - mc));
+  while (at < stop) {
+    for (i = 0; i < indent + 3; i++) putchar(' ');
+    printf("%04X %s\n", at, (cpu_dis(at, buf), buf));
+    at = (word)(at + cpu_dis(at, buf));
+  }
+  return end;
+}
+
+static int sim_trap(Cpu6502 *c) {
+  word acc = (word)SIM_W(ACC_ADR), par = (word)SIM_W(PAR_ADR), t;
+  int ch;
+
+  if (c->pc >= SIM_end) return 0;
+  sim_traps++;
+  switch (c->pc) {
+  case SIM_opputchar: putchar(c->a); break;           // A X Y kept
+  case SIM_opgetchar:
+    ch = getchar();
+    t = (word)(ch == EOF ? 0xffff : ch);
+    SIM_AX(c, t);
+    break;
+  case SIM_opputnum: printf("%u", acc); SIM_AX(c, acc); break;
+  case SIM_opputs:
+    for (t = acc; t && cpu_mem[t]; t++) putchar(cpu_mem[t]);
+    SIM_AX(c, acc);
+    break;
+  case SIM_opprintstr:
+    // the string follows the JSR: print it, return after its 0
+    t = cpu_mem[0x101 + c->s];
+    t |= (word)(cpu_mem[0x102 + c->s] << 8);
+    while (cpu_mem[++t]) putchar(cpu_mem[t]);
+    cpu_mem[0x101 + c->s] = (uchar)t;                 // RTS: t + 1
+    cpu_mem[0x102 + c->s] = (uchar)(t >> 8);
+    break;
+  case SIM_opmul: SIM_SETW(ACC_ADR, (word)(acc * par)); break;
+  case SIM_opdiv: if (par) SIM_SETW(ACC_ADR, (word)(acc / par)); break;
+  case SIM_opmod: if (par) SIM_SETW(ACC_ADR, (word)(acc % par)); break;
+  case SIM_opmalloc:                                  // AX = bytes -> ptr
+    t = (word)(c->a | (c->x << 8));
+    if (sim_heap + (unsigned)t > sim_heapend) t = 0;
+    else {
+      memset(cpu_mem + sim_heap, 0, t);
+      ch = sim_heap;
+      sim_heap = (word)((sim_heap + t + 1) & ~1);
+      t = (word)ch;
+    }
+    SIM_AX(c, t);
+    break;
+  case SIM_opfree: break;
+  default: return 0;
+  }
+  return 1;
+}
+
+// JIT-compile and run an un-relocated blob (as load_blob reads it on the
+// host). zp: -z (zp_at 0 = top down), org: -a (0 = $1000). Returns AX.
+word sim_run_blob(uchar *blob, uchar zp, uchar zp_at, word org) {
+  // header: magic[4] len memsz constidx main code call fp con data
+  #define HW(i) ((word)(blob[4 + 2 * (i)] | (blob[5 + 2 * (i)] << 8)))
+  word len = HW(0), memsz = HW(1), cidx = HW(2), hmain = HW(3);
+  word hcode = HW(4), hcall = HW(5), hfp = HW(6), hcon = HW(7), hdata = HW(8);
+  #undef HW
+  word membytes = (word)(memsz * 2), mem_base, data, code_len, size, i, w;
+  word vec_bc[64], *map, *img;
+  uchar ncall = (uchar)((hcon - hcall) / 2), seen0 = 0, *out;
+  Cpu6502 cpu;
+  int r;
+
+  if (ncall > 64) ncall = 64;
+  memset(cpu_mem, 0, sizeof(cpu_mem));
+
+  // mem[]
+  if (zp) {
+    if (!zp_at) zp_at = (uchar)(0xFE - membytes);
+    if (membytes > 0xFE || zp_at + membytes > 0xFE) {
+      printf("%%SIM: -z: mem[] %u bytes does not fit in zp\n", membytes);
+      return 0;
+    }
+    mem_base = zp_at;
+    data = 0x0300;
+  } else {
+    mem_base = 0x0300;
+    data = (word)((mem_base + membytes + 1) & ~1);
+  }
+  if (!org) org = 0x1000;
+  if (data + (len - hdata) > org) {
+    printf("%%SIM: mem[]+strings reach $%04X, past code org $%04X\n",
+      (unsigned)(data + len - hdata), (unsigned)org);
+    return 0;
+  }
+
+  // strings, then the mem[] image: consts from the pool; string words are
+  // blob offsets (before the 0) -> their address here
+  memcpy(cpu_mem + data, blob + hdata, len - hdata);
+  img = (word *)calloc(memsz ? memsz : 1, sizeof(word));
+  for (i = 0; cidx + i < memsz; i++) {
+    w = (word)(blob[hcon + 2 * i] | (blob[hcon + 2 * i + 1] << 8));
+    if (!w) seen0 = 1;
+    else if (!seen0) w = (word)(data + (w - hdata));
+    img[cidx + i] = w;
+  }
+  for (i = 0; i < memsz; i++) SIM_SETW(mem_base + 2 * i, img[i]);
+
+  // JIT
+  for (i = 0; i < ncall; i++)
+    vec_bc[i] = (word)((blob[hcall + 2 * i] | (blob[hcall + 2 * i + 1] << 8)) - hcode);
+  code_len = (word)((hdata > hcode ? hdata : len) - hcode);
+  map = (word *)calloc(code_len ? code_len : 1, sizeof(word));
+  out = (uchar *)malloc(8192);
+  lc_main_bc = (word)(hmain - hcode);
+  lc_main_at = 0;
+  lc_constidx = (uchar)cidx;
+  lc_constmem = img;
+  size = ivm_jit(blob + hcode, code_len, out, 8192, map, code_len,
+                 mem_base, org, vec_bc, blob + hfp, ncall);
+  if (!size || org + size > 0xF000) {
+    printf("%%SIM: JIT failed (%u bytes)\n", (unsigned)size);
+    free(img); free(map); free(out);
+    return 0;
+  }
+  if (lc_main_at) {                       // startup JMP -> _start of the blob
+    out[lc_jmp_at]     = (uchar)(org + lc_main_at);
+    out[lc_jmp_at + 1] = (uchar)((org + lc_main_at) >> 8);
+  }
+  memcpy(cpu_mem + org, out, size);
+
+  printf("--- SIM: mem[] $%04X (%u B), strings $%04X, code $%04X-$%04X"
+         " (%u B), heap $%04X ---\n", (unsigned)mem_base, (unsigned)membytes,
+         (unsigned)data, (unsigned)org, (unsigned)(org + size - 1),
+         (unsigned)size, (unsigned)((org + size + 1) & ~1));
+
+  // run
+  sim_heap = (word)((org + size + 1) & ~1);
+  sim_heapend = 0xF000;
+  sim_traps = 0;
+  cpu_trap = sim_trap;
+  cpu_trap_lo = SIM_opputnum;
+  memset(&cpu, 0, sizeof(cpu));
+  cpu.s = 0xff;
+  cpu.p = 0x24;
+  r = cpu_call(&cpu, org, 0);
+  if (r < 0) {
+    char buf[40];
+    cpu_dis(cpu.pc, buf);
+    printf("\n%%SIM: undocumented opcode at $%04X: %s\n", (unsigned)cpu.pc, buf);
+  }
+  printf("\n--- SIM: %lu cycles, %lu lib calls, AX = %u ---\n",
+    cpu.cycles, sim_traps, (unsigned)(cpu.a | (cpu.x << 8)));
+
+  free(img); free(map); free(out);
+  return (word)(cpu.a | (cpu.x << 8));
+}
+#endif // HOSTSIM
 
 #endif
