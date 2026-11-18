@@ -1213,6 +1213,13 @@ static word ivm_jit1(const uchar *code, word code_len,
         break;
       }
       if (op == '+') em(CLC); else if (op == '-') em(SEC);
+      if (acc_at == ACC_PEND && !acc_hk && lc_axs == s && op != '-') {
+        uchar x = acc_s;           // commutative: AX already holds mem[s],
+        acc_ax_slot(s);            // so mem[s] OP mem[x] (k = i + prime
+        emit_lohiop(ins, x);       // right after S prime)
+        acc_ax();
+        break;
+      }
       if (acc_at == ACC_PEND) {
         // load each byte straight from where ACC is: no LDX / TXA
         emit_lda_pend(0); emit_alub(ins, s, 0); em(TAY);
@@ -1982,6 +1989,7 @@ word sim_run_blob(uchar *blob, uchar zp, uchar zp_at, word org) {
   cpu_trap = sim_trap;
   cpu_trap_lo = SIM_opputnum;
   memset(&cpu, 0, sizeof(cpu));
+  memset(cpu_xpage_at, 0, sizeof(cpu_xpage_at));
   cpu.s = 0xff;
   cpu.p = 0x24;
   r = cpu_call(&cpu, org, 0);
@@ -1992,6 +2000,13 @@ word sim_run_blob(uchar *blob, uchar zp, uchar zp_at, word org) {
   }
   printf("\n--- SIM: %lu cycles, %lu lib calls, AX = %u ---\n",
     cpu.cycles, sim_traps, (unsigned)(cpu.a | (cpu.x << 8)));
+  if (cpu.xpage) {                     // layout: branches across a page
+    unsigned long n = 0; word at = 0; long k;
+    for (k = 0; k < 65536L; k++)
+      if (cpu_xpage_at[k] > n) { n = cpu_xpage_at[k]; at = (word)k; }
+    printf("--- SIM: page-crossing branches cost %lu (most: $%04X"
+      " %lu times) ---\n", cpu.xpage, (unsigned)at, n);
+  }
 
   free(img); free(map); free(out);
   return (word)(cpu.a | (cpu.x << 8));

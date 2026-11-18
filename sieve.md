@@ -5,7 +5,6 @@
   - possibly use shared library?
 -  3 B: m - malloc sizes constant, don't need to LDA xx TAY ...  CMP BEQ,
            just delay and do ... LDY xx BEQ (- 3 bytes)
-- 12 B (16) -> 10 B (12) i+i == i<<1
 -  4 B: reorder: "prime = i + i + 3;  k = i + prime;" => "...; k = prime + i;"
 
 ------- 5b '[' 00 05 9b 05 ------
@@ -33,6 +32,7 @@ BUG: 'I' and 'J' doesn't wrap around will give 16 bit number
 --- 
 
 DONE:
+- saved  2 B: 12 B (16) -> 10 B (12) i+i == i<<1
 - saved  8 B: [ zjmp - it's a byte simplify zjmp
 - saved  5 B: forward jumps: bxx + jmp = if can shorten save 2 byte per forward
 - saved 12 B! 364-356: 8 B: for (i = 0; i <= SIZE; i++) { 

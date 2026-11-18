@@ -20,7 +20,11 @@ typedef struct {
   uchar a, x, y, s, p;
   word pc;
   unsigned long cycles;
+  unsigned long xpage;          // +1 cycles of taken branches crossing a page
 } Cpu6502;
+
+// per branch address: how often its taken branch crossed a page
+static unsigned long cpu_xpage_at[65536];
 
 // P flags
 #define CPU_C 0x01
@@ -218,7 +222,11 @@ static int cpu_step(Cpu6502 *c) {
     taken = (uchar)(((c->p & flag[f]) != 0) == want);
     if (taken) {
       t = (word)(c->pc + (signed char)b1);
-      cy += 1 + ((t ^ c->pc) >> 8 ? 1 : 0);
+      cy += 1;
+      if ((t ^ c->pc) >> 8) {           // page cross: layout dependent
+        cy++; c->xpage++;
+        cpu_xpage_at[(word)(c->pc - 2)]++;
+      }
       c->pc = t;
     }
     break;
