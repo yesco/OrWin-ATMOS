@@ -271,13 +271,19 @@
 
 #ifdef JIT
   #include "ivm-jit.c"
-  #include "disasm.c"
+  #ifndef HOSTSIM
+    #include "disasm.c"
+    #define JIT_6502    // real 6502: ivm-lib.asm, -o/-t, jsr into the code
+  #endif
   static int jit_force_zp = 0;
   static word  jit_zp = 0;          // -zXX: zp base of mem[] (0: auto)
   static word  jit_org = 0;         // -a XXXX: org of generated code (0: auto)
   static char *jit_outfile = NULL;  // -o file
   static char *jit_target = NULL;   // -t sim6502|atmos|raw
 
+#endif
+
+#ifdef JIT_6502
   // ivm-lib.asm (link it FIRST): [start .. end[ is copied by -o
   extern uchar ivmlib_start[], ivmlib_end[];
   extern word  ivmlib_entry, ivmlib_heap, ivmlib_heapend, ivmlib_zpsrc;
@@ -1726,7 +1732,7 @@ char save_blob(const char *path, uchar *img, int len) {
   return 1;
 }
 
-#ifdef JIT
+#ifdef JIT_6502
 
 // ---- -t -z -a -o support -------------------------------------------------
 //
@@ -2020,15 +2026,27 @@ static word runs = 1;   // -rN
 static int run_loaded_blob(uchar *img, int len) {
   static word ret; // static so can access in 6502 asm
   static word addr;
-  #ifdef JIT
+  #ifdef JIT_6502
     static word heap0;
   #endif
+  Process *proc;
 
-  Process *proc= Nevm(img);
-    
+  #ifdef HOSTSIM
+    // host: JIT + run in cpu6502.c (sim_run_blob in ivm-jit.c). img is still
+    // blob-relative here: relocate() only patches on 6502 (IVM_ABS)
+    printf("--- JIT (SIM) compiling IVM (blob %d) ---\n", len);
+    while (runs) {
+      runs--;
+      ret = sim_run_blob(img, (uchar)jit_force_zp, (uchar)jit_zp, jit_org);
+      printf("acc = %u\n", ret);
+    }
+    return 0;
+  #endif
+
+  proc = Nevm(img);
   if (!proc) return -1;
 
-  #ifdef JIT
+  #ifdef JIT_6502
     printf("--- JIT compiling IVM (blob %d) ---\n", len);
     addr = jit_compile(proc);
     if (!addr) return -1;
@@ -2050,7 +2068,7 @@ static int run_loaded_blob(uchar *img, int len) {
     runs--;
     printf("\n--- RUN IVM (blob %d) ---\n", len);
 
-  #ifdef JIT
+  #ifdef JIT_6502
       // NOTE: mem[] is not reset between runs
       ivmlib_heap = heap0;
       // call the generated 6502 code at addr (JMP + vector table)
@@ -2067,7 +2085,7 @@ static int run_loaded_blob(uchar *img, int len) {
     printf("\n--- END ---\n");
     printf("acc = %u\n\n", ret);
 
-  #ifndef JIT
+  #ifndef JIT_6502
     if (runs) {          // fresh mem[] for the next run
       free(proc);
       if (!(proc = Nevm(img))) return -1;
@@ -2153,9 +2171,12 @@ int main(int argc, char** argv) {
 
   printf("ivm args done\n");
 
-  #ifdef JIT
+  #ifdef JIT_6502
     // code built for another address/file can't run here
     if (jit_org || jit_outfile) runs = 0;
+  #endif
+  #ifdef HOSTSIM
+    if (jit_outfile) { printf("%%SIM: -o needs the 6502 build\n"); runs = 0; }
   #endif
 
   if (s) return run_file(s);
