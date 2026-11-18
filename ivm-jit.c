@@ -584,6 +584,8 @@ static void emit_lim_minus_slot(uchar lim, uchar slot) {
   }
 }
 
+// Word indexing address calculation
+//
 // tmp1/tmp2 = mem[base] + 2*mem[idx]   (clobbers A, X, Y)
 // TODO: this is very expensive, we should pass in the size
 //   if we know it, also, have a byte operator. If size < 256 bytes
@@ -608,6 +610,8 @@ static void emit_elem_ptr(uchar base, uchar idx) {
   emit_alub(ADC, base, 1); em2(STAZ, tmp2);
 }
 
+// Byte indexing address calculation
+//
 // (tmp1),Y == &((uchar*)mem[base])[mem[idx]]   (clobbers A, Y; X kept)
 // ptr = (idx_lo, base_hi+idx_hi), Y = base_lo: the indexed mode does the
 // lo add + carry for free.

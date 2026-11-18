@@ -193,6 +193,10 @@ echo
 
 # ivm-oscar	  	|		44.20x	|309,383,290
 
+# - opt jit byte-sieve-primes.c - sieve.md
+# jit -z 	  364 B	|			| 25,033,395
+# jit for	  356 B	|			| 24,856,097
+
 
 # (/ 309.383290 7.0) 
 # (/ 450 469.0)

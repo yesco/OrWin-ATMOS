@@ -1,3 +1,14 @@
+# jsk notes:
+
+- 33 B: 11x: forward jumps: bxx + jmp = if can shorten save 33 B!
+- 27 B: memset (+ 4 B load size deferred)
+  - lots of setup (clc+adc)
+  - possibly use shared library?
+- saved 12 B! 364-356: 8 B: for (i = 0; i <= SIZE; i++) { 
+
+  
+
+
 # Claude analysis compare with oscar64 asm:
 
 ## Matching the parts
