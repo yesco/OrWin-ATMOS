@@ -820,33 +820,34 @@ word ivm_jit(const uchar *code, word code_len,
   p = code;
   end = code + code_len;
 
+  ostart = lc_at;
+  
   while (p < end) {
     bc_pc = (word)(p - code);
 
     // state left by the previous op; default for this op: unknown after
     kc = lc_kc; kv = lc_kv; kp = lc_kp; lc_kc = 0; lc_kp = 0;
     ks = lc_ks; lc_ks = 0xff;
+
     // a label (jump target / function entry) here: ACC is not what the
     // previous op left on every path
     if (kc && (is_fwd_target(bc_pc) || is_fn_entry(bc_pc))) kc = 0;
+
     // emit the deferred constant load unless ')' consumes it itself.
     // Done BEFORE map[bc_pc] so jumps to this op do not run it.
-    if (kp && !(kc && code[bc_pc] == ')')) {
-      #ifdef JIT_TRACE
-      ostart = lc_at;
-      #endif
+    if (kp && !(kc && (code[bc_pc] == ')' || code[bc_pc] == ']'))) {
       emit_load_const(kv);
       #ifdef JIT_TRACE
-      printf("------- deferred const load ------\n");
-      if (lc_at <= lc_max)
+        // Not sure I like the duplication, lol
+        printf("------- deferred const load ------\n");
         disasm((char *)(lc_out + ostart), (char *)(lc_out + lc_at), 0);
+        ostart = lc_at;
       #endif
     }
 
-    if (bc_pc < lc_mapn)
-      lc_map[bc_pc] = lc_at;
-    if (bc_pc == lc_main_bc)
-      lc_main_at = lc_at;
+    // Catch function entries (?)
+    if (bc_pc <  lc_mapn)    lc_map[bc_pc] = lc_at;
+    if (bc_pc == lc_main_bc) lc_main_at = lc_at;
 
     // function entry: patch vector word, set frame, store AX to ACC home
     if (vec_bc && frame_base) {
@@ -866,7 +867,13 @@ word ivm_jit(const uchar *code, word code_len,
       }
     }
 
+    // NEXT op
     op = *p++;
+
+    #ifdef JIT_TRACE
+      printf("------- %02x '%c' %02x %02x %02x %02x ------\n",
+        op, isprint(op) ? op : ' ', p[0], p[1], p[2], p[3]);
+    #endif
 
     // 0..31: fast load mem[op] (nothing if AX already holds it)
     if (op < 32) { if (op != ks) load_slot_lazy(op); continue; }
@@ -913,14 +920,8 @@ word ivm_jit(const uchar *code, word code_len,
         }
 
       }
-      continue;
+      goto report;
     }
-
-    #ifdef JIT_TRACE
-    printf("------- %02x '%c' %02x %02x %02x %02x ------\n",
-      op, isprint(op) ? op : ' ', p[0], p[1], p[2], p[3]);
-    ostart = lc_at;
-    #endif
 
     // PAR: one operand byte, advances p
     #define PAR (*p++)
@@ -1013,10 +1014,7 @@ word ivm_jit(const uchar *code, word code_len,
       fx = emrel(BNE);
       emop2(INC_, slothi(s));
       empatch(fx);
-
-// TODO: lazy load! (wasting 6 cycles if not need. disp-inc: 14c 
-
-      emit_load_slot(s);
+      load_slot_lazy(s);
       break;
     }
     // J: LDA lo; BNE skip; DEC hi; DEC lo; reload ACC
@@ -1028,7 +1026,7 @@ word ivm_jit(const uchar *code, word code_len,
       emop2(DEC_, slothi(s));
       empatch(fx);
       emop2(DEC_, slotlo(s));
-      emit_load_slot(s);
+      load_slot_lazy(s);
       break;
     }
 
@@ -1084,6 +1082,8 @@ word ivm_jit(const uchar *code, word code_len,
     // ,: *(uchar*)ptr = ACC; ptr++
     case ',': {
       uchar s = PAR;
+// TODO: if in zeropage should be easier code! no need copy and use tmp1!
+//   any other places that benefit from ZP?
       em(TAY); emit_load_slot(s); emit_ax_to_tmp1();
       em(TYA); em2(LDYN, 0); em2(STAIY, tmp1);
       em(CLC);
@@ -1097,6 +1097,8 @@ word ivm_jit(const uchar *code, word code_len,
     // @: ACC = *(word*)mem[s]
     case '@': {
       uchar s = PAR;
+// TODO: if in zeropage should be easier code! no need copy and use tmp1!
+//   any other places that benefit from ZP?
       emit_load_slot(s); emit_ax_to_tmp1();
       em2(LDYN, 0); em2(LDAIY, tmp1); em(PHA);
       em(INY); em2(LDAIY, tmp1); em(TAX); em(PLA);
@@ -1109,6 +1111,8 @@ word ivm_jit(const uchar *code, word code_len,
       em(TAY);                             // lo in Y
       em(TXA); em(PHA);                    // hi on stack
       em(TYA); em(PHA);                    // lo on stack
+// TODO: if in zeropage should be easier code! no need copy and use tmp1!
+//   any other places that benefit from ZP?
       emit_load_slot(s); emit_ax_to_tmp1();
       em(PLA); em2(LDYN, 0); em2(STAIY, tmp1);
       em(INY); em(PLA); em2(STAIY, tmp1);
@@ -1370,10 +1374,12 @@ word ivm_jit(const uchar *code, word code_len,
 
     #undef PAR
 
-#ifdef JIT_TRACE
-    if (lc_at <= lc_max)
-      disasm((char *)(lc_out + ostart), (char *)(lc_out + lc_at), 0);
-#endif
+  report: ;
+    
+  #ifdef JIT_TRACE
+    disasm((char *)(lc_out + ostart), (char *)(lc_out + lc_at), 0);
+    ostart= lc_at;
+  #endif
 
   }
 

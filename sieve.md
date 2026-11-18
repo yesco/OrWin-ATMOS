@@ -4,10 +4,21 @@
 - 27 B: memset (+ 4 B load size deferred)
   - lots of setup (clc+adc)
   - possibly use shared library?
-- saved 12 B! 364-356: 8 B: for (i = 0; i <= SIZE; i++) { 
 - 4 B: for should leave index in ACC
-- n duplicates the test
+- 
   
+
+
+BUG: 'I' and 'J' doesn't wrap around will give 16 bit number
+    and when used as direct arg will read hibyte... 
+
+--- 
+
+DONE:
+- saved 12 B! 364-356: 8 B: for (i = 0; i <= SIZE; i++) { 
+- saved 21 B: 'i' 'n' duplicates the test - fixed
+    
+
 
 
 # Claude analysis compare with oscar64 asm:

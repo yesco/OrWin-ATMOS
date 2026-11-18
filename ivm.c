@@ -143,7 +143,7 @@
 //  1234576 - parameter/local var read
 //  8 - first parameter
 //  9 - ACC= -1/TRUE/0xffff
-//? : - store ACC by name :cc (cc - const char* ptr), see _
+//? : - TODO: store ACC by name :cc (cc - const char* ptr), see _
 //  ; - return (ACC=returnvalue, for pascal), see X and Q, too.
 //  <=> - cmp - lt eq gt => 0 or 1
 //  ? - NOT acc (C: !)
@@ -207,20 +207,27 @@
 //           nth
 //           consp
 //
+// TOOD: maybe need byte version of I and J... move loop to tuv
 //  i   - loop <= with 'n' ('i' var upper skip)
 //  j   - TODO: loop >=0 with 'n' (j var skip)
-//  k   - switch-case ('k'ase low count (const back)...)
+//
+//  k   - TODO: switch-case ('k'ase low count (const back)...)
 //
 //  l   - load byte from slot
+//
 //  m   - memset ACC=size "m pp vv" 
+//
 //  n   - next loop (together with ij ind/dec-for)
-//? op  - TODO: object, 'm' method call 'p' ... ?
+//
+//? op  - TODO: object, 'o' methOd call 'p' ... ?
 //  q   - quit program
 //  r   - read byte (c@)
 //  s   - save byte in slot (reset hibit)
+
 //? t   -
-//? u   - similar U ? or not need
+//? u   - 
 //? v   - 
+
 //  w   - write byte (c!)
 //  xyz - call library functions w 2..4 args
 
