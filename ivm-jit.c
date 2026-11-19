@@ -658,7 +658,7 @@ static void emit_lim_minus_slot(uchar lim, uchar slot) {
 // ax = 1: the body starts by reading the loop var: AX = mem[slot] first,
 //   then CPX/CMP, which only read A and X (13-14 cycles, the body's load
 //   is free):  CPX hi; BNE t; CMP lo; t:   C = AX >= lim, Z = AX == lim
-//   Const lim: i <= lim  <=>  i < lim+1 (folded here): one BCC.
+//   Const lim: i <= lim  <=>  i < lim+1 (folded here): emit_below_const.
 // 'i' closed by a 'B' back to it (while (v <= lim)): its exit, else 0xffff.
 // Rotated like the for loop ('n'), the 'B' has the test (no increment).
 static word i_exit_b(const uchar *c, word i, word len) {
@@ -677,16 +677,46 @@ static int is_stride(const uchar *c, word ibc, word len) {
          c[ex - 4] == c[ibc + 1] && !is_label((word)(ex - 2));
 }
 
+// reg hi / reg lo < v (const): to body (backward). Common case first:
+//   v lo == 0:  CPhi #h; BCC body                      (5 c, 4 B)
+//   v hi == 0:  CPhi #0; BNE exit; CPlo #l; BCC body   (hi below: never)
+//   near body:  CPhi #h; BCC body; BNE exit; CPlo #l; BCC body  (5 c, 10 B)
+//   far body:   CPhi #h; BCC go; BNE exit; CPlo #l; BCS exit; go: JMP body
+static void emit_below_const(uchar cphi, uchar cplo, word v, word body) {
+  word t = body < lc_mapn ? lc_map[body] : 0xffff, fx, fgo, fx2;
+  em2(cphi, (uchar)(v >> 8));
+  if (!(uchar)v) { emjump(BCC, body); return; }
+  if (!(v >> 8)) {
+    fx = emrel(BNE);
+    em2(cplo, (uchar)v);
+    emjump(BCC, body);
+    empatch(fx);
+    return;
+  }
+  if (t != 0xffff && (int)t - (int)(lc_at + 8) >= -128) {   // both short
+    emjump(BCC, body);
+    fx = emrel(BNE);
+    em2(cplo, (uchar)v);
+    emjump(BCC, body);
+    empatch(fx);
+    return;
+  }
+  fgo = emrel(BCC);
+  fx = emrel(BNE);
+  em2(cplo, (uchar)v);
+  fx2 = emrel(BCS);
+  empatch(fgo);
+  emjump(JMP, body);
+  empatch(fx); empatch(fx2);
+}
+
 // Y = lo, A = hi of the loop var: to body while <= lim (as emit_loop_test)
 static void emit_loop_test_ya(uchar lim, word body) {
   word fx;
   if (is_const(lim)) {
     word v = const_val(lim);
     if (v == 0xffff) { emjump(JMP, body); return; }   // always true
-    v++;
-    em2(CMPN, (uchar)(v >> 8)); fx = emrel(BNE);
-    em2(CPYN, (uchar)v);        empatch(fx);
-    emjump(BCC, body);
+    emit_below_const(CMPN, CPYN, (word)(v + 1), body);
   } else {
     emit_alub(CMP, lim, 1); fx = emrel(BNE);
     emit_alub(CPY, lim, 0); empatch(fx);
@@ -707,10 +737,7 @@ static void emit_loop_test(uchar slot, uchar lim, word body, uchar ax) {
   if (is_const(lim)) {
     word v = const_val(lim);
     if (v == 0xffff) { emjump(JMP, body); return; }   // always true
-    v++;
-    em2(CPXN, (uchar)(v >> 8)); fx = emrel(BNE);
-    em2(CMPN, (uchar)v);        empatch(fx);
-    emjump(BCC, body);
+    emit_below_const(CPXN, CMPN, (word)(v + 1), body);
   } else {
     emop2(CPX, slothi(lim)); fx = emrel(BNE);
     emop2(CMP, slotlo(lim)); empatch(fx);
