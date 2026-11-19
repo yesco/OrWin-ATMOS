@@ -17,20 +17,22 @@
 ;;; that range (no cc65 runtime/lib calls). Allowed: zero page, ROM,
 ;;; sim65 paravirt hooks (_write/_read/exit are fixed hook addresses,
 ;;; not code).
-;;; 
+;;;
 ;;; TODO: it's not clear how it'll do that when compiling on host. LOL
-;;;   maybe keep/save a copy of this binary as a stub artifact to 
+;;;   maybe keep/save a copy of this binary as a stub artifact to
 ;;;   include. One problem is that the way it's written is not
 ;;;   relocatable. Entry points is one thing, however, internally
 ;;;   in eacch routine... should only be using relative jumps,
 ;;;   and possibly not depend on eachother?
 ;;;
-;;; 
-;;; Calling convention (as cc65 / ivm-vm.asm):
-;;; 
-;;;   opmul opdiv opmod : _ivm_acc OP= _ivm_par,  AX = result
-;;;   opputnum opputs   : print _ivm_acc,         AX = _ivm_acc
-;;;   opputchar         : A = char,               A X Y preserved
+;;;
+;;; Calling convention (AX = A lo, X hi, as the JIT code keeps ACC):
+;;;
+;;;   opmul opdiv opmod : JT = first (ACC), AX = second,  AX = result
+;;;                       (/0: AX = first, like the VM)
+;;;   opputnum opputs   : AX = number / string,   AX kept
+;;;   opputchar         : A = char,               A X Y preserved,
+;;;                       Z/N from A (callers BNE on it: a char is never 0)
 ;;;   opgetchar         : AX = char, $FFFF = EOF
 ;;;   opprintstr        : JSR + inline string + 0, AX preserved
 ;;;   opmalloc          : AX = bytes -> AX = zeroed ptr (0 = fail), bump heap
@@ -39,22 +41,22 @@
 ;;;                       _opmemset_adr = ptr + X*256 (last page);
 ;;;                       A kept, X = $FF, Y = 0
 ;;;
-;;; 
-;;; Uses cc65 zp scratch: ptr1 ptr2 tmp1-tmp4  (as most cc65)
-;;; 
-;;; 
+;;; Sizes and cycles: per routine (cycles: the JSR to it included;
+;;; opputnum..opdiv measured in cpu6502.c, the rest estimated).
+;;;
+;;; Uses cc65 zp scratch: ptr1 ptr2 tmp1-tmp4  (as most cc65), and JT.
+;;;
+;;;
 ;;; TODO: possibly the 6502 vars may not be present at runtime,
 ;;;   potentially they will clash with ZP jit compiled code,
 ;;;   which is why they were using their safe variants. We
 ;;;   don't especially need to "exit" nicely.
-;;; 
-;;; TODO: possibly in sim6502.cfg minimal "allocate" space in 
+;;;
+;;; TODO: possibly in sim6502.cfg minimal "allocate" space in
 ;;;   upper zero page. Like our generated code assumed 0xFE,0xFF
 ;;;   tmp1, tmp2
-	
-.include "zeropage.inc"
 
-.importzp _ivm_acc, _ivm_par
+.include "zeropage.inc"
 
 .export _ivmlib_start, _ivmlib_end
 .export _ivmlib_entry, _ivmlib_heap, _ivmlib_heapend
@@ -72,6 +74,8 @@
         .define CSP sp
 .endif
 
+;;; JIT scratch word (ivm-jit.c tmp1/tmp2): first operand of opmul/opdiv/opmod
+JT = $FE
 
 
 ;;;  TODO: the compiler, either if native or ot
@@ -81,11 +85,11 @@
 .if .defined(__SIM6502__) .or .defined(__SIM65C02__)
 	;; .if .defined(__CC65___) ??? TODO:
         SIM = 1
-        .import _write, _read, exit     ; sim65 paravirt hooks
-        SIM_SP = $FF00                  ; C stack top, stand-alone run
+        .import _write, _read, exit     ;; sim65 paravirt hooks
+        SIM_SP = $FF00                  ;; C stack top, stand-alone run
 .elseif .defined(__ATMOS__)
-        ROM_PRCHR  = $0238              ; ROM 1.1: print char in X
-        ROM_GETKEY = $023B              ; ROM 1.1: get key (UNTESTED)
+        ROM_PRCHR  = $0238              ;; ROM 1.1: print char in X
+        ROM_GETKEY = $023B              ;; ROM 1.1: get key (UNTESTED)
 .else
         .error "ivm-lib: only sim6502/sim65c02/atmos supported"
 .endif
@@ -123,11 +127,11 @@ _ivmlib_start:
 @nozp:
         jsr     @call
 .ifdef SIM
-        jmp     exit                    ; A = exit code (lo of result)
+        jmp     exit                    ;; A = exit code (lo of result)
 .else
-        rts                             ; back to BASIC
+        rts                             ;; back to BASIC
 .endif
-@call:  lda     _ivmlib_entry           ; via zp: no JMP ($xxFF) bug
+@call:  lda     _ivmlib_entry           ;; via zp: no JMP ($xxFF) bug
         sta     ptr2
         lda     _ivmlib_entry+1
         sta     ptr2+1
@@ -137,20 +141,20 @@ _ivmlib_start:
 ;;; Variables, patched by ivm.c before the image is written (and for runs
 ;;; in place: heap/heapend)
 
-_ivmlib_entry:   .word 0                ; JIT code start (NOPs, JMP main)
-_ivmlib_heap:    .word 0                ; next free heap byte
-_ivmlib_heapend: .word 0                ; first byte after heap
-_ivmlib_zpsrc:   .word 0                ; -z: mem[] image in the file
-_ivmlib_zpdst:   .byte 0                ; -z: zp base
-_ivmlib_zplen:   .byte 0                ; -z: bytes, 0 = mem[] not in zp
-_ivmlib_spzp:                           ; sim65 header needs sp's zp address
+_ivmlib_entry:   .word 0                ;; JIT code start (NOPs, JMP main)
+_ivmlib_heap:    .word 0                ;; next free heap byte
+_ivmlib_heapend: .word 0                ;; first byte after heap
+_ivmlib_zpsrc:   .word 0                ;; -z: mem[] image in the file
+_ivmlib_zpdst:   .byte 0                ;; -z: zp base
+_ivmlib_zplen:   .byte 0                ;; -z: bytes, 0 = mem[] not in zp
+_ivmlib_spzp:                           ;; sim65 header needs sp's zp address
 .ifdef SIM
                  .byte CSP
 .else
                  .byte 0
 .endif
 
-pcbuf:  .byte   0                       ; char for putchar/getchar
+pcbuf:  .byte   0                       ;; char for putchar/getchar
 pcx:    .byte   0
 pcy:    .byte   0
 
@@ -159,32 +163,34 @@ pcy:    .byte   0
 ;;; Character I/O trampolines
 ;;; ===========================================================================
 
+;;; SIM 27 B, ATMOS 34 B; ~50 c + pvio + _write (SIM) / ROM
 _opputchar:
         sta     pcbuf
         stx     pcx
         sty     pcy
 .ifdef SIM
-        ldx     #1                      ; stdout
+        ldx     #1                      ;; stdout
         jsr     pvio
-        jsr     _write                  ; write(1, &pcbuf, 1)
+        jsr     _write                  ;; write(1, &pcbuf, 1)
 .else
-        cmp     #$0A                    ; LF -> CR LF
+        cmp     #$0A                    ;; LF -> CR LF
         bne     @ch
         ldx     #$0D
         jsr     ROM_PRCHR
 @ch:    ldx     pcbuf
         jsr     ROM_PRCHR
 .endif
-        lda     pcbuf
-        ldx     pcx
         ldy     pcy
+        ldx     pcx
+        lda     pcbuf                   ;; last: Z/N from the char
         rts
 
+;;; SIM 22 B, ATMOS 10 B
 _opgetchar:
 .ifdef SIM
-        ldx     #0                      ; stdin
+        ldx     #0                      ;; stdin
         jsr     pvio
-        jsr     _read                   ; AX = read(0, &pcbuf, 1)
+        jsr     _read                   ;; AX = read(0, &pcbuf, 1)
         cmp     #1
         bne     @eof
         lda     pcbuf
@@ -194,7 +200,7 @@ _opgetchar:
         tax
         rts
 .else
-@wait:  jsr     ROM_GETKEY              ; UNTESTED: N=1 when key valid?
+@wait:  jsr     ROM_GETKEY              ;; UNTESTED: N=1 when key valid?
         bpl     @wait
         and     #$7F
         ldx     #0
@@ -204,6 +210,7 @@ _opgetchar:
 .ifdef SIM
 ;;; push (fd=X, buf=&pcbuf) on the C stack by hand (no pushax: outside image),
 ;;; AX = count 1. The paravirt hook pops them.
+;;; 36 B, ~60 c
 pvio:   lda     CSP
         sec
         sbc     #4
@@ -212,45 +219,24 @@ pvio:   lda     CSP
         dec     CSP+1
 :       ldy     #3
         lda     #0
-        sta     (CSP),y                 ; fd hi
+        sta     (CSP),y                 ;; fd hi
         dey
         txa
-        sta     (CSP),y                 ; fd lo
+        sta     (CSP),y                 ;; fd lo
         dey
         lda     #>pcbuf
-        sta     (CSP),y                 ; buf hi
+        sta     (CSP),y                 ;; buf hi
         dey
         lda     #<pcbuf
-        sta     (CSP),y                 ; buf lo
+        sta     (CSP),y                 ;; buf lo
         lda     #1
         ldx     #0
         rts
 .endif
 
 ;;; ---------------------------------------------------------------------------
-;;; P: print 0-terminated string at _ivm_acc
-
-_opputs:
-        lda     _ivm_acc
-        sta     ptr1
-        lda     _ivm_acc+1
-        sta     ptr1+1
-        ora     ptr1
-        beq     retacc                  ; NULL
-@l:     ldy     #0
-        lda     (ptr1),y
-        beq     retacc
-        jsr     _opputchar
-        inc     ptr1
-        bne     @l
-        inc     ptr1+1
-        bne     @l
-retacc: lda     _ivm_acc
-        ldx     _ivm_acc+1
-        rts
-
-;;; ---------------------------------------------------------------------------
 ;;; ": JSR _opprintstr / .asciiz "..." / next instruction
+;;; 40 B; ~70 c + ~25 c per char + opputchar
 
 _opprintstr:
         sta     tmp3
@@ -258,7 +244,7 @@ _opprintstr:
         pla
         sta     ptr1
         pla
-        sta     ptr1+1                  ; -> last byte of the JSR
+        sta     ptr1+1                  ;; -> last byte of the JSR
 @n:     inc     ptr1
         bne     :+
         inc     ptr1+1
@@ -266,8 +252,8 @@ _opprintstr:
         lda     (ptr1),y
         beq     @done
         jsr     _opputchar
-        jmp     @n
-@done:  inc     ptr1                    ; skip the 0
+        bne     @n                      ;; A kept: the char, never 0
+@done:  inc     ptr1                    ;; skip the 0
         bne     :+
         inc     ptr1+1
 :       lda     tmp3
@@ -275,24 +261,24 @@ _opprintstr:
         jmp     (ptr1)
 
 ;;; ---------------------------------------------------------------------------
-;;; .: print _ivm_acc unsigned decimal
+;;; .: print AX unsigned decimal, AX kept
+;;; 53 B; 0-9: 425 c, 42: 815 c, 1234: 1631 c, 65535: 2063 c; + opputchar
 
-;;; 51 B
 _opputnum:
-        lda     _ivm_acc
+        sta     tmp3                    ;; AX kept for the return
+        stx     tmp4
         sta     ptr1
-        lda     _ivm_acc+1
-        sta     ptr1+1
+        stx     ptr1+1
         lda     #0
-        pha                             ; end marker
-@div:   lda     #0                      ; ptr1 /= 10, A = remainder
+        pha                             ;; end marker
+@div:   lda     #0                      ;; ptr1 /= 10, A = remainder
         ldx     #16
 @bit:   asl     ptr1
         rol     ptr1+1
         rol     a
         cmp     #10
         bcc     @nb
-        sbc     #10                     ; C=1
+        sbc     #10                     ;; C=1
         inc     ptr1
 @nb:    dex
         bne     @bit
@@ -302,98 +288,114 @@ _opputnum:
         ora     ptr1+1
         bne     @div
 @out:   pla
-        beq     retacc
+        beq     retax
         jsr     _opputchar
-;;; problem
-        jmp     @out
+        bne     @out                    ;; A kept: a digit, never 0
+retax:  lda     tmp3                    ;; AX as on entry
+        ldx     tmp4
+        rts
+
+;;; ---------------------------------------------------------------------------
+;;; P: print 0-terminated string at AX, AX kept
+;;; 31 B; ~40 c + ~24 c per char + opputchar
+
+_opputs:
+        sta     tmp3
+        stx     tmp4
+        sta     ptr1
+        stx     ptr1+1
+        ora     ptr1+1
+        beq     retax                   ;; NULL
+@l:     ldy     #0
+        lda     (ptr1),y
+        beq     retax
+        jsr     _opputchar
+        inc     ptr1
+        bne     @l
+        inc     ptr1+1
+        bne     @l
+        beq     retax                   ;; wrapped past $FFFF
 
 
 ;;; ===========================================================================
-;;; Arithmetic: _ivm_acc OP= _ivm_par (unsigned 16 bit)
+;;; Arithmetic: JT = first (ACC), AX = second, AX = result (unsigned 16 bit)
 ;;; ===========================================================================
 
-;;; TODO: too big, what's the characteristics?
-	
-;;; 52 B
+;;; JT * AX. AX is the multiplier, shifted right until it is 0: one round
+;;; per bit of AX, so the smaller number belongs in AX (the JIT puts a
+;;; constant there). JT is destroyed.
+;;; 44 B; 63-847 c: *10: 197 c, *255: 439 c, *65535: 847 c
 _opmul:
-        lda     _ivm_par
-        sta     ptr2
-        lda     _ivm_par+1
-        sta     ptr2+1
+        sta     ptr2                    ;; multiplier
+        stx     ptr2+1
         lda     #0
-        sta     tmp1                    ; result lo
-        sta     tmp2                    ; result hi
-        ldx     #16
+        sta     tmp3                    ;; result
+        sta     tmp4
 @l:     lsr     ptr2+1
         ror     ptr2
         bcc     @n
         clc
-        lda     tmp1
-        adc     _ivm_acc
-        sta     tmp1
-        lda     tmp2
-        adc     _ivm_acc+1
-        sta     tmp2
-@n:     asl     _ivm_acc
-        rol     _ivm_acc+1
-        dex
+        lda     tmp3
+        adc     JT
+        sta     tmp3
+        lda     tmp4
+        adc     JT+1
+        sta     tmp4
+@n:     asl     JT
+        rol     JT+1
+        lda     ptr2
+        ora     ptr2+1
         bne     @l
-        lda     tmp1
-        sta     _ivm_acc
-        lda     tmp2
-        sta     _ivm_acc+1
-;;; problem
-        jmp     retacc
-
-_opdiv:
-        jsr     divmod
-        jmp     retacc
-
-_opmod:
-        jsr     divmod
-        bcs     retacc2		         ; /0: unchanged
-        lda     ptr1
-        sta     _ivm_acc
-        lda     ptr1+1
-        sta     _ivm_acc+1
-retacc2:	
-        jmp     retacc
-
-;;;; quotient -> _ivm_acc, remainder -> ptr1. C=1: divisor 0, nothing done.
-;;; 
-;;; 52 B
-divmod:
-        lda     _ivm_par
-        ora     _ivm_par+1
-        bne     :+
-        sec
+        lda     tmp3
+        ldx     tmp4
         rts
-:       lda     #0
+
+;;; JT / AX (opdiv) and JT % AX (opmod): one routine, opmod enters with
+;;; C = 1 (the BIT skips opdiv's CLC). Quotient in JT, remainder in ptr1.
+;;; AX = 0: AX = JT (unchanged, as the VM).
+;;; 70 B; /0: 37 c, else 16 rounds: up to 1045 c
+_opmod:
+        sec                             ;; remainder
+        .byte   $24                     ;; BIT zp: skips the CLC
+_opdiv:
+        clc                             ;; quotient
+        ror     tmp3                    ;; bit 7: 1 = opmod
+        sta     ptr2                    ;; divisor
+        stx     ptr2+1
+        ora     ptr2+1
+        beq     @ja                     ;; /0
+        lda     #0
         sta     ptr1
         sta     ptr1+1
         ldx     #16
-@l:     asl     _ivm_acc
-        rol     _ivm_acc+1
+@l:     asl     JT
+        rol     JT+1
         rol     ptr1
         rol     ptr1+1
-        php                             ; C: 17th remainder bit
+        php                             ;; C: 17th remainder bit
         lda     ptr1
         sec
-        sbc     _ivm_par
+        sbc     ptr2
         tay
         lda     ptr1+1
-        sbc     _ivm_par+1
-        bcs     @take                   ; rem >= par
+        sbc     ptr2+1
+        bcs     @take                   ;; rem >= divisor
         plp
-        bcc     @next                   ; rem < par (no 17th bit)
-        php                             ; 17th bit: must subtract
+        bcc     @next                   ;; rem < divisor (no 17th bit)
+        php                             ;; 17th bit: must subtract
 @take:  plp
         sta     ptr1+1
         sty     ptr1
-        inc     _ivm_acc                ; quotient bit
+        inc     JT                      ;; quotient bit
 @next:  dex
         bne     @l
-        clc
+        bit     tmp3
+        bpl     @ja                     ;; opdiv: quotient
+        lda     ptr1                    ;; opmod: remainder
+        ldx     ptr1+1
+        rts
+@ja:    lda     JT
+        ldx     JT+1
         rts
 
 
@@ -401,6 +403,7 @@ divmod:
 ;;; Heap: bump allocator, zeroed (calloc), even sizes. free is a no-op.
 ;;; ===========================================================================
 
+;;; 106 B; ~120 c + 11 c per byte zeroed
 _opmalloc:
         clc
         adc     #1
@@ -408,30 +411,30 @@ _opmalloc:
         sta     tmp1
         txa
         adc     #0
-        sta     tmp2                    ; tmp2:tmp1 = (n+1) & ~1
-        bcs     @null                   ; n = $FFFF
+        sta     tmp2                    ;; tmp2:tmp1 = (n+1) & ~1
+        bcs     @null                   ;; n = $FFFF
         ora     tmp1
-        beq     @null                   ; n = 0
+        beq     @null                   ;; n = 0
         clc
         lda     _ivmlib_heap
         adc     tmp1
         sta     ptr2
         lda     _ivmlib_heap+1
         adc     tmp2
-        sta     ptr2+1                  ; ptr2 = new top
+        sta     ptr2+1                  ;; ptr2 = new top
         bcs     @null
         lda     _ivmlib_heapend
         cmp     ptr2
         lda     _ivmlib_heapend+1
         sbc     ptr2+1
-        bcc     @null                   ; heapend < new top
+        bcc     @null                   ;; heapend < new top
         lda     _ivmlib_heap
         sta     ptr1
         lda     _ivmlib_heap+1
         sta     ptr1+1
         lda     #0
         tay
-        ldx     tmp2                    ; full pages
+        ldx     tmp2                    ;; full pages
         beq     @part
 @page:  sta     (ptr1),y
         iny
@@ -439,12 +442,12 @@ _opmalloc:
         inc     ptr1+1
         dex
         bne     @page
-@part:  ldy     tmp1                    ; rest
+@part:  ldy     tmp1                    ;; rest
         beq     @done
 @byte:  dey
         sta     (ptr1),y
         bne     @byte
-@done:  lda     _ivmlib_heap            ; result = old heap
+@done:  lda     _ivmlib_heap            ;; result = old heap
         ldx     _ivmlib_heap+1
         pha
         lda     ptr2
@@ -458,6 +461,7 @@ _opmalloc:
         rts
 
 ;;; TODO: make it reuse, lol
+;;; 1 B; 12 c
 _opfree:
         rts
 
@@ -467,8 +471,8 @@ _opfree:
 ;;;
 ;;; A : fill byte
 ;;; Y : rest (i.e. low byte size)
-;;; _opmemset_adr: pointer + 
-;;; 
+;;; _opmemset_adr: pointer +
+;;;
 ;;;   LDA #fill / LDY #rest / JSR _opmemset
 ;;;
 ;;; Algo: First rest of last page; full pages downwards.
@@ -476,18 +480,18 @@ _opfree:
 ;;; ===========================================================================
 
 ;;; Only called for large/variable sized memset
-	
-;;; 18 B
+
+;;; 17 B; ~20 c + 10 c per byte + 11 c per page
 _opmemset:
         cpy     #0
-        beq     opms_page               ; no rest
+        beq     opms_page               ;; no rest
 opms_loop:
         dey
 opms_sta:
-        sta     $FFFF,y                 ; operand patched by the caller
+        sta     $FFFF,y                 ;; operand patched by the caller
         bne     opms_loop
 opms_page:
-        dec     opms_sta+2              ; next page down
+        dec     opms_sta+2              ;; next page down
         dex
         bpl     opms_loop
         rts

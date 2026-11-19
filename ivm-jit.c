@@ -32,7 +32,7 @@ INSTRUCTIONS: Keeps this section but keep updated for status
 | `U`                      | Present |
 | `j` (down-loop)          | **Missing** — warns only |
 | Array `(` `)`            | Present (needs testing) |
-| / *                      | JSR helpers in **ivm-lib.asm** (ACC/PAR in zp ivm_acc/ivm_par); still need **PARAX → zp_par** |
+| / * %                    | JSR helpers in **ivm-lib.asm**: ACC in $FE/$FF (tmp1/tmp2), the other operand in AX, result in AX; a const goes in AX (`*`: the multiplier, fewer rounds) |
 | ZP optimisation          | **Done, one place** — emop2() + zpmap[] (see below) |
 | Branch emit              | **Done** — emrel/empatch (local), emjump (bytecode target); forward short by estimate (JIT_BC_SCALE), retry if too far |
 | ACC state                | **Done** — lc_axs: slot physically in AX while ACC is pending (`[` `]` index). acc_x0 (X = 0) / acc_z (Z = ACC==0, next op): zjp `beq`, G `bne`. acc_at AX/PEND/LOST + acc_s (slot AX equals) + acc_k (const). Every op declares its ivm-walk.c contract: acc_need (in: loads a pending const/slot, error if LOST), acc_keep, acc_drop/acc_lost, acc_ax, acc_ax_slot, acc_pk/acc_ps (lazy const/slot), acc_write. Undeclared op → `ACC use not declared`. Labels (prescan, lc_lbl) flush. Pending users: `+ - & \| ^` load from the source (no TXA), const folding (also `~`), `)` `]` store from the source. acc_dead(): KEEP ops (N O F) don't save a dead ACC. -z pointer ops `r w ' , @ !` use (slot),Y directly. Contract breaks fixed: Z N O G F s w , ! ; m |
@@ -301,8 +301,7 @@ Simplyfy function calling code:
 #define BRFLIP 0x20
 
 #ifndef HOSTSIM
-extern ivmvar ivm_acc;
-extern ivmvar ivm_par;
+extern ivmvar ivm_acc;                // jit_puts
 #endif
 
 
@@ -311,8 +310,8 @@ extern ivmvar ivm_par;
 //   result in ACC: * / % outputnum
 
 #ifndef HOSTSIM
-extern void opputnum(void); // there is like a 30 B variant!
-extern void opmul(void);
+extern void opputnum(void); // print AX; AX kept. there is like a 30 B variant!
+extern void opmul(void);    // $FE/$FF OP AX -> AX
 extern void opdiv(void);
 extern void opmod(void);
 
@@ -320,7 +319,7 @@ extern void opmod(void);
 // image saved by -o). putchar/getchar trampolines hide the target.
 extern void opputchar(void);  // A = char; A X Y preserved
 extern void opgetchar(void);  // AX = char, $FFFF = EOF
-extern void opputs(void);     // print string at ivm_acc; AX = ivm_acc
+extern void opputs(void);     // print string at AX; AX kept
 extern void opprintstr(void); // JSR + inline string + 0; AX preserved
 extern void opmalloc(void);   // AX = bytes -> AX = zeroed ptr (bump)
 extern void opfree(void);     // AX = ptr (no-op)
@@ -387,8 +386,7 @@ extern void   ivm_free(ivmvar p);
 #ifdef HOSTSIM
   #include "cpu6502.c"
 
-  // ivm-lib routines: trap addresses (cpu_trap runs them in C), and the
-  // ivm_acc / ivm_par words in the 64K
+  // ivm-lib routines: trap addresses (cpu_trap runs them in C)
   enum {
     SIM_opputnum = 0xFF00, SIM_opmul, SIM_opdiv, SIM_opmod,
     SIM_opputchar, SIM_opgetchar, SIM_opputs, SIM_opprintstr,
@@ -399,14 +397,9 @@ extern void   ivm_free(ivmvar p);
   #define SIM_opmemset     0xFE00
   #define SIM_opmemset_adr 0xFE06
   #define REF(f) ((word)SIM_##f)
-  // address of ivm_acc / ivm_par as the generated code sees it
-  #define ACC_ADR 0x0200
-  #define PAR_ADR 0x0202
   char *disasm(char *mc, char *end, char indent);   // HOSTSIM: cpu6502.c
 #else
   #define REF(f) ((word)(unsigned long)(void *)(f))
-  #define ACC_ADR ((word)(unsigned)&ivm_acc)
-  #define PAR_ADR ((word)(unsigned)&ivm_par)
 #endif
 
 // zero-page scratch word (lo at tmp1, hi at tmp2) — single named base, not magic 0xfe elsewhere
@@ -1380,17 +1373,25 @@ static word ivm_jit1(const uchar *code, word code_len,
         emit_acc_double();
         break;
       }
-      acc_need();
-      emop2(STA, ACC_ADR);
-      emop2(STX, (word)(ACC_ADR + 1));
-      emit_load_slot(s);
-      emop2(STA, PAR_ADR);
-      emop2(STX, (word)(PAR_ADR + 1));
+      // ivm-lib: first in tmp1/tmp2 ($FE/$FF), second in AX, result AX
+      if (op == '*' && acc_at == ACC_PEND && acc_hk && !is_const(s)) {
+        // const * x: x first, the const as the multiplier (AX): fewer rounds
+        emop2(LDA, slotlo(s)); em2(STAZ, tmp1);
+        emop2(LDA, slothi(s)); em2(STAZ, tmp2);
+        emit_load_const(acc_k);
+      } else {
+        if (acc_at == ACC_PEND) {          // straight from where it is
+          emit_lda_pend(0); em2(STAZ, tmp1);
+          emit_lda_pend(1); em2(STAZ, tmp2);
+        } else {
+          acc_need();
+          em2(STAZ, tmp1); em2(STXZ, tmp2);
+        }
+        emit_load_slot(s);
+      }
       if (op == '*') ema(JSR, REF(opmul));
       else if (op == '/') ema(JSR, REF(opdiv));
       else ema(JSR, REF(opmod));
-      emop2(LDA, ACC_ADR);
-      emop2(LDX, (word)(ACC_ADR + 1));
       acc_ax();
       break;
     }
@@ -1428,10 +1429,8 @@ static word ivm_jit1(const uchar *code, word code_len,
       break;
     }
     case 'E': acc_need(); ema(JSR, REF(opputchar)); break;  // ACC as char
-    case '.': case 'P':                            // in, KEEP (AX = ivm_acc)
+    case '.': case 'P':                            // in, KEEP (AX kept)
       acc_need();
-      emop2(STA, ACC_ADR);
-      emop2(STX, (word)(ACC_ADR + 1));
       ema(JSR, op == '.' ? REF(opputnum) : REF(opputs));
       break;
 
@@ -2001,7 +2000,6 @@ word ivm_jit(const uchar *code, word code_len,
 // cpu6502.c, JIT-compiles it there and runs it:
 //
 //   $0000-$00FF  zero page: -z mem[] (top down, below tmp1/tmp2 $FE/$FF)
-//   $0200        ivm_acc, ivm_par
 //   $0300        mem[] (without -z), then the strings
 //   org          JIT code ($1000 default, -a XXXX), then the heap to $F000
 //   $FF00        ivm-lib traps (SIM_*), $FFF0 cpu_call sentinel
@@ -2036,7 +2034,7 @@ char *disasm(char *mc, char *end, char indent) {
 }
 
 static int sim_trap(Cpu6502 *c) {
-  word acc = (word)SIM_W(ACC_ADR), par = (word)SIM_W(PAR_ADR), t;
+  word ax = (word)(c->a | (c->x << 8)), jt = (word)SIM_W(0xFE), t;
   int ch;
 
   if (c->pc >= SIM_end) return 0;
@@ -2048,10 +2046,9 @@ static int sim_trap(Cpu6502 *c) {
     t = (word)(ch == EOF ? 0xffff : ch);
     SIM_AX(c, t);
     break;
-  case SIM_opputnum: printf("%u", acc); SIM_AX(c, acc); break;
+  case SIM_opputnum: printf("%u", ax); break;              // AX kept
   case SIM_opputs:
-    for (t = acc; t && cpu_mem[t]; t++) putchar(cpu_mem[t]);
-    SIM_AX(c, acc);
+    for (t = ax; t && cpu_mem[t]; t++) putchar(cpu_mem[t]);
     break;
   case SIM_opprintstr:
     // the string follows the JSR: print it, return after its 0
@@ -2061,9 +2058,10 @@ static int sim_trap(Cpu6502 *c) {
     cpu_mem[0x101 + c->s] = (uchar)t;                 // RTS: t + 1
     cpu_mem[0x102 + c->s] = (uchar)(t >> 8);
     break;
-  case SIM_opmul: SIM_SETW(ACC_ADR, (word)(acc * par)); break;
-  case SIM_opdiv: if (par) SIM_SETW(ACC_ADR, (word)(acc / par)); break;
-  case SIM_opmod: if (par) SIM_SETW(ACC_ADR, (word)(acc % par)); break;
+  // $FE/$FF OP AX -> AX; /0: AX = $FE/$FF (as the VM: ACC unchanged)
+  case SIM_opmul: SIM_AX(c, (word)(jt * ax)); break;
+  case SIM_opdiv: SIM_AX(c, ax ? (word)(jt / ax) : jt); break;
+  case SIM_opmod: SIM_AX(c, ax ? (word)(jt % ax) : jt); break;
   case SIM_opmalloc:                                  // AX = bytes -> ptr
     t = (word)(c->a | (c->x << 8));
     if (sim_heap + (unsigned)t > sim_heapend) t = 0;
@@ -2079,7 +2077,7 @@ static int sim_trap(Cpu6502 *c) {
   case SIM_optimed: {                                 // JSR + name + 0
     // since the last #TIMED (or the start): cycles without this JSR's 6,
     // code bytes from the end of the last one to this JSR
-    //   <<<      4711c    32B - name   (+ page-crossing cycles if any)
+    //   =======      4711c    32B - name   (+ page-crossing cycles if any)
     // no name (bare #TIMED): print nothing, just start counting here
     unsigned long now = c->cycles - 6;
     t = cpu_mem[0x101 + c->s];

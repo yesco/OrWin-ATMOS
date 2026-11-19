@@ -1,5 +1,28 @@
 # jsk notes:
 
+- 
+------- 6e 'n' 25 6e 33 22 ------
+   B155 inc $e8
+   B157  bne +2	=> $B15B
+   B159 inc $e9
+   B15B lda $e8
+   B15D ldx $e9
+   B15F cpx #$1f
+   B161  bne +2	=> $B165
+   B163 cmp #$ff  '�'
+   B165  bcc -113	=> $B0F6
+------- 6e 'n' 33 22 70 72 ------
+   B167 inc $f0
+   B169  bne +2	=> $B16D
+   B16B inc $f1
+   B16D lda #$0a
+   B16F cmp $f0
+   B171 lda #$00
+   B173 sbc $f1
+   B175  bcc +3	=> $B17A
+   B177  jmp $b0d2
+
+
 - 16 B: free(); include and doing F in code gen???
 - 
 -  ------- 6d 'm' 00 0d 5a 05 ------

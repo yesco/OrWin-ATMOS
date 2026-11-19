@@ -84,7 +84,7 @@ K=if (E)[?G\x] K else[0?G\x\w\y] K[\y]
 |putchar(E);[E]
 
 |puts("["]\u);[N]
-|puts(\i);[\1PN]
+|puts(\i);[L\1PN]
 
 |fputs("["]\u,stdout);
 |fputs(\i,stdout);[L\1P]
@@ -141,7 +141,8 @@ K=if (E)[?G\x] K else[0?G\x\w\y] K[\y]
 |#timed[#\#00]\*\n
 
 # - Memory
-|free(\i);[F\1]
+#|free(\i);[F\1]
+|free(\i);
 |\i=malloc(E);[M\1]
 
 # - Statement can be a Block, or lastly Assignments
@@ -333,6 +334,7 @@ O=
 |- [S\t] R[S\tL\a1-\a3]\<
 |* [S\t] R[*\a1]\<
 |/ [S\t] R[S\tL\a1/\a3]\<
+|% [S\t] R[S\tL\a1%\a3]\<
 |& [S\t] R[&\a1]\<
 |\|[S\t] R[|\a1]\<
 |^ [S\t] R[^\a1]\<
@@ -348,6 +350,7 @@ O=
 |- S[-\a1]\<
 |* S[*\a1]\<
 |/ S[/\a1]\<
+|% S[%\a1]\<
 |& S[&\a1]\<
 |\|S[|\a1]\<
 |^ S[^\a1]\<
