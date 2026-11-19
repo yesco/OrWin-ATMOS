@@ -93,9 +93,9 @@
 
 .code
 
-; ===========================================================================
-; Stand-alone entry: load/reset/autorun address of an ivm -o image
-; ===========================================================================
+;;; ===========================================================================
+;;; Stand-alone entry: load/reset/autorun address of an ivm -o image
+;;;; ===========================================================================
 _ivmlib_start:
 .ifdef SIM
         ldx     #$FF
@@ -105,7 +105,7 @@ _ivmlib_start:
         lda     #>SIM_SP
         sta     CSP+1
 .endif
-        ; -z: copy initial mem[] image (globals + consts) to zero page
+        ;; -z: copy initial mem[] image (globals + consts) to zero page
         ldy     _ivmlib_zplen
         beq     @nozp
         lda     _ivmlib_zpsrc
@@ -133,9 +133,9 @@ _ivmlib_start:
         sta     ptr2+1
         jmp     (ptr2)
 
-; ---------------------------------------------------------------------------
-; Variables, patched by ivm.c before the image is written (and for runs
-; in place: heap/heapend)
+;;; ---------------------------------------------------------------------------
+;;; Variables, patched by ivm.c before the image is written (and for runs
+;;; in place: heap/heapend)
 
 _ivmlib_entry:   .word 0                ; JIT code start (NOPs, JMP main)
 _ivmlib_heap:    .word 0                ; next free heap byte
@@ -155,9 +155,9 @@ pcx:    .byte   0
 pcy:    .byte   0
 
 
-; ===========================================================================
-; Character I/O trampolines
-; ===========================================================================
+;;; ===========================================================================
+;;; Character I/O trampolines
+;;; ===========================================================================
 
 _opputchar:
         sta     pcbuf
@@ -202,8 +202,8 @@ _opgetchar:
 .endif
 
 .ifdef SIM
-; push (fd=X, buf=&pcbuf) on the C stack by hand (no pushax: outside image),
-; AX = count 1. The paravirt hook pops them.
+;;; push (fd=X, buf=&pcbuf) on the C stack by hand (no pushax: outside image),
+;;; AX = count 1. The paravirt hook pops them.
 pvio:   lda     CSP
         sec
         sbc     #4
@@ -227,8 +227,8 @@ pvio:   lda     CSP
         rts
 .endif
 
-; ---------------------------------------------------------------------------
-; P: print 0-terminated string at _ivm_acc
+;;; ---------------------------------------------------------------------------
+;;; P: print 0-terminated string at _ivm_acc
 
 _opputs:
         lda     _ivm_acc
@@ -249,8 +249,8 @@ retacc: lda     _ivm_acc
         ldx     _ivm_acc+1
         rts
 
-; ---------------------------------------------------------------------------
-; ": JSR _opprintstr / .asciiz "..." / next instruction
+;;; ---------------------------------------------------------------------------
+;;; ": JSR _opprintstr / .asciiz "..." / next instruction
 
 _opprintstr:
         sta     tmp3
@@ -274,9 +274,10 @@ _opprintstr:
         ldx     tmp4
         jmp     (ptr1)
 
-; ---------------------------------------------------------------------------
-; .: print _ivm_acc unsigned decimal
+;;; ---------------------------------------------------------------------------
+;;; .: print _ivm_acc unsigned decimal
 
+;;; 51 B
 _opputnum:
         lda     _ivm_acc
         sta     ptr1
@@ -303,13 +304,17 @@ _opputnum:
 @out:   pla
         beq     retacc
         jsr     _opputchar
+;;; problem
         jmp     @out
 
 
-; ===========================================================================
-; Arithmetic: _ivm_acc OP= _ivm_par (unsigned 16 bit)
-; ===========================================================================
+;;; ===========================================================================
+;;; Arithmetic: _ivm_acc OP= _ivm_par (unsigned 16 bit)
+;;; ===========================================================================
 
+;;; TODO: too big, what's the characteristics?
+	
+;;; 52 B
 _opmul:
         lda     _ivm_par
         sta     ptr2
@@ -337,6 +342,7 @@ _opmul:
         sta     _ivm_acc
         lda     tmp2
         sta     _ivm_acc+1
+;;; problem
         jmp     retacc
 
 _opdiv:
@@ -353,7 +359,9 @@ _opmod:
 retacc2:	
         jmp     retacc
 
-; quotient -> _ivm_acc, remainder -> ptr1. C=1: divisor 0, nothing done.
+;;;; quotient -> _ivm_acc, remainder -> ptr1. C=1: divisor 0, nothing done.
+;;; 
+;;; 52 B
 divmod:
         lda     _ivm_par
         ora     _ivm_par+1
@@ -389,9 +397,9 @@ divmod:
         rts
 
 
-; ===========================================================================
-; Heap: bump allocator, zeroed (calloc), even sizes. free is a no-op.
-; ===========================================================================
+;;; ===========================================================================
+;;; Heap: bump allocator, zeroed (calloc), even sizes. free is a no-op.
+;;; ===========================================================================
 
 _opmalloc:
         clc
@@ -449,17 +457,27 @@ _opmalloc:
         tax
         rts
 
+;;; TODO: make it reuse, lol
 _opfree:
         rts
 
 
-; ===========================================================================
-; m: memset. The JIT code stores ptr + X*256 into _opmemset_adr (the STA
-; operand: self-modifying, 5 cycles per byte instead of 6 for (zp),Y), then
-;   LDA #fill / LDY #rest / JSR _opmemset
-; Rest of the last page first, then full pages downwards. Max 32K (BPL).
-; ===========================================================================
+;;; ===========================================================================
+;;; m: memset. Self-moddifying (savas 1c/byte using LDA ,x instead of LDA (),y)
+;;;
+;;; A : fill byte
+;;; Y : rest (i.e. low byte size)
+;;; _opmemset_adr: pointer + 
+;;; 
+;;;   LDA #fill / LDY #rest / JSR _opmemset
+;;;
+;;; Algo: First rest of last page; full pages downwards.
+;;; NOTE: Max 32K (because terminate by BPL)
+;;; ===========================================================================
 
+;;; Only called for large/variable sized memset
+	
+;;; 18 B
 _opmemset:
         cpy     #0
         beq     opms_page               ; no rest

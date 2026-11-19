@@ -1,24 +1,27 @@
 # jsk notes:
 
 - 16 B: free(); include and doing F in code gen???
--  3 B: m - malloc sizes constant, don't need to LDA xx TAY ...  CMP BEQ,
-           just delay and do ... LDY xx BEQ (- 3 bytes)
--  4 B: reorder: "prime = i + i + 3;  k = i + prime;" => "...; k = prime + i;"
+- 
+-  ------- 6d 'm' 00 0d 5a 05 ------
+   ;; 21 B => store ptr in acc? Let the routine do the add?
+   ;; size in XY (hi, lo)
+   B0AE ldx #$1f
+   B0BE ldy #$ff
 
-------- 5b '[' 00 05 9b 05 ------
-   A3AA sta $fe
-   A3AC txa 
-   A3AD clc 
-   A3AE adc $df
-   A3B0 sta $ff
-   A3B2 ldy $de
-   A3B4 lda ($fe),y
-   A3B6 ldx #$00
-------- 9b '�' 05 2b 05 2b ------
-   A3B8 cmp #$00
-   A3BA  bne +4	=> $A3C0
-   A3BC cpx #$00
-   A3BE  beq +0	=> $A3C0
+   ;; ADDR.lo = ptr.lo
+   B0B0 lda $de
+   B0B2 sta $0458
+
+   ;; ADDR.hi = ptr.hi + x
+   B0B5 txa 
+   B0B6 clc 
+   B0B7 adc $df
+   B0B9 sta $0459
+
+   ;; fill
+   B0BC lda #$01
+
+   B0C0  jsr $0452
 
 
 TODO: 'B' opcode redundant, if loop back to 'i' j k then use n m!
@@ -30,9 +33,12 @@ BUG: 'I' and 'J' doesn't wrap around will give 16 bit number
 --- 
 
 DONE:
+- saved  5 B: m - malloc sizes constant, don't need to LDA xx TAY ...  CMP BEQ,
+           just delay and do ... LDY xx BEQ (- 3 bytes)
 - saved  5 B: a 27 B: memset (+ 4 B load size deferred)
   - lots of setup (clc+adc)
   - possibly use shared library?
+- saved  4 B: reorder: "prime = i + i + 3;  k = i + prime;" => "...; k = prime + i;"
 - saved  2 B: 12 B (16) -> 10 B (12) i+i == i<<1
 - saved  8 B: [ zjmp - it's a byte simplify zjmp
 - saved  5 B: forward jumps: bxx + jmp = if can shorten save 2 byte per forward
