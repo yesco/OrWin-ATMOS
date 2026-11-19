@@ -36,7 +36,7 @@ INSTRUCTIONS: Keeps this section but keep updated for status
 | ZP optimisation          | **Done, one place** — emop2() + zpmap[] (see below) |
 | Branch emit              | **Done** — emrel/empatch (local), emjump (bytecode target); forward short by estimate (JIT_BC_SCALE), retry if too far |
 | ACC state                | **Done** — lc_axs: slot physically in AX while ACC is pending (`[` `]` index). acc_x0 (X = 0) / acc_z (Z = ACC==0, next op): zjp `beq`, G `bne`. acc_at AX/PEND/LOST + acc_s (slot AX equals) + acc_k (const). Every op declares its ivm-walk.c contract: acc_need (in: loads a pending const/slot, error if LOST), acc_keep, acc_drop/acc_lost, acc_ax, acc_ax_slot, acc_pk/acc_ps (lazy const/slot), acc_write. Undeclared op → `ACC use not declared`. Labels (prescan, lc_lbl) flush. Pending users: `+ - & \| ^` load from the source (no TXA), const folding (also `~`), `)` `]` store from the source. acc_dead(): KEEP ops (N O F) don't save a dead ACC. -z pointer ops `r w ' , @ !` use (slot),Y directly. Contract breaks fixed: Z N O G F s w , ! ; m |
-| Runtime library          | **Done (untested)** — ivm-lib.asm: op* helpers, putchar/getchar trampolines, bump heap. Generated code calls ONLY these (+ zp), never cc65 lib |
+| Runtime library          | **Done (untested)** — ivm-lib.asm: op* helpers, putchar/getchar trampolines, bump heap, opmemset (self-modified STA abs,Y; `m` with count > 256 or not const, const 1..256 is inline). Generated code calls ONLY these (+ zp), never cc65 lib |
 | `-z[XX]` mem in zp       | **Done (untested)** — mem[] at XX, default: ends at target zp top |
 | `-a XXXX` code org       | **Done (untested)** — implies -j (can't run code built for another address) |
 | `-o file` save           | **Done (untested)** — [hdr][ivm-lib][mem image][strings][gap][JIT code], implies -j |
@@ -324,6 +324,8 @@ extern void opputs(void);     // print string at ivm_acc; AX = ivm_acc
 extern void opprintstr(void); // JSR + inline string + 0; AX preserved
 extern void opmalloc(void);   // AX = bytes -> AX = zeroed ptr (bump)
 extern void opfree(void);     // AX = ptr (no-op)
+extern void opmemset(void);   // A = fill, X = pages, Y = rest; see 'm'
+extern uchar opmemset_adr[];  // its STA $xxxx,Y operand (self-modified)
 #endif
 
 // TODO: word oprandom(void): see my parse.asm in Meteoric C compiler
@@ -392,6 +394,10 @@ extern void   ivm_free(ivmvar p);
     SIM_opputchar, SIM_opgetchar, SIM_opputs, SIM_opprintstr,
     SIM_opmalloc, SIM_opfree, SIM_end
   };
+  // opmemset is real 6502 code (its loop costs cycles): sim_memset[] at
+  // $FE00, below the traps. Same bytes as _opmemset in ivm-lib.asm.
+  #define SIM_opmemset     0xFE00
+  #define SIM_opmemset_adr 0xFE06
   #define REF(f) ((word)SIM_##f)
   // address of ivm_acc / ivm_par as the generated code sees it
   #define ACC_ADR 0x0200
@@ -1827,19 +1833,31 @@ static word ivm_jit1(const uchar *code, word code_len,
       break;
     }
 
-    // m: memset words. ACC = word count, ptr slot, val slot (lo byte = fill).
-    //   bytes = 2*ACC: Y = lo, X = hi (= full pages). Remainder on the LAST
-    //   page first, then full pages downwards. BPL: max 32K bytes.
+    // m: memset bytes. ACC = count, ptr slot, val slot (lo byte = fill).
+    //   const 1..256: inline  LDY #n; LDA #v; l: DEY; STA (zp),Y; BNE l
+    //   else: X = pages, Y = rest, the routine's STA $xxxx,Y operand =
+    //   ptr + X*256 (last page), A = fill; JSR _opmemset (ivm-lib.asm):
+    //   rest of the last page first, then full pages down. Max 32K (BPL).
     case 'm': {
       uchar ptr = PAR;
       uchar val = PAR;
-      word fx;
       // in (count), KEEP: the code below uses A X Y. A pending count is
-      // loaded straight into X (hi) and Y (lo, last: sets Z, no CPY) and
-      // stays pending; a count in AX: TAY, CPY #0, then it is lost.
+      // loaded straight into X (hi) and Y (lo, last) and stays pending; a
+      // count in AX: TAY, then it is lost.
       uchar pend = (acc_at == ACC_PEND);
 
-// 27 Bytes TODO: move out to subroutine, nothing is "special"
+      if (pend && acc_hk && acc_k <= 256) {         // small: all inline
+        uchar zp;
+        if (acc_k) {
+          zp = emit_ptr(ptr);
+          em2(LDYN, (uchar)acc_k);                  // 256: 0, DEY wraps
+          if (is_const(val)) em2(LDAN, (uchar)const_val(val));
+          else               emop2(LDA, slotlo(val));
+          em(DEY); em2(STAIY, zp); em2(BNE, (uchar)-5);
+        }
+        acc_keep();
+        break;
+      }
 
       if (pend) {
         if (acc_hk) em2(LDXN, (uchar)(acc_k >> 8));
@@ -1849,32 +1867,22 @@ static word ivm_jit1(const uchar *code, word code_len,
         em(TAY);
       }
 
-      // tmp1/tmp2 = ptr + X*256  (last page)
-      emop2(LDA, slotlo(ptr)); em2(STAZ, tmp1);
+      // the routine's STA operand = ptr + X*256  (last page)
+      if (is_const(ptr)) em2(LDAN, (uchar)const_val(ptr));
+      else               emop2(LDA, slotlo(ptr));
+      ema(STA, REF(opmemset_adr));
       em(TXA); em(CLC);
-      emit_alub(ADC, ptr, 1);  em2(STAZ, tmp2);
+      emit_alub(ADC, ptr, 1);
+      ema(STA, (word)(REF(opmemset_adr) + 1));
 
-      // fill byte
-      emop2(LDA, slotlo(val));
-
-      // init: Z = (Y == 0)
-      if (!pend)          em2(CPYN, 0);
-      else if (acc_hk)    em2(LDYN, (uchar)acc_k);
-      else                emop2(LDY, slotlo(acc_s));
-      fx = 0xffff;
-      if (!(pend && acc_hk && (uchar)acc_k))  // const lo != 0: never taken
-        fx = emrel(BEQ);                  // no remainder → page
-
-      // loop:
-      em(DEY);                            // 1
-      em2(STAIY, tmp1);                   // 2
-      em2(BNE, (uchar)-5);                // 2 → loop
-      if (fx != 0xffff) empatch(fx);
-
-      // page:
-      em2(DECZ, tmp2);                    // 2
-      em(DEX);                            // 1
-      em2(BPL, (uchar)-10);               // 2 → loop (Y==0: 256 bytes)
+      // fill byte, rest
+      if (is_const(val)) em2(LDAN, (uchar)const_val(val));
+      else               emop2(LDA, slotlo(val));
+      if (pend) {
+        if (acc_hk) em2(LDYN, (uchar)acc_k);
+        else        emop2(LDY, slotlo(acc_s));
+      }
+      ema(JSR, REF(opmemset));
 
       if (pend) acc_keep();               // its source is unchanged
       else acc_lost();
@@ -2128,14 +2136,29 @@ word sim_run_blob(uchar *blob, uchar zp, uchar zp_at, word org) {
     out[lc_jmp_at + 1] = (uchar)((org + lc_main_at) >> 8);
   }
   memcpy(cpu_mem + org, out, size);
+  {                                       // _opmemset, as in ivm-lib.asm
+    static const uchar sim_memset[] = {
+      0xC0, 0x00,        //       CPY #0
+      0xF0, 0x06,        //       BEQ page
+      0x88,              // loop: DEY
+      0x99, 0xFF, 0xFF,  //       STA $FFFF,Y   (SIM_opmemset_adr)
+      0xD0, 0xFA,        //       BNE loop
+      0xCE, 0x07, 0xFE,  // page: DEC SIM_opmemset_adr+1
+      0xCA,              //       DEX
+      0x10, 0xF4,        //       BPL loop
+      0x60               //       RTS
+    };
+    memcpy(cpu_mem + SIM_opmemset, sim_memset, sizeof(sim_memset));
+  }
 
   printf("--- SIM: mem[] $%04X (%u B), strings $%04X, code $%04X-$%04X"
          " (%u B), heap $%04X ---\n", (unsigned)mem_base, (unsigned)membytes,
          (unsigned)data, (unsigned)org, (unsigned)(org + size - 1),
-         (unsigned)size, (unsigned)((org + size + 1) & ~1));
+         (unsigned)size, (unsigned)((org + size + 0xFF) & ~0xFF));
 
   // run
-  sim_heap = (word)((org + size + 1) & ~1);
+  sim_heap = (word)((org + size + 0xFF) & ~0xFF);   // page: data alignment
+                                          // must not change with code size
   sim_heapend = 0xF000;
   sim_traps = 0;
   cpu_trap = sim_trap;

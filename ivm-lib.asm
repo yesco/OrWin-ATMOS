@@ -35,6 +35,9 @@
 ;;;   opprintstr        : JSR + inline string + 0, AX preserved
 ;;;   opmalloc          : AX = bytes -> AX = zeroed ptr (0 = fail), bump heap
 ;;;   opfree            : AX = ptr, no-op
+;;;   opmemset          : A = fill, X = full pages, Y = rest,
+;;;                       _opmemset_adr = ptr + X*256 (last page);
+;;;                       A kept, X = $FF, Y = 0
 ;;;
 ;;; 
 ;;; Uses cc65 zp scratch: ptr1 ptr2 tmp1-tmp4  (as most cc65)
@@ -60,6 +63,7 @@
 .export _opmul, _opdiv, _opmod, _opputnum
 .export _opputchar, _opgetchar, _opputs, _opprintstr
 .export _opmalloc, _opfree
+.export _opmemset, _opmemset_adr
 
 
 .ifdef USE_C_SP
@@ -447,6 +451,29 @@ _opmalloc:
 
 _opfree:
         rts
+
+
+; ===========================================================================
+; m: memset. The JIT code stores ptr + X*256 into _opmemset_adr (the STA
+; operand: self-modifying, 5 cycles per byte instead of 6 for (zp),Y), then
+;   LDA #fill / LDY #rest / JSR _opmemset
+; Rest of the last page first, then full pages downwards. Max 32K (BPL).
+; ===========================================================================
+
+_opmemset:
+        cpy     #0
+        beq     opms_page               ; no rest
+opms_loop:
+        dey
+opms_sta:
+        sta     $FFFF,y                 ; operand patched by the caller
+        bne     opms_loop
+opms_page:
+        dec     opms_sta+2              ; next page down
+        dex
+        bpl     opms_loop
+        rts
+_opmemset_adr = opms_sta + 1
 
 
 _ivmlib_end:
