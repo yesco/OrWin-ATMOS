@@ -227,9 +227,10 @@ echo
 # jit stride opt  261 B |               1.002s  | 14,428,576
 # ---!!!!!!!---------- WE ON PAR W OSCAR64 in SPEED!!!----------
 # This optimization "RUN" was done in only 5 hours of work!
+# jit  'm'emset   255 B |               0.9921s	| 14,286,529
 #
 
-# (/ 14.428576 14.40) 1.0019844444444443
+# (/ 14.286529 14.40) 0.9921200694444444
 
 
 # (/ 309.383290 7.0) 
@@ -243,6 +244,7 @@ echo
 # Orig ASM (hand)         |  ?    |  7.00s |  1---x |  0.49x |  0.50x
 #                         |       |        |        |        |
 # oscar64 -Os            *| 294 B | 14.40s |  2.06x |  1---x |  1.02x
+#                         |       |        |        |        |
 # ivm-jit (stride opt)   *| 260 B | 14.12s |  2.02x |  0.98x |  1---x
 # ivm-jit (byte opt)      | 324 B | 22.26s |  3.18x |  1.55x |  1.58x
 # ivm-jit (-z peephole)   | 364 B | 25.03s |  3.58x |  1.74x |  1.77x

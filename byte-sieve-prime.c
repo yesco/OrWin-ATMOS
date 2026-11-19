@@ -45,5 +45,7 @@ int main() {
     }
   }
 
+  free(flags)
+
   putz("primes: "); printf("%u \n", count);
 }

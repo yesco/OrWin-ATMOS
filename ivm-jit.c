@@ -992,6 +992,47 @@ static int is_fn_entry(word bc) {
 #define FR_ACC 3
 
 static uchar lc_retry;        // a short forward branch didn't fit
+static const uchar *lc_code;  // the bytecode
+
+// A taken branch to another page costs +1 cycle: a loop whose closing
+// branch crosses a page gets its body moved to one page on the next run,
+// with NOPs after the 'i' JMP (never executed: costs bytes, no cycles).
+#define JIT_ALIGN_LOOPS 0     // 1: pad innermost loops (sieve: avg -0.1%, +0..37 B)
+static struct { word ibc, len; } lc_al[8];  // loops to align, body length
+static uchar lc_nal;
+
+// 'i' after its JMP: pad if the body (len, from a previous run) would
+// straddle a page
+static void loop_pad(word ibc) {
+  uchar k;
+  for (k = 0; k < lc_nal; k++)
+    if (lc_al[k].ibc == ibc) {
+      word a = (word)((lc_out_org + lc_at) & 0xff);
+      if (a + lc_al[k].len > 0x100)
+        for (a = (word)(0x100 - a); a; a--) em(NOP);
+      return;
+    }
+}
+
+// after the closing test of the loop at ibc (innermost loops only: they
+// run most, and are short): does its short branch back to the body cross
+// a page? note it and run again
+static void loop_align_check(word ibc) {
+  word body = lc_map[ibc + 4], len = (word)(lc_at - body), b;
+  uchar k;
+  if (!JIT_ALIGN_LOOPS || body == 0xffff || len >= 128) return;
+  for (b = (word)(ibc + 4); b < lc_bc; b += ivm_oplen(lc_code + b))
+    if (lc_code[b] == 'i' || !ivm_oplen(lc_code + b)) return;   // not innermost
+  if (lc_at >= 3 && lc_out[lc_at - 3] == JMP) return;   // long form
+  if (((lc_out_org + body) ^ (lc_out_org + lc_at)) >> 8 == 0) return;
+  for (k = 0; k < lc_nal && lc_al[k].ibc != ibc; k++) ;
+  if (k == lc_nal) {
+    if (lc_nal == 8) return;
+    lc_nal++;
+  } else if (lc_al[k].len == len) return;   // padded already: can't help
+  lc_al[k].ibc = ibc; lc_al[k].len = len;
+  lc_retry = 1;
+}
 
 static word ivm_jit1(const uchar *code, word code_len,
   uchar *out, word out_max,
@@ -1011,7 +1052,7 @@ static word ivm_jit1(const uchar *code, word code_len,
 
   zpmap_init();
 
-  lc_out = out; lc_at = 0; lc_max = out_max;
+  lc_out = out; lc_at = 0; lc_max = out_max; lc_code = code;
   lc_map = map; lc_mapn = map_n; lc_mem = mem_base;
   lc_nfix = 0;
   lc_nloop = 0;
@@ -1603,12 +1644,14 @@ static word ivm_jit1(const uchar *code, word code_len,
         acc_lost();                // stride: Y/A from the 'U' just before
         loop_close(dest);
         emit_loop_test_ya(code[dest + 2], (word)(dest + 4));
+        loop_align_check(dest);
         break;                     // fell out: Y/A = var, ACC undefined
       }
       if (code[dest] == 'i' && i_exit_b(code, dest, code_len) == p - code) {
         acc_lost();                // closes a while: the test is here
         loop_close(dest);
         emit_loop_test(code[dest + 1], code[dest + 2], (word)(dest + 4), 1);
+        loop_align_check(dest);
         acc_ax_slot(code[dest + 1]);   // fell out: AX = the var
         break;
       }
@@ -1683,6 +1726,7 @@ static word ivm_jit1(const uchar *code, word code_len,
         } else
           printf("%%JIT: loops nested too deep\n");
         em(0); em(0);
+        loop_pad(bc_pc);
         break;
       }
       // while (closed by 'B'): no increment, the test always loads it
@@ -1709,6 +1753,7 @@ static word ivm_jit1(const uchar *code, word code_len,
       } else
         printf("%%JIT: loops nested too deep\n");
       em(0); em(0);
+      loop_pad(bc_pc);
       break;
     }
 
@@ -1733,6 +1778,7 @@ static word ivm_jit1(const uchar *code, word code_len,
       ax = loop_close(ibc);        // the i's JMP lands on the test
       // body = bc pc after the i (backward: short branch when it fits)
       emit_loop_test(ip[1], ip[2], (word)(ibc + 4), ax);
+      loop_align_check(ibc);
       if (ax) acc_ax_slot(ip[1]);  // loop done: AX = the loop var
       break;
     }
@@ -1788,15 +1834,20 @@ static word ivm_jit1(const uchar *code, word code_len,
       uchar ptr = PAR;
       uchar val = PAR;
       word fx;
-      // in (count), KEEP: the code below uses A X Y. A pending count stays
-      // pending (its source is unchanged), else it is lost.
-      uchar pend = (acc_at == ACC_PEND), phk = acc_hk, ps = acc_s;
-      word pk = acc_k;
-      acc_need();
+      // in (count), KEEP: the code below uses A X Y. A pending count is
+      // loaded straight into X (hi) and Y (lo, last: sets Z, no CPY) and
+      // stays pending; a count in AX: TAY, CPY #0, then it is lost.
+      uchar pend = (acc_at == ACC_PEND);
 
 // 27 Bytes TODO: move out to subroutine, nothing is "special"
 
-      em(TAY);
+      if (pend) {
+        if (acc_hk) em2(LDXN, (uchar)(acc_k >> 8));
+        else        emop2(LDX, slothi(acc_s));
+      } else {
+        acc_need();
+        em(TAY);
+      }
 
       // tmp1/tmp2 = ptr + X*256  (last page)
       emop2(LDA, slotlo(ptr)); em2(STAZ, tmp1);
@@ -1806,22 +1857,26 @@ static word ivm_jit1(const uchar *code, word code_len,
       // fill byte
       emop2(LDA, slotlo(val));
 
-      // init
-      em2(CPYN, 0);
-      fx = emrel(BEQ);                    // no remainder → page
+      // init: Z = (Y == 0)
+      if (!pend)          em2(CPYN, 0);
+      else if (acc_hk)    em2(LDYN, (uchar)acc_k);
+      else                emop2(LDY, slotlo(acc_s));
+      fx = 0xffff;
+      if (!(pend && acc_hk && (uchar)acc_k))  // const lo != 0: never taken
+        fx = emrel(BEQ);                  // no remainder → page
 
       // loop:
       em(DEY);                            // 1
       em2(STAIY, tmp1);                   // 2
       em2(BNE, (uchar)-5);                // 2 → loop
-      empatch(fx);
+      if (fx != 0xffff) empatch(fx);
 
       // page:
       em2(DECZ, tmp2);                    // 2
       em(DEX);                            // 1
       em2(BPL, (uchar)-10);               // 2 → loop (Y==0: 256 bytes)
 
-      if (pend) { acc_at = ACC_PEND; acc_hk = phk; acc_k = pk; acc_s = ps; }
+      if (pend) acc_keep();               // its source is unchanged
       else acc_lost();
       break;
     }
@@ -1906,11 +1961,12 @@ word ivm_jit(const uchar *code, word code_len,
   word r;
   uchar n = 0;
   lc_long = (uchar *)calloc((code_len >> 3) + 1, 1);
+  lc_nal = 0;
   do {
     lc_retry = 0;
     r = ivm_jit1(code, code_len, out, out_max, map, map_n, mem_base,
                  out_org, vec_bc, frame_base, ncall);
-    if (lc_retry) printf("%%JIT: short branch too far, again\n");
+    if (lc_retry) printf("%%JIT: again (short branch too far / loop align)\n");
   } while (lc_retry && r && ++n < 8);
   free(lc_long);
   lc_long = NULL;

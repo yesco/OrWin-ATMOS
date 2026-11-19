@@ -1,8 +1,5 @@
 # jsk notes:
 
-- 27 B: memset (+ 4 B load size deferred)
-  - lots of setup (clc+adc)
-  - possibly use shared library?
 -  3 B: m - malloc sizes constant, don't need to LDA xx TAY ...  CMP BEQ,
            just delay and do ... LDY xx BEQ (- 3 bytes)
 -  4 B: reorder: "prime = i + i + 3;  k = i + prime;" => "...; k = prime + i;"
@@ -32,6 +29,9 @@ BUG: 'I' and 'J' doesn't wrap around will give 16 bit number
 --- 
 
 DONE:
+- saved  5 B: a 27 B: memset (+ 4 B load size deferred)
+  - lots of setup (clc+adc)
+  - possibly use shared library?
 - saved  2 B: 12 B (16) -> 10 B (12) i+i == i<<1
 - saved  8 B: [ zjmp - it's a byte simplify zjmp
 - saved  5 B: forward jumps: bxx + jmp = if can shorten save 2 byte per forward
