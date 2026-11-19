@@ -56,21 +56,52 @@ int main() {
 
 #TIMED "start"
 #TIMED "zero"
+
+  fill(20);  
+#TIMED
   // const 0: nothing
-  fill(20);  memset(p, 9, 0);     chk(0, 9);
+memset(p, 9, 0);
+#TIMED "nothing"
+  chk(0, 9);
+
+  fill(20);  
+#TIMED
   // const 1..256: inline
-  fill(20);  memset(p, 1, 1);     chk(1, 1);
-  fill(300); memset(p, 2, 255);   chk(255, 2);
-  fill(300); memset(p, 3, 256);   chk(256, 3);
+memset(p, 1, 1);
+#TIMED "size 1"
+  chk(1, 1);
+
+  fill(300);
+#TIMED
+  memset(p, 2, 255);
+#TIMED "size 255"
+  chk(255, 2);
+
+  fill(300); 
+#TIMED
+  memset(p, 3, 256);
+#TIMED "size 256"
+  chk(256, 3);
+
+  fill(300);
+#TIMED
   // const > 256: JSR _opmemset (lo != 0, lo == 0)
-  fill(300); memset(p, 4, 257);   chk(257, 4);
-  fill(600); memset(p, 5, 512);   chk(512, 5);
-#TIMED "fill+checks"
+   memset(p, 4, 257);
+#TIMED "size 257"
+  chk(257, 4);  
+  
+  fill(600); 
+#TIMED  
+  memset(p, 5, 512);
+#TIMED "size LARGE: fill+checks"
+  chk(512, 5);
+
   fill(8195);
-#TIMED "fill 8196"
+#TIMED
   memset(p, 6, 8191);
-#TIMED "memset 8191"
+#TIMED "size 8191 - test 8195"
   chk(8191, 6);
+  
   // variable count: X/Y from the slot
   n = 300;
   fill(400); memset(p, 7, n);     chk(300, 7);

@@ -136,11 +136,12 @@ K=if (E)[?G\x] K else[0?G\x\w\y] K[\y]
 |pon;[]
 # #TIMED "name": op '#' + name; the JIT on the host simulator prints the
 #   cycles since the previous #TIMED, everything else skips it
+# #TIMED (no name): '#' + 0, only restarts the counting there
 |#timed "[#]\u\*\n
+|#timed[#\#00]\*\n
 
 # - Memory
-#|free(\i);[F\1] -- TODO: make one
-|free(\i);
+|free(\i);[F\1]
 |\i=malloc(E);[M\1]
 
 # - Statement can be a Block, or lastly Assignments

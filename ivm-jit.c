@@ -2011,6 +2011,7 @@ word ivm_jit(const uchar *code, word code_len,
 static word sim_heap, sim_heapend;
 static unsigned long sim_traps;
 static unsigned long sim_t_cyc, sim_t_xp;   // at the last #TIMED
+static word sim_t_pc;                       // code after the last #TIMED
 
 #define SIM_W(a)  (cpu_mem[(word)(a)] | (cpu_mem[(word)((a) + 1)] << 8))
 #define SIM_SETW(a, v) (cpu_mem[(word)(a)] = (uchar)(v), \
@@ -2076,13 +2077,21 @@ static int sim_trap(Cpu6502 *c) {
     break;
   case SIM_opfree: break;
   case SIM_optimed: {                                 // JSR + name + 0
-    // since the last #TIMED (or the start), without this JSR's 6 cycles
+    // since the last #TIMED (or the start): cycles without this JSR's 6,
+    // code bytes from the end of the last one to this JSR
+    //   <<<      4711c    32B - name   (+ page-crossing cycles if any)
+    // no name (bare #TIMED): print nothing, just start counting here
     unsigned long now = c->cycles - 6;
     t = cpu_mem[0x101 + c->s];
     t |= (word)(cpu_mem[0x102 + c->s] << 8);
-    printf("<<< ");
-    while (cpu_mem[++t]) putchar(cpu_mem[t]);
-    printf(": %luc (incl %luc page)\n", now - sim_t_cyc, c->xpage - sim_t_xp);
+    if (cpu_mem[t + 1]) {
+      printf("======= %9luc %5uB - ", now - sim_t_cyc,
+        (unsigned)(word)(t - 2 - sim_t_pc));
+      while (cpu_mem[++t]) putchar(cpu_mem[t]);
+      if (c->xpage - sim_t_xp) printf("  +%luc page", c->xpage - sim_t_xp);
+      putchar('\n');
+    } else t++;
+    sim_t_pc = (word)(t + 1);
     cpu_mem[0x101 + c->s] = (uchar)t;                 // RTS: t + 1
     cpu_mem[0x102 + c->s] = (uchar)(t >> 8);
     sim_t_cyc = c->cycles;
@@ -2191,6 +2200,7 @@ word sim_run_blob(uchar *blob, uchar zp, uchar zp_at, word org) {
   sim_heapend = 0xF000;
   sim_traps = 0;
   sim_t_cyc = sim_t_xp = 0;
+  sim_t_pc = org;
   cpu_trap = sim_trap;
   cpu_trap_lo = SIM_opputnum;
   memset(&cpu, 0, sizeof(cpu));

@@ -228,10 +228,10 @@ echo
 # ---!!!!!!!---------- WE ON PAR W OSCAR64 in SPEED!!!----------
 # This optimization "RUN" was done in only 5 hours of work!
 # jit  'm'emset   255 B |               0.9921s	| 14,286,529
-# jit  'm'jsr     250 B |               0.9788 	| 14,094,824
-#
+# jit  'm'jsr     250 B |               0.9788s	| 14,094,824
+# jit  'm'#TIMED  250 B |               0.9864s	| 14,203,811 ~ page fluct
 
-# (/ 14.094824 14.40) 0.9788072222222222
+# (/ 14.203811 14.40) 0.9863757638888888
 
 
 # (/ 309.383290 7.0) 
