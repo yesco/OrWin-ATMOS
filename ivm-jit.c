@@ -392,7 +392,7 @@ extern void   ivm_free(ivmvar p);
   enum {
     SIM_opputnum = 0xFF00, SIM_opmul, SIM_opdiv, SIM_opmod,
     SIM_opputchar, SIM_opgetchar, SIM_opputs, SIM_opprintstr,
-    SIM_opmalloc, SIM_opfree, SIM_end
+    SIM_opmalloc, SIM_opfree, SIM_optimed, SIM_end
   };
   // opmemset is real 6502 code (its loop costs cycles): sim_memset[] at
   // $FE00, below the traps. Same bytes as _opmemset in ivm-lib.asm.
@@ -1685,6 +1685,20 @@ static word ivm_jit1(const uchar *code, word code_len,
       acc_keep();
       break;
 
+    // # name 0: #TIMED. Host sim: JSR to a trap that prints the cycles
+    // since the last one (KEEP: A X Y kept), else nothing at all
+    case '#':
+      #ifdef HOSTSIM
+        ema(JSR, REF(optimed));
+        while (p < end && *p) { em(*p); p++; }
+        em(0);
+      #else
+        while (p < end && *p) p++;
+      #endif
+      if (p < end) p++;
+      acc_keep();
+      break;
+
     case ' ': acc_keep(); break; // spacer
     case 127: acc_keep(); break; // DEL: peephole filler (squeezed out by ivm-gen)
 
@@ -1996,6 +2010,7 @@ word ivm_jit(const uchar *code, word code_len,
 // ---------------------------------------------------------------------------
 static word sim_heap, sim_heapend;
 static unsigned long sim_traps;
+static unsigned long sim_t_cyc, sim_t_xp;   // at the last #TIMED
 
 #define SIM_W(a)  (cpu_mem[(word)(a)] | (cpu_mem[(word)((a) + 1)] << 8))
 #define SIM_SETW(a, v) (cpu_mem[(word)(a)] = (uchar)(v), \
@@ -2060,6 +2075,20 @@ static int sim_trap(Cpu6502 *c) {
     SIM_AX(c, t);
     break;
   case SIM_opfree: break;
+  case SIM_optimed: {                                 // JSR + name + 0
+    // since the last #TIMED (or the start), without this JSR's 6 cycles
+    unsigned long now = c->cycles - 6;
+    t = cpu_mem[0x101 + c->s];
+    t |= (word)(cpu_mem[0x102 + c->s] << 8);
+    printf("<<< ");
+    while (cpu_mem[++t]) putchar(cpu_mem[t]);
+    printf(": %luc (incl %luc page)\n", now - sim_t_cyc, c->xpage - sim_t_xp);
+    cpu_mem[0x101 + c->s] = (uchar)t;                 // RTS: t + 1
+    cpu_mem[0x102 + c->s] = (uchar)(t >> 8);
+    sim_t_cyc = c->cycles;
+    sim_t_xp = c->xpage;
+    break;
+  }
   default: return 0;
   }
   return 1;
@@ -2161,6 +2190,7 @@ word sim_run_blob(uchar *blob, uchar zp, uchar zp_at, word org) {
                                           // must not change with code size
   sim_heapend = 0xF000;
   sim_traps = 0;
+  sim_t_cyc = sim_t_xp = 0;
   cpu_trap = sim_trap;
   cpu_trap_lo = SIM_opputnum;
   memset(&cpu, 0, sizeof(cpu));

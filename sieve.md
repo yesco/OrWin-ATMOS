@@ -1,5 +1,6 @@
 # jsk notes:
 
+- 16 B: free(); include and doing F in code gen???
 -  3 B: m - malloc sizes constant, don't need to LDA xx TAY ...  CMP BEQ,
            just delay and do ... LDY xx BEQ (- 3 bytes)
 -  4 B: reorder: "prime = i + i + 3;  k = i + prime;" => "...; k = prime + i;"
@@ -40,6 +41,117 @@ DONE:
 - saved  3 B: I J lazy load - 2.8% in speed!
 - saved  2 B: U - less juggling just save A directly, reload cheaper than TAY TYA
 - saved  4 B: for should leave index in ACC
+
+=============================================================
+
+## 6502 C-compiler bencharks out there
+
+In benchmarks targeting the MOS 6502 (specifically variants of the
+classic BYTE Sieve prime-number test), Oscar64 and LLVM-MOS
+consistently lead in execution speed, while vbcc produces the smallest
+compiled binaries. Traditional compilers like cc65 lag significantly
+behind in cycle counts due to heavy reliance on a software stack. [1]
+(https://www.c64-wiki.com/wiki/oscar64), [2]
+(https://raxiss.com/article/id/30-MOS6502-compiler-benchmark), [3]
+(https://github.com/kassane/mos-toolchains-research/blob/main/Research.md),
+[4] (https://www.youtube.com/watch?v=ejbTKtgSZI0&vl=en), [5]
+(https://www.reddit.com/r/retrogamedev/comments/1xhp8dk/i_wrote_a_compiler_that_turns_typescript_into/)
+Because different benchmark suites use varying iteration counts, array
+sizes, and runtime libraries, results are best evaluated through the
+two most comprehensive modern 6502 C compiler test suites: C-Bench-64
+and the Raxiss MOS6502 Benchmark. [1]
+(https://thred.github.io/c-bench-64/), [2]
+(https://raxiss.com/article/id/30-MOS6502-compiler-benchmark)
+
+1. Execution Speed & Cycles (C-Bench-64 / GGLabs Suite)
+
+The C-Bench-64 suite (adapted from the GGLabs benchmarks) measures
+real-world execution time on a ~1 MHz Commodore 64 (where 1 second ≈
+1,000,000 clock cycles). It tests both the standard array-based Byte
+Sieve (sieve) and a bitwise-packed variant (sieve-bit). [1]
+(https://www.c64-wiki.com/wiki/oscar64), [2]
+(https://thred.github.io/c-bench-64/), [3]
+(https://6502.org/forum/viewtopic.php?t=8140)
+
+Compiler	Standard Sieve Time (sec)
+                        Approx. Cycles (~1 MHz)
+			        Bitwise Sieve Cycles (sec)
+Oscar64	9.5 s	~9.5M	16.3 s	~16.3M
+LLVM-MOS	16.7 s ~16.7M   ~19.6M
+cc65	23.1 s	~23.1M	70.7 s	~70.7M
+
+• Oscar64 Dominates Loop Logic. Oscar64 performs whole-program
+  call-chain analysis to statically allocate local variables and
+  aggressively narrows 16-bit integer math down to native 8-bit
+  operations. [1] (https://news.ycombinator.com/item?id=38901089)
+
+• LLVM-MOS Excels at Complex Control Flow. LLVM-MOS uses static
+  zero-page allocation instead of a software stack. While it trails
+  Oscar64 slightly on tight 8-bit array indexing like the Sieve, it
+  often matches or beats Oscar64 in heavier math and cryptography
+  benchmarks like AES-256. [1]
+  (https://news.ycombinator.com/item?id=46098359), [2]
+  (https://llvm-mos.org/wiki/Findings), [3]
+  (https://www.c64-wiki.com/wiki/oscar64)
+
+• cc65 Suffers from Stack Overhead. cc65 maintains a 16-bit software
+  stack pointer in memory, requiring roughly 20 cycles of overhead per
+  function call and 8 cycles just to read a local variable off the
+  stack. [1] (https://www.youtube.com/watch?v=ejbTKtgSZI0&vl=en)
+
+2. Binary Size Comparison (Raxiss MOS6502 Suite)
+
+The Raxiss MOS6502 Compiler Benchmark measures total compiled executable size (including minimal runtime startup overhead) when compilers are tuned specifically for code size. [1] (https://raxiss.com/article/id/30-MOS6502-compiler-benchmark)
+
+Comp  OptFlag	Sieve Size	Notes
+====  =======   ==========	=================
+vbcc  -O=991	  914 bytes	Smallest complete binary; strong size optimizer.
+cc65  -O	1,108 bytes	Compact due to calling reusable runtime subroutines.
+osdk-lcc65 -O3	1,160 bytes	Oric-focused LCC port; competitive binary footprint.
+LLVM-MOS   -Oz	1,162 bytes	Slightly larger due to aggressive loop/inlining transforms.
+SDCC --opt-code-size
+               10,012 bytes	Includes heavy standard library/startup overhead.
+KickC	--Failed to compile--	Lacks full standard C compliance for unmodified benchmarks.
+
+• Size vs. Speed Trade-off. Compilers like vbcc and cc65 produce
+  smaller binaries because they emit calls to shared runtime helper
+  routines.
+  
+  LLVM-MOS and Oscar64 trade a small amount of ROM/RAM footprint for
+  unrolled loops and inlined zero-page operations that cut cycle
+  counts in half.
+  
+  [1] (https://www.reddit.com/r/Compilers/comments/1xukomg/introduce_llvm_z80_backend/),
+  [2] (https://raxiss.com/article/id/30-MOS6502-compiler-benchmark),
+  [3] (https://news.ycombinator.com/item?id=46098359),
+  [4] (https://www.c64-wiki.com/wiki/oscar64)
+
+Key Takeaways for Choosing a 6502 C Compiler
+
+• Best Overall Performance. Choose Oscar64 (especially for Commodore
+  targets) or LLVM-MOS (for multi-platform 6502 targets like NES,
+  Atari, and C64) if cycle count is your primary bottleneck. [1]
+  (https://www.c64-wiki.com/wiki/oscar64), [2]
+  (https://www.youtube.com/watch?v=ejbTKtgSZI0&vl=en&t=25)
+
+• Smallest Footprint. Choose vbcc if you are targeting strict size
+  limits (such as 4K/8K cartridge builds), though note that its
+  license restricts commercial redistribution. [1]
+  (https://sgadrat.itch.io/super-tilt-bro/devlog/219534/benchmark-c-compilers-for-the-6502-cpu),
+  [2] (https://raxiss.com/article/id/30-MOS6502-compiler-benchmark)
+
+• Legacy Compatibility. Choose cc65 only if you rely on its mature,
+  built-in target libraries (conio, platform drivers) and do not need
+  maximum execution speed. [1]
+  (https://www.youtube.com/watch?v=xkolkC1RgOY), [2]
+  (https://www.cc65.org/oldindex.php)
+
+If you are targeting a specific 6502 system (such as C64, NES, Atari,
+or Apple II) or have strict ROM/RAM constraints, let me know and I can
+help you compare compiler flags and C coding patterns (like zero-page
+usage and Structure-of-Arrays) to minimize cycle counts.
+
+=============================================================
 
 
 ## - 'n' INC optimiation -1c +2 B - LOL

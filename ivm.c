@@ -127,7 +127,7 @@
 // ' '- nop
 //  ! - store at global address ACC
 //  " - inline print string end with \0
-//? # - number? TODO: atoi?!?!
+//  # - #TIMED "name\0": no-op here (JIT on the host sim: cycles)
 //? $ - string ptr at end? $ == \
 //  % - mod
 //  & - and
@@ -1418,6 +1418,8 @@ ZL(op_W,   'W')  printf("%u", PAR);     goto pnext;
 ZL(op_dot, '.')  printf("%u", zp.acc);  goto xnext;
 ZL(op_str, '"')  while (*zp.ipc) putchar(*zp.ipc++);
                                         goto pnext;
+// #TIMED "name": skip the name (the JIT on the host sim reports cycles)
+ZL(op_time,'#')  while (*zp.ipc) zp.ipc++;  goto pnext;
 // TODO: T printing string ? Type w length (from index)
 
 

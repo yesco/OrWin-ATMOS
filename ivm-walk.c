@@ -41,7 +41,7 @@
 //   NEW   new value           UNDEF don't rely on it (impls differ)
 //
 //   in  out    ops
-//   -   KEEP   ' ' DEL B O N W Z
+//   -   KEEP   ' ' DEL B O N W Z # (#TIMED: JIT on the host sim only)
 //   in  KEEP   S(+SLOT) ! , w s ) ] m . P E zjp X(returns it)
 //   -   SLOT   L <32 C(dst) U(1st) I J
 //   in  SLOT   M(acc = mem[s] = alloc(acc))
@@ -109,9 +109,9 @@ static word ivm_oplen(const uchar *p) {
   word n;
 
   if (!(i & OPI_SPEC)) return 1 + OPI_NARGS(i);
-  if (*p != '"') return 0;
+  if (*p != '"' && *p != '#') return 0;
 
-  // inline string: " bytes... 0
+  // inline string: " bytes... 0   (# name... 0: #TIMED)
   for (n = 1; p[n]; n++)
     ;
   return n + 1;

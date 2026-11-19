@@ -31,7 +31,7 @@ static void ivm_print_one(FILE *fp, const uchar *code, unsigned len, unsigned *p
 
   c = code[i];
 
-  if (c == '"') {
+  if (c == '"' || c == '#') {             // " string, # #TIMED name
     fputc('\n', fp);
     do {
       fputc((int)c, fp);
@@ -53,7 +53,8 @@ static void ivm_print_one(FILE *fp, const uchar *code, unsigned len, unsigned *p
     return;
   }
   if (c >= 0x80) {
-    // zjp: jump forward if ACC == 0 - same as the "?G rr" it replaced
+    // zjp#ss: short one byte jump forward if ACC == 0
+    //         (replaces "?G rr")
     fprintf(fp, "zj%02x ", (unsigned)(c & 0x3f));
     *pi = i + 1;
     return;
@@ -108,7 +109,7 @@ unsigned ivm_print_code_range(
     ivm_print_one(fp, code, end, &i);
     if (i <= before) i = before + 1;
 
-    if (wrap && ((strchr("ijnGBmN;XQq", ch) != NULL) || ++n >= wrap)) {
+    if (wrap && ((strchr("ijnGBmN;XQ", ch) != NULL) || ++n >= wrap)) {
       fputc('\n', fp);
       n = 0;
     }

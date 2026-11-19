@@ -5,58 +5,58 @@
 // #included in run_ivm() with -DUSE_BTABLE.
 // 
 // Works on any compiler (no labels as values, no switch):
-//   77 op ranges, 6-7 compares for any op.
+//   78 op ranges, 6-7 compares for any op.
 //
 // GENERATED from ivm-jtable.c:
 // 
 //   python3 ivm-tree.py ivm-jtable.c > ivm-btable.c
 // 
-// (op < 32 is handled before this)
 
   if (op & 0x80) goto op_hibit;
 
   if (op < 'M') {
-    if (op < ':') {
-      if (op < '*') {
-        if (op < '%') {
+    if (op < '9') {
+      if (op < ')') {
+        if (op < '$') {
           if (op < '"') {
             if (op < '!') goto op_sp;
             goto op_bang;
           }
           if (op < '#') goto op_str;
-          goto op_unk;
+          goto op_time;
         }
-        if (op < '\'') {
-          if (op < '&') goto op_mod;
-          goto op_and;
+        if (op < '&') {
+          if (op < '%') goto op_unk;
+          goto op_mod;
         }
+        if (op < '\'') goto op_and;
         if (op < '(') goto op_ri;
-        if (op < ')') goto op_idxl;
-        goto op_idxs;
+        goto op_idxl;
       }
-      if (op < '/') {
-        if (op < ',') {
-          if (op < '+') goto op_mul;
-          goto op_add;
+      if (op < '.') {
+        if (op < '+') {
+          if (op < '*') goto op_idxs;
+          goto op_mul;
         }
+        if (op < ',') goto op_add;
         if (op < '-') goto op_wi;
-        if (op < '.') goto op_sub;
-        goto op_dot;
+        goto op_sub;
       }
-      if (op < '1') {
-        if (op < '0') goto op_div;
-        goto op_0;
+      if (op < '0') {
+        if (op < '/') goto op_dot;
+        goto op_div;
       }
+      if (op < '1') goto op_0;
       if (op < '8') goto op_17;
-      if (op < '9') goto op_8;
-      goto op_9;
+      goto op_8;
     }
     if (op < 'C') {
       if (op < '>') {
-        if (op < '<') {
-          if (op < ';') goto op_unk;
-          goto op_semi;
+        if (op < ';') {
+          if (op < ':') goto op_9;
+          goto op_unk;
         }
+        if (op < '<') goto op_semi;
         if (op < '=') goto op_lt;
         goto op_eq;
       }

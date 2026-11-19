@@ -134,9 +134,13 @@ K=if (E)[?G\x] K else[0?G\x\w\y] K[\y]
 # - benchmarking dispatch
 |nop;[ ]
 |pon;[]
+# #TIMED "name": op '#' + name; the JIT on the host simulator prints the
+#   cycles since the previous #TIMED, everything else skips it
+|#timed "[#]\u\*\n
 
 # - Memory
-|free(\i);[F\1]
+#|free(\i);[F\1] -- TODO: make one
+|free(\i);
 |\i=malloc(E);[M\1]
 
 # - Statement can be a Block, or lastly Assignments
@@ -257,7 +261,10 @@ H=\i+=\i;[U\1\2]
 |\i=\1-1;[J\1]
 |* \i=E;[!\1]
 
-#|\i\[S\]=E;[)\1\2] # TODO: word byte
+# p[i]: char* -> byte ops [ ], int* -> word ops ( ) (\?\C: \?C would
+#   call rule C); anything else (an int used as pointer): bytes
+|\i\?\C\[S\]=E;[\]\1\2]
+|\i\?\W\[S\]=E;[)\1\2]
 |\i\[S\]=E;[\]\1\2]
 
 |\i=0;[Z\1]
@@ -299,7 +306,8 @@ R=\i(Z)[\v]
 #   *intptr    (TODO: block for charptr, put guard/other gen)
 |* \i[@\1]
 
-#|\i\[S\][(\1\2] # TODO: word byte
+|\i\?\C\[S\][\[\1\2]
+|\i\?\W\[S\][(\1\2]
 |\i\[S\][\[\1\2]
 
 # - Parens
