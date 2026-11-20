@@ -144,7 +144,6 @@ echo
 # jit: Lcc(bbcc   469 B	|       40.5    5.78x	| 40,453,871 2.3%
 # jit: *2  -> <<1 450 B |       40.39	5.77x	| 40,389,838
 
-
 # === TODO: no ?? was faster than after OP. some regressed?
 # adding ./ivm -r 10 option so we can (minimize/remove) overhead
 #
@@ -232,7 +231,7 @@ echo
 # jit  'm'#TIMED  250 B |               0.9864s	| 14,203,811 ~ page fluct
 # jit  ivm-lib    246 B |		0.9829s	| 14,154,354
 # jit  cmp #$ff   250 B | 		0.9325s	| 13,427,346
-#
+
 # (/ 13.427346 14.40) 0.9324545833333333
 
 

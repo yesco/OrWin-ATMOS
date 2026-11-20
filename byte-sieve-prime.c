@@ -23,7 +23,7 @@ int main() {
 
     // recognized as memset! save bytes and time!
     // TODO: currently only using < ...
-    for (i = 0; i < SIZEPL; i++)
+    for (int i = 0; i < SIZEPL; i++)
       flags[i] = 1;
 
     // < is incorect so use <= lol

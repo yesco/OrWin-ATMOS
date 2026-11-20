@@ -165,7 +165,23 @@ K=if (E)[?G\x] K else[0?G\x\w\y] K[\y]
 
 # TODO: memset working fine on ./ivm ./ivm-jit but NOT ./ivm-asm....?
 
-L=\i=0; \1<E; \1++) \i\[\1\]=\d;[m\5\7]
+# - memset: for (i = 0; i < n; i++) p[i] = v
+#   char*: any v
+#   int* : only 0 and -1 (all bytes the same): 2n bytes
+#   * 2 (\#02 const; the JIT makes it ASL/ROL)
+#   int* with another v: will not use memsest => normal loop.
+#   scoped (for (int i = ..): no end value for i -> no S i (cheaper)
+#   captures: 1=I (a rule's result is a capture too) 2=i 3=i 4=E
+#             5=i 6=ptr 7=i 8=val 9=const 2
+L=I\{ \+=0; \2<E; \2++) \i\?\C\[\2\]=\d;\}[m\6\8]
+| I\{ \+=0; \2<E; \2++) \i\?\W\[\2\]=0;\#00\#02\}[*\9m\6\8]
+| I\{ \+=0; \2<E; \2++) \i\?\W\[\2\]=-1;\#ff\#02\}[*\9m\6\8]
+
+# - memset; not scoped: i ends at n (C)
+#   captures: 1=i 2=i 3=E 4=i 5=ptr 6=i 7=val 8=const 2
+|\i=0; \1<E; \1++) \i\?\C\[\1\]=\d;[S\1m\5\7]
+|\i=0; \1<E; \1++) \i\?\W\[\1\]=0;\#00\#02[S\1*\8m\5\7]
+|\i=0; \1<E; \1++) \i\?\W\[\1\]=-1;\#ff\#02[S\1*\8m\5\7]
 
 # - dangerous: for(i=0; i<42; i++) arr[i]=i; // lol!
 #|\i=0; \1<E; \1++) \i\[\1\]=\i;[m\5\7]
@@ -196,9 +212,10 @@ L=\i=0; \1<E; \1++) \i\[\1\]=\d;[m\5\7]
 #   op, and or run the same code (jump back and forth is ok)
 #   These are 144 bytes (i+n so should minimize, at slight cost)
 
-|\i=0; [Z\1]   \1<\d[\eS\t]; \1++) [\mi\1\4\x] K [n\z\y]
-|\i=\d;[C\1\2] \1<\d[\eS\t]; \1++) [\mi\1\5\x] K [n\z\y]
-|\i=\i;[C\1\2] \1<\d[\eS\t]; \1++) [\mi\1\5\x] K [n\z\y]
+# \e: temp = ACC - 1, so the limit must be in ACC first (\l: the \d)
+|\i=0; [Z\1]   \1<\d[\l3\eS\t]; \1++) [\mi\1\4\x] K [n\z\y]
+|\i=\d;[C\1\2] \1<\d[\l4\eS\t]; \1++) [\mi\1\5\x] K [n\z\y]
+|\i=\i;[C\1\2] \1<\d[\l4\eS\t]; \1++) [\mi\1\5\x] K [n\z\y]
 
 
 |\i=E[S\1]; \1<=E[S\t];  \1++) [\mi\1\5\x] K [n\z\y]
@@ -225,20 +242,21 @@ L=\i=0; \1<E; \1++) \i\[\1\]=\d;[m\5\7]
 # counting-down-to-zero with classic ops (no j/m)
 # body runs N times for N>0, i ends at 0
 # for (i = N; i--; )          and  for (i = N; i-->0; )
-|\i=E[S\1];\1--;)     [\mL\1G\x] K[J\1B\z\y]
-|\i=E[S\1];\1-->0;)   [\mL\1G\x] K[J\1B\z\y]
+#   C: test the old i, then i-1; the exit path decrements too (i = -1)
+|\i=E[S\1];\1--;)     [\mL\1?G\xJ\1] K[B\z\yJ\1]
+|\i=E[S\1];\1-->0;)   [\mL\1G\x0?G\x\w\yJ\1] K[B\z\yJ\1]
 # for (i = N; --i; )          (runs N-1 times — keep if you want it)
-|\i=E[S\1];--\1;)     [\mL\1G\x] K[J\1B\z\y]
+|\i=E[S\1];--\1;)     [\mJ\1?G\x] K[B\z\y]
 # for (i = N; i; i--)         and  for (i = N; i>0; i--)
-|\i=E[S\1];\1;\i--)   [\mL\1G\x] K[J\1B\z\y]
-|\i=E[S\1];\1>0;\i--) [\mL\1G\x] K[J\1B\z\y]
+|\i=E[S\1];\1;\i--)   [\mL\1?G\x] K[J\1B\z\y]
+|\i=E[S\1];\1>0;\i--) [\mL\1G\x0?G\x\w\y] K[J\1B\z\y]
 
 |\i=E[S\1]; [\m]E[?G\x] ;\i++) K[I\4B\z\y]
 |\i=E[S\1]; [\m]E[?G\x] ;\i--) K[J\4B\z\y]
 
 |E; [\m] E [?G\x] ;E) K[B\z\y]
 
-|\i=E[S\1]; [\m]E[?G\x]; \i+=\i[U\1\5]) K[B\z\y]
+|\i=E[S\1]; [\m]E[?G\x]; \i+=\i) K[U\1\5B\z\y]
 
 |\i=E[S\1]; \1<=E[S\t]; \1++) [\mi\1\5\x] K [n\z\y]
 
