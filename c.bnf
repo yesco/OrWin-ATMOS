@@ -392,10 +392,12 @@ O=
 |& [S\t] R[&\a1]\<
 |\|[S\t] R[|\a1]\<
 |^ [S\t] R[^\a1]\<
-|<=[S\t] R[S\tL\a1>\a3?]\<
-|>=[S\t] R[S\tL\a1<\a3?]\<
-|< [S\t] R[S\tL\a1<\a3]\<
-|> [S\t] R[S\tL\a1>\a3]\<
+# compare with an R: left spilled, R in ACC, compare swapped (no 2nd temp):
+#   l <= r  =  !(r < l)    l >= r  =  !(r > l)    l < r  =  r > l
+|<=[S\t] R[<\a1?]\<
+|>=[S\t] R[>\a1?]\<
+|< [S\t] R[>\a1]\<
+|> [S\t] R[<\a1]\<
 |<<S[\{\a1]\<
 |>>S[\}\a1]\<
 |!=S[=\a1?]\<
