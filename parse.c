@@ -896,7 +896,7 @@ static word force_addr(uchar n) {
 // run production at p (first char after '['); returns after ']'
 // quiet: GEN is printed only when the owning alt accepts (pop)
 static uchar *run_production(uchar *p) {
-  uchar n, b, e, adv, cv, dest, src, *q;
+  uchar n, b, e, adv, cv, dest, src, *q, is_char = 0;
   word w;
   unsigned int val;
 
@@ -991,7 +991,7 @@ static uchar *run_production(uchar *p) {
         b = alloc_slot();
         if (e == HIBIT('e')) {
           // TODO: replace with better loop/test code-gen
-          // A: \e makes "i < n" into "i <= n-1" for the i/n loop ops,
+          // A: \e makes "i < n" into "i <= n-1" for the t/n loop ops,
           //   at the cost of a temp + 2 ops. A loop op with < (exclusive)
           //   would remove it: then \e isn't needed at all.
           emitop2('S', b);
@@ -1096,6 +1096,19 @@ static uchar *run_production(uchar *p) {
           break;
         }
 
+        // char var: keep the hi byte 0 (i j in the JIT rely on it)
+        {
+          word si;
+          for (si = 0; si < nsym; si++)
+            if (syms[si].address == dest && syms[si].type == SYM_VAR) {
+              if (syms[si].vtype == 'c' && !syms[si].is_ptr) {
+                if (isconst(src)) src = const_slot(const_val(src) & 0xff);
+                else is_char = 1;
+              }
+              break;
+            }
+        }
+
         // A global initializer ("int g = 5;" outside any function)
         // has no code to go into: nothing runs at scope 0. So it's
         // recorded in ginit_*, and gen_func_entry() emits Z/C stores
@@ -1110,7 +1123,7 @@ static uchar *run_production(uchar *p) {
           //   c) C dd ss         dd := ss;
           //   d) C d1 ss S d2... d2 := d1 := ss;
           emitop2('L', src);
-          emitop2('S', dest);
+          emitop2(is_char ? 's' : 'S', dest);
         }
         break;
 

@@ -100,7 +100,7 @@
 //   possibly usage: cAr Cons cDr, Heap/Here, Recurse, Tail-call, Vector/index? Yndex?
 //
 // ? abcdefgh           - lisp?
-// ? m o(p)             - ?index stuff, built in loops iGG GG if zero/non-zero?
+// ? m op               - ?index stuff, built in loops iGG GG if zero/non-zero?
 // ? tuv                - ?SSTACK saves, param: 1..7 (ACC is 0th)
 // xyz                  - syscall function LN with 1,2,3 byte args indices+acc
 //
@@ -155,7 +155,7 @@
 //  E - emit char = putchar(acc)
 //  F - free var, set it 0 "Fvv"
 //  G - conditional acc > 0: goto 1-255
-//? H - TODO: heap/here something? Hollerith? LOL
+//  H - word pointer += 2: "Hvv" ACC= var += 2
 //  IJ - inc/dec var, leave val in ACC
 //  K - key = getchar (waits?)
 //  L - load var
@@ -207,9 +207,8 @@
 //           nth
 //           consp
 //
-// TOOD: maybe need byte version of I and J... move loop to tuv
-//  i   - loop <= with 'n' ('i' var upper skip)
-//  j   - TODO: loop >=0 with 'n' (j var skip)
+//  i   - inc byte var, leave val in ACC "ivv" (char ++)
+//  j   - dec byte var, leave val in ACC "jvv" (char --)
 //
 //  k   - TODO: switch-case ('k'ase low count (const back)...)
 //
@@ -217,15 +216,15 @@
 //
 //  m   - memset ACC=size "m pp vv" 
 //
-//  n   - next loop (together with ij ind/dec-for)
+//  n   - next loop (together with tu inc/dec-for)
 //
 //? op  - TODO: object, 'o' methOd call 'p' ... ?
 //  q   - quit program
 //  r   - read byte (c@)
 //  s   - save byte in slot (reset hibit)
 
-//? t   -
-//? u   - 
+//  t   - loop <= with 'n' ('t' var upper skip)
+//  u   - TODO: loop >=0 with 'n' (u var skip)
 //? v   - 
 
 //  w   - write byte (c!)
@@ -1388,6 +1387,12 @@ ZL(op_J,   'J')  zp.acc = PAR - 1; PAR = zp.acc; goto pnext;
 // Fails on oscar! same for 'I'
 // ZL(op_J,   'J')  zp.acc = --zp.mem[*zp.ipc]; goto pnext; 
 
+// byte (char) ++ --: hi byte stays 0
+ZL(op_bi,  'i')  zp.acc = (uchar)(PAR + 1); PAR = zp.acc; goto pnext;
+ZL(op_bj,  'j')  zp.acc = (uchar)(PAR - 1); PAR = zp.acc; goto pnext;
+// word pointer ++ (int*)
+ZL(op_H,   'H')  zp.acc = PAR + 2; PAR = zp.acc; goto pnext;
+
 ZL(op_U,   'U')  zp.acc = (zp.mem[zp.ipc[0]]
                         += zp.mem[zp.ipc[1]]);
                                 zp.ipc += 2; goto xnext; // two args
@@ -1435,13 +1440,13 @@ ZL(op_B,   'B')  zp.ipc -= *zp.ipc;     goto pnext;
 // - ivm-vm.asm - 18% faster with FOR-ops
 //       (/ 2893598 2449567.0) 18% faster (1.1812691794100754)
 
-// TODO: 'u'  ==  "U n' stepper that combines:
-//     "Uiiss B<back> -> u<ss><back>    === 5 b -> 3 b !
-//     "Uiiss n<back> -> u<ss><back>"   === 5 b -> 3 b
+// TODO: 'v'  ==  "U n' stepper that combines:
+//     "Uiiss B<back> -> v<ss><back>    === 5 b -> 3 b !
+//     "Uiiss n<back> -> v<ss><back>"   === 5 b -> 3 b
 
 
 // loop: FOR i u end
-ZL(op_i,   'i')  zp.acc = zp.mem[zp.ipc[0]];
+ZL(op_t,   't')  zp.acc = zp.mem[zp.ipc[0]];
                  if (zp.acc <= zp.mem[zp.ipc[1]]) {
                    zp.ipc += 3;               goto xnext; } // 3 args
                  zp.ipc += 2 + zp.ipc[2];     goto pnext; // skip
@@ -1453,12 +1458,12 @@ ZL(op_n,   'n')  tpc = zp.ipc - *zp.ipc + 1;
                  zp.ipc = tpc + 4;            goto xnext; // body
 
 // loop:      for(i= ...; i; i--) ... (down)
-ZL(op_j,   'j')  zp.acc = zp.mem[zp.ipc[0]];
+ZL(op_u,   'u')  zp.acc = zp.mem[zp.ipc[0]];
                  if (zp.acc) {
                    zp.ipc += 2;               goto xnext; } // 2 args
                  zp.ipc += 1 + zp.ipc[2];     goto pnext; // skip
 // NEXT loop --
-// TODO: fuse into i (j) and n
+// TODO: fuse into t (u) and n
 //ZL(op_m,   'm')  tpc = zp.ipc - *zp.ipc + 1;
 //                 zp.acc = --zp.mem[tpc[1]];
 //                 if (!zp.acc)                 goto pnext; // done

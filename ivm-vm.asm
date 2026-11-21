@@ -746,6 +746,27 @@ op_s:   USEY
 
         jmp     pnext
 
+;;; jxx  acc = mem[xx] = (uchar)(mem[xx] - 1)   (char --, hi := 0)
+op_j:   USEY
+        PARY
+        lda     #$FF
+        bne     bincdec         ; always
+
+;;; ixx  acc = mem[xx] = (uchar)(mem[xx] + 1)   (char ++, hi := 0)
+op_i:   USEY
+        PARY
+        lda     #1
+bincdec:
+        clc
+        adc     (_ivm_memlo),y
+        sta     (_ivm_memlo),y
+        sta     _ivm_acc
+        lda     #0
+        sta     (_ivm_memhi),y
+        sta     _ivm_acc+1
+
+        jmp     pnext
+
 ;;; rxx  ACC = *(uchar*)PAR
 op_r:   PARAX                       ; A=addr_lo, X=addr_hi
         sta     tmp_lo
@@ -1099,6 +1120,7 @@ op_I:   USEY
         clc
         lda     (_ivm_memlo),y
         adc     #1
+I_st:
         sta     (_ivm_memlo),y
         sta     _ivm_acc
 
@@ -1109,6 +1131,15 @@ op_I:   USEY
         sta     _ivm_acc+1
 
         jmp     pnext
+
+;;; Hxx  acc = mem[xx] += 2   (int* ++)
+op_H:   USEY
+        PARY
+
+        clc
+        lda     (_ivm_memlo),y
+        adc     #2
+        jmp     I_st
 
 ;;; Jxx  acc = --mem[xx]
 op_J:   USEY
@@ -1242,7 +1273,7 @@ op_B:
 	
 
 ;;; ------------------------------------------------------------
-;;; i v u oo   — counting-up for test (at top)
+;;; t v u oo   — counting-up for test (at top)
 ;;;   acc = mem[v]
 ;;;   if (acc <= mem[u])  ipc += 3;          // enter body
 ;;;   else                ipc += 2 + oo;     // exit (G-style)
@@ -1250,7 +1281,7 @@ op_B:
 
 ;;; ------------------------------------------------------------
 ;;; n back  — next of counting-up for
-;;;   tpc = ipc - back + 1     ; → address of the 'i'
+;;;   tpc = ipc - back + 1     ; → address of the 't'
 ;;;   acc = ++mem[tpc[1]]       ; v
 ;;;   if (acc > mem[tpc[2]]) fall out
 ;;;   else ipc = tpc + 4        ; body
@@ -1265,19 +1296,19 @@ op_B:
 .if ALTCODE=1
 ;;;  about 100 bytes exatly!
 
-op_i:
+op_t:
 	FIXIPC
 	
         ;; Entry: Y points to arg 1 ('v'). No FIXIPC needed!
         lda     (_ivm_ipc),y
         tay
         LOAD_SLOT_Y             ; _ivm_acc = mem[v]
-        jmp     i_skip_load
+        jmp     t_skip_load
 
-op_i_step:
+op_t_step:
 ;;; 2272806 - test.ivm start
-;;; 2262309 - op_i_tep opt
-;;; 2262643 - FIXIPC at op_i enter
+;;; 2262309 - op_t_step opt
+;;; 2262643 - FIXIPC at op_t enter
 ;;; 2248522 - FIXIPC  (/ 2272806 2248522.0) = 1.1% faseter
 ;;; 2248266 - correct exit
 ;;; 2248783 - hmmm, not clear. lol
@@ -1300,7 +1331,7 @@ op_i_step:
         sta     _ivm_acc+1
         sta     (_ivm_memhi),y
 
-i_skip_load:
+t_skip_load:
 	;; get u parameter memory location
 	ldy     #1
 	sty     savey
@@ -1312,9 +1343,9 @@ i_skip_load:
         cmp     _ivm_acc
         lda     (_ivm_memhi),y
         sbc     _ivm_acc+1
-        bcc     i_exit
+        bcc     t_exit
 
-i_enter:
+t_enter:
 	;; go to next op (skip jump offset)
 	;;  TODO: comically we can add or remove 1 here!
 	;;  #3 #2 works - probably jups to low load bytes
@@ -1322,7 +1353,7 @@ i_enter:
         jmp     xnext
 
 .if 1				
-i_exit:
+t_exit:
         ldy     #2
         lda     (_ivm_ipc),y    ; oo
         clc
@@ -1333,7 +1364,7 @@ i_exit:
 :
 	jmp     xnext
 .else	
-i_exit:
+t_exit:
 	ldy     #2
         lda     (_ivm_ipc),y    ; A = exit_offset ($02)
 	tay
@@ -1359,7 +1390,7 @@ op_n:
 	;; delta = (Y - offset arg)
         sbc     (_ivm_ipc),y 
 	;; if equal go next step where Y will be RESET to 0
-        beq     op_i_step
+        beq     op_t_step
 
 op_n_do_the_math:
 ;;; +10 +
@@ -1370,7 +1401,7 @@ op_n_do_the_math:
 	tay
 	FIXIPC
 
-        jmp     op_i_step
+        jmp     op_t_step
 
 
 .endif ; ALTCODE
@@ -1387,9 +1418,9 @@ op_n_do_the_math:
 ;;;   saves 24 bytes, lol
 ;;;  (- 1 (/ 4866569 4926832.0)) = 1.2% faster !
 ;;;  (- 1 (/ 4806464 4926832.0)) = 2.44% (upfront load ax)
-op_i:
+op_t:
 ;;; This entry point is only used the first time.
-;;; During the loop it enters from op_n in op_i_step
+;;; During the loop it enters from op_n in op_t_step
 
 ;;; 74 B 
 
@@ -1398,10 +1429,10 @@ op_i:
 	PARY			
         LOAD_SLOT_Y
 
-	jmp     i_skip_load
+	jmp     t_skip_load
 
 ;;; Entry point from op_n! saves bytes
-op_i_step:
+op_t_step:
 ;;; --- 25 b 46c
 
 	PARAX			; 10 B  21c
@@ -1421,9 +1452,9 @@ op_i_step:
 	sta     (_ivm_memhi),y
 
 ;;; We want to compare acc <= mem[u]
-op_i_cmp:
+op_t_cmp:
 
-i_skip_load:	
+t_skip_load:	
         ldy     #1
         lda     (_ivm_ipc),y
         tay
@@ -1434,13 +1465,13 @@ i_skip_load:
         cmp     _ivm_acc
         lda     (_ivm_memhi),y
         sbc     _ivm_acc+1
-        bcc     i_exit
+        bcc     t_exit
 
-i_enter:
+t_enter:
 	lda     #3
 	jmp     anext
 
-i_exit:
+t_exit:
         ldy     #2
         lda     (_ivm_ipc),y        ; oo
 
@@ -1465,14 +1496,14 @@ op_n_short:
 	tya
 	cmp (_ivm_ipc),y
 	;; We're where we can just 
-	beq op_i_step  		; always (and at dest set Y=0)
+	beq op_t_step  		; always (and at dest set Y=0)
 .endif
 
 op_n_compute:	
 	;; we're not the inner loop - pay the cost
 ;;; 23 B  27c f+ this: (FIXIPC + USEY: 12 b  15c +  2 b  3c)
 	;; basically op_B except the jmp next
-	;; is shortcut to inside op_i
+	;; is shortcut to inside op_t
         FIXIPC                  ; Y=0 ; 
 	USEY
 
@@ -1495,7 +1526,7 @@ op_n_compute:
         sta     _ivm_ipc
 
 ;;; TODO: specialized dispatch depending on receiver op!
-	jmp     op_i_step
+	jmp     op_t_step
 
 
 .endif ; ALTOCODE=0
@@ -1503,12 +1534,12 @@ op_n_compute:
 
 ;;; TODO:
 	
-;;; j v oo   — zero-test form
+;;; u v oo   — zero-test form
 ;;; m delta  — next (does --)
 ;;; (same structure, lengths 3 / 1)
 ;;; ------------------------------------------------------------
-;op_j:
-        ; analogous to op_i but only one limit test (acc != 0)
+;op_u:
+        ; analogous to op_t but only one limit test (acc != 0)
         ; enter: ipc += 2
         ; exit:  ipc += 1 + oo
 
@@ -1759,8 +1790,6 @@ op_colon:
 op_A:
 op_D:
 
-op_H:
-
 
 op_R:
 op_T:
@@ -1784,13 +1813,11 @@ op_f:
 op_g:
 op_h:
 
-op_j:
 op_k:
 
 op_o:
 op_p:
 
-op_t:
 op_u:
 op_v:
 

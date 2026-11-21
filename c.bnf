@@ -70,9 +70,9 @@ K=if (E)[?G\x] K else[0?G\x\w\y] K[\y]
 
 |for(L
 
-# while (v <= lim): the VM 'i' is the test itself, 'B' jumps back to it
-|while (\i<=\d) [\mi\1\2\x] K[B\z\y]
-|while (\i<=\i) [\mi\1\2\x] K[B\z\y]
+# while (v <= lim): the VM 't' is the test itself, 'B' jumps back to it
+|while (\i<=\d) [\mt\1\2\x] K[B\z\y]
+|while (\i<=\i) [\mt\1\2\x] K[B\z\y]
 |while ([\m]E) [?G\x] K[B\z\y]
 
 
@@ -193,51 +193,51 @@ L=I\{ \+=0; \2<E; \2++) \i\?\C\[\2\]=\d;\}[m\6\8]
 
 # for(i=0; i<n; i++) a[i]=v;   captures: 1=i 2=i 3=E 4=i 5=ptr 6=i 7=val
 
-|\i=0; [Z\1]   \1<=\d; \1++) [\mi\1\3\x] K [n\z\y]
-|\i=\d;[C\1\2] \1<=\d; \1++) [\mi\1\4\x] K [n\z\y]
-|\i=\i;[C\1\2] \1<=\d; \1++) [\mi\1\4\x] K [n\z\y]
+|\i=0; [Z\1]   \1<=\d; \1++) [\mt\1\3\x] K [n\z\y]
+|\i=\d;[C\1\2] \1<=\d; \1++) [\mt\1\4\x] K [n\z\y]
+|\i=\i;[C\1\2] \1<=\d; \1++) [\mt\1\4\x] K [n\z\y]
 
 # limit is a name (#define const or variable): use its slot directly, no
-# copy. i/n read the limit slot every round, so a variable limit that the
+# copy. t/n read the limit slot every round, so a variable limit that the
 # body changes behaves like C (the E[S\t] copy below is a snapshot)
-|\i=0; [Z\1]   \1<=\i; \1++) [\mi\1\3\x] K [n\z\y]
-|\i=\d;[C\1\2] \1<=\i; \1++) [\mi\1\4\x] K [n\z\y]
-|\i=\i;[C\1\2] \1<=\i; \1++) [\mi\1\4\x] K [n\z\y]
+|\i=0; [Z\1]   \1<=\i; \1++) [\mt\1\3\x] K [n\z\y]
+|\i=\d;[C\1\2] \1<=\i; \1++) [\mt\1\4\x] K [n\z\y]
+|\i=\i;[C\1\2] \1<=\i; \1++) [\mt\1\4\x] K [n\z\y]
 
 # TODO: - make same for vars, but can we really?
-#   need new op instead of 'i' (j is down) so 'k' maybe (and 'l')
+#   need new op instead of 't' (u is down) so 'k' maybe (and 'l')
 #   should rewrite so only 'n' is needed, it can figure out the
 #   op, and or run the same code (jump back and forth is ok)
-#   These are 144 bytes (i+n so should minimize, at slight cost)
+#   These are 144 bytes (t+n so should minimize, at slight cost)
 
 # \e: temp = ACC - 1, so the limit must be in ACC first (\l: the \d)
-|\i=0; [Z\1]   \1<\d[\l3\eS\t]; \1++) [\mi\1\4\x] K [n\z\y]
-|\i=\d;[C\1\2] \1<\d[\l4\eS\t]; \1++) [\mi\1\5\x] K [n\z\y]
-|\i=\i;[C\1\2] \1<\d[\l4\eS\t]; \1++) [\mi\1\5\x] K [n\z\y]
+|\i=0; [Z\1]   \1<\d[\l3\eS\t]; \1++) [\mt\1\4\x] K [n\z\y]
+|\i=\d;[C\1\2] \1<\d[\l4\eS\t]; \1++) [\mt\1\5\x] K [n\z\y]
+|\i=\i;[C\1\2] \1<\d[\l4\eS\t]; \1++) [\mt\1\5\x] K [n\z\y]
 
 
-|\i=E[S\1]; \1<=E[S\t];  \1++) [\mi\1\5\x] K [n\z\y]
+|\i=E[S\1]; \1<=E[S\t];  \1++) [\mt\1\5\x] K [n\z\y]
 # -- TODO: \t is wrong, it's taking a snapshot like PASCAL!
-|\i=E[S\1]; \1<E[\eS\t]; \1++) [\mi\1\5\x] K [n\z\y]
+|\i=E[S\1]; \1<E[\eS\t]; \1++) [\mt\1\5\x] K [n\z\y]
 
 # counting-down-to-zero (very common in C)
 #   for (i = N; i; i--)     and   for (i = N; i > 0; i--)
 # both execute the body N times when N > 0 and leave i == 0
-#|\i=E[S\1]; \1;\i--)    [\mj\1\x] K[m\z\y]
-#|\i=E[S\1]; \1>0;\i--)  [\mj\1\x] K[m\z\y]
-#|\i=E[S\1]; \1>=1;\i--) [\mj\1\x] K[m\z\y]
+#|\i=E[S\1]; \1;\i--)    [\mu\1\x] K[m\z\y]
+#|\i=E[S\1]; \1>0;\i--)  [\mu\1\x] K[m\z\y]
+#|\i=E[S\1]; \1>=1;\i--) [\mu\1\x] K[m\z\y]
 
 # for (i = N; i--; )            // N times
 # for (i = N; i-- > 0; )        // - same -
 # for (i = N; --i; )            // N-1 times!
 # ...
-#|\i=E[S\1];\1--;)      [\mj\1\x] K[m\z\y]
-#|\i=E[S\1];\1-->0;)    [\mj\1\x] K[m\z\y]
-#|\i=E[S\1];--\1;)      [\mj\1\x] K[m\z\y]
-#|\i=E[S\1];\1;\i--)    [\mj\1\x] K[m\z\y]
-#|\i=E[S\1];\1>0;\i--)  [\mj\1\x] K[m\z\y]
+#|\i=E[S\1];\1--;)      [\mu\1\x] K[m\z\y]
+#|\i=E[S\1];\1-->0;)    [\mu\1\x] K[m\z\y]
+#|\i=E[S\1];--\1;)      [\mu\1\x] K[m\z\y]
+#|\i=E[S\1];\1;\i--)    [\mu\1\x] K[m\z\y]
+#|\i=E[S\1];\1>0;\i--)  [\mu\1\x] K[m\z\y]
 
-# counting-down-to-zero with classic ops (no j/m)
+# counting-down-to-zero with classic ops (no u/m)
 # body runs N times for N>0, i ends at 0
 # for (i = N; i--; )          and  for (i = N; i-->0; )
 #   C: test the old i, then i-1; the exit path decrements too (i = -1)
@@ -249,8 +249,8 @@ L=I\{ \+=0; \2<E; \2++) \i\?\C\[\2\]=\d;\}[m\6\8]
 |\i=E[S\1];\1;\i--)   [\mL\1?G\x] K[J\1B\z\y]
 |\i=E[S\1];\1>0;\i--) [\mL\1G\x0?G\x\w\y] K[J\1B\z\y]
 
-|\i\?c=E[s\1]; [\m]E[?G\x] ;\1++) K[I\4s\4B\z\y]
-|\i\?c=E[s\1]; [\m]E[?G\x] ;\1--) K[J\4s\4B\z\y]
+|\i\?c=E[s\1]; [\m]E[?G\x] ;\1++) K[i\4B\z\y]
+|\i\?c=E[s\1]; [\m]E[?G\x] ;\1--) K[j\4B\z\y]
 |\i=E[S\1]; [\m]E[?G\x] ;\i++) K[I\4B\z\y]
 |\i=E[S\1]; [\m]E[?G\x] ;\i--) K[J\4B\z\y]
 
@@ -258,7 +258,7 @@ L=I\{ \+=0; \2<E; \2++) \i\?\C\[\2\]=\d;\}[m\6\8]
 
 |\i=E[S\1]; [\m]E[?G\x]; \i+=\i) K[U\1\5B\z\y]
 
-|\i=E[S\1]; \1<=E[S\t]; \1++) [\mi\1\5\x] K [n\z\y]
+|\i=E[S\1]; \1<=E[S\t]; \1++) [\mt\1\5\x] K [n\z\y]
 
 # END FOR
 
@@ -277,23 +277,23 @@ G=V\<
 # Prefer specific forms (no peephole across jumps): COPY / Z / U / ...
 # char (unsigned) vars: the value is a byte, s stores the low byte (hi 0)
 #   \?c: plain c, \c would be a directive
-H=\i\?c++;[I\1s\1]
-|++\i\?c;[I\1s\1]
-|\i\?c--;[J\1s\1]
-|--\i\?c;[J\1s\1]
-|\i\?c=\1+1;[I\1s\1]
-|\i\?c=\1-1;[J\1s\1]
+H=\i\?c++;[i\1]
+|++\i\?c;[i\1]
+|\i\?c--;[j\1]
+|--\i\?c;[j\1]
+|\i\?c=\1+1;[i\1]
+|\i\?c=\1-1;[j\1]
 |\i\?c+=E;[+\1s\1]
 |\i\?c=0;[Z\1]
 |\i\?c=E;[s\1]
 # int* (word pointer): ++ -- move one element = 2 bytes
-#   captures: 1=p 2=const 2   (+=: 1=p 2=n)
-|\i\?\W++;\#02[U\1\2]
-|++\i\?\W;\#02[U\1\2]
+#   captures: 1=p   (+=: 1=p 2=n)
+|\i\?\W++;[H\1]
+|++\i\?\W;[H\1]
 |\i\?\W--;[J\1J\1]
 |--\i\?\W;[J\1J\1]
 |\i\?\W+=\i;[L\2+\2+\1S\1]
-|\i\?\W=\1+1;\#02[U\1\3]
+|\i\?\W=\1+1;[H\1]
 |\i\?\W=\1-1;[J\1J\1]
 |\i+=\i;[U\1\2]
 |\i=\1+1;[I\1]
@@ -343,7 +343,7 @@ R=\i(Z)[\v]
 
 # - Dereferencing points
 #   *charptr++ (TODO: block for intptr, put guard/other gen)
-|* \i\?\W++[@\1S\tI\1I\1L\2]
+|* \i\?\W++[@\1S\tH\1L\2]
 |* \i++['\1]
 #   *intptr    (TODO: block for charptr, put guard/other gen)
 |* \i\?\C[r\1]

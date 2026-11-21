@@ -23,9 +23,9 @@
 // Every relative jump: target = (offset of the rel byte) + 1 +- rel
 //   G  rel           if ACC > 0 forward
 //   B  rel           back
-//   i  slot lim rel  FOR: past body when done (forward)
-//   n  rel           NEXT: back to its 'i'
-//   j  slot rel      down-loop (forward)
+//   t  slot lim rel  FOR: past body when done (forward)
+//   n  rel           NEXT: back to its 't'
+//   u  slot rel      down-loop (forward)
 //
 //   0x80+rel    zjp (rel < 64): jump forward if ACC == 0, see ivm_jump()
 //
@@ -43,15 +43,15 @@
 //   in  out    ops
 //   -   KEEP   ' ' DEL B O N W Z # (#TIMED: JIT on the host sim only)
 //   in  KEEP   S(+SLOT) ! , w s ) ] m . P E zjp X(returns it)
-//   -   SLOT   L <32 C(dst) U(1st) I J
+//   -   SLOT   L <32 C(dst) U(1st) I J i j H
 //   in  SLOT   M(acc = mem[s] = alloc(acc))
 //   -   NEW    0 9 Q 1..8 @ r ' l ( [ K
 //   in  NEW    + - * / % & | ^ { } < = > ? ~ x y z call(arg -> result)
-//   -   UNDEF  i n (VM: loop var; JIT: clobbered) F
+//   -   UNDEF  t n (VM: loop var; JIT: clobbered) F
 //   ;   NEW    ACC = return value cell, then return
 //
 // JIT status (ivm-jit.c) vs this contract, 2026-11:
-//   all honoured (acc_* in ivm-jit.c)    missing: { } W K x y z k j
+//   all honoured (acc_* in ivm-jit.c)    missing: { } W K x y z k u
 //   l: was sign-extended by host VM
 #define OPI_SLOTS    0x07
 #define OPI_NARGS(i) (((i) >> 3) & 3)
@@ -83,7 +83,7 @@ static const uchar ivm_optab[96] = {
   //  @    A    B    C    D    E    F    G
   _S1, _SP, _BK, _S2, _SP, _A0, _S1, _FW,
   //  H    I    J    K    L    M    N    O
-  _SP, _S1, _S1, _A0, _S1, _S1, _A0, _D1,
+  _S1, _S1, _S1, _A0, _S1, _S1, _A0, _D1,
   //  P    Q    R    S    T    U    V    W
   _A0, _A0, _SP, _S1, _SP, _S2, _SP, _S1,
   //  X    Y    Z    [   bsl   ]    ^    _
@@ -91,9 +91,9 @@ static const uchar ivm_optab[96] = {
   //  `    a    b    c    d    e    f    g
   _SP, _SP, _SP, _SP, _SP, _SP, _SP, _SP,
   //  h    i    j    k    l    m    n    o
-  _SP, _I3, _J2, _SP, _S1, _S2, _BK, _SP,
+  _SP, _S1, _S1, _SP, _S1, _S2, _BK, _SP,
   //  p    q    r    s    t    u    v    w
-  _SP, _A0, _S1, _S1, _SP, _SP, _SP, _S1,
+  _SP, _A0, _S1, _S1, _I3, _J2, _SP, _S1,
   //  x    y    z    {    |    }    ~   DEL
   _D1, _D2, _D3, _S1, _S1, _S1, _A0, _A0,
 };

@@ -27,10 +27,11 @@ INSTRUCTIONS: Keeps this section but keep updated for status
 | Calls (vector table)     | **Done** — JMP + word table at start, JSR abs |
 | Call frame               | **Done** — fixed addresses from frame_base, AX stored at fp+FR_ACC on entry |
 | Compares `<` `=` `>`     | **Done** — boolean in ACC, UNSIGNED (needs testing) |
-| Loops `i` / `n` / `B` | **Present** — unsigned. `i` closed by a `B` back to it (`while (v <= lim)`, i_exit_b): rotated too, the `B` has the test (loop_close), AX = v in the body and after. Stride loop (is_stride: body ends `U v s; B`): `U` leaves Y = lo, A = hi, the `B` tests those (`cmp/cpy`), body start has v in Y/A (lc_yas: `[` `]` index), `i` sets Y/A then JMPs to the test. Closed by `n`, rotated: `i` = JMP to the test in `n` (patched there, lc_loop[]), one compare per loop. If the body starts by reading the loop var, the test leaves it in AX and that load / `[` index is free; a `B` back to such a body start loads it first (lc_ksa[]) |
+| Loops `t` / `n` / `B` | **Present** — unsigned. `t` closed by a `B` back to it (`while (v <= lim)`, i_exit_b): rotated too, the `B` has the test (loop_close), AX = v in the body and after. Stride loop (is_stride: body ends `U v s; B`): `U` leaves Y = lo, A = hi, the `B` tests those (`cmp/cpy`), body start has v in Y/A (lc_yas: `[` `]` index), `t` sets Y/A then JMPs to the test. Closed by `n`, rotated: `t` = JMP to the test in `n` (patched there, lc_loop[]), one compare per loop. If the body starts by reading the loop var, the test leaves it in AX and that load / `[` index is free; a `B` back to such a body start loads it first (lc_ksa[]) |
 | `G`                      | **Done** — keeps AX (CPX #$80 / TAY / CPX #0), as the contract says |
 | `U`                      | Present |
-| `j` (down-loop)          | **Missing** — warns only |
+| `i` `j` `H`              | **Done** — char ++ --: INC / DEC lo only (a char var's hi byte is always 0); int* ++: += 2 |
+| `u` (down-loop)          | **Missing** — warns only |
 | Array `(` `)`            | Present (needs testing) |
 | / * %                    | JSR helpers in **ivm-lib.asm**: ACC in $FE/$FF (tmp1/tmp2), the other operand in AX, result in AX; a const goes in AX (`*`: the multiplier, fewer rounds) |
 | ZP optimisation          | **Done, one place** — emop2() + zpmap[] (see below) |
@@ -652,14 +653,14 @@ static void emit_lim_minus_slot(uchar lim, uchar slot) {
   }
 }
 
-// for-loop test (in 'n' only, 'i' jumps to it): branch back to bytecode
+// for-loop test (in 'n' only, 't' jumps to it): branch back to bytecode
 // pc body while mem[slot] <= lim, else fall through (loop done). UNSIGNED.
 // ax = 0: lim - slot (10 cycles), AX not touched.
 // ax = 1: the body starts by reading the loop var: AX = mem[slot] first,
 //   then CPX/CMP, which only read A and X (13-14 cycles, the body's load
 //   is free):  CPX hi; BNE t; CMP lo; t:   C = AX >= lim, Z = AX == lim
 //   Const lim: i <= lim  <=>  i < lim+1 (folded here): emit_below_const.
-// 'i' closed by a 'B' back to it (while (v <= lim)): its exit, else 0xffff.
+// 't' closed by a 'B' back to it (while (v <= lim)): its exit, else 0xffff.
 // Rotated like the for loop ('n'), the 'B' has the test (no increment).
 static word i_exit_b(const uchar *c, word i, word len) {
   word t = ivm_jump(c + i, i);
@@ -668,7 +669,7 @@ static word i_exit_b(const uchar *c, word i, word len) {
   return 0xffff;
 }
 
-// stride loop: 'i' at ibc closed by "U v s; B" (v its loop var, the 'B' no
+// stride loop: 't' at ibc closed by "U v s; B" (v its loop var, the 'B' no
 // jump target): 'U' leaves Y = lo, A = hi, the 'B' tests those
 static int is_label(word bc);
 static int is_stride(const uchar *c, word ibc, word len) {
@@ -746,13 +747,13 @@ static void emit_loop_test(uchar slot, uchar lim, word body, uchar ax) {
   }
 }
 
-// open loops: 'i' emits "JMP test" with an empty operand, its 'n' patches
-// it (loops nest, so this is a stack). ibc = bytecode pc of the 'i'.
+// open loops: 't' emits "JMP test" with an empty operand, its 'n' patches
+// it (loops nest, so this is a stack). ibc = bytecode pc of the 't'.
 #define MAX_LOOPS 8
 static struct { word ibc, at; uchar ax; } lc_loop[MAX_LOOPS];
 static uchar lc_nloop;
 
-// patch the JMP of the open loop at 'i' ibc to here (its test); its ax
+// patch the JMP of the open loop at 't' ibc to here (its test); its ax
 static uchar loop_close(word ibc) {
   uchar k;
   for (k = lc_nloop; k-- > 0; ) {
@@ -771,7 +772,7 @@ static uchar loop_close(word ibc) {
 // "AX == mem[slot]" at a label. lc_ksa[]: such labels; every jump there
 // makes it true, so the load at the label is free:
 // - loop body start: only entered from the 'n' test, which leaves the loop
-//   var in AX ('i' adds these)
+//   var in AX ('t' adds these)
 // - a label starting with a slot load, reached only by fall-through and
 //   'B' (a while head), if the fall-in has AX == slot: each 'B' loads it
 //   unless AX already has it (prescan adds, the label keeps or drops them)
@@ -881,7 +882,7 @@ static uchar acc_at, acc_hk, acc_s;
 //                 is dead, it uses BEQ and then drops ACC
 static uchar acc_x0, acc_z, lc_z;
 // lc_axs: the slot physically in AX at this op's start, also when ACC is
-// pending elsewhere (a const after 'i': AX still = the loop var). Valid
+// pending elsewhere (a const after 't': AX still = the loop var). Valid
 // while no code is emitted after it was taken (lc_axs_at), 0xff unknown.
 static uchar lc_axs;
 static word  lc_axs_at;
@@ -980,7 +981,7 @@ static void ksa_check(word bc_target) {
 // a KEEP op needn't save it (ivm-walk.c contract: "- SLOT/NEW/UNDEF")
 static int acc_unread(const uchar *c, word bc) {
   uchar op = c[bc];
-  return op < 32 || strchr("09Q12345678@r'l([KLCUIJ;in", op);
+  return op < 32 || strchr("09Q12345678@r'l([KLCUIJijH;tn", op);
 }
 static int acc_dead(const uchar *c, word bc, word len) {
   return bc < len && !is_label(bc) && acc_unread(c, bc);
@@ -1022,12 +1023,12 @@ static const uchar *lc_code;  // the bytecode
 
 // A taken branch to another page costs +1 cycle: a loop whose closing
 // branch crosses a page gets its body moved to one page on the next run,
-// with NOPs after the 'i' JMP (never executed: costs bytes, no cycles).
+// with NOPs after the 't' JMP (never executed: costs bytes, no cycles).
 #define JIT_ALIGN_LOOPS 0     // 1: pad innermost loops (sieve: avg -0.1%, +0..37 B)
 static struct { word ibc, len; } lc_al[8];  // loops to align, body length
 static uchar lc_nal;
 
-// 'i' after its JMP: pad if the body (len, from a previous run) would
+// 't' after its JMP: pad if the body (len, from a previous run) would
 // straddle a page
 static void loop_pad(word ibc) {
   uchar k;
@@ -1048,7 +1049,7 @@ static void loop_align_check(word ibc) {
   uchar k;
   if (!JIT_ALIGN_LOOPS || body == 0xffff || len >= 128) return;
   for (b = (word)(ibc + 4); b < lc_bc; b += ivm_oplen(lc_code + b))
-    if (lc_code[b] == 'i' || !ivm_oplen(lc_code + b)) return;   // not innermost
+    if (lc_code[b] == 't' || !ivm_oplen(lc_code + b)) return;   // not innermost
   if (lc_at >= 3 && lc_out[lc_at - 3] == JMP) return;   // long form
   if (((lc_out_org + body) ^ (lc_out_org + lc_at)) >> 8 == 0) return;
   for (k = 0; k < lc_nal && lc_al[k].ibc != ibc; k++) ;
@@ -1097,7 +1098,7 @@ static word ivm_jit1(const uchar *code, word code_len,
     map[i] = 0xffff;
 
   // labels: every jump target, loop body starts (n jumps there), function
-  // entries and main's trampoline. 'i' / 'n' rel are not used by the JIT.
+  // entries and main's trampoline. 't' / 'n' rel are not used by the JIT.
   lc_lbl = (uchar *)calloc((code_len >> 3) + 1, 1);
   if (lc_lbl) {
     word t, n;
@@ -1105,12 +1106,12 @@ static word ivm_jit1(const uchar *code, word code_len,
     for (i = 0; i < code_len; i += n) {
       n = ivm_oplen(code + i);
       if (!n) n = 1;
-      if (code[i] == 'i') { LBL(i + 4); continue; }  // body start
+      if (code[i] == 't') { LBL(i + 4); continue; }  // body start
       if (code[i] == 'n') continue;
       t = ivm_jump(code + i, i);
-      if (code[i] == 'B' && t < code_len && code[t] == 'i' &&
+      if (code[i] == 'B' && t < code_len && code[t] == 't' &&
           i_exit_b(code, t, code_len) == i + 2)
-        t = 0xffff;                // closes a rotated while: no jump to 'i'
+        t = 0xffff;                // closes a rotated while: no jump to 't'
       if (t != 0xffff) LBL(t);
       // 'B' to a slot load: candidate "AX == slot" label
       if (code[i] == 'B' && t < code_len && lc_nksa < MAX_LOOPS * 4 &&
@@ -1129,7 +1130,7 @@ static word ivm_jit1(const uchar *code, word code_len,
     for (i = 0; i < code_len; i += n) {
       n = ivm_oplen(code + i);
       if (!n) n = 1;
-      t = code[i] == 'i' ? (word)(i + 4) : code[i] == 'n' || code[i] == 'B'
+      t = code[i] == 't' ? (word)(i + 4) : code[i] == 'n' || code[i] == 'B'
           ? 0xffff : ivm_jump(code + i, i);
       if (t != 0xffff) {
         uchar k;
@@ -1165,7 +1166,7 @@ static word ivm_jit1(const uchar *code, word code_len,
     // A pending load is emitted BEFORE map[bc_pc]: jumps here skip it.
     if (is_label(bc_pc)) {
       // lc_ksa: only worth it if the fall-in has AX == slot already
-      // ('i': its JMP said so), else drop it: the 'B's come later
+      // ('t': its JMP said so), else drop it: the 'B's come later
       for (i = 0; i < lc_nksa && lc_ksa[i].bc != bc_pc; i++) ;
       if (i < lc_nksa && !(acc_at == ACC_AX && acc_s == lc_ksa[i].slot))
         lc_ksa[i].bc = 0xffff, i = lc_nksa;
@@ -1445,6 +1446,28 @@ static word ivm_jit1(const uchar *code, word code_len,
       break;
     }
 
+    // i j: char ++ --: the hi byte of a char var is always 0 (all its
+    //   stores are 's', 'i', 'j'), so only the lo byte changes
+    case 'i': case 'j': {                          // -, SLOT
+      uchar s = PAR;
+      acc_drop();
+      emop2(op == 'i' ? INC_ : DEC_, slotlo(s));
+      acc_ps(s);
+      break;
+    }
+    // H: int* ++ (word += 2)
+    case 'H': {                                    // -, SLOT
+      uchar s = PAR;
+      word fx;
+      acc_drop();
+      emop2(LDA, slotlo(s)); em(CLC); em2(ADCN, 2); emop2(STA, slotlo(s));
+      fx = emrel(BCC);
+      emop2(INC_, slothi(s));
+      empatch(fx);
+      acc_ps(s);
+      break;
+    }
+
     // I/O — same symbols as ivm-vm.asm. putchar keeps A X Y.
     case 'N': case 'O': {                          // KEEP
       uchar c = (uchar)(op == 'N' ? 10 : PAR);
@@ -1671,7 +1694,7 @@ static word ivm_jit1(const uchar *code, word code_len,
       word rel = PAR;
       word dest = (word)((p - code) - rel);
       uchar k;
-      if (code[dest] == 'i' && i_exit_b(code, dest, code_len) == p - code &&
+      if (code[dest] == 't' && i_exit_b(code, dest, code_len) == p - code &&
           is_stride(code, dest, code_len)) {
         acc_lost();                // stride: Y/A from the 'U' just before
         loop_close(dest);
@@ -1679,7 +1702,7 @@ static word ivm_jit1(const uchar *code, word code_len,
         loop_align_check(dest);
         break;                     // fell out: Y/A = var, ACC undefined
       }
-      if (code[dest] == 'i' && i_exit_b(code, dest, code_len) == p - code) {
+      if (code[dest] == 't' && i_exit_b(code, dest, code_len) == p - code) {
         acc_lost();                // closes a while: the test is here
         loop_close(dest);
         emit_loop_test(code[dest + 1], code[dest + 2], (word)(dest + 4), 1);
@@ -1742,12 +1765,12 @@ static word ivm_jit1(const uchar *code, word code_len,
       break;
     }
 
-    // i: FOR slot lim skip -- rotated loop: the test is only in 'n'
-    //   i:    JMP test          (operand patched by the matching 'n')
+    // t: FOR slot lim skip -- rotated loop: the test is only in 'n'
+    //   t:    JMP test          (operand patched by the matching 'n')
     //   body: ...               (AX = mem[slot] here, from the test)
     //   n:    INC slot; test: LDA/LDX slot; CPX/CMP lim; Bcc body
     //   exit:                   (falls out of the test: skip is not used)
-    case 'i': {
+    case 't': {
       // does the body start by reading the loop var? (a load of it, or
       // '[' with it as index): then the test leaves it in AX
       const uchar *b = p + 3;
@@ -1804,25 +1827,25 @@ static word ivm_jit1(const uchar *code, word code_len,
     }
 
     // n: NEXT back
-    // increment the loop slot (from the matching i), then the loop test
-    // ('i' jumps here too): back to the body while <= lim, else fall out.
+    // increment the loop slot (from the matching t), then the loop test
+    // ('t' jumps here too): back to the body while <= lim, else fall out.
     case 'n': {
       uchar back = PAR;
-      // the i is `back` bytes before this operand
-      // i layout: slot, lim, skip — we need those
+      // the t is `back` bytes before this operand
+      // t layout: slot, lim, skip — we need those
       const uchar *ip = p - back;       // operand_pos - back + 1
       word ibc;
       uchar ax;
       acc_lost();                  // -, UNDEF
-      if (ip < code || *ip != 'i') {
-        // can't find matching i; just consume
+      if (ip < code || *ip != 't') {
+        // can't find matching t; just consume
         break;
       }
       ibc = (word)(ip - code);
       // increment slot
       emit_inc(ip[1]);
-      ax = loop_close(ibc);        // the i's JMP lands on the test
-      // body = bc pc after the i (backward: short branch when it fits)
+      ax = loop_close(ibc);        // the t's JMP lands on the test
+      // body = bc pc after the t (backward: short branch when it fits)
       emit_loop_test(ip[1], ip[2], (word)(ibc + 4), ax);
       loop_align_check(ibc);
       if (ax) acc_ax_slot(ip[1]);  // loop done: AX = the loop var
@@ -1836,7 +1859,7 @@ static word ivm_jit1(const uchar *code, word code_len,
       // stride loop: next is its closing 'B': leave Y = lo, A = hi
       if (p[0] == 'B') {
         word d = (word)((p + 2 - code) - p[1]);
-        if (code[d] == 'i' && code[d + 1] == a &&
+        if (code[d] == 't' && code[d + 1] == a &&
             i_exit_b(code, d, code_len) == (word)(p + 2 - code) &&
             is_stride(code, d, code_len)) {
           acc_drop();
@@ -1863,11 +1886,11 @@ static word ivm_jit1(const uchar *code, word code_len,
       break;
     }
 
-    // j: down-loop — 2 operands (not yet implemented)
-    case 'j': {
+    // u: down-loop — 2 operands (not yet implemented)
+    case 'u': {
       uchar slot = PAR;
       uchar skip = PAR;
-      printf("%%Warning: unimpl op 'j' (slot %u skip %u) — skipping\n",
+      printf("%%Warning: unimpl op 'u' (slot %u skip %u) — skipping\n",
         slot, skip);
       acc_lost();
       break;

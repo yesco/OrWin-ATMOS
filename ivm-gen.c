@@ -185,7 +185,8 @@ void emitop(uchar op) {
   ((op) == 'S' || (op) == 'Z' || (op) == 'C' || (op) == 'I' || (op) == 'J' || \
    (op) == 'U' || (op) == 'M' || (op) == 'F' || (op) == 's' || \
    (op) == '{' || (op) == '}' || (op) == '\''|| (op) == ',' || \
-   (op) == 'i' || (op) == 'j' || (op) == 'k' \
+   (op) == 'i' || (op) == 'j' || (op) == 'H' || \
+   (op) == 't' || (op) == 'u' || (op) == 'k' \
   )
 
 void emitop2(uchar op, uchar arg) {

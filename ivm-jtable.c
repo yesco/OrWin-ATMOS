@@ -29,6 +29,7 @@
       t['l'] = &&op_l;    t['s'] = &&op_s;
 
       t['I'] = &&op_I;    t['J'] = &&op_J;   t['U'] = &&op_U;
+      t['i'] = &&op_bi;   t['j'] = &&op_bj;  t['H'] = &&op_H;
 
       t['M'] = &&op_M;    t['F'] = &&op_F;
       t['m'] = &&op_m;
@@ -38,8 +39,8 @@
       t['('] = &&op_idxl; t[')'] = &&op_idxs;
       t['['] = &&op_bidxl;t[']'] = &&op_bidxs;
 
-      t['i'] = &&op_i;    t['n'] = &&op_n;
-      t['j'] = &&op_j;    t['k'] = &&op_k;
+      t['t'] = &&op_t;    t['n'] = &&op_n;
+      t['u'] = &&op_u;    t['k'] = &&op_k;
 
       t['<'] = &&op_lt;   t['='] = &&op_eq;  t['>'] = &&op_gt;
       t['?'] = &&op_not;  t['~'] = &&op_bnot;
@@ -50,7 +51,7 @@
 
       t['K'] = &&op_K;    t['E'] = &&op_E;   t['N'] = &&op_N;
       t['P'] = &&op_P;    t['O'] = &&op_O;   t['W'] = &&op_W;
-      t['.'] = &&op_dot;  t['"'] = &&op_str;
+      t['.'] = &&op_dot;  t['"'] = &&op_str;   t['#'] = &&op_time;
 
       t['G'] = &&op_G;    t['B'] = &&op_B;
 
