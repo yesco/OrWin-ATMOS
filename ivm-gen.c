@@ -115,6 +115,9 @@ uchar ginit_acc;   // const slot the init code leaves in ACC, 0xff none
 
 
 void gen_func_entry(uchar v);
+#ifndef IVM_NO_VN
+word vn_label;   // last label (jump target) position: value numbering
+#endif
 uchar *build_blob(int *out_len);
 
 // ---------------------------------------------------------------------------
@@ -642,6 +645,9 @@ void gen_reset(void) {
 }
 
 void gen_func_entry(uchar v) {
+#ifndef IVM_NO_VN
+  vn_label = (word)bin_ptr;
+#endif
   cur_func = v;
   
   // main: the global init code goes first, so it runs on entry
@@ -854,53 +860,96 @@ static void gen_squeeze(void) {
   free(gen_tgt);
 }
 
-// IVM_CSE: gen_cse + gen_swap (about 1.5 KB of 6502 code with cc65): on for
-// host builds, off for cc65 unless -DIVM_CSE
+// ---- value numbering while generating (parse.c \t) ------------------------
+//
+// When the grammar puts ACC into a new temp ("S \t"), the code since ACC
+// got a fresh value (a load, then pure ops: the "chain") is hashed. Seen
+// before, and the slot that got it then still holds it: drop the chain,
+// emit "L t1" (free in the JIT, the next op mostly overwrites ACC) and
+// the production gets t1 instead of a new temp. Nothing to rename later.
+// Valid only while, between there and here: no label (vn_label: \m \y,
+// function starts), no call / loop op, no write of t1 or of a slot the
+// chain reads, no store through a pointer if the chain reads memory.
+// Backtracking: an entry is used only if its bytes are still there.
+#ifndef IVM_NO_VN
+#define VN_N 16
+static struct { word h, at; uchar len, t; } vn_t[VN_N];
+
+static word vn_hash(word at, uchar len) {
+  word h = 0;
+  while (len--) h = (word)(h * 31 + bin[at++] + 1);
+  return h;
+}
+// the ops at [from, to[: pure chain? (a fresh load, then + - ... only)
+// -> its start (or 0xffff)
+static word vn_chain(word from, word to) {
+  word pc, n, st = 0xffff;
+  uchar op;
+  for (pc = from; pc < to; pc += n) {
+    op = bin[pc];
+    n = ivm_oplen(bin + pc);
+    if (!n) return 0xffff;
+    if (op < 32 || strchr("L([@rl09", op)) st = pc;
+    else if (!(strchr("+-*/%&|^{}<=>?~", op))) st = 0xffff;
+  }
+  return pc == to ? st : 0xffff;
+}
+// [at, at + len[ is a chain that reads slot v? memory?
+static int vn_reads(word at, uchar len, uchar v, uchar mem) {
+  word pc, n;
+  const uchar *q;
+  int r = 0;
+  for (pc = at; pc < at + len; pc += n) {
+    n = ivm_oplen(bin + pc);
+    if (bin[pc] < 32) { if (bin[pc] == v) r = 1; continue; }
+    if (mem && strchr("([@rl", bin[pc])) r = 1;
+    IVM_EACH_SLOT(bin + pc, q, { if (*q == v) r = 1; });
+  }
+  return r;
+}
+// "S" just emitted at bin_ptr - 1, a new temp to follow. Same value in a
+// slot already? -> that slot (the chain dropped, L slot emitted), else 0
+// after recording the chain for temp t. from: the alternative's start.
+uchar vn_temp(word from, uchar t) {
+  word s = (word)(bin_ptr - 1), st = vn_chain(from, s), h, e, pc, n, w;
+  uchar len, k, ok;
+  if (st == 0xffff || s - st < 2 || s - st > 32) return 0;
+  len = (uchar)(s - st);
+  h = vn_hash(st, len);
+  k = (uchar)(h & (VN_N - 1));
+  e = vn_t[k].at;
+  ok = vn_t[k].h == h && vn_t[k].len == len &&
+       e + len + 2 <= st && e >= vn_label && vn_label <= st &&
+       bin[e + len] == 'S' && bin[e + len + 1] == vn_t[k].t &&
+       !memcmp(bin + e, bin + st, len);
+  // nothing between changes it
+  for (pc = e + len + 2; ok && pc < st; pc += n) {
+    uchar op = bin[pc];
+    n = ivm_oplen(bin + pc);
+    if (!n || op >= 0xC0 || strchr("tunBkxyzXQ;q", op)) { ok = 0; break; }
+    if (op < 32 || op >= 0x80) continue;
+    w = WRITES_VAR(op) ? bin[pc + 1] : 0xffff;
+    if (w == vn_t[k].t || (w != 0xffff && vn_reads(e, len, (uchar)w, 0)))
+      ok = 0;
+    if (strchr(")]!w,Am", op) && vn_reads(e, len, 0xff, 1)) ok = 0;
+  }
+  if (ok && pc == st) {
+    bin_ptr = st;
+    emitop2('L', vn_t[k].t);
+    return vn_t[k].t;
+  }
+  vn_t[k].h = h; vn_t[k].at = st; vn_t[k].len = len; vn_t[k].t = t;
+  return 0;
+}
+#endif
+
+// IVM_CSE: dead loads + gen_swap: on for host builds, off for cc65 unless
+// -DIVM_CSE. The value numbering (vn_temp) is always on (-DIVM_NO_VN: off)
 #if !defined(__CC65__) && !defined(IVM_NO_CSE)
   #define IVM_CSE
 #endif
 
 #ifdef IVM_CSE
-// ---- common subexpressions: "x OP y S t" computed again -------------------
-//
-//   L x OP y S t1 ... L x OP y S t2 ... (reads of t2)
-//   -> drop the 2nd (or "L t1" if the next op reads ACC), reads of t2 -> t1
-//
-// Only if: no label between the two (t1 was computed on the way), x y t1
-// not written between; t2 has no other write in the whole code and all its
-// reads lie in the window after it (up to a label, a call, a loop op, or a
-// write of t2); t1 is not written in that window. Then t1 == t2 wherever t2
-// is read. A linear scan per candidate: cheap (code is a few 100 bytes).
-// Typical: a[j] ... a[j + 1] ... a[j + 1] = (j + 1 into temps twice).
-#define CSE_FACTS 8
-static struct { uchar x, op, y, t; } cse_f[CSE_FACTS];
-static uchar cse_n;
-
-// op ends the window / clears facts: call, loop, return, unknown effects
-static int cse_barrier(uchar op) {
-  return op >= 0xC0 || strchr("tunBkxyzXQ;q", op) != NULL;
-}
-// slot written by the op at a (0xffff: none)
-static word cse_write(const uchar *a) {
-  if (*a < 32 || *a >= 0x80) return 0xffff;
-  return WRITES_VAR(*a) ? a[1] : 0xffff;
-}
-// does the op at a read slot v? (short load, or a read operand)
-static int cse_reads(const uchar *a, uchar v) {
-  const uchar *q;
-  int r = 0, first = 1;
-  if (*a < 32) return *a == v;
-  if (*a >= 0x80) return 0;
-  IVM_EACH_SLOT(a, q, {
-    if (*q == v && !(first && WRITES_VAR(*a) && strchr("SZMFsC", *a))) r = 1;
-    first = 0;
-  });
-  return r;
-}
-// next op does not read ACC (it sets it, or ignores it)?
-static int cse_acc_free(const uchar *a) {
-  return *a < 32 || strchr("L09Q12345678@r'l([KCIJijHUAMtu", *a) != NULL;
-}
 // "load x; OP y; S t" at pc? -> its length, x op y t
 static uchar cse_seq(word pc, uchar *x, uchar *op, uchar *y, uchar *t) {
   const uchar *a = bin + pc;
@@ -916,13 +965,14 @@ static uchar cse_seq(word pc, uchar *x, uchar *op, uchar *y, uchar *t) {
   return (uchar)(l + 4);
 }
 
-static int gen_cse(void) {
-  word pc, n, t, nb = (word)((bin_ptr >> 3) + 1), end, q, m;
-  uchar *a, x, op, y, tt, len, i, k, t1, hit = 0, ok;
-  word w;
+// "L x" (or x) right before an op that overwrites ACC without reading it:
+// the load is dead (vn_temp's "L t1" before "( a t1")
+static int gen_deadload(void) {
+  word pc, n, t, nb = (word)((bin_ptr >> 3) + 1), m;
+  uchar *a, hit = 0, k;
 
   gen_tgt = (uchar *)calloc(nb, 2);
-  if (!gen_tgt) IVM_GEN_FAIL("out of memory (cse)");
+  if (!gen_tgt) IVM_GEN_FAIL("out of memory (deadload)");
   gen_del = gen_tgt + nb;
   for (pc = 0; pc < (word)bin_ptr; pc += n) {
     a = bin + pc;
@@ -931,108 +981,22 @@ static int gen_cse(void) {
     t = ivm_jump(a, pc);
     if (t < (word)bin_ptr) SETBIT(gen_tgt, t);
   }
-  for (n = 0; n < nvector; n++) SETBIT(gen_tgt, vectors[n]);
-  SETBIT(gen_tgt, main_offset);
-
-  cse_n = 0;
   for (pc = 0; pc < (word)bin_ptr; pc += n) {
     a = bin + pc;
     n = ivm_oplen(a);
     if (!n) n = 1;
-    if (TGT(pc) || cse_barrier(*a)) cse_n = 0;
-
-    len = cse_seq(pc, &x, &op, &y, &tt);
-    if (len) {
-      // same value known already?
-      for (i = 0; i < cse_n; i++)
-        if (cse_f[i].op == op && cse_f[i].t != tt &&
-            ((cse_f[i].x == x && cse_f[i].y == y) ||
-             (strchr("+*&|^", op) && cse_f[i].x == y && cse_f[i].y == x)))
-          break;
-      ok = 0;
-      if (i < cse_n) {
-        t1 = cse_f[i].t;
-        // window after it: up to a label / barrier / write of tt
-        for (end = pc + len; end < (word)bin_ptr; end += m) {
-          m = ivm_oplen(bin + end);
-          if (!m) m = 1;
-          if (TGT(end) || cse_barrier(bin[end]) || cse_write(bin + end) == tt)
-            break;
-        }
-        ok = 1;
-        // tt: no other write anywhere, no read outside the window;
-        // t1 not written in the window; short loads of tt need t1 < 32
-        for (q = 0; q < (word)bin_ptr && ok; q += m) {
-          m = ivm_oplen(bin + q);
-          if (!m) m = 1;
-          if (q == pc) continue;
-          if (q > pc && q < pc + len) continue;
-          w = cse_write(bin + q);
-          if (w == tt) ok = 0;
-          if (cse_reads(bin + q, tt)) {
-            if (q < pc + len || q >= end) ok = 0;
-            if (bin[q] < 32 && t1 >= 32) ok = 0;
-          }
-          if (q >= pc + len && q < end && w == t1) ok = 0;
-        }
-      }
-      if (ok) {
-        // reads of tt in the window -> t1
-        for (q = pc + len; q < end; q += m) {
-          const uchar *r;
-          m = ivm_oplen(bin + q);
-          if (!m) m = 1;
-          if (bin[q] == tt && bin[q] < 32) bin[q] = t1;
-          else if (bin[q] >= 32 && bin[q] < 0x80) {
-            uchar f = 1;
-            IVM_EACH_SLOT(bin + q, r, {
-              if (*r == tt && !(f && WRITES_VAR(bin[q]))) *(uchar *)r = t1;
-              f = 0;
-            });
-          }
-        }
-        // drop the sequence; keep ACC if the next op reads it
-        if (pc + len < (word)bin_ptr && !cse_acc_free(bin + pc + len)) {
-          bin[pc] = 'L'; bin[pc + 1] = t1;
-          for (k = 2; k < len; k++) DEL(pc + k);
-        } else
-          for (k = 0; k < len; k++) DEL(pc + k);
-        hit = 1;
-        n = len;
-        continue;
-      }
-      // a new fact (after the writes below)
-    }
-
-    // writes kill facts that use the slot (a sequence: its S t)
-    w = len ? tt : cse_write(a);
-    if (w != 0xffff)
-      for (i = 0; i < cse_n; ) {
-        if (cse_f[i].x == w || cse_f[i].y == w || cse_f[i].t == w)
-          cse_f[i] = cse_f[--cse_n];
-        else i++;
-      }
-
-    if (len) {
-      // the S t of the sequence killed facts with t: now add this one
-      if (cse_n == CSE_FACTS) cse_n--;
-      cse_f[cse_n].x = x; cse_f[cse_n].op = op;
-      cse_f[cse_n].y = y; cse_f[cse_n].t = tt;
-      cse_n++;
-      n = len;
+    if (!(a[0] < 32 || a[0] == 'L') || pc + n >= (word)bin_ptr) continue;
+    m = pc + n;
+    if (TGT(m)) continue;
+    // next op sets ACC from scratch (and does not read it)
+    if (bin[m] < 32 || strchr("L09([@rlK", bin[m])) {
+      for (k = 0; k < n; k++) DEL(pc + k);
+      hit = 1;
     }
   }
   return hit;
 }
 
-// ---- array swap in the bytecode --------------------------------------------
-//
-//   ( a i  S t  [x OP y S k]  ( a k  ) a i  L t  ) a k
-//   -> [x OP y S k]  A a i k  S t
-//
-// t = a[i]; a[i] = a[k]; a[k] = t; with k any slot (also the temp of
-// a[j + 1], after the CSE). The middle part only computes k (a, i, t
-// untouched). A leaves the old a[i] in ACC, S t: same end state.
 static int gen_swap(void) {
   word pc, n, t, nb = (word)((bin_ptr >> 3) + 1), q;
   uchar *a, x, op, y, k, m, ti, l, hit = 0, base, i;
@@ -1058,6 +1022,9 @@ static int gen_swap(void) {
     base = a[1]; i = a[2]; ti = a[4];
     q = pc + 5;
     m = cse_seq(q, &x, &op, &y, &k);        // k computed here?
+    if (!m && bin[q] == 'C' && !TGT(q)) {   // or copied (value numbering)
+      m = 3; k = bin[q + 1];
+    }
     if (m && (k == base || k == i || k == ti)) continue;
     q += m;
     if (q + 13 > (word)bin_ptr || bin[q] != '(' || bin[q + 1] != base) continue;
@@ -1209,7 +1176,7 @@ uchar *build_blob(int *out_len) {
   // common subexpressions, array swaps (before the slot remap: also
   // without -O)
 #ifdef IVM_CSE
-  if (gen_cse()) gen_squeeze();
+  if (gen_deadload()) gen_squeeze();
   else free(gen_tgt);
   if (gen_swap()) gen_squeeze();
   else free(gen_tgt);

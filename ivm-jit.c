@@ -1425,6 +1425,8 @@ static word ivm_jit1(const uchar *code, word code_len,
       if (w == lc_rel_t || w == lc_rel_src) lc_rel_t = 0xff;
       if (op == 'S' && lc_plus_src != 0xff && lc_plus_src != w) {
         lc_rel_t = w; lc_rel_src = lc_plus_src; lc_rel_c = lc_plus_c;
+      } else if (op == 'C' && p[1] == lc_rel_t && w != lc_rel_src) {
+        lc_rel_t = w;              // C t2 t: t2 == src + c too
       }
     }
     if (op != 'S') lc_plus_src = 0xff;

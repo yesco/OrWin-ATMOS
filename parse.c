@@ -989,6 +989,15 @@ static uchar *run_production(uchar *p) {
       //     — S temp; J temp (store ACC-1)
       case HIBIT('t'): case HIBIT('e'):
         b = alloc_slot();
+#ifndef IVM_NO_VN
+        // value numbering: ACC's value in a slot already? use that one
+        if (e == HIBIT('t') && bin_ptr && bin[bin_ptr - 1] == 'S' &&
+            (cv = vn_temp(cur.code_save, b)) != 0) {
+          next_slot--;                         // the temp is not needed
+          record_capture(cv);
+          break;
+        }
+#endif
         if (e == HIBIT('e')) {
           // TODO: replace with better loop/test code-gen
           // A: \e makes "i < n" into "i <= n-1" for the t/n loop ops,
@@ -1021,6 +1030,9 @@ static uchar *run_production(uchar *p) {
           w = cur.patch[b];
           if (bin_ptr - (w + 1) > 255) FAIL("jump too far");
           bin[w] = bin_ptr - (w + 1);
+#ifndef IVM_NO_VN
+          vn_label = bin_ptr;                  // a jump lands here
+#endif
 
           #ifdef SYMS
             sym_patch('F', (word)w, (word)bin_ptr,
@@ -1042,6 +1054,9 @@ static uchar *run_production(uchar *p) {
       // \m: remember loop start - destination for B call
       case HIBIT('m'):
         cur.mark = bin_ptr;
+#ifndef IVM_NO_VN
+        vn_label = bin_ptr;
+#endif
         break;
 
       // \z: backward jump delta to the mark (after the B opcode)
