@@ -1380,7 +1380,7 @@ static word sym_type(Symbol *s) {
 #if 1
   // (- 26618 26584) = 34 bytes better?
   // TOUPPER for letters only
-  return (s->vtype & ~32) << 8;
+  return (s->is_ptr ? s->vtype & ~32 : s->vtype) << 8;   // pointer: upper
 #else  
   uchar t = s->vtype;
   if (s->is_ptr) t = (uchar)toupper(t);

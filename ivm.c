@@ -100,7 +100,7 @@
 //   possibly usage: cAr Cons cDr, Heap/Here, Recurse, Tail-call, Vector/index? Yndex?
 //
 // ? abcdefgh           - lisp?
-// ? m op               - ?index stuff, built in loops iGG GG if zero/non-zero?
+// ? m o(p)             - ?index stuff, built in loops iGG GG if zero/non-zero?
 // ? tuv                - ?SSTACK saves, param: 1..7 (ACC is 0th)
 // xyz                  - syscall function LN with 1,2,3 byte args indices+acc
 //

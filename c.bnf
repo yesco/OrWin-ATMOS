@@ -166,18 +166,16 @@ K=if (E)[?G\x] K else[0?G\x\w\y] K[\y]
 # TODO: memset working fine on ./ivm ./ivm-jit but NOT ./ivm-asm....?
 
 # - memset: for (i = 0; i < n; i++) p[i] = v
-#   char*: any v
-#   int* : only 0 and -1 (all bytes the same): 2n bytes
-#   * 2 (\#02 const; the JIT makes it ASL/ROL)
-#   int* with another v: will not use memsest => normal loop.
+#   char*: any v. int*: only 0 and -1 (all bytes the same): 2n bytes,
+#   * 2 (\#02 const; the JIT makes it ASL/ROL). int* with another v: no
+#   memset rule matches, a normal loop below does it.
 #   scoped (for (int i = ..): no end value for i -> no S i (cheaper)
-#   captures: 1=I (a rule's result is a capture too) 2=i 3=i 4=E
-#             5=i 6=ptr 7=i 8=val 9=const 2
+#   captures: 1=I (a rule's result is a capture too) 2=i 3=i 4=E 5=i
+#             6=ptr 7=i 8=val 9=const 2
 L=I\{ \+=0; \2<E; \2++) \i\?\C\[\2\]=\d;\}[m\6\8]
-| I\{ \+=0; \2<E; \2++) \i\?\W\[\2\]=0;\#00\#02\}[*\9m\6\8]
-| I\{ \+=0; \2<E; \2++) \i\?\W\[\2\]=-1;\#ff\#02\}[*\9m\6\8]
-
-# - memset; not scoped: i ends at n (C)
+|I\{ \+=0; \2<E; \2++) \i\?\W\[\2\]=0;\#00\#02\}[*\9m\6\8]
+|I\{ \+=0; \2<E; \2++) \i\?\W\[\2\]=-1;\#ff\#02\}[*\9m\6\8]
+#   not scoped: i ends at n (C)
 #   captures: 1=i 2=i 3=E 4=i 5=ptr 6=i 7=val 8=const 2
 |\i=0; \1<E; \1++) \i\?\C\[\1\]=\d;[S\1m\5\7]
 |\i=0; \1<E; \1++) \i\?\W\[\1\]=0;\#00\#02[S\1*\8m\5\7]
@@ -251,6 +249,8 @@ L=I\{ \+=0; \2<E; \2++) \i\?\C\[\2\]=\d;\}[m\6\8]
 |\i=E[S\1];\1;\i--)   [\mL\1?G\x] K[J\1B\z\y]
 |\i=E[S\1];\1>0;\i--) [\mL\1G\x0?G\x\w\y] K[J\1B\z\y]
 
+|\i\?c=E[s\1]; [\m]E[?G\x] ;\1++) K[I\4s\4B\z\y]
+|\i\?c=E[s\1]; [\m]E[?G\x] ;\1--) K[J\4s\4B\z\y]
 |\i=E[S\1]; [\m]E[?G\x] ;\i++) K[I\4B\z\y]
 |\i=E[S\1]; [\m]E[?G\x] ;\i--) K[J\4B\z\y]
 
@@ -275,10 +275,31 @@ G=V\<
 
 # - Assignments
 # Prefer specific forms (no peephole across jumps): COPY / Z / U / ...
-H=\i+=\i;[U\1\2]
+# char (unsigned) vars: the value is a byte, s stores the low byte (hi 0)
+#   \?c: plain c, \c would be a directive
+H=\i\?c++;[I\1s\1]
+|++\i\?c;[I\1s\1]
+|\i\?c--;[J\1s\1]
+|--\i\?c;[J\1s\1]
+|\i\?c=\1+1;[I\1s\1]
+|\i\?c=\1-1;[J\1s\1]
+|\i\?c+=E;[+\1s\1]
+|\i\?c=0;[Z\1]
+|\i\?c=E;[s\1]
+# int* (word pointer): ++ -- move one element = 2 bytes
+#   captures: 1=p 2=const 2   (+=: 1=p 2=n)
+|\i\?\W++;\#02[U\1\2]
+|++\i\?\W;\#02[U\1\2]
+|\i\?\W--;[J\1J\1]
+|--\i\?\W;[J\1J\1]
+|\i\?\W+=\i;[L\2+\2+\1S\1]
+|\i\?\W=\1+1;\#02[U\1\3]
+|\i\?\W=\1-1;[J\1J\1]
+|\i+=\i;[U\1\2]
 |\i=\1+1;[I\1]
 |\i=1+\1;[I\1]
 |\i=\1-1;[J\1]
+|* \i\?\C=E;[w\1]
 |* \i=E;[!\1]
 
 # p[i]: char* -> byte ops [ ], int* -> word ops ( ) (\?\C: \?C would
@@ -322,8 +343,10 @@ R=\i(Z)[\v]
 
 # - Dereferencing points
 #   *charptr++ (TODO: block for intptr, put guard/other gen)
+|* \i\?\W++[@\1S\tI\1I\1L\2]
 |* \i++['\1]
 #   *intptr    (TODO: block for charptr, put guard/other gen)
+|* \i\?\C[r\1]
 |* \i[@\1]
 
 |\i\?\C\[S\][\[\1\2]
