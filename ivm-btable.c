@@ -1,8 +1,16 @@
-// ivm-btable.c - run_ivm() dispatch by binary search, plain gotos
-// #included in run_ivm() with -DUSE_BTABLE. Works on any compiler (no
-// labels as values, no switch): 80 op ranges, 6-7 compares for any op.
-// GENERATED from ivm-jtable.c: python3 ivm-tree.py ivm-jtable.c > ivm-btable.c
-// (op < 32 is handled before this)
+// ivm-btable.c - for run_ivm in ivm.c
+// 
+// Dispatch by binary search, plain gotos.
+//
+// #included in run_ivm() with -DUSE_BTABLE.
+// 
+// Works on any compiler (no labels as values, no switch):
+//   80 op ranges, 6-7 compares for any op.
+//
+// GENERATED from ivm-jtable.c:
+// 
+//   python3 ivm-tree.py ivm-jtable.c > ivm-btable.c
+// 
 
   if (op & 0x80) goto op_hibit;
 

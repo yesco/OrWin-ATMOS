@@ -30,6 +30,7 @@ INSTRUCTIONS: Keeps this section but keep updated for status
 | Loops `t` / `n` / `B` | **Present** — unsigned. `t` closed by a `B` back to it (`while (v <= lim)`, i_exit_b): rotated too, the `B` has the test (loop_close), AX = v in the body and after. Stride loop (is_stride: body ends `U v s; B`): `U` leaves Y = lo, A = hi, the `B` tests those (`cmp/cpy`), body start has v in Y/A (lc_yas: `[` `]` index), `t` sets Y/A then JMPs to the test. Closed by `n`, rotated: `t` = JMP to the test in `n` (patched there, lc_loop[]), one compare per loop. If the body starts by reading the loop var, the test leaves it in AX and that load / `[` index is free; a `B` back to such a body start loads it first (lc_ksa[]) |
 | `G`                      | **Done** — keeps AX (CPX #$80 / TAY / CPX #0), as the contract says |
 | `U`                      | Present |
+| `+` `-` `&` `\|` `^`      | **Done** — const hi byte 0: `adc #n; bcc; inx` (`sbc`/`dex`, `and #n; ldx #0`, `ora`/`eor` lo only). Followed by `S d`: each byte straight into d, leaves Y = lo, A = hi (lc_yah): no TAY/TXA/TAX/TYA |
 | `i` `j` `H`              | **Done** — char ++ --: INC / DEC lo only (a char var's hi byte is always 0); int* ++: += 2 |
 | `u` (down-loop)          | **Missing** — warns only |
 | Array `(` `)`            | Present (needs testing) |
@@ -597,8 +598,21 @@ static void emit_lohiop(uchar ins, uchar s) {
     word v = const_val(s);
     uchar iop = immop(ins);
 
-    em2(iop, (uchar)(v & 0xff)); em(TAY);
-    em(TXA); em2(iop, (uchar)(v >> 8)); em(TAX);
+    uchar h = (uchar)(v >> 8);
+    word fx;
+
+    em2(iop, (uchar)(v & 0xff));
+    // hi byte 0 (or $ff for and): only a carry / borrow can reach X
+    if (h == 0 && (ins == ADC || ins == SBC)) {
+      fx = emrel(ins == ADC ? BCC : BCS);
+      em(ins == ADC ? INX : DEX);
+      empatch(fx);
+      return;
+    }
+    if (ins == AND_ && h == 0) { em2(LDXN, 0); return; }
+    if ((ins == AND_ && h == 0xff) || (ins != AND_ && h == 0)) return;
+    em(TAY);
+    em(TXA); em2(iop, h); em(TAX);
     em(TYA);
 
     return;
@@ -891,11 +905,19 @@ static word  lc_axs_at;
 // (the body start, lc_ya_bc), valid like lc_axs while no code is emitted.
 static uchar lc_yas, lc_ya_next;
 static word  lc_yas_at, lc_ya_bc;
+// Y = lo, A = hi of slot lc_yah ("op v; S d" leaves them), valid while no
+// code is emitted (lc_yah_at == lc_at) and the op is not a label
+static uchar lc_yah = 0xff;
+static word  lc_yah_at = 0xffff;
 static word  acc_k;
 static uchar lc_acc_said;   // acc_* calls by the current op
 static uchar lc_op;         // current op (messages)
 static uchar *lc_lbl;       // label bitmap, one bit per bytecode pc
 
+static int is_label(word bc);
+static int yah_is(uchar s) {
+  return lc_yah == s && lc_yah_at == lc_at && !is_label(lc_bc);
+}
 static int is_label(word bc) {
   return lc_lbl && (lc_lbl[bc >> 3] & (1 << (bc & 7)));
 }
@@ -903,7 +925,8 @@ static int is_label(word bc) {
 // emit a pending load (no message if lost)
 static void acc_flush(void) {
   if (acc_at == ACC_PEND) {
-    if (acc_hk) emit_load_const(acc_k); else emit_load_slot(acc_s);
+    if (!acc_hk && yah_is(acc_s)) { em(TAX); em(TYA); }    // Y/A: 4c, 2 B
+    else if (acc_hk) emit_load_const(acc_k); else emit_load_slot(acc_s);
     acc_at = ACC_AX; acc_x0 = 0;
   }
 }
@@ -1338,7 +1361,22 @@ static word ivm_jit1(const uchar *code, word code_len,
         acc_ax();
         break;
       }
-      if (acc_at == ACC_PEND) {
+      if (p[0] == 'S' && !is_label((word)(bc_pc + 2)) &&
+          (acc_at == ACC_AX || acc_at == ACC_PEND)) {
+        // op v; S d: each byte straight into d, no TAX / TYA. Leaves
+        // Y = lo, A = hi (lc_yah), ACC = mem[d]
+        uchar d = p[1];
+        if (acc_at == ACC_PEND) emit_lda_pend(0);
+        emit_alub(ins, s, 0); emop2(STA, slotlo(d)); em(TAY);
+        if (acc_at == ACC_PEND) emit_lda_pend(1); else em(TXA);
+        emit_alub(ins, s, 1); emop2(STA, slothi(d));
+        p += 2;
+        acc_drop();                // AX no longer = old ACC
+        acc_ps(d);
+        lc_yah = d; lc_yah_at = lc_at;
+        break;
+      }
+      if (acc_at == ACC_PEND && !is_const(s)) {
         // load each byte straight from where ACC is: no LDX / TXA
         emit_lda_pend(0); emit_alub(ins, s, 0); em(TAY);
         emit_lda_pend(1); emit_alub(ins, s, 1); em(TAX); em(TYA);
@@ -1779,7 +1817,9 @@ static word ivm_jit1(const uchar *code, word code_len,
         uchar lim = p[1];
         (void)lim;
         p += 3;
-        if (lc_axs == slot || (acc_at == ACC_AX && acc_s == slot)) {
+        if (yah_is(slot)) {
+          // already: Y = lo, A = hi ("+ v; S slot")
+        } else if (lc_axs == slot || (acc_at == ACC_AX && acc_s == slot)) {
           em(TAY); em(TXA);
         } else {
           emop2(LDY, slotlo(slot)); emop2(LDA, slothi(slot));
