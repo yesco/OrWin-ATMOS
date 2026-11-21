@@ -1,27 +1,43 @@
 # jsk notes:
 
-- 
-------- 6e 'n' 25 6e 33 22 ------
-   B155 inc $e8
-   B157  bne +2	=> $B15B
-   B159 inc $e9
-   B15B lda $e8
-   B15D ldx $e9
-   B15F cpx #$1f
-   B161  bne +2	=> $B165
-   B163 cmp #$ff  '�'
-   B165  bcc -113	=> $B0F6
-------- 6e 'n' 33 22 70 72 ------
-   B167 inc $f0
-   B169  bne +2	=> $B16D
-   B16B inc $f1
-   B16D lda #$0a
-   B16F cmp $f0
-   B171 lda #$00
-   B173 sbc $f1
-   B175  bcc +3	=> $B17A
-   B177  jmp $b0d2
+- 0.1 Mc: `i+i`: `asl; tay; lda; rol; tax; tya`
+  (6 cycles of shuffling). A doubling that writes into a slot or leaves Y/A would fix it,
+  but it only runs 18,990 times (about 0.1M).
 
+- -0.12 Mc (0.9%): +20 B Bmemset "word" 
+  duff style loop: odd count +8 B +13c
+  cost second self-modify `sta abs,y`:
+  - jit write o r (+6 B per call),
+    or lib copy(about +12 B and +20c per call)
+  - It also needs a second `dec` per page.
+  - Lib cost: about +20 B in `_opmemset`.
+  - Gain: 10c => 8.5c / byte, about 0.12M on the sieve (0.9%).
+  - skip. or last percent;  the sieve's memset is 6% of the run.
+
+Outside the inner loop we spend 5.73M cycles. That's 43% of the 13.24M total.
+
+| part | runs | cycles/run | total |
+|---|---|---|---|
+| inner loop (for comparison) | 149,990 | 50 | 7.51M |
+| `if (flags[i])`: pointer calc, load, `beq` | 81,910 | 24 | **1.95M** |
+| `i <= SIZE` test | 81,920 | 11 | 0.92M |
+| `i++` | 81,910 | 8 | 0.66M |
+| `prime = i+i+3; k = i+prime` + loop entry | 18,990 | **65** | **1.23M** |
+| memset body | 10 × 8,191 B | 10 per byte | 0.82M |
+| `count++` | 18,990 | 8 | 0.15M |
+
+3. **The `flags[i]` test is already tight**
+   (`sta fe; txa; clc; adc df; sta ff; ldy de; lda (fe),y; beq`)
+   The 17 cycles of address setup is the same "flags + index
+   recomputed every pass" problem as the inner loop. It needs
+   either pointer caching or strength reduction.
+
+4. **The `i++` plus test costs 19 cycles per pass.**
+   Making it cheaper needs loop versioning: a fast path while
+   `hi < $1F` with only `inc lo; bne body`.
+   That's the same "test only when the high byte changes"
+   trick Oscar uses. It would save about 5 cycles per pass, about 0.4M,
+   but it's a bigger change in `n`.
 
 - 16 B: free(); include and doing F in code gen???
 - 
@@ -56,6 +72,29 @@ BUG: 'I' and 'J' doesn't wrap around will give 16 bit number
 --- 
 
 DONE:
+- saved  7 B? combine
+    ------- 6e 'n' 25 6e 33 22 ------
+       B155 inc $e8
+       B157  bne +2	=> $B15B
+       B159 inc $e9
+       B15B lda $e8
+       B15D ldx $e9
+       B15F cpx #$1f
+       B161  bne +2	=> $B165
+       B163 cmp #$ff  '�'
+       B165  bcc -113	=> $B0F6
+    ------- 6e 'n' 33 22 70 72 ------
+       B167 inc $f0
+       B169  bne +2	=> $B16D
+       B16B inc $f1
+       B16D lda #$0a
+       B16F cmp $f0
+       B171 lda #$00
+       B173 sbc $f1
+       B175  bcc +3	=> $B17A
+       B177  jmp $b0d2
+
+- saved 17c: +byteconst +vvSdd
 - saved  5 B: m - malloc sizes constant, don't need to LDA xx TAY ...  CMP BEQ,
            just delay and do ... LDY xx BEQ (- 3 bytes)
 - saved  5 B: a 27 B: memset (+ 4 B load size deferred)
