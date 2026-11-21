@@ -94,14 +94,11 @@
 // BYTE CODES OVERVIEW
 // ====================
 // 0-31                 - fast var load (load typically 4x more common th store)
-// #$  \  :_  `         - FREE to use
+// $  \ : _ `           - FREE to use
 // 12345678             - local vars 1-7, 8 ist last var (AX)
-// AD H R T VY          - FREE op vars
-//   possibly usage: cAr Cons cDr, Heap/Here, Recurse, Tail-call, Vector/index? Yndex?
-//
-// ? abcdefgh           - lisp?
-// ? m op               - ?index stuff, built in loops iGG GG if zero/non-zero?
-// ? tuv                - ?SSTACK saves, param: 1..7 (ACC is 0th)
+// AD   R T VY          - FREE op vars
+//? abcdefgh            - lisp?
+//? op                  - ?index stuff, built in loops iGG GG if zero/non-zero?
 // xyz                  - syscall function LN with 1,2,3 byte args indices+acc
 //
 
@@ -148,7 +145,7 @@
 //  <=> - cmp - lt eq gt => 0 or 1
 //  ? - NOT acc (C: !)
 //  @ - read from global address ACC
-//? A - car acc= acc[0] == @ TODO: redundant, find other USE!
+//  A - TODO: Aiijj - array index swap
 //  B - back jump "B03" = back 3 bytes
 //  C - copy ... cons(acc, $) - a variant of alloc cell and
 //? D - cdr acc= acc[1] == 2 + @, LOL TODO: good for linked list
@@ -219,13 +216,15 @@
 //  n   - next loop (together with tu inc/dec-for)
 //
 //? op  - TODO: object, 'o' methOd call 'p' ... ?
+//
 //  q   - quit program
+//
 //  r   - read byte (c@)
 //  s   - save byte in slot (reset hibit)
 
-//  t   - loop <= with 'n' ('t' var upper skip)
-//  u   - loop <  with 'n' ('u' var upper skip)
-//? v   - 
+//  t   - loop/IF <= with 'n' ('t' var upper skip)
+//  u   - loop/IF <  with 'n' ('u' var upper skip)
+//? v   - TODO: loop/IF == or != ???
 
 //  w   - write byte (c!)
 //  xyz - call library functions w 2..4 args
