@@ -275,6 +275,8 @@
 
 //#define JIT
 
+static word runs = 1;   // -rN
+
 #ifdef JIT
   #include "ivm-jit.c"
   #ifndef HOSTSIM
@@ -294,6 +296,16 @@
   extern uchar ivmlib_start[], ivmlib_end[];
   extern word  ivmlib_entry, ivmlib_heap, ivmlib_heapend, ivmlib_zpsrc;
   extern uchar ivmlib_zpdst, ivmlib_zplen, ivmlib_spzp;
+
+  #if defined(__SIM6502__) || defined(__SIM65C02__)
+    // sim65, run in place = load the -o image into memory: code made for
+    // its place after the lib, copied down over the (now unused) compiler
+    // by ivmlib_load, which starts it like a loaded image: heap after it,
+    // C stack at $F000-$FF00, 'q' exits sim65
+    #define JIT_INMEM
+    extern word ivmlib_src, ivmlib_len;
+    extern uchar ivmlib_load[];
+  #endif
 #endif
 
 
@@ -1815,6 +1827,7 @@ static int jit_layout(Process *proc, uchar *base, word *mem_base, word *out_org)
       jit_zp, jit_zp + jit_membytes - 1);
   }
 
+#ifndef JIT_INMEM
   if (!jit_outfile) {
     // run in place: live mem[] (or zp copy of it), cc65 heap for 'M'
     word n = (word)_heapmaxavail();
@@ -1828,6 +1841,7 @@ static int jit_layout(Process *proc, uchar *base, word *mem_base, word *out_org)
     if (jit_org) *out_org = jit_org;
     return 1;
   }
+#endif
 
   // -o: own copy of mem[]; string consts point into the loaded blob,
   // move them to the strings copy in the image (pool: strings first, 0, ints)
@@ -1867,7 +1881,7 @@ static int jit_save(uchar *out, word size, word org) {
   uchar n = 0;
 
   ivmlib_entry   = org;
-  ivmlib_heap    = (word)((end + 1) & ~1);
+  ivmlib_heap    = (word)((end + 0xFF) & ~0xFF);   // page: no (zp),Y crossing
   ivmlib_heapend = jit_tg->heapend;
   if (ivmlib_heap >= ivmlib_heapend)
     printf("%%JIT: warning: no heap left ($%04X >= $%04X)\n",
@@ -1913,6 +1927,34 @@ static int jit_save(uchar *out, word size, word org) {
   free(jit_memimg); jit_memimg = NULL;
   return 1;
 }
+
+#ifdef JIT_INMEM
+// Run in place: the -o image after the lib, built in a buffer, then
+// ivmlib_load copies it down to ivmlib_end and starts it. Never returns.
+static void jit_load(uchar *out, word size, word org) {
+  word end = (word)(org + size);
+  word n = (word)(end - jit_imgmem);
+  word gap = (word)(org - (jit_imgdata + jit_datalen));
+  uchar *buf = (uchar *)malloc(n), *q;
+
+  if (!buf) { printf("%%JIT: alloc fail (load)\n"); return; }
+  q = buf;
+  memcpy(q, jit_memimg, jit_membytes); q += jit_membytes;
+  memcpy(q, jit_data, jit_datalen);    q += jit_datalen;
+  memset(q, 0, gap);                   q += gap;
+  memcpy(q, out, size);
+
+  ivmlib_entry   = org;
+  ivmlib_heap    = (word)((end + 0xFF) & ~0xFF);   // page: no (zp),Y crossing
+  ivmlib_heapend = jit_tg->heapend;
+  ivmlib_src     = (word)(unsigned)buf;
+  ivmlib_len     = n;
+  printf("--- JIT: load $%04X-$%04X, code $%04X, heap $%04X-$%04X ---\n",
+    jit_imgmem, end - 1, org, ivmlib_heap, ivmlib_heapend);
+  printf("\n--- RUN IVM ---\n");
+  __asm__ ("jmp %v", ivmlib_load);
+}
+#endif
 
 word jit_compile(Process* proc) {
   BlobHeader *bh = &proc->h.hdr;
@@ -2018,6 +2060,9 @@ word jit_compile(Process* proc) {
         jit_size, code_len, out_org);
 
       if (jit_outfile) jit_save(out, jit_size, out_org);
+    #ifdef JIT_INMEM
+      else if (runs) jit_load(out, jit_size, out_org);   // -j: just JIT
+    #endif
 
       // keep generated code buffer; return its address as entry
       free(map);
@@ -2035,7 +2080,6 @@ word jit_compile(Process* proc) {
 }
 #endif // JIT
 
-static word runs = 1;   // -rN
 
 static int run_loaded_blob(uchar *img, int len) {
   static word ret; // static so can access in 6502 asm

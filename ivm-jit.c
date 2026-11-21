@@ -556,6 +556,19 @@ static int is_const(uchar s) {
 
 static word const_val(uchar s) { return lc_constmem[s]; }
 
+// byte slots: hi byte always 0. A slot is a byte slot unless some op
+// writes a word to it (S I J U C M H ' , t), or it is a frame header
+// (call: ret, prev, ACC). Only 's' 'i' 'j' 'Z' 'F' write them. Prescan.
+static uchar lc_wword[32];
+static void wword(uchar s) { lc_wword[s >> 3] |= (uchar)(1 << (s & 7)); }
+static int is_byte(uchar s) {
+  return !is_const(s) && !(lc_wword[s >> 3] & (1 << (s & 7)));
+}
+// mem[s] < 256 for sure
+static int hi0(uchar s) {
+  return is_const(s) ? const_val(s) < 256 : is_byte(s);
+}
+
 
 // ACC = constant. Equal bytes (0, $FFFF, $0101...) → LDA #; TAX.
 static void emit_load_const(word v) {
@@ -593,24 +606,26 @@ static uchar immop(uchar ins) {
 
 // ACC = ACC OP mem[s]  (ADC/SBC/AND/ORA/EOR abs).
 // CLC/SEC emitted by caller when needed (+/-). Reuse for logical ops too.
+static void emit_alub(uchar ins, uchar s, uchar hi);
+// AX OP mem[s], mem[s] < 256 (hi0): only a carry / borrow can reach X
+static void emit_op_hi0(uchar ins, uchar s) {
+  word fx;
+  emit_alub(ins, s, 0);
+  if (ins == ADC || ins == SBC) {
+    fx = emrel(ins == ADC ? BCC : BCS);
+    em(ins == ADC ? INX : DEX);
+    empatch(fx);
+  } else if (ins == AND_) em2(LDXN, 0);
+}
 static void emit_lohiop(uchar ins, uchar s) {
+  if (hi0(s)) { emit_op_hi0(ins, s); return; }
   if (is_const(s)) {
     word v = const_val(s);
     uchar iop = immop(ins);
-
     uchar h = (uchar)(v >> 8);
-    word fx;
 
     em2(iop, (uchar)(v & 0xff));
-    // hi byte 0 (or $ff for and): only a carry / borrow can reach X
-    if (h == 0 && (ins == ADC || ins == SBC)) {
-      fx = emrel(ins == ADC ? BCC : BCS);
-      em(ins == ADC ? INX : DEX);
-      empatch(fx);
-      return;
-    }
-    if (ins == AND_ && h == 0) { em2(LDXN, 0); return; }
-    if ((ins == AND_ && h == 0xff) || (ins != AND_ && h == 0)) return;
+    if (ins == AND_ && h == 0xff) return;          // X kept
     em(TAY);
     em(TXA); em2(iop, h); em(TAX);
     em(TYA);
@@ -1122,6 +1137,12 @@ static word ivm_jit1(const uchar *code, word code_len,
 
   // labels: every jump target, loop body starts (n jumps there), function
   // entries and main's trampoline. 't' / 'n' rel are not used by the JIT.
+  memset(lc_wword, 0, sizeof lc_wword);
+  if (frame_base)
+    for (i = 0; i < ncall; i++) {                  // call frame headers
+      uchar f = frame_base[i], k;
+      for (k = 0; k <= FR_ACC; k++) wword((uchar)(f + k));
+    }
   lc_lbl = (uchar *)calloc((code_len >> 3) + 1, 1);
   if (lc_lbl) {
     word t, n;
@@ -1129,6 +1150,8 @@ static word ivm_jit1(const uchar *code, word code_len,
     for (i = 0; i < code_len; i += n) {
       n = ivm_oplen(code + i);
       if (!n) n = 1;
+      if (strchr("SIJUCMH',t", code[i]) && i + 1 < code_len)
+        wword(code[i + 1]);                        // word write (byte slots)
       if (code[i] == 't') { LBL(i + 4); continue; }  // body start
       if (code[i] == 'n') continue;
       t = ivm_jump(code + i, i);
@@ -1357,7 +1380,32 @@ static word ivm_jit1(const uchar *code, word code_len,
       if (acc_at == ACC_PEND && !acc_hk && lc_axs == s && op != '-') {
         uchar x = acc_s;           // commutative: AX already holds mem[s],
         acc_ax_slot(s);            // so mem[s] OP mem[x] (k = i + prime
-        emit_lohiop(ins, x);       // right after S prime)
+        s = x;                     // right after S prime): swap, go on
+      }
+      if (hi0(s) && acc_at != ACC_LOST) {
+        // operand < 256: AX OP lo, then X += carry (- borrow), and: X = 0
+        acc_need();
+        emit_op_hi0(ins, s);
+        acc_ax();
+        break;
+      }
+      if (op != '-' && ((acc_at == ACC_PEND &&
+                        (acc_hk ? acc_k < 256 : is_byte(acc_s))) ||
+                       (acc_at == ACC_AX && acc_x0))) {
+        // ACC < 256 (byte slot / X = 0), commutative: X = hi of mem[s]
+        // (+ carry), and: X = 0
+        if (acc_at == ACC_PEND) emit_lda_pend(0);
+        emit_alub(ins, s, 0);
+        if (ins == AND_) { if (acc_at != ACC_AX) em2(LDXN, 0); }
+        else {
+          if (is_const(s)) em2(LDXN, (uchar)(const_val(s) >> 8));
+          else emop2(LDX, slothi(s));
+          if (ins == ADC) {
+            word fx = emrel(BCC);
+            em(INX);
+            empatch(fx);
+          }
+        }
         acc_ax();
         break;
       }
