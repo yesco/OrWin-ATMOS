@@ -110,7 +110,71 @@ DONE:
 - saved  2 B: U - less juggling just save A directly, reload cheaper than TAY TYA
 - saved  4 B: for should leave index in ACC
 
+
 =============================================================
+# bubble.c and qsort.c
+
+Oscar's 130 cycles per inner pass is impressive. Your bubble has n =
+1000, so the inner loop runs 499,500 times:
+
+| | cycles per inner pass |
+|---|---|
+| Oscar | 130 |
+| ivm-jit | 384 |
+| cc65 | 695 |
+
+I profiled our inner loop (`while (j < (n - 1 - i)) { if (a[j] > a[j +
+1]) swap; j++; }`):
+
+| part | cycles per pass | what it does now |
+|---|---|---|
+| `a[j+1]` load | 75 | `j+1` into a temp, then ×2, + base, 2 × `lda ($fe),y` |
+| loop test | 69 | copies `j` to a temp, recomputes `n-1-i`, builds a 0/1, then branches |
+| `a[j]` load | 56 | ×2, + base, load |
+| `>` and branch | 32 | builds a 0/1 (`lda #0; tax; rol; eor #1`), then `bne` |
+| swap (about half the passes) | 146 averaged | 4 more full address calculations |
+| `j++`, `jmp` | 11 | |
+
+Oscar most likely computes `&a[j]` once and reads `a[j]` and `a[j+1]`
+as `(ptr),y` with Y = 0..3, and branches straight on the compare.
+
+**What I'd do, in order:**
+
+1. **Element pointer cache in the JIT**
+   (about −150 cycles per pass).
+   
+   Remember that `$fe/$ff` = `&a[j]`. While neither `a` nor `j` is
+   written and nothing else uses `$fe`, the next `a[j]`, `a[j]=` and
+   `a[j+1]` reuse it with `ldy #0..3`. That covers the swap's reads
+   and writes and both loads. It's general, since array code keeps
+   touching the same element and its neighbour. It also needs `a[j+1]`
+   to stay recognisable as "j plus a constant": a grammar rule
+   `\i[\i+\d]` instead of going through a temp.
+
+2. **Fused compare and branch**
+
+   (about −25 cycles per pass, and in every `if` and `while` of every
+   program). For `<`/`>`/`=` followed by a zjp: `cmp; sbc; bcs exit`
+   with no 0/1. This is the one I've been talking about.
+
+3. **`\i < (E)` in the grammar** 
+
+   about −15 cycles per pass). Emit it as `E; > j` so `j` isn't copied
+   to a temp first.
+
+Together that's about 384 → 190 cycles per pass, roughly 95M. That's
+still 1.5× Oscar, but 3.6× cc65. Hoisting the loop-invariant `n-1-i`
+out of the loop would need real analysis; writing `m = n - 1 - i;` in
+the source does the same for free.
+
+qsort at 1.7× Oscar has the same causes: `a[i]`/`a[j]` swaps and
+comparisons that build 0/1.
+
+Shall I start with 1, the pointer cache? It's the biggest of the three
+and helps every program that uses arrays.
+
+=============================================================
+
 
 ## 6502 C-compiler bencharks out there
 
