@@ -61,7 +61,7 @@
 .export _ivmlib_start, _ivmlib_end
 .export _ivmlib_entry, _ivmlib_heap, _ivmlib_heapend
 .export _ivmlib_zpsrc, _ivmlib_zpdst, _ivmlib_zplen, _ivmlib_spzp
-.export _ivmlib_load, _ivmlib_src, _ivmlib_len
+.export _ivmlib_load, _ivmlib_seg
 
 .export _opmul, _opdiv, _opmod, _opputnum
 .export _opputchar, _opgetchar, _opputs, _opprintstr
@@ -103,42 +103,54 @@ JT = $FE
 ;;;; ===========================================================================
 ;;; ===========================================================================
 ;;; Load in place (ivm.c jit_load, sim65 run in place): copy the -o image
-;;; after the lib ([mem image][strings][gap][JIT code], at _ivmlib_src,
-;;; _ivmlib_len bytes) down to _ivmlib_end, then start it as if loaded.
-;;; Before _ivmlib_start: not in -o images, not overwritten by the copy.
-;;; Forward copy: the source is above the destination.  52 B + 4 B vars
+;;; after the lib down to _ivmlib_end, then start it as if loaded. The image
+;;; is 4 segments (src, len): mem image, strings, gap (src 0: zeros), JIT
+;;; code: no buffer to build it in. Before _ivmlib_start: not in -o images,
+;;; not overwritten by the copy. Forward: the sources are above.  63 B + 16
 ;;; ===========================================================================
-_ivmlib_src:     .word 0
-_ivmlib_len:     .word 0
+_ivmlib_seg:     .res 16                ;; 4 x (src, len)
 
 _ivmlib_load:
-        lda     _ivmlib_src
-        sta     ptr1
-        lda     _ivmlib_src+1
-        sta     ptr1+1
         lda     #<_ivmlib_end
         sta     ptr2
         lda     #>_ivmlib_end
         sta     ptr2+1
+        ldx     #0
+@seg:   cpx     #16
+        beq     _ivmlib_start           ;; all copied: run
+        lda     _ivmlib_seg,x
+        sta     ptr1
+        lda     _ivmlib_seg+1,x
+        sta     ptr1+1
+        lda     _ivmlib_seg+2,x
+        sta     tmp1                    ;; len lo
+        lda     _ivmlib_seg+3,x
+        sta     tmp2                    ;; len hi
+        inx
+        inx
+        inx
+        inx
         ldy     #0
-        ldx     _ivmlib_len+1           ;; full pages
-        beq     @rest
-@page:  lda     (ptr1),y
-        sta     (ptr2),y
-        iny
-        bne     @page
+@byte:  lda     tmp1                    ;; len-- (done at 0)
+        bne     @n1
+        lda     tmp2
+        beq     @seg
+        dec     tmp2
+@n1:    dec     tmp1
+        tya                             ;; A = 0 (the gap)
+        ldy     ptr1+1
+        beq     @z                      ;; src $00xx: zeros, src stays
+        ldy     #0
+        lda     (ptr1),y
+        inc     ptr1
+        bne     @z
         inc     ptr1+1
-        inc     ptr2+1
-        dex
-        bne     @page
-@rest:  ldx     _ivmlib_len             ;; bytes left
-        beq     _ivmlib_start
-@last:  lda     (ptr1),y
+@z:     ldy     #0
         sta     (ptr2),y
-        iny
-        dex
-        bne     @last
-        ;; fall into _ivmlib_start
+        inc     ptr2
+        bne     @byte
+        inc     ptr2+1
+        bne     @byte                   ;; always
 
 _ivmlib_start:
 .ifdef SIM

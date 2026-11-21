@@ -303,7 +303,7 @@ static word runs = 1;   // -rN
     // by ivmlib_load, which starts it like a loaded image: heap after it,
     // C stack at $F000-$FF00, 'q' exits sim65
     #define JIT_INMEM
-    extern word ivmlib_src, ivmlib_len;
+    extern word ivmlib_seg[8];            // 4 x (src, len)
     extern uchar ivmlib_load[];
   #endif
 #endif
@@ -1938,26 +1938,22 @@ static int jit_save(uchar *out, word size, word org) {
 }
 
 #ifdef JIT_INMEM
-// Run in place: the -o image after the lib, built in a buffer, then
-// ivmlib_load copies it down to ivmlib_end and starts it. Never returns.
+// Run in place: the -o image after the lib, as 4 segments (mem image,
+// strings, gap, JIT code) where they are now; ivmlib_load copies them down
+// to ivmlib_end and starts it. No buffer (the heap may be full). Never
+// returns.
 static void jit_load(uchar *out, word size, word org) {
   word end = (word)(org + size);
-  word n = (word)(end - jit_imgmem);
   word gap = (word)(org - (jit_imgdata + jit_datalen));
-  uchar *buf = (uchar *)malloc(n), *q;
 
-  if (!buf) { printf("%%JIT: alloc fail (load)\n"); return; }
-  q = buf;
-  memcpy(q, jit_memimg, jit_membytes); q += jit_membytes;
-  memcpy(q, jit_data, jit_datalen);    q += jit_datalen;
-  memset(q, 0, gap);                   q += gap;
-  memcpy(q, out, size);
+  ivmlib_seg[0] = (word)(unsigned)jit_memimg; ivmlib_seg[1] = jit_membytes;
+  ivmlib_seg[2] = (word)(unsigned)jit_data;   ivmlib_seg[3] = jit_datalen;
+  ivmlib_seg[4] = 0;                          ivmlib_seg[5] = gap;
+  ivmlib_seg[6] = (word)(unsigned)out;        ivmlib_seg[7] = size;
 
   ivmlib_entry   = org;
   ivmlib_heap    = (word)((end + 0xFF) & ~0xFF);   // page: no (zp),Y crossing
   ivmlib_heapend = jit_tg->heapend;
-  ivmlib_src     = (word)(unsigned)buf;
-  ivmlib_len     = n;
   printf("--- JIT: load $%04X-$%04X, code $%04X, heap $%04X-$%04X ---\n",
     jit_imgmem, end - 1, org, ivmlib_heap, ivmlib_heapend);
   printf("\n--- RUN IVM ---\n");

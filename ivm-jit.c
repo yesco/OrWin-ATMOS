@@ -1941,7 +1941,21 @@ static word ivm_jit1(const uchar *code, word code_len,
     //   AS = &base[j], AI = &base[i] (cached: stays valid after)
     case 'A': {                                    // -, NEW
       uchar base = PAR, i = PAR, j = PAR;
+      uchar yi = ai_hit('w', base, i), yj = ai_hit('w', base, j);
       acc_drop();
+      if (yi != 0xff && yj != 0xff) {
+        // both off AI (a[j], a[j+1]: the cache): Y offsets, no AS
+        em2(LDYN, (uchar)(yi + 1)); em2(LDAIY, AI); em(TAX);   // hi
+        em2(LDYN, (uchar)(yj + 1)); em2(LDAIY, AI);
+        em2(LDYN, (uchar)(yi + 1)); em2(STAIY, AI);
+        em2(LDYN, (uchar)(yj + 1)); em(TXA); em2(STAIY, AI);
+        em2(LDYN, yi); em2(LDAIY, AI); em(PHA);                // lo
+        em2(LDYN, yj); em2(LDAIY, AI);
+        em2(LDYN, yi); em2(STAIY, AI);
+        em2(LDYN, yj); em(PLA); em2(STAIY, AI);
+        acc_ax();                                  // A X = old [i]
+        break;
+      }
       emit_elem_ptr_zp(AS, base, j);
       if (ai_hit('w', base, i) != 0) {
         emit_elem_ptr(base, i);
