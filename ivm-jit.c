@@ -35,6 +35,7 @@ INSTRUCTIONS: Keeps this section but keep updated for status
 | `u` (down-loop)          | **Missing** — warns only |
 | Array `(` `)`            | Present (needs testing) |
 | / * %                    | JSR helpers in **ivm-lib.asm**: ACC in $FE/$FF (tmp1/tmp2), the other operand in AX, result in AX; a const goes in AX (`*`: the multiplier, fewer rounds) |
+| Element cache            | **Done** — `( ) [ ]` use their own zp pointer arrayindexing ($FC/$FD). AI = &base[idx] is kept while base / idx are not written (no label, call, loop op between); `a[j+1]` after `L j + c S t` reuses it with Y + 2c (word arrays) |
 | ZP optimisation          | **Done, one place** — emop2() + zpmap[] (see below) |
 | Branch emit              | **Done** — emrel/empatch (local), emjump (bytecode target); forward short by estimate (JIT_BC_SCALE), retry if too far |
 | ACC state                | **Done** — lc_axs: slot physically in AX while ACC is pending (`[` `]` index). acc_x0 (X = 0) / acc_z (Z = ACC==0, next op): zjp `beq`, G `bne`. acc_at AX/PEND/LOST + acc_s (slot AX equals) + acc_k (const). Every op declares its ivm-walk.c contract: acc_need (in: loads a pending const/slot, error if LOST), acc_keep, acc_drop/acc_lost, acc_ax, acc_ax_slot, acc_pk/acc_ps (lazy const/slot), acc_write. Undeclared op → `ACC use not declared`. Labels (prescan, lc_lbl) flush. Pending users: `+ - & \| ^` load from the source (no TXA), const folding (also `~`), `)` `]` store from the source. acc_dead(): KEEP ops (N O F) don't save a dead ACC. -z pointer ops `r w ' , @ !` use (slot),Y directly. Contract breaks fixed: Z N O G F s w , ! ; m |
@@ -407,6 +408,19 @@ extern void   ivm_free(ivmvar p);
 // zero-page scratch word (lo at tmp1, hi at tmp2) — single named base, not magic 0xfe elsewhere
 static uchar tmp1 = 0xfe;
 static uchar tmp2 = 0xff;
+// zero-page array element pointer ( ) [ ]: only these use it, so it
+// survives lib calls and shifts (the element cache, lc_ai_*)
+static uchar arrayindexing = 0xfc;
+#define AI   arrayindexing
+#define ZPTOP 0xfc          // -z: mem[] ends below this
+
+// element cache: AI == &base[idx] (kind 'w': word ops ( ), Y = 2*off;
+// 'b': byte ops [ ], ptr = (idx lo, base hi + idx hi), Y = base lo).
+// Dropped at labels, calls, loop ops and writes to base or idx.
+// lc_rel: slot t == mem[src] + c ("L j + c S t": a[j+1] is a[j], Y + 2c)
+static uchar lc_ai_kind, lc_ai_base, lc_ai_idx;
+static uchar lc_rel_t = 0xff, lc_rel_src, lc_rel_c;
+static uchar lc_plus_src = 0xff, lc_plus_c;   // ACC == mem[src] + c (this op)
 
 static uchar *lc_out;
 static word   lc_at, lc_max;
@@ -811,28 +825,28 @@ static uchar lc_nksa;
 
 // Byte element pointer like emit_belem_ptr, index in Y (lo) and A (hi)
 static void emit_belem_ptr_ya(uchar base) {
-  em2(STYZ, tmp1);
+  em2(STYZ, AI);
   em(CLC);
   emit_alub(ADC, base, 1);
-  em2(STAZ, tmp2);
+  em2(STAZ, AI + 1);
   if (is_const(base)) em2(LDYN, const_val(base));
   else                emop2(LDY, slotlo(base));
 }
 
 // Byte element pointer like emit_belem_ptr, index already in AX
 static void emit_belem_ptr_ax(uchar base) {
-  em2(STAZ, tmp1);
+  em2(STAZ, AI);
   em(TXA);
   em(CLC);
   emit_alub(ADC, base, 1);
-  em2(STAZ, tmp2);
+  em2(STAZ, AI + 1);
   if (is_const(base)) em2(LDYN, const_val(base));
   else                emop2(LDY, slotlo(base));
 }
 
 // Word indexing address calculation
 //
-// tmp1/tmp2 = mem[base] + 2*mem[idx]   (clobbers A, X, Y)
+// AI = mem[base] + 2*mem[idx]   (clobbers A, X, Y)
 // TODO: this is very expensive, we should pass in the size
 //   if we know it, also, have a byte operator. If size < 256 bytes
 //   then we can simplify to simple LDA (base),Y !
@@ -842,34 +856,34 @@ static void emit_elem_ptr(uchar base, uchar idx) {
     word v = (word)(const_val(idx) << 1);
     emit_load_slot(base);
     em(CLC);
-    em2(ADCN, (uchar)(v & 0xff)); em2(STAZ, tmp1);
+    em2(ADCN, (uchar)(v & 0xff)); em2(STAZ, AI);
     em(TXA);
-    em2(ADCN, (uchar)(v >> 8));   em2(STAZ, tmp2);
+    em2(ADCN, (uchar)(v >> 8));   em2(STAZ, AI + 1);
     return;
   }
-  // idx*2 (lo kept in Y, hi in tmp2), then + base
+  // idx*2 (lo kept in Y, hi in AI + 1), then + base
   emop2(LDA, slotlo(idx)); em(ASLA); em(TAY);
-  emop2(LDA, slothi(idx)); em(ROLA); em2(STAZ, tmp2);
+  emop2(LDA, slothi(idx)); em(ROLA); em2(STAZ, AI + 1);
   em(CLC); em(TYA);
-  emit_alub(ADC, base, 0); em2(STAZ, tmp1);
-  em2(LDAZ, tmp2);
-  emit_alub(ADC, base, 1); em2(STAZ, tmp2);
+  emit_alub(ADC, base, 0); em2(STAZ, AI);
+  em2(LDAZ, AI + 1);
+  emit_alub(ADC, base, 1); em2(STAZ, AI + 1);
 }
 
 // Byte indexing address calculation
 //
-// (tmp1),Y == &((uchar*)mem[base])[mem[idx]]   (clobbers A, Y; X kept)
+// (AI),Y == &((uchar*)mem[base])[mem[idx]]   (clobbers A, Y; X kept)
 // ptr = (idx_lo, base_hi+idx_hi), Y = base_lo: the indexed mode does the
 // lo add + carry for free.
 static void emit_belem_ptr(uchar base, uchar idx) {
   if (is_const(idx)) em2(LDAN, const_val(idx));
   else               emop2(LDA, slotlo(idx));
-  em2(STAZ, tmp1);
+  em2(STAZ, AI);
   if (is_const(idx)) em2(LDAN, const_val(idx) >> 8);
   else               emop2(LDA, slothi(idx));
   em(CLC);
   emit_alub(ADC, base, 1);
-  em2(STAZ, tmp2);
+  em2(STAZ, AI + 1);
   if (is_const(base)) em2(LDYN, const_val(base));
   else                emop2(LDY, slotlo(base));
 }
@@ -924,6 +938,41 @@ static word  lc_yas_at, lc_ya_bc;
 // code is emitted (lc_yah_at == lc_at) and the op is not a label
 static uchar lc_yah = 0xff;
 static word  lc_yah_at = 0xffff;
+
+// ---- element cache (AI) -------------------------------------------------
+static void ai_drop(void) { lc_ai_kind = 0; lc_rel_t = 0xff; }
+// AI == &base[idx] already? -> its Y offset (0 or, via lc_rel, 2*c), else
+// 0xff
+static uchar ai_hit(uchar kind, uchar base, uchar idx) {
+  if (lc_ai_kind != kind || lc_ai_base != base) return 0xff;
+  if (lc_ai_idx == idx) return 0;
+  if (kind == 'w' && idx == lc_rel_t && lc_rel_src == lc_ai_idx)
+    return (uchar)(lc_rel_c << 1);
+  return 0xff;
+}
+// AI = &((word*)base)[idx] (or a cached one): its Y offset
+static uchar ai_word(uchar base, uchar idx) {
+  uchar y = ai_hit('w', base, idx);
+  if (y != 0xff) return y;
+  emit_elem_ptr(base, idx);
+  if (!is_const(idx)) { lc_ai_kind = 'w'; lc_ai_base = base; lc_ai_idx = idx; }
+  else lc_ai_kind = 0;
+  return 0;
+}
+// (AI),Y = &((uchar*)base)[idx]: the pointer (or cached), then Y
+static void ai_byte(uchar base, uchar idx) {
+  if (ai_hit('b', base, idx) == 0xff) {             // the helpers set Y
+    if (lc_axs == idx) emit_belem_ptr_ax(base);       // index in AX
+    else if (lc_yas == idx) emit_belem_ptr_ya(base);  // in Y/A (stride)
+    else emit_belem_ptr(base, idx);
+    if (!is_const(idx)) { lc_ai_kind = 'b'; lc_ai_base = base; lc_ai_idx = idx; }
+    else lc_ai_kind = 0;
+    return;
+  }
+  if (is_const(base)) em2(LDYN, const_val(base));
+  else                emop2(LDY, slotlo(base));
+}
+
 static word  acc_k;
 static uchar lc_acc_said;   // acc_* calls by the current op
 static uchar lc_op;         // current op (messages)
@@ -1181,6 +1230,7 @@ static word ivm_jit1(const uchar *code, word code_len,
   acc_at = ACC_AX; acc_hk = 0; acc_s = 0xff; acc_x0 = 0; acc_z = 0;
   lc_axs = 0xff; lc_axs_at = 0xffff;
   lc_yas = 0xff; lc_yas_at = 0xffff; lc_ya_bc = 0xffff;
+  ai_drop(); lc_plus_src = 0xff;
   lc_out_org = out_org;
   lc_ncall = ncall;
   lc_fbase = frame_base;
@@ -1303,6 +1353,19 @@ static word ivm_jit1(const uchar *code, word code_len,
     // NEXT op
     op = *p++;
     lc_op = op; lc_bc = bc_pc; lc_acc_said = 0;
+    // element cache: drop at joins, calls, loop ops, unknown ops; a write
+    // to base or idx drops it, to t or src the a[j+c] relation
+    if (is_label(bc_pc) || op >= 0xC0 || strchr("tunBkxyzqX;Q", op))
+      ai_drop();
+    else if (op >= 32 && strchr("SIJUCMH',sijZF", op)) {
+      uchar w = *p;
+      if (lc_ai_kind && (w == lc_ai_base || w == lc_ai_idx)) lc_ai_kind = 0;
+      if (w == lc_rel_t || w == lc_rel_src) lc_rel_t = 0xff;
+      if (op == 'S' && lc_plus_src != 0xff && lc_plus_src != w) {
+        lc_rel_t = w; lc_rel_src = lc_plus_src; lc_rel_c = lc_plus_c;
+      }
+    }
+    if (op != 'S') lc_plus_src = 0xff;
     if (acc_at == ACC_AX) { lc_axs = acc_s; lc_axs_at = lc_at; }
     else if (lc_at != lc_axs_at || is_label(bc_pc)) lc_axs = 0xff;
     if (bc_pc == lc_ya_bc) { lc_yas = lc_ya_next; lc_yas_at = lc_at; }
@@ -1419,6 +1482,9 @@ static word ivm_jit1(const uchar *code, word code_len,
       uchar s = PAR;
       uchar ins = op == '+' ? ADC : op == '-' ? SBC : op == '&' ? AND_ :
                   op == '|' ? ORA : EOR;
+      lc_plus_src = (op == '+' && acc_at == ACC_PEND && !acc_hk &&
+                     is_const(s) && const_val(s) < 128) ? acc_s : 0xff;
+      lc_plus_c = (uchar)(is_const(s) ? const_val(s) : 0);
       if (acc_at == ACC_PEND && acc_hk && is_const(s)) {
         // const OP const: fold
         word a = acc_k, b = const_val(s);
@@ -1755,32 +1821,36 @@ static word ivm_jit1(const uchar *code, word code_len,
 
     // (: ACC = ((word*)base)[idx]
     case '(': {                                    // NEW
-      uchar base = PAR, idx = PAR;
+      uchar base = PAR, idx = PAR, y = ai_word(base, idx);
       acc_drop();
-      emit_elem_ptr(base, idx);            // tmp1/tmp2 = &base[idx]
       // load word: hi first, then lo, no stack traffic
-      em2(LDYN, 1); em2(LDAIY, tmp1); em(TAX);
-      em(DEY);      em2(LDAIY, tmp1);
+      em2(LDYN, (uchar)(y + 1)); em2(LDAIY, AI); em(TAX);
+      em(DEY);                   em2(LDAIY, AI);
       acc_ax();
       break;
     }
     // ): ((word*)base)[idx] = ACC
     case ')': {                                    // in, KEEP
-      uchar base = PAR, idx = PAR;
+      uchar base = PAR, idx = PAR, y;
       if (acc_at == ACC_PEND) {
         // ACC still where it is (const / slot): store its bytes from there,
         // it stays pending
-        emit_elem_ptr(base, idx);          // tmp1/tmp2 = &base[idx]
-        em2(LDYN, 1); emit_lda_pend(1); em2(STAIY, tmp1);
-        em(DEY);      emit_lda_pend(0); em2(STAIY, tmp1);
+        y = ai_word(base, idx);
+        em2(LDYN, (uchar)(y + 1)); emit_lda_pend(1); em2(STAIY, AI);
+        em(DEY);                   emit_lda_pend(0); em2(STAIY, AI);
         acc_keep();
+      } else if (ai_hit('w', base, idx) != 0xff) {
+        acc_need();                        // in AX already
+        y = ai_word(base, idx);            // AI ok: AX untouched till here
+        em2(LDYN, y); em2(STAIY, AI);
+        em(PHA); em(TXA); em(INY); em2(STAIY, AI); em(PLA);
       } else {
         acc_need();
         em(PHA); em(TXA); em(PHA);         // save ACC: lo, then hi
-        emit_elem_ptr(base, idx);          // tmp1/tmp2 = &base[idx]
+        y = ai_word(base, idx);            // AI = &base[idx]
         // pop hi → store, pop lo → store; AX ends up = original ACC
-        em(PLA); em2(LDYN, 1); em2(STAIY, tmp1); em(TAX);
-        em(PLA); em(DEY);      em2(STAIY, tmp1);
+        em(PLA); em2(LDYN, (uchar)(y + 1)); em2(STAIY, AI); em(TAX);
+        em(PLA); em(DEY);                   em2(STAIY, AI);
       }
       break;
     }
@@ -1788,21 +1858,19 @@ static word ivm_jit1(const uchar *code, word code_len,
     // [ bb ii : ACC = ((uchar*)base)[idx]
     case '[': {                                    // NEW
       uchar base = PAR, idx = PAR;
-      if (lc_axs == idx) emit_belem_ptr_ax(base);  // index in AX
-      else if (lc_yas == idx) emit_belem_ptr_ya(base);  // in Y/A (stride)
-      else                                  emit_belem_ptr(base, idx);
+      ai_byte(base, idx);
       acc_drop();
       {                                    // next: zjp, ACC dead after it?
         word nb = (word)(p - code), t;
         if (nb + 1 < code_len && (uchar)(code[nb] - 0x80) < 64 &&
             !is_label(nb) && acc_unread(code, (word)(nb + 1)) &&
             (t = ivm_jump(code + nb, nb)) < code_len && acc_unread(code, t)) {
-          em2(LDAIY, tmp1);                // only A: Z == (byte == 0)
+          em2(LDAIY, AI);                  // only A: Z == (byte == 0)
           acc_ax(); acc_z = 2;
           break;
         }
       }
-      em2(LDXN, 0); em2(LDAIY, tmp1);      // LDA last: Z == (ACC == 0)
+      em2(LDXN, 0); em2(LDAIY, AI);        // LDA last: Z == (ACC == 0)
       acc_ax_byte(1);
       break;
     }
@@ -1810,16 +1878,17 @@ static word ivm_jit1(const uchar *code, word code_len,
     case ']': {                                    // in, KEEP
       uchar base = PAR, idx = PAR;
       if (acc_at == ACC_PEND) {            // store from where ACC is
-        if (lc_axs == idx) emit_belem_ptr_ax(base);   // index still in AX
-        else if (lc_yas == idx) emit_belem_ptr_ya(base);  // Y/A (stride)
-        else               emit_belem_ptr(base, idx);
-        emit_lda_pend(0); em2(STAIY, tmp1);
+        ai_byte(base, idx);
+        emit_lda_pend(0); em2(STAIY, AI);
         acc_keep();
+      } else if (ai_hit('b', base, idx) != 0xff) {
+        ai_byte(base, idx);                // only LDY: A X kept
+        em2(STAIY, AI);
       } else {
         acc_need();
         em(PHA);                           // X untouched by the helper
-        emit_belem_ptr(base, idx);
-        em(PLA); em2(STAIY, tmp1);
+        ai_byte(base, idx);
+        em(PLA); em2(STAIY, AI);
       }
       break;
     }
@@ -2365,8 +2434,8 @@ word sim_run_blob(uchar *blob, uchar zp, uchar zp_at, word org) {
 
   // mem[]
   if (zp) {
-    if (!zp_at) zp_at = (uchar)(0xFE - membytes);
-    if (membytes > 0xFE || zp_at + membytes > 0xFE) {
+    if (!zp_at) zp_at = (uchar)(ZPTOP - membytes);
+    if (membytes > ZPTOP || zp_at + membytes > ZPTOP) {
       printf("%%SIM: -z: mem[] %u bytes does not fit in zp\n", membytes);
       return 0;
     }

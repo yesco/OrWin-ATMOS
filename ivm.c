@@ -1778,9 +1778,9 @@ char save_blob(const char *path, uchar *img, int len) {
 typedef struct { const char *name; uchar hdr; word zptop; word heapend; } JitTarget;
 
 static const JitTarget jit_targets[3] = {
-  { "sim6502", 1, 0xFE, 0xF000 },   // sim65: C stack $F000-$FF00 (ivm-lib)
+  { "sim6502", 1, 0xFC, 0xF000 },   // sim65: C stack $F000-$FF00 (ivm-lib)
   { "atmos",   2, 0xE2, 0x9800 },   // cc65 atmos ZP is $E2-$FB; HIRES at $9800
-  { "raw",     0, 0xFE, 0x9800 },
+  { "raw",     0, 0xFC, 0x9800 },
 };
 static const JitTarget *jit_tg;
 
@@ -1817,9 +1817,9 @@ static int jit_layout(Process *proc, uchar *base, word *mem_base, word *out_org)
       }
       jit_zp = (word)(jit_tg->zptop - jit_membytes);
     }
-    // tmp1/tmp2 of the JIT live at $FE/$FF
-    if (jit_zp + jit_membytes > 0xFE) {
-      printf("%%JIT: -z: mem[] $%02X+%u bytes overruns $FE\n", jit_zp, jit_membytes);
+    // JIT zp: arrayindexing $FC/$FD, tmp1/tmp2 $FE/$FF
+    if (jit_zp + jit_membytes > 0xFC) {
+      printf("%%JIT: -z: mem[] $%02X+%u bytes overruns $FC\n", jit_zp, jit_membytes);
       return 0;
     }
     *mem_base = jit_zp;
