@@ -681,6 +681,31 @@ static void emit_alub(uchar ins, uchar s, uchar hi) {
 // UNSIGNED 16-bit compare: C = (mem[lim] >= mem[slot]).
 // CMP on the low byte starts the carry chain (same as SEC;SBC, 1 byte
 // shorter), SBC on the high byte finishes it. Only A is clobbered.
+// after a compare: [? ...] then zjp or G, no label between, ACC read by
+// neither path? -> the branch target, *skip = bytes to eat, *brc = the
+// branch on C = !cond (BCS: jump if !cond, BCC: if cond); else 0xffff
+static int acc_unread(const uchar *c, word bc);
+static int is_label(word bc);
+static word fuse_branch(const uchar *c, word nb, word len, uchar *skip,
+                        uchar *brc) {
+  word i = nb, t;
+  uchar k = 0, jz;
+  while (i < len && c[i] == '?' && k < 3) {
+    if (is_label(i)) return 0xffff;
+    i++; k++;
+  }
+  if (i >= len || is_label(i)) return 0xffff;
+  if ((uchar)(c[i] - 0x80) < 64) { jz = 1; *skip = (uchar)(i - nb + 1); }
+  else if (c[i] == 'G' && i + 1 < len) { jz = 0; *skip = (uchar)(i - nb + 2); }
+  else return 0xffff;
+  t = ivm_jump(c + i, i);
+  if (t >= len || !acc_unread(c, (word)(nb + *skip)) || !acc_unread(c, t))
+    return 0xffff;
+  // value = cond if k even; zjp jumps if value == 0, G if value != 0
+  *brc = (uchar)((jz ^ (k & 1)) ? BCS : BCC);
+  return t;
+}
+
 // flags of a - b (C = a >= b): A only, consts as immediates
 static void emit_sub_flags(uchar a, uchar b) {
   if (is_const(a)) em2(LDAN, (uchar)const_val(a)); else emop2(LDA, slotlo(a));
@@ -1603,8 +1628,28 @@ static word ivm_jit1(const uchar *code, word code_len,
       break;
     }
     // '<': ACC < mem  <=>  borrow in ACC - mem  <=>  !C
-    case '<': {
-      uchar s = PAR;
+    case '<': case '>': {
+      uchar s = PAR, skip, brc;
+      word t = fuse_branch(code, (word)(p - code), code_len, &skip, &brc);
+      if (t != 0xffff) {
+        // compare + [? ...] + zjp / G: just the branch, no 0/1. Flags
+        // C = !cond: '<' a - s, '>' s - a (a > s <=> s < a)
+        if (acc_at == ACC_PEND && !acc_hk) {
+          if (op == '<') emit_sub_flags(acc_s, s); else emit_sub_flags(s, acc_s);
+        } else if (op == '<') {
+          acc_need();
+          emit_alub(CMP, s, 0); em(TXA); emit_alub(SBC, s, 1);
+        } else {
+          acc_need();
+          em(SEC); em2(EORN, 0xff); emit_alub(ADC, s, 0);
+          em(TXA); em2(EORN, 0xff); emit_alub(ADC, s, 1);
+        }
+        p += skip;
+        emjump(brc, t);
+        acc_lost();
+        break;
+      }
+      if (op == '>') goto op_gt;
       acc_need();
       emit_alub(CMP, s, 0); em(TXA);               // C from lo compare
       emit_alub(SBC, s, 1);                        // C = ACC >= mem
@@ -1613,8 +1658,8 @@ static word ivm_jit1(const uchar *code, word code_len,
       break;
     }
     // '>': ACC > mem  <=>  mem - ACC borrows  <=>  !C of (mem + ~ACC + 1)
-    case '>': {
-      uchar s = PAR;
+    op_gt: {
+      uchar s = p[-1];
       acc_need();
       em(SEC); em2(EORN, 0xff); emit_alub(ADC, s, 0);
       em(TXA); em2(EORN, 0xff); emit_alub(ADC, s, 1);

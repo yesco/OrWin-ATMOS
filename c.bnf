@@ -57,9 +57,10 @@ B={ \{ C } \}
 C=V\<|K\<|
 
 # - Statements — keywords / specific forms first
-# if (l OP r): t / u as compare-and-branch (no 0/1, no G): u l r skip =
-#   "if (l < r) body", t: <=, > and >= swap l r. Not closed by n / B,
-#   the JIT sees it is no loop. S: the slot itself, R: into a temp
+# if (l OP r), l r simple (S): t / u as compare-and-branch (no 0/1, no
+#   G): u l r skip = "if (l < r) body", t: <=, > and >= swap l r. Not
+#   closed by n / B, the JIT sees it is no loop. Other compares: the
+#   generic if (E), the JIT fuses "< s ? G" / "< s zjp" into a branch
 K=Y
 |if (E)[?G\x] K else[0?G\x\w\y] K[\y]
 |if (E)[?G\x] K[\y]
@@ -162,47 +163,11 @@ Y=if (S<=S)[t\1\2\x] K else[0?G\x\w\y] K[\y]
 |if (S<S)[u\1\2\x] K[\y]
 |if (S>S)[u\2\1\x] K else[0?G\x\w\y] K[\y]
 |if (S>S)[u\2\1\x] K[\y]
-|if (S<=R[S\t])[t\1\3\x] K else[0?G\x\w\y] K[\y]
-|if (S<=R[S\t])[t\1\3\x] K[\y]
-|if (S>=R[S\t])[t\3\1\x] K else[0?G\x\w\y] K[\y]
-|if (S>=R[S\t])[t\3\1\x] K[\y]
-|if (S<R[S\t])[u\1\3\x] K else[0?G\x\w\y] K[\y]
-|if (S<R[S\t])[u\1\3\x] K[\y]
-|if (S>R[S\t])[u\3\1\x] K else[0?G\x\w\y] K[\y]
-|if (S>R[S\t])[u\3\1\x] K[\y]
-|if (R[S\t]<=S)[t\2\3\x] K else[0?G\x\w\y] K[\y]
-|if (R[S\t]<=S)[t\2\3\x] K[\y]
-|if (R[S\t]>=S)[t\3\2\x] K else[0?G\x\w\y] K[\y]
-|if (R[S\t]>=S)[t\3\2\x] K[\y]
-|if (R[S\t]<S)[u\2\3\x] K else[0?G\x\w\y] K[\y]
-|if (R[S\t]<S)[u\2\3\x] K[\y]
-|if (R[S\t]>S)[u\3\2\x] K else[0?G\x\w\y] K[\y]
-|if (R[S\t]>S)[u\3\2\x] K[\y]
-|if (R[S\t]<=R[S\t])[t\2\4\x] K else[0?G\x\w\y] K[\y]
-|if (R[S\t]<=R[S\t])[t\2\4\x] K[\y]
-|if (R[S\t]>=R[S\t])[t\4\2\x] K else[0?G\x\w\y] K[\y]
-|if (R[S\t]>=R[S\t])[t\4\2\x] K[\y]
-|if (R[S\t]<R[S\t])[u\2\4\x] K else[0?G\x\w\y] K[\y]
-|if (R[S\t]<R[S\t])[u\2\4\x] K[\y]
-|if (R[S\t]>R[S\t])[u\4\2\x] K else[0?G\x\w\y] K[\y]
-|if (R[S\t]>R[S\t])[u\4\2\x] K[\y]
 
 X=while ([\m]S<=S) [t\1\2\x] K[B\z\y]
 |while ([\m]S>=S) [t\2\1\x] K[B\z\y]
 |while ([\m]S<S) [u\1\2\x] K[B\z\y]
 |while ([\m]S>S) [u\2\1\x] K[B\z\y]
-|while ([\m]S<=R[S\t]) [t\1\3\x] K[B\z\y]
-|while ([\m]S>=R[S\t]) [t\3\1\x] K[B\z\y]
-|while ([\m]S<R[S\t]) [u\1\3\x] K[B\z\y]
-|while ([\m]S>R[S\t]) [u\3\1\x] K[B\z\y]
-|while ([\m]R[S\t]<=S) [t\2\3\x] K[B\z\y]
-|while ([\m]R[S\t]>=S) [t\3\2\x] K[B\z\y]
-|while ([\m]R[S\t]<S) [u\2\3\x] K[B\z\y]
-|while ([\m]R[S\t]>S) [u\3\2\x] K[B\z\y]
-|while ([\m]R[S\t]<=R[S\t]) [t\2\4\x] K[B\z\y]
-|while ([\m]R[S\t]>=R[S\t]) [t\4\2\x] K[B\z\y]
-|while ([\m]R[S\t]<R[S\t]) [u\2\4\x] K[B\z\y]
-|while ([\m]R[S\t]>R[S\t]) [u\4\2\x] K[B\z\y]
 
 # - Memory
 #|free(\i);[F\1]
