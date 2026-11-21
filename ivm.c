@@ -224,7 +224,7 @@
 //  s   - save byte in slot (reset hibit)
 
 //  t   - loop <= with 'n' ('t' var upper skip)
-//  u   - TODO: loop >=0 with 'n' (u var skip)
+//  u   - loop <  with 'n' ('u' var upper skip)
 //? v   - 
 
 //  w   - write byte (c!)
@@ -1457,23 +1457,23 @@ ZL(op_B,   'B')  zp.ipc -= *zp.ipc;     goto pnext;
 //     "Uiiss n<back> -> v<ss><back>"   === 5 b -> 3 b
 
 
-// loop: FOR i u end
+// loop: FOR i u end   (t: i <= u, u: i < u)
 ZL(op_t,   't')  zp.acc = zp.mem[zp.ipc[0]];
                  if (zp.acc <= zp.mem[zp.ipc[1]]) {
                    zp.ipc += 3;               goto xnext; } // 3 args
                  zp.ipc += 2 + zp.ipc[2];     goto pnext; // skip
-// NEXT loop ++
+ZL(op_u,   'u')  zp.acc = zp.mem[zp.ipc[0]];
+                 if (zp.acc < zp.mem[zp.ipc[1]]) {
+                   zp.ipc += 3;               goto xnext; } // 3 args
+                 zp.ipc += 2 + zp.ipc[2];     goto pnext; // skip
+// NEXT loop ++ (of a t or a u)
 ZL(op_n,   'n')  tpc = zp.ipc - *zp.ipc + 1;
                  TRACE(p, tpc);
                  zp.acc = ++zp.mem[tpc[1]]; 
-                 if (zp.acc > zp.mem[tpc[2]]) goto pnext; // fall out
+                 if (tpc[0] == 'u' ? zp.acc >= zp.mem[tpc[2]]
+                                   : zp.acc >  zp.mem[tpc[2]])
+                   goto pnext;                            // fall out
                  zp.ipc = tpc + 4;            goto xnext; // body
-
-// loop:      for(i= ...; i; i--) ... (down)
-ZL(op_u,   'u')  zp.acc = zp.mem[zp.ipc[0]];
-                 if (zp.acc) {
-                   zp.ipc += 2;               goto xnext; } // 2 args
-                 zp.ipc += 1 + zp.ipc[2];     goto pnext; // skip
 // NEXT loop --
 // TODO: fuse into t (u) and n
 //ZL(op_m,   'm')  tpc = zp.ipc - *zp.ipc + 1;

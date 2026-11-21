@@ -73,6 +73,8 @@ K=if (E)[?G\x] K else[0?G\x\w\y] K[\y]
 # while (v <= lim): the VM 't' is the test itself, 'B' jumps back to it
 |while (\i<=\d) [\mt\1\2\x] K[B\z\y]
 |while (\i<=\i) [\mt\1\2\x] K[B\z\y]
+|while (\i<\d) [\mu\1\2\x] K[B\z\y]
+|while (\i<\i) [\mu\1\2\x] K[B\z\y]
 |while ([\m]E) [?G\x] K[B\z\y]
 
 
@@ -139,6 +141,11 @@ K=if (E)[?G\x] K else[0?G\x\w\y] K[\y]
 # #TIMED (no name): '#' + 0, only restarts the counting there
 |#timed "[#]\u\*\n
 |#timed[#\#00]\*\n
+# #pragma TIMED "name" / #pragma TIMED: the same, but plain C: other
+#   compilers ignore unknown pragmas (some warn). Other pragmas: skipped
+|#pragma timed "[#]\u\*\n
+|#pragma timed[#\#00]\*\n
+|#pragma\*\n
 
 # - Memory
 #|free(\i);[F\1]
@@ -204,23 +211,21 @@ L=I\{ \+=0; \2<E; \2++) \i\?\C\[\2\]=\d;\}[m\6\8]
 |\i=\d;[C\1\2] \1<=\i; \1++) [\mt\1\4\x] K [n\z\y]
 |\i=\i;[C\1\2] \1<=\i; \1++) [\mt\1\4\x] K [n\z\y]
 
-# TODO: - make same for vars, but can we really?
-#   need new op instead of 't' (u is down) so 'k' maybe (and 'l')
-#   should rewrite so only 'n' is needed, it can figure out the
-#   op, and or run the same code (jump back and forth is ok)
-#   These are 144 bytes (t+n so should minimize, at slight cost)
-
-# \e: temp = ACC - 1, so the limit must be in ACC first (\l: the \d)
-|\i=0; [Z\1]   \1<\d[\l3\eS\t]; \1++) [\mt\1\4\x] K [n\z\y]
-|\i=\d;[C\1\2] \1<\d[\l4\eS\t]; \1++) [\mt\1\5\x] K [n\z\y]
-|\i=\i;[C\1\2] \1<\d[\l4\eS\t]; \1++) [\mt\1\5\x] K [n\z\y]
+# i < lim: the 'u' loop op (exclusive), same layout as 't'
+|\i=0; [Z\1]   \1<\d; \1++) [\mu\1\3\x] K [n\z\y]
+|\i=\d;[C\1\2] \1<\d; \1++) [\mu\1\4\x] K [n\z\y]
+|\i=\i;[C\1\2] \1<\d; \1++) [\mu\1\4\x] K [n\z\y]
+|\i=0; [Z\1]   \1<\i; \1++) [\mu\1\3\x] K [n\z\y]
+|\i=\d;[C\1\2] \1<\i; \1++) [\mu\1\4\x] K [n\z\y]
+|\i=\i;[C\1\2] \1<\i; \1++) [\mu\1\4\x] K [n\z\y]
 
 
 |\i=E[S\1]; \1<=E[S\t];  \1++) [\mt\1\5\x] K [n\z\y]
 # -- TODO: \t is wrong, it's taking a snapshot like PASCAL!
-|\i=E[S\1]; \1<E[\eS\t]; \1++) [\mt\1\5\x] K [n\z\y]
+|\i=E[S\1]; \1<E[S\t];   \1++) [\mu\1\5\x] K [n\z\y]
 
 # counting-down-to-zero (very common in C)
+#   (commented out: needs a down-loop op, \mu below is from before 'u' = <)
 #   for (i = N; i; i--)     and   for (i = N; i > 0; i--)
 # both execute the body N times when N > 0 and leave i == 0
 #|\i=E[S\1]; \1;\i--)    [\mu\1\x] K[m\z\y]

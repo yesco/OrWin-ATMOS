@@ -1,8 +1,5 @@
 // bubble sort of N pseudo random numbers (xorshift16)
 
-#include <stdlib.h>
-#include <stdio.h>
-
 int seed = 1;
 
 int rnd() {
@@ -19,8 +16,8 @@ int main() {
   n = 1000;
   a = malloc(n * 2);
   for (i = 0; i < n; i++) a[i] = rnd() % 10000;
-//#timed "init"
 
+#pragma TIMED "init"
   for (i = 0; i < n; i++) {
     j = 0;
     while (j < (n - 1 - i)) {
@@ -32,8 +29,7 @@ int main() {
       j++;
     }
   }
-//#timed "bubble"
-
+#pragma TIMED "bubble"
   sum = 0; bad = 0;
   for (i = 0; i < n; i++) {
     sum = sum + a[i];
@@ -41,8 +37,6 @@ int main() {
       if (a[i - 1] > a[i]) bad++;
     }
   }
-//#timed "check"
-  
   printf("first last: "); printf("%u ", a[0]); printf("%u\n", a[n - 1]);
   printf("sum: "); printf("%u\n", sum);
   printf("unsorted pairs: "); printf("%u\n", bad);

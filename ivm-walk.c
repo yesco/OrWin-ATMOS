@@ -23,9 +23,9 @@
 // Every relative jump: target = (offset of the rel byte) + 1 +- rel
 //   G  rel           if ACC > 0 forward
 //   B  rel           back
-//   t  slot lim rel  FOR: past body when done (forward)
-//   n  rel           NEXT: back to its 't'
-//   u  slot rel      down-loop (forward)
+//   t  slot lim rel  FOR (<=): past body when done (forward)
+//   u  slot lim rel  FOR (<):  same
+//   n  rel           NEXT: back to its 't' / 'u'
 //
 //   0x80+rel    zjp (rel < 64): jump forward if ACC == 0, see ivm_jump()
 //
@@ -47,11 +47,11 @@
 //   in  SLOT   M(acc = mem[s] = alloc(acc))
 //   -   NEW    0 9 Q 1..8 @ r ' l ( [ K
 //   in  NEW    + - * / % & | ^ { } < = > ? ~ x y z call(arg -> result)
-//   -   UNDEF  t n (VM: loop var; JIT: clobbered) F
+//   -   UNDEF  t u n (VM: loop var; JIT: clobbered) F
 //   ;   NEW    ACC = return value cell, then return
 //
 // JIT status (ivm-jit.c) vs this contract, 2026-11:
-//   all honoured (acc_* in ivm-jit.c)    missing: { } W K x y z k u
+//   all honoured (acc_* in ivm-jit.c)    missing: W K x y z k
 //   l: was sign-extended by host VM
 #define OPI_SLOTS    0x07
 #define OPI_NARGS(i) (((i) >> 3) & 3)
@@ -93,7 +93,7 @@ static const uchar ivm_optab[96] = {
   //  h    i    j    k    l    m    n    o
   _SP, _S1, _S1, _SP, _S1, _S2, _BK, _SP,
   //  p    q    r    s    t    u    v    w
-  _SP, _A0, _S1, _S1, _I3, _J2, _SP, _S1,
+  _SP, _A0, _S1, _S1, _I3, _I3, _SP, _S1,
   //  x    y    z    {    |    }    ~   DEL
   _D1, _D2, _D3, _S1, _S1, _S1, _A0, _A0,
 };

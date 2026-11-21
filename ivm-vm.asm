@@ -1273,7 +1273,7 @@ op_B:
 	
 
 ;;; ------------------------------------------------------------
-;;; t v u oo   — counting-up for test (at top)
+;;; t v u oo   — counting-up for test (at top), u: same but v < u
 ;;;   acc = mem[v]
 ;;;   if (acc <= mem[u])  ipc += 3;          // enter body
 ;;;   else                ipc += 2 + oo;     // exit (G-style)
@@ -1296,6 +1296,7 @@ op_B:
 .if ALTCODE=1
 ;;;  about 100 bytes exatly!
 
+op_u:				;; same, but < (t_skip_load)
 op_t:
 	FIXIPC
 	
@@ -1344,6 +1345,25 @@ t_skip_load:
         lda     (_ivm_memhi),y
         sbc     _ivm_acc+1
         bcc     t_exit
+
+	;; 'u' (<): equal is out too. Only then read the op at ipc-1
+        lda     (_ivm_memlo),y
+        cmp     _ivm_acc
+        bne     t_enter
+        lda     (_ivm_memhi),y
+        cmp     _ivm_acc+1
+        bne     t_enter
+        lda     _ivm_ipc
+        sec
+        sbc     #1
+        sta     tmp_lo
+        lda     _ivm_ipc+1
+        sbc     #0
+        sta     tmp_hi
+        ldy     #0
+        lda     (tmp_lo),y
+        cmp     #'u'
+        beq     t_exit
 
 t_enter:
 	;; go to next op (skip jump offset)
@@ -1418,6 +1438,7 @@ op_n_do_the_math:
 ;;;   saves 24 bytes, lol
 ;;;  (- 1 (/ 4866569 4926832.0)) = 1.2% faster !
 ;;;  (- 1 (/ 4806464 4926832.0)) = 2.44% (upfront load ax)
+op_u:				;; same, but < (t_skip_load)
 op_t:
 ;;; This entry point is only used the first time.
 ;;; During the loop it enters from op_n in op_t_step
@@ -1466,6 +1487,25 @@ t_skip_load:
         lda     (_ivm_memhi),y
         sbc     _ivm_acc+1
         bcc     t_exit
+
+	;; 'u' (<): equal is out too. Only then read the op at ipc-1
+        lda     (_ivm_memlo),y
+        cmp     _ivm_acc
+        bne     t_enter
+        lda     (_ivm_memhi),y
+        cmp     _ivm_acc+1
+        bne     t_enter
+        lda     _ivm_ipc
+        sec
+        sbc     #1
+        sta     tmp_lo
+        lda     _ivm_ipc+1
+        sbc     #0
+        sta     tmp_hi
+        ldy     #0
+        lda     (tmp_lo),y
+        cmp     #'u'
+        beq     t_exit
 
 t_enter:
 	lda     #3
@@ -1534,7 +1574,7 @@ op_n_compute:
 
 ;;; TODO:
 	
-;;; u v oo   — zero-test form
+;;; (down-loop, zero-test form: no op yet, 'u' is the < loop)
 ;;; m delta  — next (does --)
 ;;; (same structure, lengths 3 / 1)
 ;;; ------------------------------------------------------------
@@ -1686,6 +1726,22 @@ strlp:
 	jmp     pnext
 .endif	
 
+;;; #name\0  #TIMED / #pragma TIMED: the host simulator times it, here
+;;; just skip the inline name (else its letters run as ops: "%b")
+op_hash:
+	FIXIPC			; Y = 0, ipc at the name
+:	lda     (_ivm_ipc),y
+	beq     :+
+	iny
+	bne     :-		; names < 255
+:	iny			; past the 0
+.if ALTCODE
+	jmp     pfixnext	; N from INY: Y >= 128 folds into ipc
+.else
+	tya
+	jmp     anext		; ipc += Y
+.endif
+
 ;;; ~ bitwise not
 op_bnot:
         lda     _ivm_acc
@@ -1783,7 +1839,6 @@ shrm_st:
 ;;; unknown: print % + op + NL, halt
 ;;; op is in X from dispatch (do not use _ivm_op)
 ;;; undefined opcodes — named aliases of op_bad
-op_hash:
 op_dollar:
 op_colon:
 
@@ -1818,7 +1873,6 @@ op_k:
 op_o:
 op_p:
 
-op_u:
 op_v:
 
 ;;; TODO: call library routine (see ivm.c)

@@ -32,7 +32,7 @@ INSTRUCTIONS: Keeps this section but keep updated for status
 | `U`                      | Present |
 | `+` `-` `&` `\|` `^`      | **Done** — const hi byte 0: `adc #n; bcc; inx` (`sbc`/`dex`, `and #n; ldx #0`, `ora`/`eor` lo only). Followed by `S d`: each byte straight into d, leaves Y = lo, A = hi (lc_yah): no TAY/TXA/TAX/TYA |
 | `i` `j` `H`              | **Done** — char ++ --: INC / DEC lo only (a char var's hi byte is always 0); int* ++: += 2 |
-| `u` (down-loop)          | **Missing** — warns only |
+| `u`                      | **Done** — like `t` but `<`: `for (i = a; i < n; i++)` without the n-1 temp (and right for n == 0) |
 | Array `(` `)`            | Present (needs testing) |
 | / * %                    | JSR helpers in **ivm-lib.asm**: ACC in $FE/$FF (tmp1/tmp2), the other operand in AX, result in AX; a const goes in AX (`*`: the multiplier, fewer rounds) |
 | Element cache            | **Done** — `( ) [ ]` use their own zp pointer arrayindexing ($FC/$FD). AI = &base[idx] is kept while base / idx are not written (no label, call, loop op between); `a[j+1]` after `L j + c S t` reuses it with Y + 2c (word arrays) |
@@ -705,6 +705,7 @@ static void emit_lim_minus_slot(uchar lim, uchar slot) {
 //   Const lim: i <= lim  <=>  i < lim+1 (folded here): emit_below_const.
 // 't' closed by a 'B' back to it (while (v <= lim)): its exit, else 0xffff.
 // Rotated like the for loop ('n'), the 'B' has the test (no increment).
+#define IS_LOOP(o) ((o) == 't' || (o) == 'u')     // u: < (exclusive)
 static word i_exit_b(const uchar *c, word i, word len) {
   word t = ivm_jump(c + i, i);
   if (t >= 2 && t <= len && c[t - 2] == 'B' && (word)(t - c[t - 1]) == i)
@@ -755,37 +756,41 @@ static void emit_below_const(uchar cphi, uchar cplo, word v, word body) {
 }
 
 // Y = lo, A = hi of the loop var: to body while <= lim (as emit_loop_test)
-static void emit_loop_test_ya(uchar lim, word body) {
+// excl ('u'): while < lim
+static void emit_loop_test_ya(uchar lim, word body, uchar excl) {
   word fx;
   if (is_const(lim)) {
     word v = const_val(lim);
+    if (excl) { if (v) emit_below_const(CMPN, CPYN, v, body); return; }
     if (v == 0xffff) { emjump(JMP, body); return; }   // always true
     emit_below_const(CMPN, CPYN, (word)(v + 1), body);
   } else {
     emit_alub(CMP, lim, 1); fx = emrel(BNE);
     emit_alub(CPY, lim, 0); empatch(fx);
-    emjump(BEQ, body);
+    if (!excl) emjump(BEQ, body);
     emjump(BCC, body);
   }
 }
 
-static void emit_loop_test(uchar slot, uchar lim, word body, uchar ax) {
+static void emit_loop_test(uchar slot, uchar lim, word body, uchar ax,
+                           uchar excl) {
   word fx;
 
   if (!ax) {
-    emit_lim_minus_slot(lim, slot);
-    emjump(BCS, body);
+    if (excl) { emit_lim_minus_slot(slot, lim); emjump(BCC, body); }
+    else      { emit_lim_minus_slot(lim, slot); emjump(BCS, body); }
     return;
   }
   emit_load_slot(slot);
   if (is_const(lim)) {
     word v = const_val(lim);
+    if (excl) { if (v) emit_below_const(CPXN, CMPN, v, body); return; }
     if (v == 0xffff) { emjump(JMP, body); return; }   // always true
     emit_below_const(CPXN, CMPN, (word)(v + 1), body);
   } else {
     emop2(CPX, slothi(lim)); fx = emrel(BNE);
     emop2(CMP, slotlo(lim)); empatch(fx);
-    emjump(BEQ, body);                                // == (Z only if hi ==)
+    if (!excl) emjump(BEQ, body);                     // == (Z only if hi ==)
     emjump(BCC, body);                                // <
   }
 }
@@ -1123,7 +1128,7 @@ static void ksa_check(word bc_target) {
 // a KEEP op needn't save it (ivm-walk.c contract: "- SLOT/NEW/UNDEF")
 static int acc_unread(const uchar *c, word bc) {
   uchar op = c[bc];
-  return op < 32 || strchr("09Q12345678@r'l([KLCUIJijH;tn", op);
+  return op < 32 || strchr("09Q12345678@r'l([KLCUIJijH;tun", op);
 }
 static int acc_dead(const uchar *c, word bc, word len) {
   return bc < len && !is_label(bc) && acc_unread(c, bc);
@@ -1191,7 +1196,7 @@ static void loop_align_check(word ibc) {
   uchar k;
   if (!JIT_ALIGN_LOOPS || body == 0xffff || len >= 128) return;
   for (b = (word)(ibc + 4); b < lc_bc; b += ivm_oplen(lc_code + b))
-    if (lc_code[b] == 't' || !ivm_oplen(lc_code + b)) return;   // not innermost
+    if (IS_LOOP(lc_code[b]) || !ivm_oplen(lc_code + b)) return;   // not innermost
   if (lc_at >= 3 && lc_out[lc_at - 3] == JMP) return;   // long form
   if (((lc_out_org + body) ^ (lc_out_org + lc_at)) >> 8 == 0) return;
   for (k = 0; k < lc_nal && lc_al[k].ibc != ibc; k++) ;
@@ -1255,12 +1260,12 @@ static word ivm_jit1(const uchar *code, word code_len,
     for (i = 0; i < code_len; i += n) {
       n = ivm_oplen(code + i);
       if (!n) n = 1;
-      if (strchr("SIJUCMH',t", code[i]) && i + 1 < code_len)
+      if (strchr("SIJUCMH',tu", code[i]) && i + 1 < code_len)
         wword(code[i + 1]);                        // word write (byte slots)
-      if (code[i] == 't') { LBL(i + 4); continue; }  // body start
+      if (IS_LOOP(code[i])) { LBL(i + 4); continue; }  // body start
       if (code[i] == 'n') continue;
       t = ivm_jump(code + i, i);
-      if (code[i] == 'B' && t < code_len && code[t] == 't' &&
+      if (code[i] == 'B' && t < code_len && IS_LOOP(code[t]) &&
           i_exit_b(code, t, code_len) == i + 2)
         t = 0xffff;                // closes a rotated while: no jump to 't'
       if (t != 0xffff) LBL(t);
@@ -1281,7 +1286,7 @@ static word ivm_jit1(const uchar *code, word code_len,
     for (i = 0; i < code_len; i += n) {
       n = ivm_oplen(code + i);
       if (!n) n = 1;
-      t = code[i] == 't' ? (word)(i + 4) : code[i] == 'n' || code[i] == 'B'
+      t = IS_LOOP(code[i]) ? (word)(i + 4) : code[i] == 'n' || code[i] == 'B'
           ? 0xffff : ivm_jump(code + i, i);
       if (t != 0xffff) {
         uchar k;
@@ -1933,18 +1938,19 @@ static word ivm_jit1(const uchar *code, word code_len,
       word rel = PAR;
       word dest = (word)((p - code) - rel);
       uchar k;
-      if (code[dest] == 't' && i_exit_b(code, dest, code_len) == p - code &&
+      if (IS_LOOP(code[dest]) && i_exit_b(code, dest, code_len) == p - code &&
           is_stride(code, dest, code_len)) {
         acc_lost();                // stride: Y/A from the 'U' just before
         loop_close(dest);
-        emit_loop_test_ya(code[dest + 2], (word)(dest + 4));
+        emit_loop_test_ya(code[dest + 2], (word)(dest + 4), code[dest] == 'u');
         loop_align_check(dest);
         break;                     // fell out: Y/A = var, ACC undefined
       }
-      if (code[dest] == 't' && i_exit_b(code, dest, code_len) == p - code) {
+      if (IS_LOOP(code[dest]) && i_exit_b(code, dest, code_len) == p - code) {
         acc_lost();                // closes a while: the test is here
         loop_close(dest);
-        emit_loop_test(code[dest + 1], code[dest + 2], (word)(dest + 4), 1);
+        emit_loop_test(code[dest + 1], code[dest + 2], (word)(dest + 4), 1,
+                       code[dest] == 'u');
         loop_align_check(dest);
         acc_ax_slot(code[dest + 1]);   // fell out: AX = the var
         break;
@@ -2009,7 +2015,7 @@ static word ivm_jit1(const uchar *code, word code_len,
     //   body: ...               (AX = mem[slot] here, from the test)
     //   n:    INC slot; test: LDA/LDX slot; CPX/CMP lim; Bcc body
     //   exit:                   (falls out of the test: skip is not used)
-    case 't': {
+    case 't': case 'u': {
       // does the body start by reading the loop var? (a load of it, or
       // '[' with it as index): then the test leaves it in AX
       const uchar *b = p + 3;
@@ -2078,7 +2084,7 @@ static word ivm_jit1(const uchar *code, word code_len,
       word ibc;
       uchar ax;
       acc_lost();                  // -, UNDEF
-      if (ip < code || *ip != 't') {
+      if (ip < code || !IS_LOOP(*ip)) {
         // can't find matching t; just consume
         break;
       }
@@ -2087,7 +2093,7 @@ static word ivm_jit1(const uchar *code, word code_len,
       emit_inc(ip[1]);
       ax = loop_close(ibc);        // the t's JMP lands on the test
       // body = bc pc after the t (backward: short branch when it fits)
-      emit_loop_test(ip[1], ip[2], (word)(ibc + 4), ax);
+      emit_loop_test(ip[1], ip[2], (word)(ibc + 4), ax, *ip == 'u');
       loop_align_check(ibc);
       if (ax) acc_ax_slot(ip[1]);  // loop done: AX = the loop var
       break;
@@ -2100,7 +2106,7 @@ static word ivm_jit1(const uchar *code, word code_len,
       // stride loop: next is its closing 'B': leave Y = lo, A = hi
       if (p[0] == 'B') {
         word d = (word)((p + 2 - code) - p[1]);
-        if (code[d] == 't' && code[d + 1] == a &&
+        if (IS_LOOP(code[d]) && code[d + 1] == a &&
             i_exit_b(code, d, code_len) == (word)(p + 2 - code) &&
             is_stride(code, d, code_len)) {
           acc_drop();
@@ -2124,16 +2130,6 @@ static word ivm_jit1(const uchar *code, word code_len,
       }
       emit_alub(ADC, b, 1); emop2(STA, slothi(a));
       acc_ps(a);
-      break;
-    }
-
-    // u: down-loop — 2 operands (not yet implemented)
-    case 'u': {
-      uchar slot = PAR;
-      uchar skip = PAR;
-      printf("%%Warning: unimpl op 'u' (slot %u skip %u) — skipping\n",
-        slot, skip);
-      acc_lost();
       break;
     }
 
@@ -2397,7 +2393,7 @@ static int sim_trap(Cpu6502 *c) {
     t = cpu_mem[0x101 + c->s];
     t |= (word)(cpu_mem[0x102 + c->s] << 8);
     if (cpu_mem[t + 1]) {
-      printf("======= %9luc %5uB - ", now - sim_t_cyc,
+      printf("\n\n======= %9luc %5uB - ", now - sim_t_cyc,
         (unsigned)(word)(t - 2 - sim_t_pc));
       while (cpu_mem[++t]) putchar(cpu_mem[t]);
       if (c->xpage - sim_t_xp) printf("  +%luc page", c->xpage - sim_t_xp);

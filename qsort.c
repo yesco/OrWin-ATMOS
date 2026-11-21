@@ -1,9 +1,6 @@
 // quicksort of N pseudo random numbers (xorshift16), no recursion:
 // a stack of ranges (lo, hi) still to sort
 
-#include <stdlib.h>
-#include <stdio.h>
-
 int seed = 1;
 
 int rnd() {
@@ -25,7 +22,7 @@ int main() {
   shi = malloc(64);
   for (i = 0; i < n; i++) a[i] = rnd();
 
-//#timed "init"
+#pragma TIMED "init"
   sp = 0; maxsp = 0;
   slo[0] = 0; shi[0] = n - 1; sp = 1;
   while (sp > 0) {
@@ -58,7 +55,7 @@ int main() {
       if (sp > maxsp) maxsp = sp;
     }
   }
-//#timed "qsort"
+#pragma TIMED "qsort"
   sum = 0; bad = 0;
   for (i = 0; i < n; i++) {
     sum = sum + a[i];
