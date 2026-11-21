@@ -94,11 +94,14 @@
 // BYTE CODES OVERVIEW
 // ====================
 // 0-31                 - fast var load (load typically 4x more common th store)
-// $  \ : _ `           - FREE to use
+// #$  \  :_  `         - FREE to use
 // 12345678             - local vars 1-7, 8 ist last var (AX)
-// AD   R T VY          - FREE op vars
-//? abcdefgh            - lisp?
-//? op                  - ?index stuff, built in loops iGG GG if zero/non-zero?
+// AD H R T VY          - FREE op vars
+//   possibly usage: cAr Cons cDr, Heap/Here, Recurse, Tail-call, Vector/index? Yndex?
+//
+// ? abcdefgh           - lisp?
+// ? m op               - ?index stuff, built in loops iGG GG if zero/non-zero?
+// ? tuv                - ?SSTACK saves, param: 1..7 (ACC is 0th)
 // xyz                  - syscall function LN with 1,2,3 byte args indices+acc
 //
 
@@ -145,7 +148,7 @@
 //  <=> - cmp - lt eq gt => 0 or 1
 //  ? - NOT acc (C: !)
 //  @ - read from global address ACC
-//  A - TODO: Aiijj - array index swap
+//  A - array swap "Abbiijj": swap ((word*)b)[i] and [j], ACC = the old [i]
 //  B - back jump "B03" = back 3 bytes
 //  C - copy ... cons(acc, $) - a variant of alloc cell and
 //? D - cdr acc= acc[1] == 2 + @, LOL TODO: good for linked list
@@ -216,15 +219,13 @@
 //  n   - next loop (together with tu inc/dec-for)
 //
 //? op  - TODO: object, 'o' methOd call 'p' ... ?
-//
 //  q   - quit program
-//
 //  r   - read byte (c@)
 //  s   - save byte in slot (reset hibit)
 
-//  t   - loop/IF <= with 'n' ('t' var upper skip)
-//  u   - loop/IF <  with 'n' ('u' var upper skip)
-//? v   - TODO: loop/IF == or != ???
+//  t   - loop <= with 'n' ('t' var upper skip)
+//  u   - loop <  with 'n' ('u' var upper skip)
+//? v   - 
 
 //  w   - write byte (c!)
 //  xyz - call library functions w 2..4 args
@@ -1366,12 +1367,12 @@ ZL(op_idxs,')')
 
 // [ aa ii - byte index read
 ZL(op_bidxl,'[')
-    CHKP(PAR + zp.mem[zp.ipc[1]], 2);
+    CHKP(PAR + zp.mem[zp.ipc[1]], 1);
     zp.acc = ((uchar*)(IVM_PTR(PAR)))[zp.mem[zp.ipc[1]]];
     zp.ipc += 2; goto xnext; // 2 args
 // ] aa ii - byte index write
 ZL(op_bidxs,']')
-    CHKP(PAR + zp.mem[zp.ipc[1]], 2);
+    CHKP(PAR + zp.mem[zp.ipc[1]], 1);
     ((uchar*)(IVM_PTR(PAR)))[zp.mem[zp.ipc[1]]] = zp.acc;
     zp.ipc += 2; goto xnext; // 2 args
  
@@ -1450,6 +1451,15 @@ ZL(op_B,   'B')  zp.ipc -= *zp.ipc;     goto pnext;
 //       (/ 9844950 7211499.0) 37% faster (1.365173870231418)
 // - ivm-vm.asm - 18% faster with FOR-ops
 //       (/ 2893598 2449567.0) 18% faster (1.1812691794100754)
+
+// A bb ii jj - swap word elements (t = a[i]; a[i] = a[j]; a[j] = t;),
+// ACC = old a[i] (the t)
+ZL(op_A,   'A') {
+    ivmvar *b = IVM_PTR(PAR);
+    word i = zp.mem[zp.ipc[1]], j = zp.mem[zp.ipc[2]];
+    CHKP(PAR + 2UL * i, 2); CHKP(PAR + 2UL * j, 2);
+    zp.acc = b[i]; b[i] = b[j]; b[j] = zp.acc;
+    zp.ipc += 3; goto xnext; } // 3 args
 
 // TODO: 'v'  ==  "U n' stepper that combines:
 //     "Uiiss B<back> -> v<ss><back>    === 5 b -> 3 b !
@@ -1777,9 +1787,9 @@ char save_blob(const char *path, uchar *img, int len) {
 typedef struct { const char *name; uchar hdr; word zptop; word heapend; } JitTarget;
 
 static const JitTarget jit_targets[3] = {
-  { "sim6502", 1, 0xFC, 0xF000 },   // sim65: C stack $F000-$FF00 (ivm-lib)
+  { "sim6502", 1, 0xFA, 0xF000 },   // sim65: C stack $F000-$FF00 (ivm-lib)
   { "atmos",   2, 0xE2, 0x9800 },   // cc65 atmos ZP is $E2-$FB; HIRES at $9800
-  { "raw",     0, 0xFC, 0x9800 },
+  { "raw",     0, 0xFA, 0x9800 },
 };
 static const JitTarget *jit_tg;
 
@@ -1816,9 +1826,9 @@ static int jit_layout(Process *proc, uchar *base, word *mem_base, word *out_org)
       }
       jit_zp = (word)(jit_tg->zptop - jit_membytes);
     }
-    // JIT zp: arrayindexing $FC/$FD, tmp1/tmp2 $FE/$FF
-    if (jit_zp + jit_membytes > 0xFC) {
-      printf("%%JIT: -z: mem[] $%02X+%u bytes overruns $FC\n", jit_zp, jit_membytes);
+    // JIT zp: arrayswap $FA/$FB, arrayindexing $FC/$FD, tmp1/tmp2 $FE/$FF
+    if (jit_zp + jit_membytes > 0xFA) {
+      printf("%%JIT: -z: mem[] $%02X+%u bytes overruns $FA\n", jit_zp, jit_membytes);
       return 0;
     }
     *mem_base = jit_zp;

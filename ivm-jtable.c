@@ -30,6 +30,7 @@
 
       t['I'] = &&op_I;    t['J'] = &&op_J;   t['U'] = &&op_U;
       t['i'] = &&op_bi;   t['j'] = &&op_bj;  t['H'] = &&op_H;
+      t['A'] = &&op_A;
 
       t['M'] = &&op_M;    t['F'] = &&op_F;
       t['m'] = &&op_m;

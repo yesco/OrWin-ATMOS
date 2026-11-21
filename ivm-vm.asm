@@ -52,6 +52,10 @@ tmp_lo: .res 1
 tmp_hi: .res 1
 
 savey:  .res 1
+
+swp2:   .res 2                  ; op_A: &base[j]
+swpb:   .res 1                  ; op_A: base slot
+swpi:   .res 1                  ; op_A: i slot
         
 
 ;;; CODESIZE: (- _IVM_ASM_END _IVM_ASM_START)
@@ -1156,6 +1160,79 @@ op_J:   USEY
         sta     _ivm_acc+1
         jmp     pnext
 
+;;; A bb ii jj  swap ((word*)mem[bb])[mem[ii]] and [mem[jj]]; acc = old [ii]
+;;; (t = a[i]; a[i] = a[j]; a[j] = t;)
+op_A:
+.if ALTCODE=0
+        ldy     #0
+.endif
+        lda     (_ivm_ipc),y    ; bb
+        sta     swpb
+        iny
+        lda     (_ivm_ipc),y    ; ii
+        sta     swpi
+        iny
+        sty     savey           ; at jj: pnext skips it
+        lda     (_ivm_ipc),y    ; jj
+        ldx     swpb
+        jsr     elem_adr        ; tmp = &base[j]
+        lda     tmp_lo
+        sta     swp2
+        lda     tmp_hi
+        sta     swp2+1
+        lda     swpi
+        ldx     swpb
+        jsr     elem_adr        ; tmp = &base[i]
+
+        ldy     #1              ; hi
+        lda     (tmp_lo),y
+        tax
+        lda     (swp2),y
+        sta     (tmp_lo),y
+        txa
+        sta     (swp2),y
+        sta     _ivm_acc+1
+        dey                     ; lo
+        lda     (tmp_lo),y
+        tax
+        lda     (swp2),y
+        sta     (tmp_lo),y
+        txa
+        sta     (swp2),y
+        sta     _ivm_acc
+
+.if ALTCODE=0
+        ; consume 2 of the 3 operand bytes (pnext: the 3rd)
+        inc     _ivm_ipc
+        bne     :+
+        inc     _ivm_ipc+1
+:       inc     _ivm_ipc
+        bne     :+
+        inc     _ivm_ipc+1
+:
+.endif
+        jmp     pnext
+
+;;; tmp = mem[X] + 2 * mem[A]   (A = index slot, X = base slot; Y used)
+elem_adr:
+        tay
+        lda     (_ivm_memlo),y
+        asl     a
+        sta     tmp_lo
+        lda     (_ivm_memhi),y
+        rol     a
+        sta     tmp_hi
+        txa
+        tay
+        clc
+        lda     (_ivm_memlo),y
+        adc     tmp_lo
+        sta     tmp_lo
+        lda     (_ivm_memhi),y
+        adc     tmp_hi
+        sta     tmp_hi
+        rts
+
 ;;; Uab  mem[a] += mem[b]; acc = mem[a]
 op_U:   USEY
 	;; read first parameter
@@ -1842,7 +1919,6 @@ shrm_st:
 op_dollar:
 op_colon:
 
-op_A:
 op_D:
 
 

@@ -45,7 +45,7 @@
 //   in  KEEP   S(+SLOT) ! , w s ) ] m . P E zjp X(returns it)
 //   -   SLOT   L <32 C(dst) U(1st) I J i j H
 //   in  SLOT   M(acc = mem[s] = alloc(acc))
-//   -   NEW    0 9 Q 1..8 @ r ' l ( [ K
+//   -   NEW    0 9 Q 1..8 @ r ' l ( [ K A (old a[i])
 //   in  NEW    + - * / % & | ^ { } < = > ? ~ x y z call(arg -> result)
 //   -   UNDEF  t u n (VM: loop var; JIT: clobbered) F
 //   ;   NEW    ACC = return value cell, then return
@@ -62,6 +62,7 @@
 #define _A0  0x00   // no operands
 #define _S1  0x09   // slot
 #define _S2  0x13   // slot slot
+#define _S3  0x1f   // slot slot slot
 #define _D1  0x08   // 1 data byte (not a slot)
 #define _D2  0x10   // 2 data bytes
 #define _D3  0x18   // 3 data bytes
@@ -81,7 +82,7 @@ static const uchar ivm_optab[96] = {
   //  8    9    :    ;    <    =    >    ?
   _A0, _A0, _SP, _A0, _S1, _S1, _S1, _A0,
   //  @    A    B    C    D    E    F    G
-  _S1, _SP, _BK, _S2, _SP, _A0, _S1, _FW,
+  _S1, _S3, _BK, _S2, _SP, _A0, _S1, _FW,
   //  H    I    J    K    L    M    N    O
   _S1, _S1, _S1, _A0, _S1, _S1, _A0, _D1,
   //  P    Q    R    S    T    U    V    W

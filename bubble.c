@@ -10,7 +10,7 @@ int rnd() {
 }
 
 int main() {
-  int i, j, n, t, sum, bad;
+  int i, j, n, k, x, y, t, sum, bad;
   int *a;
 
   n = 1000;
@@ -21,10 +21,10 @@ int main() {
   for (i = 0; i < n; i++) {
     j = 0;
     while (j < (n - 1 - i)) {
-      if (a[j] > a[j + 1]) {
-        t = a[j];
-        a[j] = a[j + 1];
-        a[j + 1] = t;
+      x = a[j]; k= j+1; y= a[k];
+      if (x > y) {
+        a[j] = y;
+        a[k] = x;
       }
       j++;
     }

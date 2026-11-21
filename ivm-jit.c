@@ -35,6 +35,7 @@ INSTRUCTIONS: Keeps this section but keep updated for status
 | `u`                      | **Done** — like `t` but `<`: `for (i = a; i < n; i++)` without the n-1 temp (and right for n == 0) |
 | Array `(` `)`            | Present (needs testing) |
 | / * %                    | JSR helpers in **ivm-lib.asm**: ACC in $FE/$FF (tmp1/tmp2), the other operand in AX, result in AX; a const goes in AX (`*`: the multiplier, fewer rounds) |
+| `A` array swap           | **Done** — `t = a[i]; a[i] = a[j]; a[j] = t;` (int*): AS ($FA/$FB) = &a[j], AI = &a[i] (cache), 2 x 3 (zp),Y moves; AX = old a[i] for the `S t` |
 | Element cache            | **Done** — `( ) [ ]` use their own zp pointer arrayindexing ($FC/$FD). AI = &base[idx] is kept while base / idx are not written (no label, call, loop op between); `a[j+1]` after `L j + c S t` reuses it with Y + 2c (word arrays) |
 | ZP optimisation          | **Done, one place** — emop2() + zpmap[] (see below) |
 | Branch emit              | **Done** — emrel/empatch (local), emjump (bytecode target); forward short by estimate (JIT_BC_SCALE), retry if too far |
@@ -412,7 +413,10 @@ static uchar tmp2 = 0xff;
 // survives lib calls and shifts (the element cache, lc_ai_*)
 static uchar arrayindexing = 0xfc;
 #define AI   arrayindexing
-#define ZPTOP 0xfc          // -z: mem[] ends below this
+// second element pointer: 'A' (array swap) a[j]
+static uchar arrayswap = 0xfa;
+#define AS   arrayswap
+#define ZPTOP 0xfa          // -z: mem[] ends below this
 
 // element cache: AI == &base[idx] (kind 'w': word ops ( ), Y = 2*off;
 // 'b': byte ops [ ], ptr = (idx lo, base hi + idx hi), Y = base lo).
@@ -897,24 +901,29 @@ static void emit_belem_ptr_ax(uchar base) {
 // TODO: this is very expensive, we should pass in the size
 //   if we know it, also, have a byte operator. If size < 256 bytes
 //   then we can simplify to simple LDA (base),Y !
+static void emit_elem_ptr_zp(uchar zp, uchar base, uchar idx);
 static void emit_elem_ptr(uchar base, uchar idx) {
+  emit_elem_ptr_zp(AI, base, idx);
+}
+// the same into any zp pointer
+static void emit_elem_ptr_zp(uchar zp, uchar base, uchar idx) {
   if (is_const(idx)) {
     // constant index folds into one add
     word v = (word)(const_val(idx) << 1);
     emit_load_slot(base);
     em(CLC);
-    em2(ADCN, (uchar)(v & 0xff)); em2(STAZ, AI);
+    em2(ADCN, (uchar)(v & 0xff)); em2(STAZ, zp);
     em(TXA);
-    em2(ADCN, (uchar)(v >> 8));   em2(STAZ, AI + 1);
+    em2(ADCN, (uchar)(v >> 8));   em2(STAZ, zp + 1);
     return;
   }
-  // idx*2 (lo kept in Y, hi in AI + 1), then + base
+  // idx*2 (lo kept in Y, hi in zp + 1), then + base
   emop2(LDA, slotlo(idx)); em(ASLA); em(TAY);
-  emop2(LDA, slothi(idx)); em(ROLA); em2(STAZ, AI + 1);
+  emop2(LDA, slothi(idx)); em(ROLA); em2(STAZ, zp + 1);
   em(CLC); em(TYA);
-  emit_alub(ADC, base, 0); em2(STAZ, AI);
-  em2(LDAZ, AI + 1);
-  emit_alub(ADC, base, 1); em2(STAZ, AI + 1);
+  emit_alub(ADC, base, 0); em2(STAZ, zp);
+  em2(LDAZ, zp + 1);
+  emit_alub(ADC, base, 1); em2(STAZ, zp + 1);
 }
 
 // Byte indexing address calculation
@@ -1925,6 +1934,25 @@ static word ivm_jit1(const uchar *code, word code_len,
         em(PLA); em2(LDYN, (uchar)(y + 1)); em2(STAIY, AI); em(TAX);
         em(PLA); em(DEY);                   em2(STAIY, AI);
       }
+      break;
+    }
+
+    // A bb ii jj: swap ((word*)base)[i] and [j]; ACC = the old [i]
+    //   AS = &base[j], AI = &base[i] (cached: stays valid after)
+    case 'A': {                                    // -, NEW
+      uchar base = PAR, i = PAR, j = PAR;
+      acc_drop();
+      emit_elem_ptr_zp(AS, base, j);
+      if (ai_hit('w', base, i) != 0) {
+        emit_elem_ptr(base, i);
+        if (!is_const(i)) { lc_ai_kind = 'w'; lc_ai_base = base; lc_ai_idx = i; }
+        else lc_ai_kind = 0;
+      }
+      em2(LDYN, 1); em2(LDAIY, AI); em(TAX);       // hi
+      em2(LDAIY, AS); em2(STAIY, AI); em(TXA); em2(STAIY, AS);
+      em(DEY);      em2(LDAIY, AI); em(PHA);       // lo
+      em2(LDAIY, AS); em2(STAIY, AI); em(PLA); em2(STAIY, AS);
+      acc_ax();                                    // A X = old [i]
       break;
     }
 

@@ -65,7 +65,7 @@
         if (op < '@') goto op_not;
         goto op_at;
       }
-      if (op < 'B') goto op_unk;
+      if (op < 'B') goto op_A;
       if (op < 'C') goto op_B;
       goto op_C;
     }
