@@ -987,6 +987,61 @@ static void acc_write(uchar s) {
   if (acc_at == ACC_PEND && !acc_hk) acc_flush();  // old mem[s] into AX
   acc_s = 0xff;
 }
+static void emit_acc_double(void);
+static void emit_lda_pend(uchar hi);
+// ACC <<= n / >>= n, n const. NEW. >= 8: a byte move (from where ACC is,
+// if pending), then the rest in A; 7: a byte move and one bit back;
+// < 7: hi via tmp2: ASL A; ROL tmp2
+static void emit_shift(uchar right, uchar n) {
+  uchar k;
+  if (acc_at == ACC_PEND && acc_hk) {              // const: fold
+    acc_pk(n > 15 ? 0 : right ? (word)(acc_k >> n) : (word)(acc_k << n));
+    return;
+  }
+  if (!n) { acc_need(); return; }
+  if (n > 15) { acc_drop(); emit_load0(); acc_ax(); acc_x0 = 1; return; }
+  if (n == 1 && !right) { emit_acc_double(); return; }
+  if (n >= 8) {
+    if (acc_at == ACC_PEND) emit_lda_pend(right ? 1 : 0);
+    else { acc_need(); if (right) em(TXA); }
+    for (k = 8; k < n; k++) em(right ? LSRA : ASLA);
+    if (right) { em2(LDXN, 0); acc_ax(); acc_x0 = 1; }
+    else { em(TAX); em2(LDAN, 0); acc_ax(); }
+    return;
+  }
+  if (n == 7) {                                   // a byte move + 1 bit
+    word fx;
+    if (!right) {        // hi = hi0:lo>>1, lo = lo0 << 7
+      if (acc_at == ACC_PEND) { emit_lda_pend(1); em(LSRA); emit_lda_pend(0); }
+      else { acc_need(); em(TAY); em(TXA); em(LSRA); em(TYA); }
+      em(RORA); em(TAX); em2(LDAN, 0); em(RORA);
+      acc_ax();
+      return;
+    }
+    // lo = hi << 1 | lo7, hi = hi7
+    if (acc_at == ACC_PEND) { emit_lda_pend(0); em(ASLA); emit_lda_pend(1); }
+    else { acc_need(); em(ASLA); em(TXA); }
+    em(ROLA); em2(LDXN, 0);
+    fx = emrel(BCC); em(INX); empatch(fx);
+    acc_ax();
+    return;
+  }
+  acc_need();
+  em2(STXZ, tmp2);
+  for (k = 0; k < n; k++) {
+    if (right) { em2(LSRZ, tmp2); em(RORA); }
+    else       { em(ASLA); em2(ROLZ, tmp2); }
+  }
+  em2(LDXZ, tmp2);
+  acc_ax();
+}
+// n if v == 1 << n, else 0xff
+static uchar log2w(word v) {
+  uchar n;
+  for (n = 0; n < 16; n++) if (v == (word)(1u << n)) return n;
+  return 0xff;
+}
+
 // ACC *= 2 (i+i, i*2, 2*i): from the pending slot, or in AX. NEW
 static void emit_acc_double(void) {
   if (acc_at == ACC_PEND && !acc_hk) {
@@ -1477,6 +1532,35 @@ static word ivm_jit1(const uchar *code, word code_len,
     // * / % — helpers as in ivm-vm.asm (ACC op PAR); TODO: PARAX into zp_par
     case '*': case '/': case '%': {
       uchar s = PAR;
+      uchar n = is_const(s) ? log2w(const_val(s)) : 0xff;
+      if (n != 0xff) {                            // power of 2: no JSR
+        if (op != '%') { emit_shift(op == '/', n); break; }
+        if (acc_at == ACC_PEND && acc_hk) {       // const % const
+          acc_pk((word)(acc_k & (const_val(s) - 1)));
+          break;
+        }
+        if (n == 0) { acc_drop(); acc_pk(0); break; }
+        if (n < 8) {                              // lo & mask, X = 0
+          if (acc_at == ACC_PEND) emit_lda_pend(0); else acc_need();
+          if (n) em2(ANDN, (uchar)((1 << n) - 1));
+          em2(LDXN, 0);
+          acc_ax(); acc_x0 = 1;
+        } else if (n == 8) {                      // lo, X = 0
+          if (acc_at == ACC_PEND) emit_lda_pend(0); else acc_need();
+          em2(LDXN, 0);
+          acc_ax(); acc_x0 = 1;
+        } else {                                  // hi & mask
+          uchar m = (uchar)((1 << (n - 8)) - 1);
+          if (acc_at == ACC_PEND) {
+            emit_lda_pend(1); em2(ANDN, m); em(TAX); emit_lda_pend(0);
+          } else {
+            acc_need();
+            em(TAY); em(TXA); em2(ANDN, m); em(TAX); em(TYA);
+          }
+          acc_ax();
+        }
+        break;
+      }
       if (op == '*' && is_const(s) && const_val(s) == 2) {   // i * 2
         emit_acc_double();
         break;
@@ -1981,6 +2065,29 @@ static word ivm_jit1(const uchar *code, word code_len,
       printf("%%Warning: unimpl op 'u' (slot %u skip %u) — skipping\n",
         slot, skip);
       acc_lost();
+      break;
+    }
+
+    // { }: ACC <<= / >>= mem[s]. Const: emit_shift; else a loop on Y
+    case '{': case '}': {                          // in, NEW
+      uchar s = PAR;
+      word top, fx;
+      if (is_const(s)) {
+        emit_shift(op == '}', (uchar)(const_val(s) > 15 ? 16 : const_val(s)));
+        break;
+      }
+      acc_need();
+      em2(STXZ, tmp2);
+      emop2(LDY, slotlo(s));
+      fx = emrel(BEQ);
+      top = lc_at;
+      if (op == '}') { em2(LSRZ, tmp2); em(RORA); }
+      else           { em(ASLA); em2(ROLZ, tmp2); }
+      em(DEY);
+      em2(BNE, (uchar)(top - (lc_at + 2)));
+      empatch(fx);
+      em2(LDXZ, tmp2);
+      acc_ax();
       break;
     }
 

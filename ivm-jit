@@ -8,8 +8,8 @@ rm ivm-jit.x ivm-vm.lst ivm-jit.sim ivm-jit.lst 2>/dev/null
 # recreate .lst asm and merge C force comments
 ./cafix
 
-sim65 -c ivm-jit.sim -z -j $* $name.ivm | grep cycles | sed 's/ cycles//' > $name.cycles.jit
-sim65 -c ivm-jit.sim -z $* $name.ivm | tee $name.log
+time sim65 -c ivm-jit.sim -z -j $* $name.ivm | grep cycles | sed 's/ cycles//' > $name.cycles.jit
+time sim65 -c ivm-jit.sim -z $* $name.ivm | tee $name.log
 
 jit=$(cat "$name.cycles.jit")
 jitandrun=$(grep cycles "$name.log" | sed 's/ cycles//')

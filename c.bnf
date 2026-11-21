@@ -307,6 +307,10 @@ H=\i\?c++;[i\1]
 |\i\?\C\[S\]=E;[\]\1\2]
 |\i\?\W\[S\]=E;[)\1\2]
 |\i\[S\]=E;[\]\1\2]
+# p[expr] = ...: index into a temp first   captures: 1=p 2=index 3=temp 4=value
+|\i\?\C\[E[S\t]\]=E;[\]\1\3]
+|\i\?\W\[E[S\t]\]=E;[)\1\3]
+|\i\[E[S\t]\]=E;[\]\1\3]
 
 |\i=0;[Z\1]
 |\i=S+S;[L\2+\3S\1]
@@ -352,6 +356,10 @@ R=\i(Z)[\v]
 |\i\?\C\[S\][\[\1\2]
 |\i\?\W\[S\][(\1\2]
 |\i\[S\][\[\1\2]
+# p[expr]   captures: 1=p 2=index 3=temp
+|\i\?\C\[E\][S\t\[\1\3]
+|\i\?\W\[E\][S\t(\1\3]
+|\i\[E\][S\t\[\1\3]
 
 # - Parens
 |(E)
