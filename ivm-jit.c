@@ -1176,7 +1176,7 @@ static int yah_is(uchar s) {
   return lc_yah == s && lc_yah_at == lc_at && !is_label(lc_bc);
 }
 static int is_label(word bc) {
-  return lc_lbl && (lc_lbl[bc >> 3] & (1 << (bc & 7)));
+  return lc_lbl != 0 && (lc_lbl[bc >> 3] & (1 << (bc & 7)));
 }
 
 // emit a pending load (no message if lost)
@@ -2659,8 +2659,148 @@ word ivm_jit(const uchar *code, word code_len,
   return lc_retry ? 0 : r;
 }
 
+#ifdef MEMMAP
+// ---- memory map (-DMEMMAP) ---------------------------------------------
+//
+// The areas in address order and what's in them: slots (names, frames,
+// consts), the library routines, strings, static arrays, the functions,
+// the heap. Names from NAME.sym (parse -DSYMS) next to the .ivm, if there.
+// The caller notes each area (mm_area), then mm_print.
+
+const char *mm_ivm;                    // the .ivm file (the caller sets it)
+
+enum { MM_SLOTS, MM_LIB, MM_IMG, MM_DATA, MM_BSS, MM_CODE, MM_HEAP, MM_N };
+static const char *const mm_what[MM_N] = {
+  "SLOTS mem[]", "ivm-lib", "MEM[] image", "DATA strings, init arrays",
+  "BSS static arrays", "CODE", "HEAP"
+};
+static word  mm_at[MM_N], mm_len[MM_N];
+static char *mm_slot[256];             // .sym: slot -> name
+static uchar mm_arr[256];              // .sym: an array (its const slot)
+static char *mm_fn[64];                // .sym: vector -> function name
+
+static void mm_area(uchar k, word at, word n) { mm_at[k] = at; mm_len[k] = n; }
+
+// NAME.sym: "  ss  M  name ..." (A: an array), "aaaa  Vvv  name ..."
+static void mm_syms(void) {
+  char path[128], line[128], name[64], *dot = 0, *q;
+  unsigned a, v;
+  char tag;
+  FILE *f;
+
+  if (!mm_ivm || strlen(mm_ivm) > 120) return;
+  strcpy(path, mm_ivm);
+  for (q = path; *q; q++) if (*q == '.') dot = q;
+  strcpy(dot ? dot : q, ".sym");
+  if (!(f = fopen(path, "r"))) return;
+  while (fgets(line, sizeof line, f)) {
+    if (line[0] == ' ' && sscanf(line, " %x %c %63s", &a, &tag, name) == 3 &&
+        (tag == 'M' || tag == 'A') && a < 256 && !mm_slot[a]) {
+      mm_slot[a] = strdup(name);
+      mm_arr[a] = tag == 'A';
+    } else if (sscanf(line, "%x V%x %63s", &a, &v, name) == 3 && v < 64)
+      mm_fn[v] = strdup(name);
+  }
+  fclose(f);
+}
+
+// slot i: its name, a frame cell, or a const
+static void mm_slotline(word at, uchar i, uchar memsz) {
+  uchar v, fb, best = 0xff, k;
+  static const char *const hd[4] = { "ret", "value", "prev fp", "last param" };
+
+  printf("  $%04X  %02x  ", at, i);
+  if (mm_slot[i]) printf("%s%s", mm_slot[i], mm_arr[i] ? "  (array)" : "");
+  if (is_const(i)) {
+    printf("%sconst $%04X", mm_slot[i] ? "  " : "", const_val(i));
+    if (mm_len[MM_BSS] && const_val(i) == mm_at[MM_BSS] + mm_len[MM_BSS])
+      printf("  (bss end)");
+    printf("\n");
+    return;
+  }
+
+  // the frame it's in: the highest base <= i
+  for (v = 0; lc_fbase && v < lc_ncall; v++) {
+    fb = lc_fbase[v];
+    if (fb <= i && (best == 0xff || fb > lc_fbase[best])) best = v;
+  }
+  if (best != 0xff && !mm_slot[i]) {
+    k = (uchar)(i - lc_fbase[best]);
+    if (mm_fn[best]) printf("%s", mm_fn[best]); else printf("V%02x", best);
+    if (k < 4) printf(" %s", hd[k]); else printf(" +%u", k);
+  }
+  printf("\n");
+  (void)memsz;
+}
+
+// what of the arrays (their const slots) is in [at, at + n)
+static void mm_arrays(word at, word n, uchar memsz) {
+  word i, w;
+  for (i = 0; i < memsz; i++)
+    if (mm_arr[i] && is_const((uchar)i) && (w = const_val((uchar)i)) >= at &&
+        w - at < n)
+      printf("  $%04X  %s\n", w, mm_slot[i]);
+}
+
+static void mm_print(uchar memsz) {
+  static const char *const lib[] = { "putchar", "putnum", "puts", "free",
+    "malloc", "mul", "div", "mod", "printstr", "timed", "memset" };
+  uchar k, j, done = 0;
+  unsigned long i;
+
+  mm_syms();
+  printf("\n--- MEMMAP %s ---\n", mm_ivm ? mm_ivm : (const char *)"");
+  while (done != (1 << MM_N) - 1) {
+
+    // the next area by address
+    for (j = 0xff, k = 0; k < MM_N; k++)
+      if (!(done & (1 << k)) && (j == 0xff || mm_at[k] < mm_at[j])) j = k;
+    done |= (uchar)(1 << j);
+    if (!mm_len[j]) continue;
+    printf("$%04X --- %s (%u bytes) ---\n", mm_at[j], mm_what[j], mm_len[j]);
+
+    switch (j) {
+    case MM_SLOTS:
+      for (i = 0; i < memsz; i++)
+        mm_slotline((word)(mm_at[j] + 2 * i), (uchar)i, memsz);
+      break;
+    case MM_LIB:                         // its routines, by address
+      for (i = 0; i < 0x10000L; ) {
+        word nx = 0xffff;
+        for (k = 0; k <= LIB_MEMSET; k++) {
+          #ifndef HOSTSIM
+          if (k == LIB_TIMED) continue;
+          #endif
+          if (rule_ref(k) == i) printf("  $%04X  %s\n", (word)i, lib[k]);
+          if (rule_ref(k) > i && rule_ref(k) < nx) nx = rule_ref(k);
+        }
+        if (nx == 0xffff) break;
+        i = nx;
+      }
+      break;
+    case MM_DATA: case MM_BSS:
+      mm_arrays(mm_at[j], mm_len[j], memsz);
+      break;
+    case MM_CODE:
+      printf("  $%04X  JMP _start, vectors\n", mm_at[j]);
+      for (k = 0; lc_vec_bc && k < lc_ncall; k++) {
+        word a = (word)(lc_out_org + lc_map[lc_vec_bc[k]]);
+        if (mm_fn[k]) printf("  $%04X  %s()\n", a, mm_fn[k]);
+        else printf("  $%04X  V%02x()\n", a, k);
+      }
+      if (lc_main_at)
+        printf("  $%04X  _start (global inits, main)\n",
+               (word)(lc_out_org + lc_main_at));
+      break;
+    }
+  }
+  printf("\n");
+}
+#endif // MEMMAP
+
 #ifdef HOSTSIM
 // ---------------------------------------------------------------------------
+
 // HOSTSIM: run on the host. sim_run_blob() lays an .ivm blob out in the 64K of
 // cpu6502.c, JIT-compiles it there and runs it:
 //
@@ -2864,6 +3004,17 @@ word sim_run_blob(uchar *blob, uchar zp, uchar zp_at, word org) {
     memcpy(cpu_mem + SIM_opmemset, sim_memset, sizeof(sim_memset));
   }
 
+#ifdef MEMMAP
+  mm_area(MM_SLOTS, mem_base, membytes);
+  mm_area(MM_DATA, data, (word)(len - hdata));
+  mm_area(MM_BSS, bss, bss_n);
+  mm_area(MM_CODE, org, size);
+  mm_area(MM_HEAP, (word)((org + size + 0xFF) & ~0xFF),
+          (word)(bss - ((org + size + 0xFF) & ~0xFF)));
+  mm_area(MM_LIB, SIM_opmemset, (word)(SIM_opputnum + 0x10 - SIM_opmemset));
+                                          // C traps (memset is 6502)
+  mm_print((uchar)memsz);
+#endif
   if (bss_n)
     printf("--- SIM: static arrays $%04X-$%04X ---\n", (unsigned)bss,
            (unsigned)(bss + bss_n - 1));

@@ -538,11 +538,25 @@ void scope_enter(void) {
   if (scope_depth < 255) scope_depth++;
 }
 
+#ifdef SYMS
+// locals and params at their scope's end: kept for the .sym (remapped
+// with the live symbols)
+#define MAX_DEAD 256
+static Symbol sym_dead[MAX_DEAD];
+static word nsym_dead;
+#endif
+
 void scope_leave(void) {
   if (scope_depth == 0) return;
 
   while (nsym > 0 && syms[nsym - 1].scope >= scope_depth) {
     nsym--;
+    #ifdef SYMS
+      if (nsym_dead < MAX_DEAD) {
+        sym_dead[nsym_dead++] = syms[nsym];
+        syms[nsym].name = NULL;        // the copy has it now
+      }
+    #endif
     free(syms[nsym].name);
     syms[nsym].name = NULL;
   }
@@ -1130,6 +1144,11 @@ static void gen_map_syms(uchar *map) {
   for (i = 0; i < nvector; i++)
     frame_base[i] = map[frame_base[i]];
 
+  #ifdef SYMS
+    for (i = 0; i < nsym_dead; i++)
+      if (sym_dead[i].type == SYM_VAR)
+        sym_dead[i].address = map[sym_dead[i].address];
+  #endif
   for (i = 0; i < nsym; i++) {
     s = &syms[i];
     if (s->type == SYM_VAR) {

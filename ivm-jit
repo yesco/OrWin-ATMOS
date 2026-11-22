@@ -14,7 +14,8 @@ time sim65 -c ivm-jit.sim -z $* $name.ivm | tee $name.log
 echo 
 echo 
 echo "--- -t generate file ---"
-time sim65 -c ivm-jit.sim -j -z -tsim6502 $* $name.ivm -o$name.ivm.sim
+cl65 -DMEMMAP -DJIT -Oirs -C sim6502.cfg -t sim6502 ivm-lib.o ivm.c -o ivm-jit-map.sim || exit 1
+time sim65 -c ivm-jit-map.sim -j -z -tsim6502 $* $name.ivm -o$name.ivm.sim
 echo
 echo
 
@@ -33,7 +34,7 @@ echo
 
 echo
 echo
-ls -ugGlf ivm-jit.sim ivm-jit.x $name.ivm $name.ivm.sim 2>/dev/null
+ls -ugGlf ivm-jit.sim ivm-jit-map.sim $name.ivm $name.ivm.sim 2>/dev/null
 echo
 echo "=== ivm.c: `./wcode ivm.c` LOC ==="
 echo "=== jit c: `./wcode ivm-jit.c` LOC ==="

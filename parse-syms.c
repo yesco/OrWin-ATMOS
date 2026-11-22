@@ -17,10 +17,31 @@ static uchar frame_size(uchar v) {
   return sz;
 }
 
+// "c" "w*", an array "c[100]"
 static void sym_type_str(Symbol *s, char *buf) {
   buf[0] = (char)(s->vtype ? s->vtype : 'w');
   buf[1] = 0;
-  if (s->is_ptr) { buf[1] = '*'; buf[2] = 0; }
+  if (s->nelem) sprintf(buf + 1, "[%u]", (unsigned)s->nelem);
+  else if (s->is_ptr) { buf[1] = '*'; buf[2] = 0; }
+}
+
+// a local / param (gone at its scope's end, kept in sym_dead): slot,
+// name, type, its function
+static void sym_local(Symbol *s) {
+  char tbuf[12];
+  uchar v, best = 0xff;
+  if (s->type != SYM_VAR) return;
+  sym_type_str(s, tbuf);
+  fprintf(sym_fp, "  %02x  %c  %-20s  %s  %-5s", s->address,
+          s->nelem ? 'A' : 'M', s->name, s->pidx ? "param    " : "local    ",
+          tbuf);
+
+  // its function: the frame with the highest base <= its slot
+  for (v = 0; v < nvector; v++)
+    if (frame_base[v] <= s->address &&
+        (best == 0xff || frame_base[v] > frame_base[best])) best = v;
+  if (best != 0xff && !s->nelem) fprintf(sym_fp, "  V%02x", best);
+  fputc('\n', sym_fp);
 }
 
 // stream one patch line when resolved — no arrays
@@ -51,7 +72,7 @@ static void sym_open(const char *path) {
 static void sym_write_all(void) {
   word i, j, pc;
   uchar v, fb, sz, op;
-  char tbuf[4];
+  char tbuf[12];
   Symbol *s;
   // reuse the static note_* arrays: 512 bytes less on the cc65 C stack
   uchar *r = sym_r, *wcnt = sym_w;
@@ -110,7 +131,8 @@ static void sym_write_all(void) {
     s = &syms[i];
     if (s->type != SYM_VAR) continue;
     sym_type_str(s, tbuf);
-    fprintf(sym_fp, "  %02x  M  %-20s  ", s->address, s->name);
+    fprintf(sym_fp, "  %02x  %c  %-20s  ", s->address, s->nelem ? 'A' : 'M',
+            s->name);
     if (s->pidx) fprintf(sym_fp, "param     ");
     else if (s->scope == 0) fprintf(sym_fp, "global    ");
     else fprintf(sym_fp, "local     ");
@@ -129,6 +151,9 @@ static void sym_write_all(void) {
 
     fputc('\n', sym_fp);
   }
+
+  // the locals and params
+  for (i = 0; i < nsym_dead; i++) sym_local(&sym_dead[i]);
 
   // one line per function: entry address, vector, frame base and
   // size, how often it's called, and its parameter list.

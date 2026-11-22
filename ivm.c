@@ -1844,6 +1844,7 @@ static ivmvar *jit_memimg;          // -o: copy of mem[], strings relocated
 static uchar  *jit_blob;            // the loaded blob (its real address)
 static uchar  *jit_data;            // blob string section
 static word    jit_membytes, jit_datalen, jit_imgmem, jit_imgdata;
+static word    jit_bss_at, jit_bss_n;    // static arrays (-o / in place)
 
 // Decide mem_base / out_org (and const view) before ivm_jit(). 0 = error.
 static int jit_layout(Process *proc, uchar *base, word *mem_base, word *out_org) {
@@ -1930,6 +1931,7 @@ static int jit_layout(Process *proc, uchar *base, word *mem_base, word *out_org)
   // zeroed gap (the file has the zeros, ivmlib_load zero-fills)
   bss_img = (word)((jit_imgdata + jit_datalen + 255) & ~255u);
   if (bss_n) bss_move(jit_memimg + bh->constidx, bss_end, bss_img);
+  jit_bss_at = bss_img; jit_bss_n = bss_n;
 
   if (!jit_force_zp) *mem_base = jit_imgmem;
   ivmlib_zpsrc = jit_imgmem;
@@ -2133,6 +2135,27 @@ word jit_compile(Process* proc) {
       printf("\n--- JIT: emitted %u bytes (BC: %u) of 6502 at org 0x%04X ---\n\n",
         jit_size, code_len, out_org);
 
+    #ifdef MEMMAP
+      // the -o / in place (sim65) image: always there with JIT_INMEM (-j
+      // too), else only with -o
+      #ifdef JIT_INMEM
+      if (1) {
+      #else
+      if (jit_outfile) {
+      #endif
+        word heap = (word)((out_org + jit_size + 0xFF) & ~0xFF);
+        mm_area(MM_SLOTS, mem_base, jit_membytes);
+        mm_area(MM_LIB, (word)(unsigned)ivmlib_start,
+                (word)(ivmlib_end - ivmlib_start));
+        if (mem_base != jit_imgmem)            // -z: the zp copy's source
+          mm_area(MM_IMG, jit_imgmem, jit_membytes);
+        mm_area(MM_DATA, jit_imgdata, jit_datalen);
+        mm_area(MM_BSS, jit_bss_at, jit_bss_n);
+        mm_area(MM_CODE, out_org, jit_size);
+        mm_area(MM_HEAP, heap, (word)(jit_tg->heapend - heap));
+        mm_print((uchar)(jit_membytes / 2));
+      }
+    #endif
       if (jit_outfile) jit_save(out, jit_size, out_org);
     #ifdef JIT_INMEM
       else if (runs) jit_load(out, jit_size, out_org);   // -j: just JIT
@@ -2248,6 +2271,9 @@ int run_file(char* filename) {
   if (!img) return -1;
 #endif
     
+#ifdef MEMMAP
+  mm_ivm = filename;
+#endif
   r = run_loaded_blob(img, len);
 #ifndef OSCAR64
   free(img);
