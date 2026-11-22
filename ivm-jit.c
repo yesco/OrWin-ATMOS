@@ -528,6 +528,7 @@ static void ksa_check(word bc_target);
 static void emjump(uchar bop, word bc_target) {
   word t = (bc_target < lc_mapn) ? lc_map[bc_target] : 0xffff;
   word at;
+  LcFix *f;
 
   ksa_check(bc_target);
 
@@ -542,23 +543,28 @@ static void emjump(uchar bop, word bc_target) {
     return;
   }
 
+  // a fixup: patched at the end
   if (lc_nfix >= 256) { lc_err = 1; return; }
-  lc_fix[lc_nfix].bc_target = bc_target;
-  lc_fix[lc_nfix].bc_from = lc_bc;
-  lc_fix[lc_nfix].sh = 0;
+  f = &lc_fix[lc_nfix++];
+  f->bc_target = bc_target;
+  f->bc_from = lc_bc;
+
+  // short: the offset patched
   if (bop != JMP && !IS_LONG(lc_bc) &&
       (long)(bc_target - lc_bc) * JIT_BC_SCALE <= 127) {
-    em2(bop, 0);                              // short, offset patched
-    lc_fix[lc_nfix].at = (word)(lc_at - 1);
-    lc_fix[lc_nfix].sh = 1;
+    em2(bop, 0);
+    f->at = (word)(lc_at - 1);
+    f->sh = 1;
+
+  // long: the opposite cond skips a JMP, its address patched
   } else {
-    if (bop != JMP) em2(rev_branch(bop), 3);  // opposite cond skips the JMP
+    if (bop != JMP) em2(rev_branch(bop), 3);
     em(JMP);
     at = lc_at;
     em(0); em(0);
-    lc_fix[lc_nfix].at = at;
+    f->at = at;
+    f->sh = 0;
   }
-  lc_nfix++;
 }
 
 
@@ -817,23 +823,36 @@ static void emit_loop_test(uchar slot, uchar lim, word body, uchar ax,
 // open loops: 't' emits "JMP test" with an empty operand, its 'n' patches
 // it (loops nest, so this is a stack). ibc = bytecode pc of the 't'.
 #define MAX_LOOPS 8
-static struct { word ibc, at; uchar ax; } lc_loop[MAX_LOOPS];
+typedef struct { word ibc, at; uchar ax; } LcLoop;
+static LcLoop lc_loop[MAX_LOOPS];
 static uchar lc_nloop;
 
 // patch the JMP of the open loop at 't' ibc to here (its test); its ax
 static uchar loop_close(word ibc) {
   uchar k;
+  LcLoop *l;
   for (k = lc_nloop; k-- > 0; ) {
-    if (lc_loop[k].ibc != ibc) continue;
-    if (lc_loop[k].at + 1 < lc_max) {
+    l = &lc_loop[k];
+    if (l->ibc != ibc) continue;
+
+    // its JMP: to here
+    if (l->at + 1 < lc_max) {
       word abs = (word)(lc_out_org + lc_at);
-      lc_out[lc_loop[k].at]     = (uchar)(abs & 0xff);
-      lc_out[lc_loop[k].at + 1] = (uchar)(abs >> 8);
+      lc_out[l->at]     = (uchar)(abs & 0xff);
+      lc_out[l->at + 1] = (uchar)(abs >> 8);
     }
     lc_nloop = k;
-    return lc_loop[k].ax;
+    return l->ax;
   }
   return 0;
+}
+
+// open the loop at 't' ibc: its JMP's address is at lc_at
+static void loop_open(word ibc, uchar ax) {
+  LcLoop *l;
+  if (lc_nloop == MAX_LOOPS) { printf("%%JIT: loops nested too deep\n"); return; }
+  l = &lc_loop[lc_nloop++];
+  l->ibc = ibc; l->at = lc_at; l->ax = ax;
 }
 
 // "AX == mem[slot]" at a label. lc_ksa[]: such labels; every jump there
@@ -843,8 +862,21 @@ static uchar loop_close(word ibc) {
 // - a label starting with a slot load, reached only by fall-through and
 //   'B' (a while head), if the fall-in has AX == slot: each 'B' loads it
 //   unless AX already has it (prescan adds, the label keeps or drops them)
-static struct { word bc; uchar slot, b; } lc_ksa[MAX_LOOPS * 4];  // b: by 'B'
+typedef struct { word bc; uchar slot, b; } LcKsa;          // b: by 'B'
+static LcKsa lc_ksa[MAX_LOOPS * 4];
 static uchar lc_nksa;
+
+// a new "AX == mem[slot]" label (the caller checks there is room)
+static void ksa_add(word bc, uchar slot, uchar b) {
+  LcKsa *q = &lc_ksa[lc_nksa++];
+  q->bc = bc; q->slot = slot; q->b = b;
+}
+// the one at bc, 0 if none
+static LcKsa *ksa_at(word bc) {
+  uchar k;
+  for (k = 0; k < lc_nksa; k++) if (lc_ksa[k].bc == bc) return &lc_ksa[k];
+  return 0;
+}
 
 
 // Byte element pointer like emit_belem_ptr, index in Y (lo) and A (hi)
@@ -1116,12 +1148,10 @@ static void acc_label(void) {
 // a jump to a while head (lc_ksa, b) must arrive with AX == its slot. Catches
 // a jump op the prescan (ivm-walk.c ivm_jump) does not know.
 static void ksa_check(word bc_target) {
-  uchar k;
-  for (k = 0; k < lc_nksa; k++)
-    if (lc_ksa[k].bc == bc_target && lc_ksa[k].b &&
-        !(acc_at == ACC_AX && acc_s == lc_ksa[k].slot))
-      printf("%%JIT: jump to bc %u without AX == slot %u\n",
-             (unsigned)bc_target, lc_ksa[k].slot);
+  LcKsa *q = ksa_at(bc_target);
+  if (q && q->b && !(acc_at == ACC_AX && acc_s == q->slot))
+    printf("%%JIT: jump to bc %u without AX == slot %u\n",
+           (unsigned)bc_target, q->slot);
 }
 
 // next op (at bc) does not read ACC and is not a label: ACC is dead, so
@@ -1173,20 +1203,23 @@ static word lc_len;           // its length
 // branch crosses a page gets its body moved to one page on the next run,
 // with NOPs after the 't' JMP (never executed: costs bytes, no cycles).
 #define JIT_ALIGN_LOOPS 0     // 1: pad innermost loops (sieve: avg -0.1%, +0..37 B)
-static struct { word ibc, len; } lc_al[8];  // loops to align, body length
+typedef struct { word ibc, len; } LcAl;
+static LcAl lc_al[8];                       // loops to align, body length
 static uchar lc_nal;
+// the one for the loop at ibc, 0 if none
+static LcAl *al_at(word ibc) {
+  uchar k;
+  for (k = 0; k < lc_nal; k++) if (lc_al[k].ibc == ibc) return &lc_al[k];
+  return 0;
+}
 
 // 't' after its JMP: pad if the body (len, from a previous run) would
 // straddle a page
 static void loop_pad(word ibc) {
-  uchar k;
-  for (k = 0; k < lc_nal; k++)
-    if (lc_al[k].ibc == ibc) {
-      word a = (word)((lc_out_org + lc_at) & 0xff);
-      if (a + lc_al[k].len > 0x100)
-        for (a = (word)(0x100 - a); a; a--) em(NOP);
-      return;
-    }
+  LcAl *q = al_at(ibc);
+  word a = (word)((lc_out_org + lc_at) & 0xff);
+  if (q && a + q->len > 0x100)
+    for (a = (word)(0x100 - a); a; a--) em(NOP);
 }
 
 // after the closing test of the loop at ibc (innermost loops only: they
@@ -1194,19 +1227,19 @@ static void loop_pad(word ibc) {
 // a page? note it and run again
 static void loop_align_check(word ibc) {
   word body = lc_map[ibc + 4], len = (word)(lc_at - body), b;
-  uchar k;
+  LcAl *q;
   if (!JIT_ALIGN_LOOPS || body == 0xffff || len >= 128) return;
   for (b = (word)(ibc + 4); b < lc_bc; b += ivm_oplen(lc_code + b))
     if ((IS_LOOP(lc_code[b]) && is_loop_head(lc_code, b, lc_mapn)) ||
         !ivm_oplen(lc_code + b)) return;                    // not innermost
   if (lc_at >= 3 && lc_out[lc_at - 3] == JMP) return;   // long form
   if (((lc_out_org + body) ^ (lc_out_org + lc_at)) >> 8 == 0) return;
-  for (k = 0; k < lc_nal && lc_al[k].ibc != ibc; k++) ;
-  if (k == lc_nal) {
+  // note it (padded already: can't help)
+  if ((q = al_at(ibc)) == 0) {
     if (lc_nal == 8) return;
-    lc_nal++;
-  } else if (lc_al[k].len == len) return;   // padded already: can't help
-  lc_al[k].ibc = ibc; lc_al[k].len = len;
+    q = &lc_al[lc_nal++];
+  } else if (q->len == len) return;
+  q->ibc = ibc; q->len = len;
   lc_retry = 1;
 }
 
@@ -1429,9 +1462,10 @@ static void loop_align_check(word ibc) {
 #define G2(op)  ((op) & 0x1F)             // + - & |: group 2
 #define G2ANY   1                         // any op of group 2
 #define MULDIV  0x81                      // * / % (not by a power of 2)
-static const struct {
+typedef struct {
   uchar op, acc; word g; uchar len; const char *t;
-} jit_rules[] = {
+} JitRule;
+static const JitRule jit_rules[] = {
   // ---- + - & | ^ (C before: fold, i + i, commutative swap; between the
   // groups: "op v; S d"). Group 1: operand < 256, or ACC < 256
   RULE(G1('+'), G_B1 | G_LIVE, R_NEED | R_AX,
@@ -1676,30 +1710,31 @@ static int rule_guard(word g, const uchar *p) {
 #define RMATCH(r) ((r) == rop || ((r) == G2ANY && rop < 0x20))
 static int jit_rule_k(uchar rop, uchar op, const uchar *p) {
   const uchar *t, *e, *rs = 0, *re = 0;
-  uchar k, b, c, a, y = 0, zp = 0, rn = 0;
+  const JitRule *r;                  // a pointer: no index * 7 per use
+  uchar b, c, a, y = 0, zp = 0, rn = 0;
   word fx[4], top = 0;
   uchar nfx = 0;
 
   // first rule of the key; a write of slot 1 first (it may flush ACC):
   // then the guards see the ACC as the template will
-  for (k = 0; (b = jit_rules[k].op) != 0 && !RMATCH(b); k++) ;
+  for (r = jit_rules; (b = r->op) != 0 && !RMATCH(b); r++) ;
   if (!b) return 0;
-  if (jit_rules[k].acc & R_WRITE) acc_write(p[0]);
+  if (r->acc & R_WRITE) acc_write(p[0]);
 
   // the first rule whose guard holds (R_AGAIN: from the first again)
 again:
-  for (k = 0; (b = jit_rules[k].op) != 0; k++)
-    if (RMATCH(b) && rule_guard(jit_rules[k].g, p)) break;
+  for (r = jit_rules; (b = r->op) != 0; r++)
+    if (RMATCH(b) && rule_guard(r->g, p)) break;
   if (!b) return 0;
 
   // ACC before
-  a = jit_rules[k].acc;
+  a = r->acc;
   if (a & R_NEED) acc_need();
   else if (a & R_DROP) acc_drop();
 
   // the template: by the opcode's column (lo nibble c)
-  t = (const uchar *)jit_rules[k].t;
-  for (e = t + jit_rules[k].len; t < e; ) {
+  t = (const uchar *)r->t;
+  for (e = t + r->len; t < e; ) {
     b = *t++;
     c = b & 15;
 
@@ -1774,7 +1809,7 @@ again:
   }
 
   // ACC after
-  switch (jit_rules[k].acc & 0xF0) {
+  switch (r->acc & 0xF0) {
   case R_SLOT:   acc_ps(p[0]); break;
   case R_LOST:   acc_lost(); break;
   case R_AX:     acc_ax(); break;
@@ -1791,7 +1826,7 @@ again:
   }
 
   // ACC moved for another rule: match again
-  if (jit_rules[k].acc & R_AGAIN) goto again;
+  if (r->acc & R_AGAIN) goto again;
   return 1;
 }
 static int jit_rule(uchar op, const uchar *p) { return jit_rule_k(op, op, p); }
@@ -1864,10 +1899,7 @@ static word ivm_jit1(const uchar *code, word code_len,
       if (code[i] == 'B' && t < code_len && lc_nksa < MAX_LOOPS * 4 &&
           (code[t] < 32 || code[t] == 'L') && !is_fn_entry(t) &&
           t != lc_main_bc) {
-        lc_ksa[lc_nksa].bc = t;
-        lc_ksa[lc_nksa].slot = code[t] < 32 ? code[t] : code[t + 1];
-        lc_ksa[lc_nksa].b = 1;
-        lc_nksa++;
+        ksa_add(t, code[t] < 32 ? code[t] : code[t + 1], 1);
       }
     }
     for (i = 0; vec_bc && i < ncall; i++) LBL(vec_bc[i]);
@@ -1881,9 +1913,8 @@ static word ivm_jit1(const uchar *code, word code_len,
           : code[i] == 'n' || code[i] == 'B'
           ? 0xffff : ivm_jump(code + i, i);
       if (t != 0xffff) {
-        uchar k;
-        for (k = 0; k < lc_nksa; k++)
-          if (lc_ksa[k].bc == t) lc_ksa[k].bc = 0xffff;
+        LcKsa *q;
+        while ((q = ksa_at(t)) != 0) q->bc = 0xffff;
       }
     }
   }
@@ -1915,10 +1946,9 @@ static word ivm_jit1(const uchar *code, word code_len,
     if (is_label(bc_pc)) {
       // lc_ksa: only worth it if the fall-in has AX == slot already
       // ('t': its JMP said so), else drop it: the 'B's come later
-      for (i = 0; i < lc_nksa && lc_ksa[i].bc != bc_pc; i++) ;
-      if (i < lc_nksa && !(acc_at == ACC_AX && acc_s == lc_ksa[i].slot))
-        lc_ksa[i].bc = 0xffff, i = lc_nksa;
-      if (i < lc_nksa) acc_ax_slot(lc_ksa[i].slot);
+      LcKsa *q = ksa_at(bc_pc);
+      if (q && !(acc_at == ACC_AX && acc_s == q->slot)) q->bc = 0xffff, q = 0;
+      if (q) acc_ax_slot(q->slot);
       else if (bc_pc == lc_ya_bc) acc_lost();     // stride body: Y/A = var
       else if (acc_free_label(code, bc_pc)) acc_lost();
       else acc_label();
@@ -2273,7 +2303,7 @@ static word ivm_jit1(const uchar *code, word code_len,
     case 'B': {
       word rel = PAR;
       word dest = (word)((p - code) - rel);
-      uchar k;
+      LcKsa *q;
       if (IS_LOOP(code[dest]) && i_exit_b(code, dest, code_len) == p - code &&
           is_stride(code, dest, code_len)) {
         acc_lost();                // stride: Y/A from the 'U' just before
@@ -2294,13 +2324,10 @@ static word ivm_jit1(const uchar *code, word code_len,
       if (!acc_free_label(code, dest)) acc_flush();  // label expects AX
       acc_keep();
       // back to a loop body start that expects AX = its loop var
-      for (k = 0; k < lc_nksa; k++)
-        if (lc_ksa[k].bc == dest) {
-          if (!(acc_at == ACC_AX && acc_s == lc_ksa[k].slot))
-            emit_load_slot(lc_ksa[k].slot);
-          acc_ax_slot(lc_ksa[k].slot);
-          break;
-        }
+      if ((q = ksa_at(dest)) != 0) {
+        if (!(acc_at == ACC_AX && acc_s == q->slot)) emit_load_slot(q->slot);
+        acc_ax_slot(q->slot);
+      }
       emjump(JMP, dest);
       acc_ax();
       break;
@@ -2345,13 +2372,7 @@ static word ivm_jit1(const uchar *code, word code_len,
         acc_lost();
         lc_ya_next = slot; lc_ya_bc = (word)(bc_pc + 4);
         em(JMP);
-        if (lc_nloop < MAX_LOOPS) {
-          lc_loop[lc_nloop].ibc = bc_pc;
-          lc_loop[lc_nloop].at  = lc_at;
-          lc_loop[lc_nloop].ax  = 0;
-          lc_nloop++;
-        } else
-          printf("%%JIT: loops nested too deep\n");
+        loop_open(bc_pc, 0);
         em(0); em(0);
         loop_pad(bc_pc);
         break;
@@ -2361,24 +2382,13 @@ static word ivm_jit1(const uchar *code, word code_len,
            ((b < end) && (b[0] == slot || (b[0] == 'L' && b[1] == slot) ||
                           (b[0] == '[' && b[2] == slot)));
       if (ax) {                    // body start: AX = loop var (loop top)
-        if (lc_nksa < MAX_LOOPS * 4) {
-          lc_ksa[lc_nksa].bc = (word)(bc_pc + 4);
-          lc_ksa[lc_nksa].slot = slot;
-          lc_ksa[lc_nksa].b = 0;
-          lc_nksa++;
-        }
+        if (lc_nksa < MAX_LOOPS * 4) ksa_add((word)(bc_pc + 4), slot, 0);
       }
       p += 3;                      // slot lim skip: 'n' reads slot, lim
       if (ax) acc_ax_slot(slot);   // unreachable after the JMP: no fall-in
       else acc_lost();             // load at the body start. -, UNDEF
       em(JMP);
-      if (lc_nloop < MAX_LOOPS) {
-        lc_loop[lc_nloop].ibc = bc_pc;
-        lc_loop[lc_nloop].at  = lc_at;
-        lc_loop[lc_nloop].ax  = ax;
-        lc_nloop++;
-      } else
-        printf("%%JIT: loops nested too deep\n");
+      loop_open(bc_pc, ax);
       em(0); em(0);
       loop_pad(bc_pc);
       break;
@@ -2534,7 +2544,8 @@ static word ivm_jit1(const uchar *code, word code_len,
 
   // patch forward jumps (G/i and any unmapped target). Calls need no fixups.
   for (i = 0; i < lc_nfix; i++) {
-    word dest = lc_fix[i].bc_target;
+    LcFix *f = &lc_fix[i];
+    word dest = f->bc_target;
     word mapped = 0xffff;
     word d;
     if (dest < lc_mapn) mapped = lc_map[dest];
@@ -2549,22 +2560,22 @@ static word ivm_jit1(const uchar *code, word code_len,
       return 0;
     }
 
-    if (lc_fix[i].sh) {                     // short: rel8 from after it
-      int off = (int)mapped - (int)(lc_fix[i].at + 1);
+    if (f->sh) {                            // short: rel8 from after it
+      int off = (int)mapped - (int)(f->at + 1);
       if (off > 127) {                        // estimate too low: long next
-        word b = lc_fix[i].bc_from;
+        word b = f->bc_from;
         if (lc_long) lc_long[b >> 3] |= (uchar)(1 << (b & 7));
         lc_retry = 1;
       }
-      lc_out[lc_fix[i].at] = (uchar)off;
+      lc_out[f->at] = (uchar)off;
       continue;
     }
 
     // write absolute JMP target (long form)
-    if (lc_fix[i].at + 1 < lc_max) {
+    if (f->at + 1 < lc_max) {
       word abs = (word)(lc_out_org + mapped);
-      lc_out[lc_fix[i].at]     = (uchar)(abs & 0xff);
-      lc_out[lc_fix[i].at + 1] = (uchar)(abs >> 8);
+      lc_out[f->at]     = (uchar)(abs & 0xff);
+      lc_out[f->at + 1] = (uchar)(abs >> 8);
     }
   }
 
