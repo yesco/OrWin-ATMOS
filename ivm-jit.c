@@ -413,6 +413,8 @@ static uchar tmp2 = 0xff;
 // survives lib calls and shifts (the element cache, lc_ai_*)
 static uchar arrayindexing = 0xfc;
 #define AI   arrayindexing
+#define _AIZ  "\xFC"                     // AI, AI + 1 in templates
+#define _AIZ1 "\xFD"
 // second element pointer: 'A' (array swap) a[j]
 static uchar arrayswap = 0xfa;
 #define AS   arrayswap
@@ -441,6 +443,8 @@ typedef struct { word at, bc_target, bc_from; uchar sh; } LcFix;
 static LcFix lc_fix[256];
 static word  lc_nfix;
 static word  lc_bc;           // bytecode pc of the current op
+static const uchar *lc_code;  // the bytecode
+static word lc_len;           // its length
 static uchar *lc_long;        // ops whose forward branches must be long
 #define IS_LONG(bc) (lc_long && (lc_long[(bc) >> 3] & (1 << ((bc) & 7))))
 
@@ -615,6 +619,7 @@ static void emit_tpl(const uchar *t, uchar len, const uchar *p, uchar op);
 #define _ASLA   "\x0A"
 #define _BEQ    "\xF0"
 #define _CPX    "\xEC"
+#define _CPY    "\xCC"
 #define _CMP    "\xCD"
 #define _BCC    "\x90"
 #define _BCS    "\xB0"
@@ -654,6 +659,7 @@ static void emit_tpl(const uchar *t, uchar len, const uchar *p, uchar op);
 #define _STX    "\x8E"
 #define _STXZ   "\x86"
 #define _STY    "\x8C"
+#define _STYZ   "\x84"
 #define _TAX    "\xAA"
 #define _TAY    "\xA8"
 #define _TXA    "\x8A"
@@ -789,22 +795,22 @@ static void emit_alub(uchar ins, uchar s, uchar hi) {
 // after a compare: [? ...] then zjp or G, no label between, ACC read by
 // neither path? -> the branch target, *skip = bytes to eat, *brc = the
 // branch on C = !cond (BCS: jump if !cond, BCC: if cond); else 0xffff
-static int acc_unread(const uchar *c, word bc);
+static int acc_unread(word bc);
 static int is_label(word bc);
-static word fuse_branch(const uchar *c, word nb, word len, uchar *skip,
-                        uchar *brc) {
+static word fuse_branch(word nb, uchar *skip, uchar *brc) {
+  const uchar *c = lc_code;
   word i = nb, t;
   uchar k = 0, jz;
-  while (i < len && c[i] == '?' && k < 3) {
+  while (i < lc_len && c[i] == '?' && k < 3) {
     if (is_label(i)) return 0xffff;
     i++; k++;
   }
-  if (i >= len || is_label(i)) return 0xffff;
+  if (i >= lc_len || is_label(i)) return 0xffff;
   if ((uchar)(c[i] - 0x80) < 64) { jz = 1; *skip = (uchar)(i - nb + 1); }
-  else if (c[i] == 'G' && i + 1 < len) { jz = 0; *skip = (uchar)(i - nb + 2); }
+  else if (c[i] == 'G' && i + 1 < lc_len) { jz = 0; *skip = (uchar)(i - nb + 2); }
   else return 0xffff;
   t = ivm_jump(c + i, i);
-  if (t >= len || !acc_unread(c, (word)(nb + *skip)) || !acc_unread(c, t))
+  if (t >= lc_len || !acc_unread((word)(nb + *skip)) || !acc_unread(t))
     return 0xffff;
   // value = cond if k even; zjp jumps if value == 0, G if value != 0
   *brc = (uchar)((jz ^ (k & 1)) ? BCS : BCC);
@@ -828,27 +834,30 @@ static void emit_sub_flags(uchar a, uchar b) {
 // 't' closed by a 'B' back to it (while (v <= lim)): its exit, else 0xffff.
 // Rotated like the for loop ('n'), the 'B' has the test (no increment).
 #define IS_LOOP(o) ((o) == 't' || (o) == 'u')     // u: < (exclusive)
-static word i_exit_b(const uchar *c, word i, word len) {
+static word i_exit_b(word i) {
+  const uchar *c = lc_code;
   word t = ivm_jump(c + i, i);
-  if (t >= 2 && t <= len && c[t - 2] == 'B' && (word)(t - c[t - 1]) == i)
+  if (t >= 2 && t <= lc_len && c[t - 2] == 'B' && (word)(t - c[t - 1]) == i)
     return t;
   return 0xffff;
 }
 
 // t / u at i a loop head? Closed by an 'n' or a 'B' back to it. Else it
 // is an if (l < r) / while with a mark before it: compare and branch
-static int is_loop_head(const uchar *c, word i, word len) {
+static int is_loop_head(word i) {
+  const uchar *c = lc_code;
   word ex = ivm_jump(c + i, i);
-  if (ex < 2 || ex > len) return 0;
+  if (ex < 2 || ex > lc_len) return 0;
   if (c[ex - 2] == 'n' && (word)(ex - c[ex - 1]) == i) return 1;
-  return i_exit_b(c, i, len) == ex;
+  return i_exit_b(i) == ex;
 }
 
 // stride loop: 't' at ibc closed by "U v s; B" (v its loop var, the 'B' no
 // jump target): 'U' leaves Y = lo, A = hi, the 'B' tests those
 static int is_label(word bc);
-static int is_stride(const uchar *c, word ibc, word len) {
-  word ex = i_exit_b(c, ibc, len);
+static int is_stride(word ibc) {
+  const uchar *c = lc_code;
+  word ex = i_exit_b(ibc);
   return ex != 0xffff && ex >= ibc + 9 && c[ex - 5] == 'U' &&
          c[ex - 4] == c[ibc + 1] && !is_label((word)(ex - 2));
 }
@@ -889,15 +898,13 @@ static void emit_below_const(uchar cphi, uchar cplo, word v, word body) {
 // Y = lo, A = hi of the loop var: to body while <= lim (as emit_loop_test)
 // excl ('u'): while < lim
 static void emit_loop_test_ya(uchar lim, word body, uchar excl) {
-  word fx;
   if (is_const(lim)) {
     word v = const_val(lim);
     if (excl) { if (v) emit_below_const(CMPN, CPYN, v, body); return; }
     if (v == 0xffff) { emjump(JMP, body); return; }   // always true
     emit_below_const(CMPN, CPYN, (word)(v + 1), body);
   } else {
-    emit_alub(CMP, lim, 1); fx = emrel(BNE);
-    emit_alub(CPY, lim, 0); empatch(fx);
+    TPL(_CMP RHI1 _BNE _CPY RLO1 R_PATCH, &lim);
     if (!excl) emjump(BEQ, body);
     emjump(BCC, body);
   }
@@ -905,7 +912,6 @@ static void emit_loop_test_ya(uchar lim, word body, uchar excl) {
 
 static void emit_loop_test(uchar slot, uchar lim, word body, uchar ax,
                            uchar excl) {
-  word fx;
 
   if (!ax) {
     if (excl) { emit_sub_flags(slot, lim); emjump(BCC, body); }
@@ -919,8 +925,7 @@ static void emit_loop_test(uchar slot, uchar lim, word body, uchar ax,
     if (v == 0xffff) { emjump(JMP, body); return; }   // always true
     emit_below_const(CPXN, CMPN, (word)(v + 1), body);
   } else {
-    emop2(CPX, slothi(lim)); fx = emrel(BNE);
-    emop2(CMP, slotlo(lim)); empatch(fx);
+    TPL(_CPX RHI1 _BNE _CMP RLO1 R_PATCH, &lim);
     if (!excl) emjump(BEQ, body);                     // == (Z only if hi ==)
     emjump(BCC, body);                                // <
   }
@@ -986,24 +991,13 @@ static LcKsa *ksa_at(word bc) {
 
 
 // Byte element pointer like emit_belem_ptr, index in Y (lo) and A (hi)
-static void emit_belem_ptr_ya(uchar base) {
-  em2(STYZ, AI);
-  em(CLC);
-  emit_alub(ADC, base, 1);
-  em2(STAZ, AI + 1);
-  if (is_const(base)) em2(LDYN, const_val(base));
-  else                emop2(LDY, slotlo(base));
-}
+//   T_BTAIL: AI hi = base hi + index hi, Y = base lo (slot 1: base)
+#define T_BTAIL _CLC _ADC RHI1 _STAZ _AIZ1 _LDY RLO1
+static void emit_belem_ptr_ya(uchar base) { TPL(_STYZ _AIZ T_BTAIL, &base); }
 
 // Byte element pointer like emit_belem_ptr, index already in AX
 static void emit_belem_ptr_ax(uchar base) {
-  em2(STAZ, AI);
-  em(TXA);
-  em(CLC);
-  emit_alub(ADC, base, 1);
-  em2(STAZ, AI + 1);
-  if (is_const(base)) em2(LDYN, const_val(base));
-  else                emop2(LDY, slotlo(base));
+  TPL(_STAZ _AIZ _TXA T_BTAIL, &base);
 }
 
 // Word indexing address calculation
@@ -1043,16 +1037,9 @@ static void emit_elem_ptr_zp(uchar zp, uchar base, uchar idx) {
 // ptr = (idx_lo, base_hi+idx_hi), Y = base_lo: the indexed mode does the
 // lo add + carry for free.
 static void emit_belem_ptr(uchar base, uchar idx) {
-  if (is_const(idx)) em2(LDAN, const_val(idx));
-  else               emop2(LDA, slotlo(idx));
-  em2(STAZ, AI);
-  if (is_const(idx)) em2(LDAN, const_val(idx) >> 8);
-  else               emop2(LDA, slothi(idx));
-  em(CLC);
-  emit_alub(ADC, base, 1);
-  em2(STAZ, AI + 1);
-  if (is_const(base)) em2(LDYN, const_val(base));
-  else                emop2(LDY, slotlo(base));
+  uchar sa[2];
+  sa[0] = base; sa[1] = idx;
+  TPL(_LDA RLO2 _STAZ _AIZ _LDA RHI2 T_BTAIL, sa);
 }
 
 // ---- ACC state: where the IVM ACC is, and what is known about it --------
@@ -1261,18 +1248,18 @@ static void ksa_check(word bc_target) {
 
 // next op (at bc) does not read ACC and is not a label: ACC is dead, so
 // a KEEP op needn't save it (ivm-walk.c contract: "- SLOT/NEW/UNDEF")
-static int acc_unread(const uchar *c, word bc) {
-  uchar op = c[bc];
+static int acc_unread(word bc) {
+  uchar op = lc_code[bc];
   return op < 32 || strchr("09Q12345678@r'l([KLCUIJijH;tun", op);
 }
-static int acc_dead(const uchar *c, word bc, word len) {
-  return bc < len && !is_label(bc) && acc_unread(c, bc);
+static int acc_dead(word bc) {
+  return bc < lc_len && !is_label(bc) && acc_unread(bc);
 }
 static int is_fn_entry(word bc);
 // label whose first op doesn't read ACC (not a function entry: that one
 // stores AX): jumps to it and code falling into it needn't load ACC
-static int acc_free_label(const uchar *c, word bc) {
-  return !is_fn_entry(bc) && bc != lc_main_bc && acc_unread(c, bc);
+static int acc_free_label(word bc) {
+  return !is_fn_entry(bc) && bc != lc_main_bc && acc_unread(bc);
 }
 
 // lo / hi byte of a pending ACC (const or slot) into A: LDA #k / LDA slot
@@ -1301,8 +1288,6 @@ static int is_fn_entry(word bc) {
 #define FR_ACC 3
 
 static uchar lc_retry;        // a short forward branch didn't fit
-static const uchar *lc_code;  // the bytecode
-static word lc_len;           // its length
 
 // A taken branch to another page costs +1 cycle: a loop whose closing
 // branch crosses a page gets its body moved to one page on the next run,
@@ -1335,7 +1320,7 @@ static void loop_align_check(word ibc) {
   LcAl *q;
   if (!JIT_ALIGN_LOOPS || body == 0xffff || len >= 128) return;
   for (b = (word)(ibc + 4); b < lc_bc; b += ivm_oplen(lc_code + b))
-    if ((IS_LOOP(lc_code[b]) && is_loop_head(lc_code, b, lc_mapn)) ||
+    if ((IS_LOOP(lc_code[b]) && is_loop_head(b)) ||
         !ivm_oplen(lc_code + b)) return;                    // not innermost
   if (lc_at >= 3 && lc_out[lc_at - 3] == JMP) return;   // long form
   if (((lc_out_org + body) ^ (lc_out_org + lc_at)) >> 8 == 0) return;
@@ -1660,12 +1645,12 @@ static int rule_guard(word g, const uchar *p) {
   if ((g & G_S2) && acc_s != p[1]) return 0;
   if (g & (G_DEAD | G_ZJD)) {
     word nb = (word)(lc_bc + ivm_oplen(lc_code + lc_bc)), t;
-    if ((g & G_DEAD) && !acc_dead(lc_code, nb, lc_len)) return 0;
+    if ((g & G_DEAD) && !acc_dead(nb)) return 0;
     if ((g & G_ZJD) &&
         !(nb + 1 < lc_len && (uchar)(lc_code[nb] - 0x80) < 64 &&
-          !is_label(nb) && acc_unread(lc_code, (word)(nb + 1)) &&
+          !is_label(nb) && acc_unread((word)(nb + 1)) &&
           (t = ivm_jump(lc_code + nb, nb)) < lc_len &&
-          acc_unread(lc_code, t))) return 0;
+          acc_unread(t))) return 0;
   }
 
   // class: of slot 1, or of the shift count lc_rn
@@ -1868,14 +1853,14 @@ static word ivm_jit1(const uchar *code, word code_len,
       if (!n) n = 1;
       if (strchr("SIJUCMH',tu", code[i]) && i + 1 < code_len)
         wword(code[i + 1]);                        // word write (byte slots)
-      if (IS_LOOP(code[i]) && is_loop_head(code, i, code_len)) {
+      if (IS_LOOP(code[i]) && is_loop_head(i)) {
         LBL(i + 4);                                // body start
         continue;
       }
       if (code[i] == 'n') continue;
       t = ivm_jump(code + i, i);
       if (code[i] == 'B' && t < code_len && IS_LOOP(code[t]) &&
-          i_exit_b(code, t, code_len) == i + 2)
+          i_exit_b(t) == i + 2)
         t = 0xffff;                // closes a rotated while: no jump to 't'
       if (t != 0xffff) LBL(t);
       // 'B' to a slot load: candidate "AX == slot" label
@@ -1892,7 +1877,7 @@ static word ivm_jit1(const uchar *code, word code_len,
     for (i = 0; i < code_len; i += n) {
       n = ivm_oplen(code + i);
       if (!n) n = 1;
-      t = IS_LOOP(code[i]) && is_loop_head(code, i, code_len) ? (word)(i + 4)
+      t = IS_LOOP(code[i]) && is_loop_head(i) ? (word)(i + 4)
           : code[i] == 'n' || code[i] == 'B'
           ? 0xffff : ivm_jump(code + i, i);
       if (t != 0xffff) {
@@ -1933,7 +1918,7 @@ static word ivm_jit1(const uchar *code, word code_len,
       if (q && !(acc_at == ACC_AX && acc_s == q->slot)) q->bc = 0xffff, q = 0;
       if (q) acc_ax_slot(q->slot);
       else if (bc_pc == lc_ya_bc) acc_lost();     // stride body: Y/A = var
-      else if (acc_free_label(code, bc_pc)) acc_lost();
+      else if (acc_free_label(bc_pc)) acc_lost();
       else acc_label();
     }
 
@@ -1967,7 +1952,7 @@ static word ivm_jit1(const uchar *code, word code_len,
     // element cache: drop it at joins, calls ($C0+), jumps (n B k),
     // sys calls (x y z), returns (q X ; Q), loop heads
     if (is_label(bc_pc) || op >= 0xC0 || strchr("nBkxyzqX;Q", op) ||
-        (IS_LOOP(op) && is_loop_head(code, bc_pc, code_len)))
+        (IS_LOOP(op) && is_loop_head(bc_pc)))
       ai_drop();
 
     // a write of slot w: drops the cache if w is its base or idx, the
@@ -2137,7 +2122,7 @@ static word ivm_jit1(const uchar *code, word code_len,
     // '<': ACC < mem  <=>  borrow in ACC - mem  <=>  !C
     case '<': case '>': {
       uchar s = PAR, skip, brc;
-      word t = fuse_branch(code, (word)(p - code), code_len, &skip, &brc);
+      word t = fuse_branch((word)(p - code), &skip, &brc);
       if (t != 0xffff) {
         // compare + [? ...] + zjp / G: just the branch, no 0/1. Flags
         // C = !cond: '<' a - s, '>' s - a (a > s <=> s < a)
@@ -2287,15 +2272,15 @@ static word ivm_jit1(const uchar *code, word code_len,
       word rel = PAR;
       word dest = (word)((p - code) - rel);
       LcKsa *q;
-      if (IS_LOOP(code[dest]) && i_exit_b(code, dest, code_len) == p - code &&
-          is_stride(code, dest, code_len)) {
+      if (IS_LOOP(code[dest]) && i_exit_b(dest) == p - code &&
+          is_stride(dest)) {
         acc_lost();                // stride: Y/A from the 'U' just before
         loop_close(dest);
         emit_loop_test_ya(code[dest + 2], (word)(dest + 4), code[dest] == 'u');
         loop_align_check(dest);
         break;                     // fell out: Y/A = var, ACC undefined
       }
-      if (IS_LOOP(code[dest]) && i_exit_b(code, dest, code_len) == p - code) {
+      if (IS_LOOP(code[dest]) && i_exit_b(dest) == p - code) {
         acc_lost();                // closes a while: the test is here
         loop_close(dest);
         emit_loop_test(code[dest + 1], code[dest + 2], (word)(dest + 4), 1,
@@ -2304,7 +2289,7 @@ static word ivm_jit1(const uchar *code, word code_len,
         acc_ax_slot(code[dest + 1]);   // fell out: AX = the var
         break;
       }
-      if (!acc_free_label(code, dest)) acc_flush();  // label expects AX
+      if (!acc_free_label(dest)) acc_flush();  // label expects AX
       acc_keep();
       // back to a loop body start that expects AX = its loop var
       if ((q = ksa_at(dest)) != 0) {
@@ -2329,7 +2314,7 @@ static word ivm_jit1(const uchar *code, word code_len,
       // '[' with it as index): then the test leaves it in AX
       const uchar *b = p + 3;
       uchar slot = p[0], ax;
-      if (!is_loop_head(code, bc_pc, code_len)) {
+      if (!is_loop_head(bc_pc)) {
         // if (l < r) / (l <= r): to the body, else out. u: out if l >= r
         // (l - r: C), t: out if r < l (r - l: !C). -, UNDEF
         uchar l = p[0], r = p[1];
@@ -2341,7 +2326,7 @@ static word ivm_jit1(const uchar *code, word code_len,
         acc_lost();
         break;
       }
-      if (is_stride(code, bc_pc, code_len)) {      // test on Y/A: set them
+      if (is_stride(bc_pc)) {      // test on Y/A: set them
         uchar lim = p[1];
         (void)lim;
         p += 3;
@@ -2361,7 +2346,7 @@ static word ivm_jit1(const uchar *code, word code_len,
         break;
       }
       // while (closed by 'B'): no increment, the test always loads it
-      ax = i_exit_b(code, bc_pc, code_len) != 0xffff ||
+      ax = i_exit_b(bc_pc) != 0xffff ||
            ((b < end) && (b[0] == slot || (b[0] == 'L' && b[1] == slot) ||
                           (b[0] == '[' && b[2] == slot)));
       if (ax) {                    // body start: AX = loop var (loop top)
@@ -2411,8 +2396,8 @@ static word ivm_jit1(const uchar *code, word code_len,
       if (p[0] == 'B') {
         word d = (word)((p + 2 - code) - p[1]);
         if (IS_LOOP(code[d]) && code[d + 1] == a &&
-            i_exit_b(code, d, code_len) == (word)(p + 2 - code) &&
-            is_stride(code, d, code_len)) {
+            i_exit_b(d) == (word)(p + 2 - code) &&
+            is_stride(d)) {
           acc_drop();
           TPL(_CLC _LDA RLO1 _ADC RLO2 _STA RLO1 _TAY
               _LDA RHI1 _ADC RHI2 _STA RHI1, p - 2);
