@@ -235,6 +235,7 @@ void emitop2(uchar op, uchar arg) {
 // ---------------------------------------------------------------------------
 uint16_t const_pool    [MAX_CONSTS];
 uchar    const_is_reloc[MAX_CONSTS]; // 1 = value is offset into data section
+                                     // 2 = offset into bss (static arrays)
 uchar    nconst = 0;
 uchar    constidx = 255; // lowest const slot; 255 = none
 uchar    nreloc_const = 0; // how many reloc entries (for pack)
@@ -246,6 +247,13 @@ uchar    nreloc_const = 0; // how many reloc entries (for pack)
 
 uchar data_pool[MAX_DATA];
 word  data_len = 0;
+
+// Static arrays (bss): zeroed memory the loader sets aside after the
+// blob's end; never in the file. Their consts are reloc words (kind 2):
+// blob offset len + off, so a loader finds them as words >= len. One more
+// kind 2 const marks the end: the loader's bss size
+word  bss_len = 0;
+uchar bss_end_slot = 0;          // the end marker's const slot, 0 none
 
 // Type tags for captures / symbols (high byte of word results)
 // Low 8 bits of a capture = slot or IMM; high 8 = type char.
@@ -333,6 +341,23 @@ uchar add_string_reloc(word off) {
   return add_const_raw((unsigned int)off, 1);
 }
 
+// A static array of n bytes: its const slot (the address after loading).
+// 256 bytes or more: page aligned (the loader aligns the bss), else word
+uchar add_bss_array(word n) {
+  word off;
+  uchar k;
+
+  data_string_start();                       // no 0 offset (0 ends reloc)
+  off = n >= 256 ? (word)((bss_len + 255) & ~255u) : (word)((bss_len + 1) & ~1u);
+  bss_len = (word)(off + n);
+  k = add_const_raw(off, 2);
+
+  // the end marker
+  if (!bss_end_slot) bss_end_slot = add_const_raw(bss_len, 2);
+  else const_pool[CONST_TOP - bss_end_slot] = bss_len;
+  return k;
+}
+
 #define isconst(a) ((uchar)(a) >= constidx && (uchar)(a) <= CONST_TOP)
 #define const_val(a) (const_pool[CONST_TOP - (uchar)(a)])
 
@@ -404,6 +429,8 @@ typedef struct {
   uchar is_ptr;        // 1 if pointer type (still one cell)
   uchar is_const;      // 1 = const / #define, no stores allowed
   uchar vtype;         // TY_WORD ('w') or TY_CHAR ('c') — element type
+  word  nelem;         // static array: element count (its size: nelem *
+                       // (vtype 'c' ? 1 : 2)); address: a const slot. 0 none
 
   uchar scope;         // scope depth it was declared in
 
@@ -453,6 +480,7 @@ Symbol *sym_add(const char *name, SymbolType type, uchar address) {
   s->vtype = 'w';
   s->scope = scope_depth;
   s->pidx = 0;
+  s->nelem = 0;
 
   return s;
 }
@@ -633,6 +661,8 @@ void gen_reset(void) {
   next_glob = 32;
   nreloc_const = 0;
   data_len = 0;
+  bss_len = 0;
+  bss_end_slot = 0;
   pending_func_entry = 0xff;
   main_vec = 0xff;
   main_offset = 0;
@@ -1217,6 +1247,7 @@ uchar *build_blob(int *out_len) {
       os = (uchar)(CONST_TOP - i);
       map[os] = (uchar)(constidx + k);
       v = const_pool[i];
+      if (const_is_reloc[i] == 2) v = (word)(data_len + v);   // bss: past data
       p[0] = (uchar)v;
       p[1] = (uchar)(v >> 8);
       p += 2;

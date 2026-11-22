@@ -38,7 +38,8 @@ D=#define \+ \d\c[\g]\n\o\<
 # - Declarations: optional register\b -> REGISTER slot 0..31
 # -O: REGISTER 0..31, other globals 32..95, frames at 96+
 V=const\c T M;|register\b T M;|T M;
-M=\+=S[\g]U|\+=E[S\1]U|\+U|
+# name[N]: a static array of N (a number or const) elements (\@)
+M=\+\[S\]\@U|\+=S[\g]U|\+=E[S\1]U|\+U|
 
 # - TODO: deep recursion might be bad...
 U=,M|
@@ -434,8 +435,8 @@ R=\i(Z)[\v]
 
 # - Simple Expression: \s = string const, \d = number
 # sizeof: by the type's guard: char 1, int / word / any pointer 2 (\#xx:
-# the result is the const xx)
-S=\d|sizeof(T\?c)\#01|sizeof(T)\#02|sizeof(\i\?c)\#01|sizeof(\i)\#02|\s|\i
+# the result is the const xx); a static array: its size (\$)
+S=\d|sizeof(T\?c)\#01|sizeof(T)\#02|sizeof(\i\$)|sizeof(\i\?c)\#01|sizeof(\i)\#02|\s|\i
 
 # - List of expressions (limited, TODO: get rid of?)
 # TODO: think it'll parse E twice?
@@ -505,6 +506,8 @@ Control:
   \> \< tail-till-here tail-recurse rule (till \> or first alt)
   \#xx  result := hex xx  (same as \d having matched that number)
   \xHH  match the byte HH exactly (no ws skipped)
+  \@    the ident just declared (\1) becomes a static array of \2 elements
+  \$    the ident \i matched is a static array: result := its size (bytes)
   \=n   result := capture n
 
 Generate:

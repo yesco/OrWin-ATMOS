@@ -1476,6 +1476,7 @@ static uchar match_ident_same(uchar n) {
   return 1;
 }
 
+static word last_sym = 0xffff;   // the symbol \i matched last (\$)
 static uchar match_ident(void) {
   uchar c, slot;
   word start_abs, i;
@@ -1501,6 +1502,7 @@ static uchar match_ident(void) {
   }
 
   s = &syms[i];
+  last_sym = i;
   if (s->type == SYM_FUNC) {
 
     // It's a function name?
@@ -1554,6 +1556,34 @@ static uchar match_ident_decl(void) {
 }
 
 
+
+// \@: the last declared ident becomes a static array of capture 2
+// elements (see the matcher)
+static uchar make_array(void) {
+  Symbol *s;
+  uchar slot, n = CAP_SLOT(cap_val(2));
+  word cnt;
+
+  if (!nsym) return 0;
+  s = &syms[nsym - 1];
+  slot = s->address;
+  if (s->type != SYM_VAR || !is_lit(n)) return 0;
+  cnt = (word)lit_val(n);
+  if (!cnt) return 0;
+
+  // give its slot back (the last one handed out)
+  if (scope_depth == 0 && optimize) {
+    if (next_glob == slot + 1) next_glob--;
+  } else if (next_slot == slot + 1) next_slot--;
+
+  s->nelem = cnt;
+  s->is_ptr = 1;
+  s->is_const = 1;                     // the name: no stores
+  s->address = add_bss_array((word)(s->vtype == 'c' ? cnt : cnt * 2));
+  vlog("  array '%s' [%u] %c at const slot %u\n", s->name, (unsigned)cnt,
+    s->vtype, (unsigned)s->address);
+  return 1;
+}
 
 // TODO: match_ident_decl and func_decl must be dduplicates....
 // A: they only share read_ident + sym_find. \+ allocates one slot by
@@ -1784,7 +1814,7 @@ static void free_rules(void) {
 // note: '>' is load-time only (not stored)
 //       '<' becomes HIBIT(x), x=1..31 (alt jump) or HIBIT('<')
 static uchar is_dir(uchar e) {
-  return isdigit(e) || strchr("insfdprlxywmzkcahvgetoubj+{}#='?*", e) != NULL;
+  return isdigit(e) || strchr("insfdprlxywmzkcahvgetoubj+{}#='?*@$", e) != NULL;
 }
 
 static void build_one_rule(uchar r, char *rhs) {
@@ -2274,6 +2304,20 @@ int run() {
   else if (c == HIBIT('x') && isxdigit(a[1]) && isxdigit(a[2])) {
     ok = got(hex2(a + 1));
     adv = 3;
+  }
+
+  // \@: the ident just declared (\+, capture 1) is a static array of
+  //   capture 2 (a number or const) elements: its slot goes back, its name
+  //   is a const slot (the address, bss), a pointer of the declared type
+  else if (c == HIBIT('@')) ok = make_array();
+
+  // \$: the ident \i matched is a static array: the result is its size in
+  //   bytes (sizeof), else fail
+  else if (c == HIBIT('$')) {
+    Symbol *sy = last_sym < nsym ? &syms[last_sym] : 0;
+    ok = sy && sy->nelem;
+    if (ok)
+      record_capture(const_slot(sy->vtype == 'c' ? sy->nelem : sy->nelem * 2));
   }
 
   // SET # RETURN VALUE OF RULE

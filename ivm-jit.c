@@ -640,6 +640,7 @@ static word  lc_tdest;
 #define _JSR    "\x20"
 #define _LDA    "\xAD"
 #define _LDAIY  "\xB1"
+#define _LDAAY  "\xB9"
 #define _LDAN   "\xA9"
 #define _LDAZ   "\xA5"
 #define _CPXN   "\xE0"
@@ -661,6 +662,7 @@ static word  lc_tdest;
 #define _ROLA   "\x2A"
 #define _STA    "\x8D"
 #define _STAIY  "\x91"
+#define _STAAY  "\x99"
 #define _STAZ   "\x85"
 #define _STX    "\x8E"
 #define _STXZ   "\x86"
@@ -688,6 +690,9 @@ static word  lc_tdest;
 #define RLOM    "\x05"                    // opmemset_adr: the routine's STA
 #define RHIM    "\x15"                    // operand (+ 1)
 #define RS_MSA  5
+#define RKA1    "\x06"                    // (abs,Y) address: slot 1's const
+#define RKK     "\x07"                    // abs address: slot 1 + slot 2,
+#define RS_KK   7                         // both consts (a[k])
 
 // library routines (JSR n, rule_ref)
 #define LIB_PUTCHAR 0
@@ -742,6 +747,8 @@ static word  lc_tdest;
 #define A_BRD    0x93                     // emjump(op, lc_tdest): + op
 #define A_FOLD   0xA3                     // ACC = const ACC op const slot 1
 #define A_CARRY  0xB3                     // CLC for +, SEC for -
+#define A_ELBK   0xC3                     // Y = idx lo, A = idx hi + base hi
+                                          // -> the next abs,Y's hi (STA)
 // ... the same as template strings
 #define R_ALU    "\x0F"
 #define R_PEND0  "\x02"
@@ -771,6 +778,7 @@ static word  lc_tdest;
 #define R_BRD    "\x93"
 #define R_FOLD   "\xA3"
 #define R_CARRY  "\xB3"
+#define R_ELBK   "\xC3"
 #define _TZP     "\x00"                   // zp op on the pointer (zp), + 1
 #define _TZP1    "\x01"
 
@@ -1399,6 +1407,11 @@ static void loop_align_check(word ibc) {
 //   R_BRD op       emjump(op, lc_tdest): to a bytecode target
 //   R_FOLD         ACC = the pending const ACC op the const slot 1
 //   R_CARRY        CLC for +, SEC for - (nothing for & | ^)
+//   R_ELBK         static array (slot 1 a const), any index (slot 2): Y =
+//                  index lo, then A = index hi + base hi into the hi byte
+//                  of the next abs,Y (self-modifying): base + index with
+//                  no pointer
+//   abs,Y op spec  RKA1: slot 1's const as the address (+ an R_ELBK's hi)
 //   R_INC1         mem[slot 1]++ (emit_inc)
 //   R_NOW          acc_need() here (a pending const / slot into AX)
 //   R_LD1 / R_LD2  AX = mem[slot 1 / 2] (const: LDA #lo, TAX if hi == lo)
@@ -1430,9 +1443,10 @@ static void loop_align_check(word ibc) {
 #define G_ACC_IS2  0x0040         // ACC == mem[slot 2]
 #define G_X_0      0x0080         // X == 0 known
 #define G_NEXT_S   0x0100         // next op "S d", not a label
-// class (one, the top 7 bits): like a type signature (%d %D %v ... of
-// old), of slot 1, the shift count lc_rn, ACC, what comes after
-#define GC(n)      ((word)(n) << 9)
+#define G_ZJP_DEAD 0x0200         // next: zjp, ACC not read after it
+// class (one, the top 6 bits): like a type signature (%d %D %v ... of
+// old), of slot 1 (2), the shift count lc_rn, ACC, what comes after
+#define GC(n)      ((word)(n) << 10)
 #define G_S1_ZP    GC(1)          // slot 1 in zp
 #define G_S1_VAR   GC(2)          // slot 1 not a const (a variable)
 #define G_S1_K     GC(3)          // slot 1 a const
@@ -1446,7 +1460,9 @@ static void loop_align_check(word ibc) {
 #define G_ACC_K0   GC(11)         // ACC the pending const 0
 #define G_ACC_K256 GC(12)         // ACC a pending const 1..256
 #define G_DEAD     GC(13)         // ACC is not read after this op
-#define G_ZJP_DEAD GC(14)         // next: zjp, ACC not read after it
+#define G_K1_B2    GC(14)         // slot 1 a const (a static array), slot
+                                  // 2 < 256 (a byte index)
+#define G_K1_K2    GC(17)         // slot 1 and 2 consts (a[k])
 #define G_AI_WORD  GC(15)         // &slot1[slot2] (word) in AI already
 #define G_AI_BYTE  GC(16)         // the same, uchar
 #define R_NEED  0x01
@@ -1568,12 +1584,29 @@ static const JitRule jit_rules[] = {
     R_ELW R_YK0 _STAIY _PHA _TXA _INY _STAIY _PLA),
   RULE(')', 0, R_NEED,
     _PHA _TXA _PHA R_ELW _PLA R_YK1 _STAIY _TAX _PLA _DEY _STAIY),
-  // ] bb ii: ((uchar*)base)[idx] = ACC (the same three)
+  // ] bb ii: ((uchar*)base)[idx] = ACC. A static array (base a const):
+  // a const index: STA base+k; a byte index: STA base,Y (Y = idx); else
+  // self-modifying (R_ELBK)
+  RULE(']', G_ACC_PEND | G_K1_K2, 0,      R_PEND0 _STA RKK),
+  RULE(']', G_K1_K2,              R_NEED, _STA RKK),
+  RULE(']', G_ACC_PEND | G_K1_B2, 0,      _LDY RLO2 R_PEND0 _STAAY RKA1),
+  RULE(']', G_K1_B2,              R_NEED, _LDY RLO2 _STAAY RKA1),
+  RULE(']', G_ACC_PEND | G_S1_K,  0,      R_ELBK R_PEND0 _STAAY RKA1),
+  RULE(']', G_S1_K,               R_NEED, _PHA R_ELBK _PLA _STAAY RKA1),
+  // else via AI: pending: from where it is; AI there already; AX saved
   RULE(']', G_ACC_PEND, 0,     R_ELB R_PEND0 _STAIY),
   RULE(']', G_AI_BYTE, 0,      R_ELB _STAIY),
   RULE(']', 0,     R_NEED, _PHA R_ELB _PLA _STAIY),
   // [ bb ii: ACC = ((uchar*)base)[idx]; a zjp next and ACC dead after
-  // it: only A (Z), else LDA last: Z == (ACC == 0)
+  // it: only A (Z), else LDA last: Z == (ACC == 0). A static array: LDA
+  // base,Y (as for ])
+  RULE('[', G_ZJP_DEAD | G_K1_K2, R_DROP | R_AXZ,  _LDA RKK),
+  RULE('[', G_K1_K2,              R_DROP | R_AXBZ, _LDXN "\0" _LDA RKK),
+  RULE('[', G_ZJP_DEAD | G_K1_B2, R_DROP | R_AXZ,  _LDY RLO2 _LDAAY RKA1),
+  RULE('[', G_K1_B2,              R_DROP | R_AXBZ,
+    _LDY RLO2 _LDXN "\0" _LDAAY RKA1),
+  RULE('[', G_ZJP_DEAD | G_S1_K,  R_DROP | R_AXZ,  R_ELBK _LDAAY RKA1),
+  RULE('[', G_S1_K,               R_DROP | R_AXBZ, R_ELBK _LDXN "\0" _LDAAY RKA1),
   RULE('[', G_ZJP_DEAD, R_DROP | R_AXZ,  R_ELB _LDAIY),
   RULE('[', 0,     R_DROP | R_AXBZ, R_ELB _LDXN "\0" _LDAIY),
   // N / O c: putchar('\n' / c), A X Y kept: AX saved in Y if read later
@@ -1700,7 +1733,7 @@ static word rule_ref(uchar n) {
 static int rule_guard(word g, const uchar *p) {
   uchar s = p[0];
   word nb = 0, t;                                // the next op's bc
-  if ((g & G_NEXT_S) || g >= G_DEAD)            // (classes from G_DEAD)
+  if ((g & (G_NEXT_S | G_ZJP_DEAD)) || g >= G_DEAD)  // (classes from G_DEAD)
     nb = (word)(lc_bc + ivm_oplen(lc_code + lc_bc));
 
   // flags
@@ -1715,28 +1748,31 @@ static int rule_guard(word g, const uchar *p) {
   if ((g & G_ACC_IS2) && acc_s != p[1]) return 0;
   if ((g & G_X_0) && !acc_x0) return 0;
   if ((g & G_NEXT_S) && !(lc_code[nb] == 'S' && !is_label(nb))) return 0;
+  if ((g & G_ZJP_DEAD) &&
+      !(nb + 1 < lc_len && (uchar)(lc_code[nb] - 0x80) < 64 &&
+        !is_label(nb) && acc_unread((word)(nb + 1)) &&
+        (t = ivm_jump(lc_code + nb, nb)) < lc_len && acc_unread(t)))
+    return 0;
 
   // class
-  switch (g >> 9) {
-  case G_S1_ZP >> 9:    return slotlo(s) < 0xff;
-  case G_S1_VAR >> 9:   return !is_const(s);
-  case G_S1_K >> 9:     return is_const(s);
-  case G_S1_BYTE >> 9:  return hi0(s);
-  case G_S1_HIFF >> 9:  return is_const(s) && (const_val(s) >> 8) == 0xff;
-  case G_N_1TO4 >> 9:   return (uchar)(lc_rn - 1) < 4;
-  case G_N_7 >> 9:      return lc_rn == 7;
-  case G_N_8UP >> 9:    return (uchar)(lc_rn - 8) < 8;
-  case G_N_LT8 >> 9:    return lc_rn < 8;
-  case G_N_K >> 9:      return lc_rn != 0xff;
-  case G_ACC_K0 >> 9:   return acc_at == ACC_PEND && acc_hk && !acc_k;
-  case G_ACC_K256 >> 9: return acc_at == ACC_PEND && acc_hk && acc_k - 1 < 256;
-  case G_DEAD >> 9:     return acc_dead(nb);
-  case G_ZJP_DEAD >> 9:
-    return nb + 1 < lc_len && (uchar)(lc_code[nb] - 0x80) < 64 &&
-           !is_label(nb) && acc_unread((word)(nb + 1)) &&
-           (t = ivm_jump(lc_code + nb, nb)) < lc_len && acc_unread(t);
-  case G_AI_WORD >> 9:  return ai_hit('w', s, p[1]) != 0xff;
-  case G_AI_BYTE >> 9:  return ai_hit('b', s, p[1]) != 0xff;
+  switch (g >> 10) {
+  case G_S1_ZP >> 10:    return slotlo(s) < 0xff;
+  case G_S1_VAR >> 10:   return !is_const(s);
+  case G_S1_K >> 10:     return is_const(s);
+  case G_S1_BYTE >> 10:  return hi0(s);
+  case G_S1_HIFF >> 10:  return is_const(s) && (const_val(s) >> 8) == 0xff;
+  case G_N_1TO4 >> 10:   return (uchar)(lc_rn - 1) < 4;
+  case G_N_7 >> 10:      return lc_rn == 7;
+  case G_N_8UP >> 10:    return (uchar)(lc_rn - 8) < 8;
+  case G_N_LT8 >> 10:    return lc_rn < 8;
+  case G_N_K >> 10:      return lc_rn != 0xff;
+  case G_ACC_K0 >> 10:   return acc_at == ACC_PEND && acc_hk && !acc_k;
+  case G_ACC_K256 >> 10: return acc_at == ACC_PEND && acc_hk && acc_k - 1 < 256;
+  case G_DEAD >> 10:     return acc_dead(nb);
+  case G_K1_B2 >> 10:   return is_const(s) && hi0(p[1]);
+  case G_K1_K2 >> 10:   return is_const(s) && is_const(p[1]);
+  case G_AI_WORD >> 10:  return ai_hit('w', s, p[1]) != 0xff;
+  case G_AI_BYTE >> 10:  return ai_hit('b', s, p[1]) != 0xff;
   }
   return 1;
 }
@@ -1800,7 +1836,7 @@ again:
 static void emit_tpl(const uchar *t, uchar len, const uchar *p, uchar op) {
   const uchar *e, *rs = 0, *re = 0;
   uchar b, c, a, zp = lc_tzp, rn = 0;
-  word fx[4], top = 0;
+  word fx[4], top = 0, smfix = 0;
   uchar nfx = 0;
 
   // by the opcode's column (lo nibble c)
@@ -1823,6 +1859,9 @@ static void emit_tpl(const uchar *t, uchar len, const uchar *p, uchar op) {
 
       // opmemset_adr: absolute
       else if (a == RS_MSA) ema(b, (word)(REF(opmemset_adr) + (c ? 1 : 0)));
+
+      // a static array's element at a const index: absolute
+      else if (a == RS_KK) ema(b, (word)(const_val(p[0]) + const_val(p[1])));
 
       // a slot
       else {
@@ -1855,6 +1894,12 @@ static void emit_tpl(const uchar *t, uchar len, const uchar *p, uchar op) {
       case A_CARRY:
         if (op == '+') em(CLC); else if (op == '-') em(SEC);
         break;
+      case A_ELBK:                           // Y = idx lo, A = idx hi
+        if (lc_axs == p[1]) TPL(_TAY _TXA, 0);
+        else if (lc_yas != p[1]) TPL(_LDY RLO2 _LDA RHI2, p);
+        TPL(_CLC _ADC RHI1, p);              // + base hi: the abs,Y's hi
+        em(STA); smfix = lc_at; em(0); em(0);
+        break;
       case A_FOLD: {
         word k = const_val(p[0]);
         acc_pk((word)(op == '+' ? acc_k + k : op == '-' ? acc_k - k :
@@ -1880,6 +1925,18 @@ static void emit_tpl(const uchar *t, uchar len, const uchar *p, uchar op) {
 
     // branch: forward, A_PATCH lands it
     } else if ((b & 0x10) && c == 0) fx[nfx++ & 3] = emrel(b);
+
+    // abs,Y (column 9, odd rows) + RKA1: slot 1's const as the address; an
+    // R_ELBK before stores into its hi
+    else if (c == 9 && (b & 0x10)) {
+      t++;
+      ema(b, const_val(p[0]));
+      if (smfix) {
+        lc_out[smfix]     = (uchar)(lc_out_org + lc_at - 1);
+        lc_out[smfix + 1] = (uchar)((lc_out_org + lc_at - 1) >> 8);
+        smfix = 0;
+      }
+    }
 
     // (zp),Y: on the pointer of A_PTR / A_ELW / A_ELB
     else if ((b & 0x10) && c == 1) em2(b, zp);
@@ -2718,6 +2775,7 @@ word sim_run_blob(uchar *blob, uchar zp, uchar zp_at, word org) {
   word hcode = HW(4), hcall = HW(5), hfp = HW(6), hcon = HW(7), hdata = HW(8);
   #undef HW
   word membytes = (word)(memsz * 2), mem_base, data, code_len, size, i, w;
+  word bss_n = 0, bss;
   word vec_bc[64], *map, *img;
   uchar ncall = (uchar)((hcon - hcall) / 2), seen0 = 0, *out;
   Cpu6502 cpu;
@@ -2746,6 +2804,16 @@ word sim_run_blob(uchar *blob, uchar zp, uchar zp_at, word org) {
     return 0;
   }
 
+  // static arrays (bss): reloc words past the blob's end; the largest is
+  // the end marker. A page aligned, zeroed bss right below $F000 (the code
+  // size isn't known yet)
+  for (i = 0; cidx + i < memsz; i++) {
+    w = (word)(blob[hcon + 2 * i] | (blob[hcon + 2 * i + 1] << 8));
+    if (!w) break;
+    if (w >= len && (word)(w - len) > bss_n) bss_n = (word)(w - len);
+  }
+  bss = (word)((0xF000 - bss_n) & 0xFF00);
+
   // strings, then the mem[] image: consts from the pool; string words are
   // blob offsets (before the 0) -> their address here
   memcpy(cpu_mem + data, blob + hdata, len - hdata);
@@ -2753,7 +2821,8 @@ word sim_run_blob(uchar *blob, uchar zp, uchar zp_at, word org) {
   for (i = 0; cidx + i < memsz; i++) {
     w = (word)(blob[hcon + 2 * i] | (blob[hcon + 2 * i + 1] << 8));
     if (!w) seen0 = 1;
-    else if (!seen0) w = (word)(data + (w - hdata));
+    else if (!seen0)
+      w = w >= len ? (word)(bss + (w - len)) : (word)(data + (w - hdata));
     img[cidx + i] = w;
   }
   for (i = 0; i < memsz; i++) SIM_SETW(mem_base + 2 * i, img[i]);
@@ -2770,7 +2839,7 @@ word sim_run_blob(uchar *blob, uchar zp, uchar zp_at, word org) {
   lc_constmem = img;
   size = ivm_jit(blob + hcode, code_len, out, 8192, map, code_len,
                  mem_base, org, vec_bc, blob + hfp, ncall);
-  if (!size || org + size > 0xF000) {
+  if (!size || org + size > bss) {
     printf("%%SIM: JIT failed (%u bytes)\n", (unsigned)size);
     free(img); free(map); free(out);
     return 0;
@@ -2795,6 +2864,9 @@ word sim_run_blob(uchar *blob, uchar zp, uchar zp_at, word org) {
     memcpy(cpu_mem + SIM_opmemset, sim_memset, sizeof(sim_memset));
   }
 
+  if (bss_n)
+    printf("--- SIM: static arrays $%04X-$%04X ---\n", (unsigned)bss,
+           (unsigned)(bss + bss_n - 1));
   printf("--- SIM: mem[] $%04X (%u B), strings $%04X, code $%04X-$%04X"
          " (%u B), heap $%04X ---\n", (unsigned)mem_base, (unsigned)membytes,
          (unsigned)data, (unsigned)org, (unsigned)(org + size - 1),
@@ -2803,7 +2875,7 @@ word sim_run_blob(uchar *blob, uchar zp, uchar zp_at, word org) {
   // run
   sim_heap = (word)((org + size + 0xFF) & ~0xFF);   // page: data alignment
                                           // must not change with code size
-  sim_heapend = 0xF000;
+  sim_heapend = bss;                      // static arrays above
   sim_traps = 0;
   sim_t_cyc = sim_t_xp = 0;
   sim_t_pc = org;

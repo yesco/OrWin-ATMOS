@@ -734,6 +734,22 @@ void relocate(uchar *base) {
 #endif
 }
 
+// Static arrays (bss): reloc const words from end (the blob's end) on are
+// offsets into zeroed memory the loader sets aside. m: the const words
+// (reloc ones first, 0 ends them). Its size: the largest offset (the
+// compiler's end marker)
+static word bss_size(ivmvar *m, word end) {
+  word n = 0;
+  for (; *m; m++)
+    if (*m >= end && (word)(*m - end) > n) n = (word)(*m - end);
+  return n;
+}
+// ... they point to at instead
+static void bss_move(ivmvar *m, word end, word at) {
+  for (; *m; m++)
+    if (*m >= end) *m = (ivmvar)(at + (*m - end));
+}
+
 Process* Nevm(uchar *loaded) {
   Process *p;
   unsigned int cells, bytes;
@@ -802,19 +818,45 @@ Process* Nevm(uchar *loaded) {
     nc = (word)(cells - bh->constidx);
     #ifdef SOFT_HEAP
     {
-      // string blob-offsets until the 0000 -> soft_heap addresses
-      word i, data_off = bh->data;
+      // string blob-offsets until the 0000 -> soft_heap addresses; static
+      // arrays (offsets past the blob) -> a zeroed, page aligned bss after
+      word i, data_off = bh->data, bss, n;
       uchar seen0 = 0;
+      memcpy(m, pool, nc * sizeof(ivmvar));
+      n = bss_size(m, bh->len);
+      bss = (word)((soft_top + 255) & ~255u);
+      if (n && bss + n > SOFT_HEAP_MAX) {
+        printf("\n[IVM] static arrays: out of soft heap (want %u)\n", n);
+        free(p);
+        return NULL;
+      }
+      if (n) { memset(soft_heap + bss, 0, n); soft_top = (word)(bss + n); }
       for (i = 0; i < nc; i++) {
         word w = pool[i];
         if (!w) seen0 = 1;
-        else if (!seen0) w = (word)(SOFT_BASE + (w - data_off));
+        else if (!seen0)
+          w = w >= bh->len ? (word)(bss + (w - bh->len))
+                           : (word)(SOFT_BASE + (w - data_off));
         m[i] = w;
       }
     }
     #else
       // relocate() already made the string words absolute: plain copy
       memcpy(m, pool, nc * sizeof(ivmvar));
+
+      // static arrays: a zeroed, page aligned bss (the JIT places its own)
+      #if defined(IVM_ABS) && !defined(JIT_6502)
+      {
+        word end = (word)((unsigned)loaded + bh->len);
+        word n = bss_size(m, end);
+        uchar *b;
+        if (n) {
+          b = (uchar *)calloc(1, n + 255);
+          if (!b) { printf("bss: calloc fail %u\n", n); free(p); return NULL; }
+          bss_move(m, end, (word)(((unsigned)b + 255) & ~255u));
+        }
+      }
+      #endif
     #endif
 
     // printf("mem[32]=%u h.mem[32]=%u\n", p->mem[32], p->h.mem[32]);
@@ -1071,10 +1113,10 @@ word sys(char n, word acc, char* ipc) {
 // (- 9396 5047) == 4349 bytes for JUST the VM!
 #if defined(NOIVM) || defined(JIT_6502)
 
-#ifdef NOIVM
-
+// the JIT's code still uses it (ivm-jit.c jit_puts)
 ivmvar ivm_acc;
 
+#ifdef NOIVM
 ivmvar run_ivm(Process *p) {
   return 0;
   (void)p;
@@ -1799,6 +1841,7 @@ static const JitTarget jit_targets[3] = {
 static const JitTarget *jit_tg;
 
 static ivmvar *jit_memimg;          // -o: copy of mem[], strings relocated
+static uchar  *jit_blob;            // the loaded blob (its real address)
 static uchar  *jit_data;            // blob string section
 static word    jit_membytes, jit_datalen, jit_imgmem, jit_imgdata;
 
@@ -1807,6 +1850,12 @@ static int jit_layout(Process *proc, uchar *base, word *mem_base, word *out_org)
   BlobHeader *bh = &proc->h.hdr;
   word cells = bh->memsz ? bh->memsz : MAX_SLOTS;
   word i;
+  // static arrays: const words from bss_end on (Nevm left them). Not
+  // base: on cc65 the header is absolute already, base is 0 there
+  word bss_end = (word)((unsigned)jit_blob + bh->len), bss_n = 0, bss_img;
+  ivmvar *cm = proc->h.mem + bh->constidx;
+
+  if (bh->constidx != 255) bss_n = bss_size(cm, bss_end);
 
   if (!jit_target) jit_target = JIT_DEFAULT_TARGET;
   jit_tg = NULL;
@@ -1819,7 +1868,9 @@ static int jit_layout(Process *proc, uchar *base, word *mem_base, word *out_org)
 
   jit_membytes = (word)(cells * 2);
   jit_data     = base + bh->data;
-  jit_datalen  = (bh->data && bh->len > bh->data) ? (word)(bh->len - bh->data) : 0;
+  // the strings: from data to the blob's end (cc65: data is absolute)
+  jit_datalen  = bh->data ?
+    (word)((unsigned)jit_blob + bh->len - (unsigned)jit_data) : 0;
   jit_imgmem   = (word)(unsigned)ivmlib_end;
   jit_imgdata  = (word)(jit_imgmem + jit_membytes);
 
@@ -1843,8 +1894,15 @@ static int jit_layout(Process *proc, uchar *base, word *mem_base, word *out_org)
 
 #ifndef JIT_INMEM
   if (!jit_outfile) {
-    // run in place: live mem[] (or zp copy of it), cc65 heap for 'M'
-    word n = (word)_heapmaxavail();
+    // run in place: live mem[] (or zp copy of it), cc65 heap for 'M', the
+    // static arrays page aligned before it
+    word n;
+    if (bss_n) {
+      uchar *b = (uchar *)calloc(1, bss_n + 255);
+      if (!b) { printf("%%JIT: static arrays: alloc fail %u\n", bss_n); return 0; }
+      bss_move(cm, bss_end, (word)(((unsigned)b + 255) & ~255u));
+    }
+    n = (word)_heapmaxavail();
     if (n > 512) n -= 256;   // leave some for printf & co
     ivmlib_heap = (word)(unsigned)malloc(n);
     ivmlib_heapend = ivmlib_heap ? (word)(ivmlib_heap + n) : 0;
@@ -1864,15 +1922,21 @@ static int jit_layout(Process *proc, uchar *base, word *mem_base, word *out_org)
   memcpy(jit_memimg, proc->h.mem, jit_membytes);
   if (bh->constidx != 255)
     for (i = bh->constidx; i < cells && jit_memimg[i]; i++)
-      jit_memimg[i] += (ivmvar)(jit_imgdata - (word)(unsigned)jit_data);
+      if (jit_memimg[i] < bss_end)               // strings
+        jit_memimg[i] += (ivmvar)(jit_imgdata - (word)(unsigned)jit_data);
   lc_constmem = jit_memimg;
+
+  // static arrays: page aligned after the strings, before the code: in the
+  // zeroed gap (the file has the zeros, ivmlib_load zero-fills)
+  bss_img = (word)((jit_imgdata + jit_datalen + 255) & ~255u);
+  if (bss_n) bss_move(jit_memimg + bh->constidx, bss_end, bss_img);
 
   if (!jit_force_zp) *mem_base = jit_imgmem;
   ivmlib_zpsrc = jit_imgmem;
   ivmlib_zpdst = (uchar)jit_zp;
   ivmlib_zplen = jit_force_zp ? (uchar)jit_membytes : 0;
 
-  *out_org = (word)(jit_imgdata + jit_datalen);
+  *out_org = bss_n ? (word)(bss_img + bss_n) : (word)(jit_imgdata + jit_datalen);
   if (jit_org) {
     if (jit_org < *out_org) {
       printf("%%JIT: -a %04X overlaps ivm-lib/mem/strings, min %04X\n",
@@ -2116,6 +2180,7 @@ static int run_loaded_blob(uchar *img, int len) {
 
   #ifdef JIT_6502
     printf("--- JIT compiling IVM (blob %d) ---\n", len);
+    jit_blob = img;
     addr = jit_compile(proc);
     if (!addr) return -1;
     printf("--- JIT: entry at $%04X ---\n", (unsigned)addr);
