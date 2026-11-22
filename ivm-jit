@@ -11,6 +11,13 @@ rm ivm-jit.x ivm-vm.lst ivm-jit.sim ivm-jit.lst 2>/dev/null
 time sim65 -c ivm-jit.sim -z -j $* $name.ivm | grep cycles | sed 's/ cycles//' > $name.cycles.jit
 time sim65 -c ivm-jit.sim -z $* $name.ivm | tee $name.log
 
+echo 
+echo 
+echo "--- -t generate file ---"
+time sim65 -c ivm-jit.sim -j -z -tsim6502 $* $name.ivm -o$name.ivm.sim
+echo
+echo
+
 jit=$(cat "$name.cycles.jit")
 jitandrun=$(grep cycles "$name.log" | sed 's/ cycles//')
 run=$((jitandrun - jit))
@@ -26,7 +33,7 @@ echo
 
 echo
 echo
-ls -ugGlf ivm-jit.sim ivm.x ivm-jit.x $name.ivm 2>/dev/null
+ls -ugGlf ivm-jit.sim ivm-jit.x $name.ivm $name.ivm.sim 2>/dev/null
 echo
 echo "=== ivm.c: `./wcode ivm.c` LOC ==="
 echo "=== jit c: `./wcode ivm-jit.c` LOC ==="

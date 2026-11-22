@@ -37,9 +37,17 @@ D=#define \+ \d\c[\g]\n\o\<
 
 # - Declarations: optional register\b -> REGISTER slot 0..31
 # -O: REGISTER 0..31, other globals 32..95, frames at 96+
-V=const\c T M;|register\b T M;|T M;
-# name[N]: a static array of N (a number or const) elements (\@)
-M=\+\[S\]\@U|\+=S[\g]U|\+=E[S\1]U|\+U|
+V=const\c T M;|register\b T M;|static T M;|T M;
+# name[N]: a static array of N (a number or const) elements: zeroed (\@),
+#   also = {0}; initialized: = "text" / = {1, 2, 'c', ...} (\: \, \.),
+#   [] its size from the initializer, [N] zeros after it. Arrays are
+#   static: initialized once (locals too: C wants "static" there)
+M=\+\[S\]={0}\@U
+|\+\[S\]=\:\s\.U|\+\[\]=\:\s\.U
+|\+\[S\]={\:N}\.U|\+\[\]={\:N}\.U
+|\+\[S\]\@U|\+=S[\g]U|\+=E[S\1]U|\+U|
+# initializer elements: consts, a trailing , allowed
+N=S\,,\<|S\,|
 
 # - TODO: deep recursion might be bad...
 U=,M|
@@ -508,6 +516,9 @@ Control:
   \xHH  match the byte HH exactly (no ws skipped)
   \@    the ident just declared (\1) becomes a static array of \2 elements
   \$    the ident \i matched is a static array: result := its size (bytes)
+  \:    an initialized array: start its data (\2: the size, if given)
+  \,    add the last capture (a const) as an element
+  \.    end it: zeros up to the size; the ident (\1) points to it
   \=n   result := capture n
 
 Generate:

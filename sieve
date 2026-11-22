@@ -123,7 +123,13 @@ echo
 #      ============  byte-sieve-prime.c - 109 BC ============
 # (/ 14.4 7.0)
 # oscar64 -Os	  294 B	|       14.4s  ~2.06x 	| best C for 6502 -   (4594 B)
+# oscar64 -Os array     |       12.64s ~1.81x   | better              (4339 B)
+#
 # cc65 -Oirs	  442 B	|       69.5s  ~9.93x	| std compliant, slow (3083 B)
+# cc65 -Cl -O	   ++	|	57.7s  ~8.24x	| static locals       (3503 B)
+
+(/ 12.64 7.0) 1.8057142857142858
+
 #
 # ./ivm-asm 	  109 BC|(182?)180 s  ~25x      |
 # ./ivm C-interpr "  ** |(744?)697 s  ~99.6x    | simplier code
@@ -196,6 +202,10 @@ echo
 # it's currently 101 bytes, 41 instr, can made 30 by remove redundant!
 
 # ivm-oscar	  	|		44.20x	|309,383,290
+
+# - with fixed array:
+# 346,270,087 ivm -array - slower? lol
+# 346,184,304
 
 # - opt jit byte-sieve-primes.c - sieve.md CMP oscar64
 # ivm 			|	340s		|340,305,927

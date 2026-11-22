@@ -457,6 +457,8 @@ typedef struct {
   word code_save; // bin_ptr at alt entry (backtrack)
   uchar ginit_save;   // ginit_len at alt entry (global init code, backtrack)
   uchar slot_save;    // next_slot at alt entry (backtrack frees slots)
+  uchar glob_save;    // next_glob, next_reg the same (-O globals)
+  uchar reg_save;
   uchar func_vec;     // vector of the function matched by \i in THIS frame (for \v)
   uchar arg_i;        // call args stored so far (rule Z, for \k)
   uchar npatch;       // pending forward jumps (\x pushes, \y pops)
@@ -1557,21 +1559,17 @@ static uchar match_ident_decl(void) {
 
 
 
-// \@: the last declared ident becomes a static array of capture 2
-// elements (see the matcher)
-static uchar make_array(void) {
+// The last declared ident as an array of cnt elements at const slot k:
+// its own slot goes back (the last one handed out), the name is a const
+// pointer of its declared type. 0: not a plain variable
+static uchar array_sym(word cnt, uchar k) {
   Symbol *s;
-  uchar slot, n = CAP_SLOT(cap_val(2));
-  word cnt;
+  uchar slot;
 
   if (!nsym) return 0;
   s = &syms[nsym - 1];
   slot = s->address;
-  if (s->type != SYM_VAR || !is_lit(n)) return 0;
-  cnt = (word)lit_val(n);
-  if (!cnt) return 0;
-
-  // give its slot back (the last one handed out)
+  if (s->type != SYM_VAR || !cnt) return 0;
   if (scope_depth == 0 && optimize) {
     if (next_glob == slot + 1) next_glob--;
   } else if (next_slot == slot + 1) next_slot--;
@@ -1579,10 +1577,64 @@ static uchar make_array(void) {
   s->nelem = cnt;
   s->is_ptr = 1;
   s->is_const = 1;                     // the name: no stores
-  s->address = add_bss_array((word)(s->vtype == 'c' ? cnt : cnt * 2));
+  s->address = k;
   vlog("  array '%s' [%u] %c at const slot %u\n", s->name, (unsigned)cnt,
-    s->vtype, (unsigned)s->address);
+    s->vtype, (unsigned)k);
   return 1;
+}
+
+// element size of the last declared ident
+#define ESIZE() (syms[nsym - 1].vtype == 'c' ? 1 : 2)
+
+// \@: a static array of capture 2 elements: zeroed (bss)
+static uchar make_array(void) {
+  uchar n = CAP_SLOT(cap_val(2));
+  word cnt;
+
+  if (!nsym || !is_lit(n)) return 0;
+  cnt = (word)lit_val(n);
+  return cnt && array_sym(cnt, add_bss_array((word)(cnt * ESIZE())));
+}
+
+// Initialized arrays: \: starts its data (capture 2: the size, if given),
+// \, adds the last capture (a const) as an element, \. ends it: zeros up
+// to the size, the name points to it (in the data: the file)
+static word ia_start, ia_n;
+
+static uchar init_start(void) {
+  uchar n = CAP_SLOT(cap_val(2));
+  ia_n = (cur.prod_n >= 2 && is_lit(n)) ? (word)lit_val(n) : 0;
+  ia_start = data_string_start();
+  return nsym != 0;
+}
+
+static uchar init_elem(void) {
+  uchar k = CAP_SLOT(cur.result);
+  word v;
+  if (!nsym || !is_lit(k)) return 0;
+  v = (word)lit_val(k);
+  data_putc((char)v);
+  if (ESIZE() == 2) data_putc((char)(v >> 8));
+  return 1;
+}
+
+static uchar init_end(void) {
+  uchar k = CAP_SLOT(cur.result), es = ESIZE();
+  word n = (word)(data_len - ia_start), want = (word)(ia_n * es);
+
+  // [3] = "abc": no room for the 0, C drops it
+  if (ia_n && n == want + 1 && es == 1 && !data_pool[data_len - 1]) {
+    data_len--;
+    n--;
+  }
+  if (ia_n && n > want) FAIL("too many initializers");
+  while (n < want) { data_putc(0); n++; }
+
+  // the name: a "string" in the data (that of \s itself, if it was one)
+  if (!(is_lit(k) && const_val(k) == ia_start &&
+        const_is_reloc[CONST_TOP - k] == 1))
+    k = add_string_reloc(ia_start);
+  return array_sym((word)(n / es), k);
 }
 
 // TODO: match_ident_decl and func_decl must be dduplicates....
@@ -1814,7 +1866,7 @@ static void free_rules(void) {
 // note: '>' is load-time only (not stored)
 //       '<' becomes HIBIT(x), x=1..31 (alt jump) or HIBIT('<')
 static uchar is_dir(uchar e) {
-  return isdigit(e) || strchr("insfdprlxywmzkcahvgetoubj+{}#='?*@$", e) != NULL;
+  return isdigit(e) || strchr("insfdprlxywmzkcahvgetoubj+{}#='?*@$:,.", e) != NULL;
 }
 
 static void build_one_rule(uchar r, char *rhs) {
@@ -2048,6 +2100,8 @@ static void alt_mark(void) {
   cur.nsym_save = nsym;
   cur.scope_save = scope_depth;
   cur.slot_save = next_slot;
+  cur.glob_save = next_glob;
+  cur.reg_save = next_reg;
   cur.code_save = bin_ptr;
   cur.ginit_save = ginit_len;
   cur.prod_n = 0;
@@ -2121,6 +2175,8 @@ static void restore_scope(void) {
   sym_truncate(cur.nsym_save);
   scope_depth = cur.scope_save;
   next_slot = cur.slot_save;
+  next_glob = cur.glob_save;
+  next_reg = cur.reg_save;
 }
 
 // frame_rewind: Undo the current alt before trying the next one.
@@ -2310,6 +2366,11 @@ int run() {
   //   capture 2 (a number or const) elements: its slot goes back, its name
   //   is a const slot (the address, bss), a pointer of the declared type
   else if (c == HIBIT('@')) ok = make_array();
+
+  // \: \, \.: an initialized array: start, an element, end
+  else if (c == HIBIT(':')) ok = init_start();
+  else if (c == HIBIT(',')) ok = init_elem();
+  else if (c == HIBIT('.')) ok = init_end();
 
   // \$: the ident \i matched is a static array: the result is its size in
   //   bytes (sizeof), else fail

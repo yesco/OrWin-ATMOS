@@ -5,13 +5,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-const int SIZE = 8190;
-const int SIZEPL = 8191;
+const unsigned int SIZE = 8190;
+const unsigned int SIZEPL = 8191;
 
-char flags[SIZEPL];
+unsigned char flags[SIZEPL];
 
 int main() {
-  int i, prime, k, count, iter; 
+  unsigned int i, prime, k, count, iter; 
 
   
   printf("10 iterations\n");
