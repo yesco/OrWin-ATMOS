@@ -610,6 +610,10 @@ static void emit_load_const(word v) {
 // emit_tpl interprets one; TPL(t, slots) emits a template t (a string
 // literal) on the slot operands slots, TPLOP the same for an ALU op.
 static void emit_tpl(const uchar *t, uchar len, const uchar *p, uchar op);
+// template inputs from C: Y offsets (R_YK R_YJ), the zp pointer at the
+// start (R_ZAI / R_ZAS change it), the bytecode target (R_BRD)
+static uchar lc_ty0, lc_ty1, lc_tzp = 0xfc;
+static word  lc_tdest;
 #define TPL(t, p)       emit_tpl((const uchar *)(t), sizeof(t) - 1, p, 0)
 #define TPLOP(t, p, op) emit_tpl((const uchar *)(t), sizeof(t) - 1, p, op)
 
@@ -637,6 +641,8 @@ static void emit_tpl(const uchar *t, uchar len, const uchar *p, uchar op);
 #define _LDA    "\xAD"
 #define _LDAIY  "\xB1"
 #define _LDAN   "\xA9"
+#define _LDAZ   "\xA5"
+#define _CPXN   "\xE0"
 #define _LDXZ   "\xA6"
 #define _LDY    "\xAC"
 #define _LSRZ   "\x46"
@@ -663,6 +669,7 @@ static void emit_tpl(const uchar *t, uchar len, const uchar *p, uchar op);
 #define _TAX    "\xAA"
 #define _TAY    "\xA8"
 #define _TXA    "\x8A"
+#define _JMP    "\x4C"
 #define _TYA    "\x98"
 #define _TMP1   "\xFE"                    // zp tmp1 / tmp2 (operands)
 #define _TMP2   "\xFF"
@@ -707,8 +714,8 @@ static void emit_tpl(const uchar *t, uchar len, const uchar *p, uchar op);
 #define A_PATCH  0x42                     // the forward branch lands here
 #define A_ELW    0x52                     // AI = &slot1[slot2], word
 #define A_ELB    0x62                     // ... uchar
-#define A_YK0    0x72                     // LDY #y
-#define A_YK1    0x82                     // LDY #y + 1
+#define A_YK0    0x72                     // LDY #lc_ty0 / #lc_ty0 + 1
+#define A_YK1    0x82
 #define A_TOP    0x92                     // loop top ...
 #define A_BACK   0xB2                     // ... branch back to it: + brop
 #define A_STR    0xC2                     // the inline string, 0 too
@@ -720,6 +727,11 @@ static void emit_tpl(const uchar *t, uchar len, const uchar *p, uchar op);
 #define A_REP    0x23                     // next len bytes, lc_rn times
 #define A_SUB8   0x33                     // lc_rn -= 8
 #define A_LDYRN  0x43                     // LDY #lc_rn
+#define A_YJ0    0x53                     // LDY #lc_ty1 / #lc_ty1 + 1
+#define A_YJ1    0x63
+#define A_ZAI    0x73                     // (zp),Y / zp ops: on AI / AS
+#define A_ZAS    0x83
+#define A_BRD    0x93                     // emjump(op, lc_tdest): + op
 // ... the same as template strings
 #define R_ALU    "\x0F"
 #define R_PEND0  "\x02"
@@ -742,6 +754,13 @@ static void emit_tpl(const uchar *t, uchar len, const uchar *p, uchar op);
 #define R_REP    "\x23"
 #define R_SUB8   "\x33"
 #define R_LDYRN  "\x43"
+#define R_YJ0    "\x53"
+#define R_YJ1    "\x63"
+#define R_ZAI    "\x73"
+#define R_ZAS    "\x83"
+#define R_BRD    "\x93"
+#define _TZP     "\x00"                   // zp op on the pointer (zp), + 1
+#define _TZP1    "\x01"
 
 static void emit_load_slot(uchar s) {
   if (is_const(s)) { emit_load_const(const_val(s)); return; }
@@ -1012,6 +1031,7 @@ static void emit_elem_ptr(uchar base, uchar idx) {
 }
 // the same into any zp pointer
 static void emit_elem_ptr_zp(uchar zp, uchar base, uchar idx) {
+  uchar sa[2];
   if (is_const(idx)) {
     // constant index folds into one add
     word v = (word)(const_val(idx) << 1);
@@ -1023,12 +1043,11 @@ static void emit_elem_ptr_zp(uchar zp, uchar base, uchar idx) {
     return;
   }
   // idx*2 (lo kept in Y, hi in zp + 1), then + base
-  emop2(LDA, slotlo(idx)); em(ASLA); em(TAY);
-  emop2(LDA, slothi(idx)); em(ROLA); em2(STAZ, zp + 1);
-  em(CLC); em(TYA);
-  emit_alub(ADC, base, 0); em2(STAZ, zp);
-  em2(LDAZ, zp + 1);
-  emit_alub(ADC, base, 1); em2(STAZ, zp + 1);
+  sa[0] = base; sa[1] = idx;
+  lc_tzp = zp;
+  TPL(_LDA RLO2 _ASLA _TAY _LDA RHI2 _ROLA _STAZ _TZP1
+      _CLC _TYA _ADC RLO1 _STAZ _TZP _LDAZ _TZP1 _ADC RHI1 _STAZ _TZP1, sa);
+  lc_tzp = AI;
 }
 
 // Byte indexing address calculation
@@ -1349,7 +1368,8 @@ static void loop_align_check(word ibc) {
 //                  return value cell (FR_VAL), +16 = hi
 //   R_ALU   spec   ($0F) the same with the ALU op of the op (+ ADC, - SBC,
 //                  & AND, | ORA, ^ EOR)
-//   (zp),Y op      on the pointer of R_PTR / R_ELW / R_ELB: no operand
+//   (zp),Y op      on the pointer (R_PTR R_ELW R_ELB R_ZAI R_ZAS): no
+//                  operand
 //   branch op      forward branch (emrel): R_PATCH lands it (a stack),
 //                  R_PATCHU the one under it
 //   JSR n          library routine n (rule_ref; $FF: * / % by the op)
@@ -1358,7 +1378,11 @@ static void loop_align_check(word ibc) {
 //   R_PEND0 / 1    emit_lda_pend: LDA lo / hi of the pending ACC
 //   R_PTR          zp pointer = mem[slot 1] (emit_ptr)
 //   R_ELW / R_ELB  AI = &((word / uchar *)slot 1)[slot 2], y its offset
-//   R_YK0 / 1      LDY #y / #y + 1
+//   R_YK0 / 1      LDY #lc_ty0 / #lc_ty0 + 1 (R_ELW sets it)
+//   R_YJ0 / 1      LDY #lc_ty1 / #lc_ty1 + 1
+//   R_ZAI / R_ZAS  the pointer: AI / AS (at the start: lc_tzp)
+//   zp op _TZP     _TZP / _TZP1 as its operand: the pointer / + 1
+//   R_BRD op       emjump(op, lc_tdest): to a bytecode target
 //   R_INC1         mem[slot 1]++ (emit_inc)
 //   R_NOW          acc_need() here (a pending const / slot into AX)
 //   R_LD1 / R_LD2  AX = mem[slot 1 / 2] (const: LDA #lo, TAX if hi == lo)
@@ -1720,7 +1744,7 @@ again:
 // LIB_MULDIV
 static void emit_tpl(const uchar *t, uchar len, const uchar *p, uchar op) {
   const uchar *e, *rs = 0, *re = 0;
-  uchar b, c, a, y = 0, zp = 0, rn = 0;
+  uchar b, c, a, zp = lc_tzp, rn = 0;
   word fx[4], top = 0;
   uchar nfx = 0;
 
@@ -1750,10 +1774,15 @@ static void emit_tpl(const uchar *t, uchar len, const uchar *p, uchar op) {
         top = fx[(nfx - 1) & 3]; fx[(nfx - 1) & 3] = fx[nfx & 3];
         empatch(top);
         break;
-      case A_ELW:   y = ai_word(p[0], p[1]); zp = AI; break;
+      case A_ELW:   lc_ty0 = ai_word(p[0], p[1]); zp = AI; break;
       case A_ELB:   ai_byte(p[0], p[1]); zp = AI; break;
-      case A_YK0:   em2(LDYN, y); break;
-      case A_YK1:   em2(LDYN, (uchar)(y + 1)); break;
+      case A_YK0:   em2(LDYN, lc_ty0); break;
+      case A_YK1:   em2(LDYN, (uchar)(lc_ty0 + 1)); break;
+      case A_YJ0:   em2(LDYN, lc_ty1); break;
+      case A_YJ1:   em2(LDYN, (uchar)(lc_ty1 + 1)); break;
+      case A_ZAI:   zp = AI; break;
+      case A_ZAS:   zp = AS; break;
+      case A_BRD:   emjump(*t++, lc_tdest); break;
       case A_TOP:   top = lc_at; break;
       case A_BACK:  b = *t++; em2(b, (uchar)(top - (lc_at + 2))); break;
       case A_LD1:   emit_load_slot(p[0]); break;
@@ -1786,6 +1815,9 @@ static void emit_tpl(const uchar *t, uchar len, const uchar *p, uchar op) {
 
     // BRK RTI RTS: one byte
     else if (c == 0 && !(b & 0x80)) em(b);
+
+    // zp op on _TZP / _TZP1: the pointer
+    else if (c >= 4 && c <= 6 && !(b & 0x10) && *t < 2) em2(b, zp + *t++);
 
     // #imm, zp, (zp,X): + its operand byte
     else if (c <= 2 || (c >= 4 && c <= 6) || c == 9) em2(b, *t++);
@@ -1998,7 +2030,6 @@ static word ivm_jit1(const uchar *code, word code_len,
         // zjp 0x80+rel: jump forward rel if ACC == 0 (ACC kept)
         //   CMP #0; BNE skip; CPX #0; BEQ dest; skip:
         word dest = (word)((p - code) + (op & 0x3f));
-        word fx;
         acc_need();                      // in, KEEP
         if (lc_z) {                                         // Z is ACC == 0
           emjump(BEQ, dest);
@@ -2006,9 +2037,8 @@ static word ivm_jit1(const uchar *code, word code_len,
         }
         else if (acc_x0) { em2(CMPN, 0); emjump(BEQ, dest); }   // X == 0
         else {
-          em2(CMPN, 0); fx = emrel(BNE);
-          em2(CPXN, 0); emjump(BEQ, dest);
-          empatch(fx);
+          lc_tdest = dest;
+          TPL(_CMPN "\0" _BNE _CPXN "\0" R_BRD _BEQ R_PATCH, 0);
         }
 
       } else {
@@ -2216,15 +2246,11 @@ static word ivm_jit1(const uchar *code, word code_len,
       uchar yi = ai_hit('w', base, i), yj = ai_hit('w', base, j);
       acc_drop();
       if (yi != 0xff && yj != 0xff) {
-        // both off AI (a[j], a[j+1]: the cache): Y offsets, no AS
-        em2(LDYN, (uchar)(yi + 1)); em2(LDAIY, AI); em(TAX);   // hi
-        em2(LDYN, (uchar)(yj + 1)); em2(LDAIY, AI);
-        em2(LDYN, (uchar)(yi + 1)); em2(STAIY, AI);
-        em2(LDYN, (uchar)(yj + 1)); em(TXA); em2(STAIY, AI);
-        em2(LDYN, yi); em2(LDAIY, AI); em(PHA);                // lo
-        em2(LDYN, yj); em2(LDAIY, AI);
-        em2(LDYN, yi); em2(STAIY, AI);
-        em2(LDYN, yj); em(PLA); em2(STAIY, AI);
+        // both off AI (a[j], a[j+1]: the cache): Y offsets, no AS. hi
+        // via X, then lo via the stack
+        lc_ty0 = yi; lc_ty1 = yj;
+        TPL(R_YK1 _LDAIY _TAX R_YJ1 _LDAIY R_YK1 _STAIY R_YJ1 _TXA _STAIY
+            R_YK0 _LDAIY _PHA R_YJ0 _LDAIY R_YK0 _STAIY R_YJ0 _PLA _STAIY, 0);
         acc_ax();                                  // A X = old [i]
         break;
       }
@@ -2234,10 +2260,10 @@ static word ivm_jit1(const uchar *code, word code_len,
         if (!is_const(i)) { lc_ai_kind = 'w'; lc_ai_base = base; lc_ai_idx = i; }
         else lc_ai_kind = 0;
       }
-      em2(LDYN, 1); em2(LDAIY, AI); em(TAX);       // hi
-      em2(LDAIY, AS); em2(STAIY, AI); em(TXA); em2(STAIY, AS);
-      em(DEY);      em2(LDAIY, AI); em(PHA);       // lo
-      em2(LDAIY, AS); em2(STAIY, AI); em(PLA); em2(STAIY, AS);
+      // swap: hi via X, then lo via the stack
+      TPL(_LDYN "\x01" _LDAIY _TAX R_ZAS _LDAIY R_ZAI _STAIY _TXA R_ZAS _STAIY
+          _DEY R_ZAI _LDAIY _PHA R_ZAS _LDAIY R_ZAI _STAIY _PLA R_ZAS _STAIY,
+          0);
       acc_ax();                                    // A X = old [i]
       break;
     }
@@ -2252,19 +2278,16 @@ static word ivm_jit1(const uchar *code, word code_len,
     case 'G': {
       word rel = PAR;
       word dest = (word)((p - code) + rel);
-      word fn, fgo, fz;
       acc_need();
       if (acc_x0) {                       // X == 0: ACC > 0 <=> A != 0
         if (!lc_z) em2(CMPN, 0);
         emjump(BNE, dest);
         break;
       }
-      em2(CPXN, 0x80); fn = emrel(BCS);   // negative -> no jump
-      em(TAY);         fgo = emrel(BNE);  // lo != 0: > 0 (Y is scratch)
-      em2(CPXN, 0);    fz = emrel(BEQ);   // == 0 -> no jump
-      empatch(fgo);
-      emjump(JMP, dest);
-      empatch(fn); empatch(fz);
+      // negative, == 0: no jump; lo != 0: > 0 (Y is scratch)
+      lc_tdest = dest;
+      TPL(_CPXN "\x80" _BCS _TAY _BNE _CPXN "\0" _BEQ
+          R_PATCHU R_BRD _JMP R_PATCH R_PATCH, 0);
       break;
     }
     // B: unconditional back
@@ -2333,9 +2356,9 @@ static word ivm_jit1(const uchar *code, word code_len,
         if (yah_is(slot)) {
           // already: Y = lo, A = hi ("+ v; S slot")
         } else if (lc_axs == slot || (acc_at == ACC_AX && acc_s == slot)) {
-          em(TAY); em(TXA);
+          TPL(_TAY _TXA, 0);
         } else {
-          emop2(LDY, slotlo(slot)); emop2(LDA, slothi(slot));
+          TPL(_LDY RLO1 _LDA RHI1, &slot);
         }
         acc_lost();
         lc_ya_next = slot; lc_ya_bc = (word)(bc_pc + 4);
