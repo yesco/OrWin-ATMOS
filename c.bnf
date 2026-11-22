@@ -400,7 +400,9 @@ E=\i+=\i [U\1\2]
 |(char*)E
 |(int*) E
 |(word*)E
-|(char)E\#ff[&\2]
+# (char): binds tighter than the operators: (char)x + y casts x only
+|(char)R\#ff[&\2]O
+|(char)S\#ff[\l1&\2]O
 
 |RO
 |S[\l1]O
@@ -431,7 +433,9 @@ R=\i(Z)[\v]
 |! E[?]
 
 # - Simple Expression: \s = string const, \d = number
-S=\d|sizeof(T)\z|sizeof(\i)\z|\s|\i
+# sizeof: by the type's guard: char 1, int / word / any pointer 2 (\#xx:
+# the result is the const xx)
+S=\d|sizeof(T\?c)\#01|sizeof(T)\#02|sizeof(\i\?c)\#01|sizeof(\i)\#02|\s|\i
 
 # - List of expressions (limited, TODO: get rid of?)
 # TODO: think it'll parse E twice?
@@ -500,6 +504,7 @@ Control:
   \{ \} scope  start end
   \> \< tail-till-here tail-recurse rule (till \> or first alt)
   \#xx  result := hex xx  (same as \d having matched that number)
+  \xHH  match the byte HH exactly (no ws skipped)
   \=n   result := capture n
 
 Generate:
@@ -515,6 +520,7 @@ Generate:
   \v       emit 0xC0|vec for the function matched by \i in this rule
   \k       emit param slot of the next call argument (rule Z)
   \x       emit jump placeholder, push on patch stack
+  \xHH     emit the byte HH (\x then two hex digits; \#xx too)
   \y       patch top placeholder to jump to here    \w swap top two
   \m       mark loop start    \z emit backward delta to the mark
   \[ \]    emit a literal [ or ]

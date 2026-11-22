@@ -2363,12 +2363,6 @@ int run() {
   else if (c == HIBIT('u')) ok = match_str(1);
 
 
-  // LOOP PATCH? FIX?
-  else if (c == HIBIT('z')) {
-    record_capture(MAKE_CAP(const_slot(
-      (!CAP_IS_PTR(cur_type) && CAP_TYPE(cur_type) == TY_CHAR) ? 1 : 2), TY_WORD));
-  }
-
 
   // OK
   // TODO: why not retun inside these rules instead?
