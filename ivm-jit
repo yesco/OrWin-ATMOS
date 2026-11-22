@@ -8,20 +8,26 @@ rm ivm-jit.x ivm-vm.lst ivm-jit.sim ivm-jit.lst 2>/dev/null
 # recreate .lst asm and merge C force comments
 ./cafix
 
-time sim65 -c ivm-jit.sim -z -j $* $name.ivm | grep cycles | sed 's/ cycles//' > $name.cycles.jit
-time sim65 -c ivm-jit.sim -z $* $name.ivm | tee $name.log
-
-echo 
-echo 
-echo "--- -t generate file ---"
-cl65 -DMEMMAP -DJIT -Oirs -C sim6502.cfg -t sim6502 ivm-lib.o ivm.c -o ivm-jit-map.sim || exit 1
-time sim65 -c ivm-jit-map.sim -j -z -tsim6502 $* $name.ivm -o$name.ivm.sim
-echo
-echo
+sim65 -c ivm-jit.sim -z -j $* $name.ivm | grep cycles | sed 's/ cycles//' > $name.cycles.jit
+sim65 -c ivm-jit.sim -z $* $name.ivm | tee $name.log
 
 jit=$(cat "$name.cycles.jit")
 jitandrun=$(grep cycles "$name.log" | sed 's/ cycles//')
 run=$((jitandrun - jit))
+
+rm ivm-jit-map.sim
+
+echo 
+echo 
+echo "--- -t generate file ---"
+cl65 -DMEMMAP -DJIT -Oirs -C sim6502.cfg -t sim6502 ivm-lib.o ivm.c -o ivm-jit-map.sim
+#cl65 -DMEMMAP -DJIT -Oirs -C sim6502.cfg -t sim6502 ivm-lib.o ivm.c -o ivm-jit-map.sim || exit 1
+sim65 -c ivm-jit-map.sim -j -z -tsim6502 $* $name.ivm -o$name.ivm.sim
+echo
+echo
+
+sim65 -c $name.ivm.sim | tee $name.sim.log
+simrun=$(grep cycles "$name.sim.log" | sed 's/ cycles//')
 
 echo
 echo
@@ -30,7 +36,9 @@ echo
 echo "JIT      : $jit"
 echo "JIT&RUN  : $jitandrun"
 echo "RUN      : $run"
+echo "SIM      : $simrun"
 echo
+
 
 echo
 echo

@@ -2682,8 +2682,9 @@ static char *mm_fn[64];                // .sym: vector -> function name
 static void mm_area(uchar k, word at, word n) { mm_at[k] = at; mm_len[k] = n; }
 
 // NAME.sym: "  ss  M  name ..." (A: an array), "aaaa  Vvv  name ..."
+static char mm_path[128], mm_line[128], mm_name[64];   // not on the C stack
 static void mm_syms(void) {
-  char path[128], line[128], name[64], *dot = 0, *q;
+  char *path = mm_path, *line = mm_line, *name = mm_name, *dot = 0, *q;
   unsigned a, v;
   char tag;
   FILE *f;
@@ -2693,7 +2694,7 @@ static void mm_syms(void) {
   for (q = path; *q; q++) if (*q == '.') dot = q;
   strcpy(dot ? dot : q, ".sym");
   if (!(f = fopen(path, "r"))) return;
-  while (fgets(line, sizeof line, f)) {
+  while (fgets(line, sizeof mm_line, f)) {
     if (line[0] == ' ' && sscanf(line, " %x %c %63s", &a, &tag, name) == 3 &&
         (tag == 'M' || tag == 'A') && a < 256 && !mm_slot[a]) {
       mm_slot[a] = strdup(name);
@@ -2733,22 +2734,45 @@ static void mm_slotline(word at, uchar i, uchar memsz) {
   (void)memsz;
 }
 
-// what of the arrays (their const slots) is in [at, at + n)
-static void mm_arrays(word at, word n, uchar memsz) {
-  word i, w;
-  for (i = 0; i < memsz; i++)
-    if (mm_arr[i] && is_const((uchar)i) && (w = const_val((uchar)i)) >= at &&
-        w - at < n)
-      printf("  $%04X  %s\n", w, mm_slot[i]);
+// a list of named addresses, then printed by address, each with its size
+// (to the next one; the last: to end)
+#define MM_MAXL 80
+static word  mm_la[MM_MAXL];
+static const char *mm_ln[MM_MAXL];
+static uchar mm_nl;
+static char  mm_vn[64][4];             // "V00" for unnamed functions
+
+static void mm_add(word a, const char *n) {
+  if (mm_nl < MM_MAXL) { mm_la[mm_nl] = a; mm_ln[mm_nl++] = n; }
 }
 
-static void mm_print(uchar memsz) {
+static void mm_list(word end) {
+  uchar k, m;
+  word a;
+  const char *n;
+
+  // sort by address (insertion)
+  for (k = 1; k < mm_nl; k++)
+    for (m = k; m && mm_la[m - 1] > mm_la[m]; m--) {
+      a = mm_la[m]; mm_la[m] = mm_la[m - 1]; mm_la[m - 1] = a;
+      n = mm_ln[m]; mm_ln[m] = mm_ln[m - 1]; mm_ln[m - 1] = n;
+    }
+  for (k = 0; k < mm_nl; k++)
+    printf("  $%04X  %-24s %5u bytes\n", mm_la[k], mm_ln[k],
+           (word)((k + 1 < mm_nl ? mm_la[k + 1] : end) - mm_la[k]));
+  mm_nl = 0;
+}
+
+static uchar mm_memsz;
+static void mm_print(uchar n) {
   static const char *const lib[] = { "putchar", "putnum", "puts", "free",
     "malloc", "mul", "div", "mod", "printstr", "timed", "memset" };
-  uchar k, j, done = 0;
-  unsigned long i;
+  uchar k, j, done = 0, memsz;
+  word i, w, end;
 
+  mm_memsz = n;                        // (kept off the C stack)
   mm_syms();
+  memsz = mm_memsz;
   printf("\n--- MEMMAP %s ---\n", mm_ivm ? mm_ivm : (const char *)"");
   while (done != (1 << MM_N) - 1) {
 
@@ -2758,39 +2782,50 @@ static void mm_print(uchar memsz) {
     done |= (uchar)(1 << j);
     if (!mm_len[j]) continue;
     printf("$%04X --- %s (%u bytes) ---\n", mm_at[j], mm_what[j], mm_len[j]);
+    end = (word)(mm_at[j] + mm_len[j]);
 
     switch (j) {
+
+    // each slot: its name, a frame cell or a const
     case MM_SLOTS:
       for (i = 0; i < memsz; i++)
         mm_slotline((word)(mm_at[j] + 2 * i), (uchar)i, memsz);
       break;
-    case MM_LIB:                         // its routines, by address
-      for (i = 0; i < 0x10000L; ) {
-        word nx = 0xffff;
-        for (k = 0; k <= LIB_MEMSET; k++) {
-          #ifndef HOSTSIM
-          if (k == LIB_TIMED) continue;
-          #endif
-          if (rule_ref(k) == i) printf("  $%04X  %s\n", (word)i, lib[k]);
-          if (rule_ref(k) > i && rule_ref(k) < nx) nx = rule_ref(k);
-        }
-        if (nx == 0xffff) break;
-        i = nx;
+
+    // the routines (the startup before them)
+    case MM_LIB:
+      #ifndef HOSTSIM
+      mm_add(mm_at[j], "startup, loader");
+      #endif
+      for (k = 0; k <= LIB_MEMSET; k++) {
+        #ifndef HOSTSIM
+        if (k == LIB_TIMED) continue;
+        #endif
+        mm_add(rule_ref(k), lib[k]);
       }
+      mm_list(end);
       break;
+
+    // the arrays in it (their const slots point here)
     case MM_DATA: case MM_BSS:
-      mm_arrays(mm_at[j], mm_len[j], memsz);
+      for (i = 0; i < memsz; i++)
+        if (mm_arr[i] && is_const((uchar)i) &&
+            (w = const_val((uchar)i)) >= mm_at[j] && w - mm_at[j] < mm_len[j])
+          mm_add(w, mm_slot[i]);
+      mm_list(end);
       break;
+
+    // the functions (their entries), _start
     case MM_CODE:
-      printf("  $%04X  JMP _start, vectors\n", mm_at[j]);
-      for (k = 0; lc_vec_bc && k < lc_ncall; k++) {
-        word a = (word)(lc_out_org + lc_map[lc_vec_bc[k]]);
-        if (mm_fn[k]) printf("  $%04X  %s()\n", a, mm_fn[k]);
-        else printf("  $%04X  V%02x()\n", a, k);
+      mm_add(mm_at[j], "JMP _start, vectors");
+      for (k = 0; lc_vec_bc && k < lc_ncall && k < 64; k++) {
+        if (!mm_fn[k]) sprintf(mm_vn[k], "V%02x", k);
+        mm_add((word)(lc_out_org + lc_map[lc_vec_bc[k]]),
+               mm_fn[k] ? mm_fn[k] : mm_vn[k]);
       }
       if (lc_main_at)
-        printf("  $%04X  _start (global inits, main)\n",
-               (word)(lc_out_org + lc_main_at));
+        mm_add((word)(lc_out_org + lc_main_at), "_start (inits, main)");
+      mm_list(end);
       break;
     }
   }
