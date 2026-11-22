@@ -257,7 +257,7 @@ if (h.len == 0 || h.len > len)
   if (h.con && h.con < h.len) {
     unsigned con_end = h.fp && h.fp > h.con ? h.fp : (h.code && h.code > h.con ? h.code : h.len);
     unsigned max_words = (con_end > h.con) ? (con_end - h.con) / 2 : 0;
-    unsigned seen0 = 0;
+    unsigned seen0 = 0, bss = 0;
 
     if (h.constidx <= 253)
       nconst = (unsigned)(253 - h.constidx + 1);
@@ -265,6 +265,15 @@ if (h.len == 0 || h.len > len)
       nconst = max_words;
     if (nconst > max_words)
       nconst = max_words;
+
+    // static arrays (bss): reloc words past the blob (>= len), offsets
+    // into zeroed memory the loader sets aside; the largest is the end
+    // marker: the bss size (not in the header, not in the file)
+    for (i = 0; i < nconst; i++) {
+      w = ivm_rd16(blob + h.con + i * 2);
+      if (!w) break;
+      if (w >= h.len && w - h.len > bss) bss = w - h.len;
+    }
 
     fprintf(fp, "-- constants (%u words @ %04x) [strings..|0|ints] --\n", nconst, h.con);
     for (i = 0; i < nconst; i++) {
@@ -276,6 +285,9 @@ if (h.len == 0 || h.len > len)
           seen0 = 1;
           fprintf(fp, "%04x  C  zero:        0000  slot=%02x  (reloc end + real 0)\n",
                   off, slot);
+        } else if (w >= h.len) {
+          fprintf(fp, "%04x  A  array%02u:    %04x  slot=%02x  bss+%u%s\n", off, i,
+                  w, slot, w - h.len, w - h.len == bss ? "  (end: bss size)" : "");
         } else {
           fprintf(fp, "%04x  S  string%02u:   %04x  slot=%02x", off, i, w, slot);
           ivm_dump_str_preview(fp, blob, h.len, h.data, w);
@@ -286,6 +298,9 @@ if (h.len == 0 || h.len > len)
                 off, i, w, slot, (unsigned)w, (unsigned)w);
       }
     }
+    if (bss)
+      fprintf(fp, "-- bss (static arrays): %u bytes, zeroed after the blob,"
+                  " not in the file --\n", bss);
   }
 
   // ---- frame bases (bytes) ---- 

@@ -2285,12 +2285,14 @@ int main(void) {
 #else
 int main(int argc, char** argv) {
 #endif
-  char *s;
+  char *s, *file = NULL;
 
   printf("ivm started.. doing args..\n");
 
-  while ((s = (char *)*++argv) && *s == '-')
-    switch (s[1]) {
+  // options before or after the file
+  while ((s = (char *)*++argv) != NULL)
+    if (*s != '-') file = s;
+    else switch (s[1]) {
     case 'r': runs = (word)strtoul(s + 2, NULL, 10); break;
     #ifdef JIT
       case 'j': runs = 0; break;
@@ -2312,7 +2314,7 @@ int main(int argc, char** argv) {
     if (jit_outfile) { printf("%%SIM: -o needs the 6502 build\n"); runs = 0; }
   #endif
 
-  if (s) return run_file(s);
+  if (file) return run_file(file);
  xusage:
 
   printf("%s", usage);
