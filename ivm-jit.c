@@ -682,6 +682,12 @@ static word  lc_tdest;
 #define RHIV    "\x13"
 #define RS_HI   0x10                      // spec: hi byte
 #define RS_VAL  3                         // spec: the return value cell
+#define RLOA    "\x04"                    // the pending ACC (const / slot)
+#define RHIA    "\x14"
+#define RS_ACC  4
+#define RLOM    "\x05"                    // opmemset_adr: the routine's STA
+#define RHIM    "\x15"                    // operand (+ 1)
+#define RS_MSA  5
 
 // library routines (JSR n, rule_ref)
 #define LIB_PUTCHAR 0
@@ -693,6 +699,7 @@ static word  lc_tdest;
 #define LIB_DIV     6
 #define LIB_MOD     7
 #define LIB_PRINTSTR 8
+#define LIB_MEMSET  10
 #define LIB_TIMED   9
 #define LIB_MULDIV  0xFF                  // MUL / DIV / MOD by the op
 #define L_PUTCHAR   "\x00"
@@ -702,6 +709,7 @@ static word  lc_tdest;
 #define L_MALLOC    "\x04"
 #define L_MUL       "\x05"
 #define L_PRINTSTR  "\x08"
+#define L_MEMSET    "\x0A"
 #define L_TIMED     "\x09"
 #define L_MULDIV    "\xFF"
 
@@ -1365,7 +1373,8 @@ static void loop_align_check(word ibc) {
 //   abs op  spec   (columns C D E) a slot operand: emop2(op, its address),
 //                  zp form if it fits, #imm if a constant (and op has it).
 //                  spec 1 / 2 = lo of slot operand 1 / 2, 3 = of the
-//                  return value cell (FR_VAL), +16 = hi
+//                  return value cell (FR_VAL), 4 = of the pending ACC,
+//                  5 = opmemset_adr (absolute), +16 = hi
 //   R_ALU   spec   ($0F) the same with the ALU op of the op (+ ADC, - SBC,
 //                  & AND, | ORA, ^ EOR)
 //   (zp),Y op      on the pointer (R_PTR R_ELW R_ELB R_ZAI R_ZAS): no
@@ -1428,6 +1437,8 @@ static void loop_align_check(word ibc) {
 #define G_N8    0x7000            // count 8..15
 #define G_NB    0x8000            // count 0..7 (a byte: < 8)
 #define G_NC    0x9000            // count a const
+#define G_MK0   0xA000            // ACC a pending const 0
+#define G_MKS   0xB000            // ACC a pending const 1..256
 #define R_NEED  0x01
 #define R_DROP  0x02
 #define R_WRITE 0x04
@@ -1567,6 +1578,15 @@ static const JitRule jit_rules[] = {
 #else
   RULE('#', 0, 0, ""),
 #endif
+  // m ptr val: memset(mem[ptr], val, ACC). A pending count stays pending.
+  // 1..256: inline (LDY #n: 256 is 0, DEY wraps); else opmemset: its STA
+  // operand = ptr + X * 256 (the last page), Y = count lo, X = count hi
+  #define T_MSET _LDA RLO1 _STA RLOM _TXA _CLC _ADC RHI1 _STA RHIM _LDA RLO2
+  RULE('m', G_MK0, 0, ""),
+  RULE('m', G_MKS, 0,
+    R_PTR _LDY RLOA _LDA RLO2 R_TOP _DEY _STAIY R_BACK _BNE),
+  RULE('m', G_PEND, 0, _LDX RHIA T_MSET _LDY RLOA _JSR L_MEMSET),
+  RULE('m', 0, R_NEED | R_LOST, _TAY T_MSET _JSR L_MEMSET),
   // ~: ACC = ~ACC (a pending const: folded, in C)
   RULE('~', 0, R_NEED | R_AX,
     _EORN "\xFF" _TAY _TXA _EORN "\xFF" _TAX _TYA),
@@ -1646,6 +1666,7 @@ static word rule_ref(uchar n) {
   case LIB_MUL:     return REF(opmul);
   case LIB_DIV:     return REF(opdiv);
   case LIB_MOD:     return REF(opmod);
+  case LIB_MEMSET:  return REF(opmemset);
   #ifdef HOSTSIM
   case LIB_TIMED:   return REF(optimed);
   #endif
@@ -1688,6 +1709,8 @@ static int rule_guard(word g, const uchar *p) {
   case G_N8 >> 12:   return (uchar)(lc_rn - 8) < 8;
   case G_NB >> 12:   return lc_rn < 8;
   case G_NC >> 12:   return lc_rn != 0xff;
+  case G_MK0 >> 12:  return acc_at == ACC_PEND && acc_hk && !acc_k;
+  case G_MKS >> 12:  return acc_at == ACC_PEND && acc_hk && acc_k - 1 < 256;
   }
   return 1;
 }
@@ -1759,8 +1782,22 @@ static void emit_tpl(const uchar *t, uchar len, const uchar *p, uchar op) {
       if (b == A_ALU)
         b = op == '+' ? ADC : op == '-' ? SBC : op == '&' ? AND_ :
             op == '|' ? ORA : EOR;
-      a = (c & 15) == RS_VAL ? (uchar)(lc_cur_frame + 1) : p[(c & 15) - 1];
-      emit_alub(b, a, c & RS_HI);
+      a = c & 15;
+      c &= RS_HI;
+
+      // the pending ACC: a const as #imm, else its slot
+      if (a == RS_ACC && acc_hk)
+        em2(immop(b), (uchar)(c ? acc_k >> 8 : acc_k));
+
+      // opmemset_adr: absolute
+      else if (a == RS_MSA) ema(b, (word)(REF(opmemset_adr) + (c ? 1 : 0)));
+
+      // a slot
+      else {
+        a = a == RS_VAL ? (uchar)(lc_cur_frame + 1) :
+            a == RS_ACC ? acc_s : p[a - 1];
+        emit_alub(b, a, c);
+      }
 
     // actions (columns 2, 3; not LDX #)
     } else if (c == 3 || (c == 2 && b != LDXN)) {
@@ -2449,57 +2486,6 @@ static word ivm_jit1(const uchar *code, word code_len,
     //   else: X = pages, Y = rest, the routine's STA $xxxx,Y operand =
     //   ptr + X*256 (last page), A = fill; JSR _opmemset (ivm-lib.asm):
     //   rest of the last page first, then full pages down. Max 32K (BPL).
-    case 'm': {
-      uchar ptr = PAR;
-      uchar val = PAR;
-      // in (count), KEEP: the code below uses A X Y. A pending count is
-      // loaded straight into X (hi) and Y (lo, last) and stays pending; a
-      // count in AX: TAY, then it is lost.
-      uchar pend = (acc_at == ACC_PEND);
-
-      if (pend && acc_hk && acc_k <= 256) {         // small: all inline
-        uchar zp;
-        if (acc_k) {
-          zp = emit_ptr(ptr);
-          em2(LDYN, (uchar)acc_k);                  // 256: 0, DEY wraps
-          if (is_const(val)) em2(LDAN, (uchar)const_val(val));
-          else               emop2(LDA, slotlo(val));
-          em(DEY); em2(STAIY, zp); em2(BNE, (uchar)-5);
-        }
-        acc_keep();
-        break;
-      }
-
-      if (pend) {
-        if (acc_hk) em2(LDXN, (uchar)(acc_k >> 8));
-        else        emop2(LDX, slothi(acc_s));
-      } else {
-        acc_need();
-        em(TAY);
-      }
-
-      // the routine's STA operand = ptr + X*256  (last page)
-      if (is_const(ptr)) em2(LDAN, (uchar)const_val(ptr));
-      else               emop2(LDA, slotlo(ptr));
-      ema(STA, REF(opmemset_adr));
-      em(TXA); em(CLC);
-      emit_alub(ADC, ptr, 1);
-      ema(STA, (word)(REF(opmemset_adr) + 1));
-
-      // fill byte, rest
-      if (is_const(val)) em2(LDAN, (uchar)const_val(val));
-      else               emop2(LDA, slotlo(val));
-      if (pend) {
-        if (acc_hk) em2(LDYN, (uchar)acc_k);
-        else        emop2(LDY, slotlo(acc_s));
-      }
-      ema(JSR, REF(opmemset));
-
-      if (pend) acc_keep();               // its source is unchanged
-      else acc_lost();
-      break;
-    }
-
     default:
       if (jit_rule(op, p)) { p += ivm_oplen(p - 1) - 1; break; }
       printf("%%ERROR: unimpl op 0x%02X '%c' at bc %u — continuing\n",

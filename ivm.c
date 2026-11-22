@@ -1066,15 +1066,20 @@ word sys(char n, word acc, char* ipc) {
 
 #endif
 
-// Just enable to see compilation size differnce
+// No VM: JIT_6502 runs the JIT's code instead (run_loaded_blob), so
+// run_ivm is not even there; NOIVM: to see the size difference
+// (- 9396 5047) == 4349 bytes for JUST the VM!
+#if defined(NOIVM) || defined(JIT_6502)
+
 #ifdef NOIVM
 
-// (- 9396 5047) == 4349 bytes for JUST the VM!
+ivmvar ivm_acc;
 
 ivmvar run_ivm(Process *p) {
   return 0;
   (void)p;
 }
+#endif
 
 #else
 

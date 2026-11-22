@@ -5,7 +5,7 @@ set -e
 # lib assembled on its own: its own listing (cl65 -l would overwrite it)
 ca65 -t sim6502 -g -l ivm-lib.raw.lst -o ivm-lib.o ivm-lib.asm
 
-cl65 -DVERBOSE -DJIT -Oirs -g --add-source -C sim6502.cfg -t sim6502 \
+cl65 -DNOIVM -DVERBOSE -DJIT -Oirs -g --add-source -C sim6502.cfg -t sim6502 \
      -l ivm.raw.lst -vm -m ivm-jit.map -Ln ivm-jit.lbl \
      -o ivm-jit.sim ivm-lib.o ivm.c
 
