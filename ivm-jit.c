@@ -601,31 +601,157 @@ static void emit_load_const(word v) {
   if (lo == hi) em(TAX); else em2(LDXN, hi);
 }
 
+// ---- templates: 6502 code as data (see "rules" below) -------------
+//
+// emit_tpl interprets one; TPL(t, slots) emits a template t (a string
+// literal) on the slot operands slots, TPLOP the same for an ALU op.
+static void emit_tpl(const uchar *t, uchar len, const uchar *p, uchar op);
+#define TPL(t, p)       emit_tpl((const uchar *)(t), sizeof(t) - 1, p, 0)
+#define TPLOP(t, p, op) emit_tpl((const uchar *)(t), sizeof(t) - 1, p, op)
+
+// opcodes as strings: templates are concatenated string literals
+#define _ADC    "\x6D"
+#define _ADCN   "\x69"
+#define _ASLA   "\x0A"
+#define _BEQ    "\xF0"
+#define _CPX    "\xEC"
+#define _CMP    "\xCD"
+#define _BCC    "\x90"
+#define _BCS    "\xB0"
+#define _BNE    "\xD0"
+#define _CLC    "\x18"
+#define _CMPN   "\xC9"
+#define _DEC    "\xCE"
+#define _DEX    "\xCA"
+#define _DEY    "\x88"
+#define _EORN   "\x49"
+#define _INC    "\xEE"
+#define _INX    "\xE8"
+#define _INY    "\xC8"
+#define _JSR    "\x20"
+#define _LDA    "\xAD"
+#define _LDAIY  "\xB1"
+#define _LDAN   "\xA9"
+#define _LDXZ   "\xA6"
+#define _LDY    "\xAC"
+#define _LSRZ   "\x46"
+#define _ROLZ   "\x26"
+#define _LSRA   "\x4A"
+#define _RORA   "\x6A"
+#define _RTS    "\x60"
+#define _SBC    "\xED"
+#define _SEC    "\x38"
+#define _LDX    "\xAE"
+#define _LDXN   "\xA2"
+#define _LDYN   "\xA0"
+#define _ORAZ   "\x05"
+#define _PHA    "\x48"
+#define _PLA    "\x68"
+#define _ROLA   "\x2A"
+#define _STA    "\x8D"
+#define _STAIY  "\x91"
+#define _STAZ   "\x85"
+#define _STX    "\x8E"
+#define _STXZ   "\x86"
+#define _STY    "\x8C"
+#define _TAX    "\xAA"
+#define _TAY    "\xA8"
+#define _TXA    "\x8A"
+#define _TYA    "\x98"
+#define _TMP1   "\xFE"                    // zp tmp1 / tmp2 (operands)
+#define _TMP2   "\xFF"
+// slot specs (after an abs op or R_ALU): which slot, lo / hi
+#define RLO1    "\x01"                    // slot operand 1: lo / hi
+#define RHI1    "\x11"
+#define RLO2    "\x02"                    // slot operand 2
+#define RHI2    "\x12"
+#define RLOV    "\x03"                    // return value cell (FR_VAL)
+#define RHIV    "\x13"
+#define RS_HI   0x10                      // spec: hi byte
+#define RS_VAL  3                         // spec: the return value cell
+
+// library routines (JSR n, rule_ref)
+#define LIB_PUTCHAR 0
+#define LIB_PUTNUM  1
+#define LIB_PUTS    2
+#define LIB_FREE    3
+#define LIB_MALLOC  4
+#define LIB_MUL     5
+#define LIB_DIV     6
+#define LIB_MOD     7
+#define LIB_PRINTSTR 8
+#define LIB_TIMED   9
+#define LIB_MULDIV  0xFF                  // MUL / DIV / MOD by the op
+#define L_PUTCHAR   "\x00"
+#define L_PUTNUM    "\x01"
+#define L_PUTS      "\x02"
+#define L_FREE      "\x03"
+#define L_MALLOC    "\x04"
+#define L_MUL       "\x05"
+#define L_PRINTSTR  "\x08"
+#define L_TIMED     "\x09"
+#define L_MULDIV    "\xFF"
+
+// actions: the opcodes a 6502 does not have (columns 2, 3, F; not LDX #)
+#define A_ALU    0x0F                     // ALU op of the op, + slot spec
+#define A_PEND0  0x02                     // LDA lo / hi of the pending ACC
+#define A_PEND1  0x12
+#define A_PTR    0x22                     // zp pointer = mem[slot 1]
+#define A_INC1   0x32                     // mem[slot 1]++
+#define A_PATCH  0x42                     // the forward branch lands here
+#define A_ELW    0x52                     // AI = &slot1[slot2], word
+#define A_ELB    0x62                     // ... uchar
+#define A_YK0    0x72                     // LDY #y
+#define A_YK1    0x82                     // LDY #y + 1
+#define A_TOP    0x92                     // loop top ...
+#define A_BACK   0xB2                     // ... branch back to it: + brop
+#define A_STR    0xC2                     // the inline string, 0 too
+#define A_PATCHU 0xD2                     // A_PATCH the one under the top
+#define A_LD2    0xE2                     // AX = mem[slot 2] (emit_load_slot)
+#define A_LDO    0xF2                     // LDA #operand byte 1
+#define A_NOW    0x03                     // acc_need() here
+#define A_LD1    0x13                     // AX = mem[slot 1]
+#define A_REP    0x23                     // next len bytes, lc_rn times
+#define A_SUB8   0x33                     // lc_rn -= 8
+#define A_LDYRN  0x43                     // LDY #lc_rn
+// ... the same as template strings
+#define R_ALU    "\x0F"
+#define R_PEND0  "\x02"
+#define R_PEND1  "\x12"
+#define R_PTR    "\x22"
+#define R_INC1   "\x32"
+#define R_PATCH  "\x42"
+#define R_ELW    "\x52"
+#define R_ELB    "\x62"
+#define R_YK0    "\x72"
+#define R_YK1    "\x82"
+#define R_TOP    "\x92"
+#define R_BACK   "\xB2"
+#define R_STR    "\xC2"
+#define R_PATCHU "\xD2"
+#define R_LD2    "\xE2"
+#define R_LDO    "\xF2"
+#define R_NOW    "\x03"
+#define R_LD1    "\x13"
+#define R_REP    "\x23"
+#define R_SUB8   "\x33"
+#define R_LDYRN  "\x43"
+
 static void emit_load_slot(uchar s) {
   if (is_const(s)) { emit_load_const(const_val(s)); return; }
   emop2(LDA, slotlo(s));
   emop2(LDX, slothi(s));
 }
-static void emit_store_slot(uchar s) {
-  emop2(STA, slotlo(s));
-  emop2(STX, slothi(s));
-}
+static void emit_store_slot(uchar s) { TPL(_STA RLO1 _STX RHI1, &s); }
 static void emit_load0(void) { em2(LDAN, 0); em(TAX); }
 
-// abs opcode → immediate form
+// abs opcode → immediate form, 0 if none. Column D: imm = abs - 4
+// (not STA); LDY CPY CPX (AC CC EC): - 12; LDX: LDXN
 static uchar immop(uchar ins) {
-  switch (ins) {
-  case ADC:  return ADCN;
-  case SBC:  return SBCN;
-  case AND_: return ANDN;
-  case ORA:  return ORAN;
-  case EOR:  return EORN;
-  case CMP:  return CMPN;
-  case CPX:  return CPXN;
-  case CPY:  return CPYN;
-  case LDA:  return LDAN;
-  case LDX:  return LDXN;
-  case LDY:  return LDYN;
+  switch (ins & 15) {
+  case 0xD: return (uchar)(ins == STA ? 0 : ins - 4);
+  case 0xC: return (uchar)(ins >= LDY ? ins - 12 : 0);
+  case 0xE: return (uchar)(ins == LDX ? LDXN : 0);
   }
   return 0;
 }
@@ -635,11 +761,7 @@ static uchar immop(uchar ins) {
 static void emit_alub(uchar ins, uchar s, uchar hi);
 
 // mem[s]++ (word)
-static void emit_inc(uchar s) {
-  word fx;
-  emop2(INC_, slotlo(s)); fx = emrel(BNE); emop2(INC_, slothi(s));
-  empatch(fx);
-}
+static void emit_inc(uchar s) { TPL(_INC RLO1 _BNE _INC RHI1 R_PATCH, &s); }
 
 // zp pointer holding mem[s] for (zp),Y: with -z the slot itself, else a
 // copy in tmp1/tmp2 (clobbers A)
@@ -653,7 +775,7 @@ static uchar emit_ptr(uchar s) {
 // reg OP (lo or hi byte of mem[s]); const-aware. For ADC/SBC/AND/ORA/EOR
 // (on A) and CMP (A) / CPX (X). CLC/SEC by caller.
 static void emit_alub(uchar ins, uchar s, uchar hi) {
-  if (is_const(s)) {
+  if (is_const(s) && immop(ins)) {
     word v = const_val(s);
     em2(immop(ins), (uchar)(hi ? (v >> 8) : (v & 0xff)));
   } else {
@@ -691,25 +813,9 @@ static word fuse_branch(const uchar *c, word nb, word len, uchar *skip,
 
 // flags of a - b (C = a >= b): A only, consts as immediates
 static void emit_sub_flags(uchar a, uchar b) {
-  if (is_const(a)) em2(LDAN, (uchar)const_val(a)); else emop2(LDA, slotlo(a));
-  emit_alub(CMP, b, 0);
-  if (is_const(a)) em2(LDAN, (uchar)(const_val(a) >> 8));
-  else emop2(LDA, slothi(a));
-  emit_alub(SBC, b, 1);
-}
-static void emit_lim_minus_slot(uchar lim, uchar slot) {
-  if (is_const(lim)) {
-    word v = const_val(lim);
-    em2(LDAN, (uchar)(v & 0xff));
-    emop2(CMP, slotlo(slot));
-    em2(LDAN, (uchar)(v >> 8));
-    emop2(SBC, slothi(slot));
-  } else {
-    emop2(LDA, slotlo(lim));
-    emop2(CMP, slotlo(slot));
-    emop2(LDA, slothi(lim));
-    emop2(SBC, slothi(slot));
-  }
+  uchar sa[2];
+  sa[0] = a; sa[1] = b;
+  TPL(_LDA RLO1 _CMP RLO2 _LDA RHI1 _SBC RHI2, sa);
 }
 
 // for-loop test (in 'n' only, 't' jumps to it): branch back to bytecode
@@ -802,8 +908,8 @@ static void emit_loop_test(uchar slot, uchar lim, word body, uchar ax,
   word fx;
 
   if (!ax) {
-    if (excl) { emit_lim_minus_slot(slot, lim); emjump(BCC, body); }
-    else      { emit_lim_minus_slot(lim, slot); emjump(BCS, body); }
+    if (excl) { emit_sub_flags(slot, lim); emjump(BCC, body); }
+    else      { emit_sub_flags(lim, slot); emjump(BCS, body); }
     return;
   }
   emit_load_slot(slot);
@@ -1130,12 +1236,11 @@ static uchar log2w(word v) {
 
 // ACC *= 2 (i+i, i*2, 2*i): from the pending slot, or in AX. NEW
 static void emit_acc_double(void) {
-  if (acc_at == ACC_PEND && !acc_hk) {
-    emop2(LDA, slotlo(acc_s)); em(ASLA); em(TAY);
-    emop2(LDA, slothi(acc_s)); em(ROLA); em(TAX); em(TYA);
-  } else {
+  if (acc_at == ACC_PEND && !acc_hk)
+    TPL(_LDA RLO1 _ASLA _TAY _LDA RHI1 _ROLA _TAX _TYA, &acc_s);
+  else {
     acc_need();
-    em(ASLA); em(TAY); em(TXA); em(ROLA); em(TAX); em(TYA);
+    TPL(_ASLA _TAY _TXA _ROLA _TAX _TYA, 0);
   }
   acc_ax();
 }
@@ -1327,133 +1432,6 @@ static void loop_align_check(word ibc) {
 #define R_AXCOPY 0x70
 #define R_SETS  0x80
 #define R_AXZ   0x90
-// opcodes as strings: templates are concatenated string literals
-#define _ADC    "\x6D"
-#define _ADCN   "\x69"
-#define _ASLA   "\x0A"
-#define _BEQ    "\xF0"
-#define _CPX    "\xEC"
-#define _CMP    "\xCD"
-#define _BCC    "\x90"
-#define _BCS    "\xB0"
-#define _BNE    "\xD0"
-#define _CLC    "\x18"
-#define _CMPN   "\xC9"
-#define _DEC    "\xCE"
-#define _DEX    "\xCA"
-#define _DEY    "\x88"
-#define _EORN   "\x49"
-#define _INC    "\xEE"
-#define _INX    "\xE8"
-#define _INY    "\xC8"
-#define _JSR    "\x20"
-#define _LDA    "\xAD"
-#define _LDAIY  "\xB1"
-#define _LDAN   "\xA9"
-#define _LDXZ   "\xA6"
-#define _LDY    "\xAC"
-#define _LSRZ   "\x46"
-#define _ROLZ   "\x26"
-#define _LSRA   "\x4A"
-#define _RORA   "\x6A"
-#define _RTS    "\x60"
-#define _SEC    "\x38"
-#define _LDX    "\xAE"
-#define _LDXN   "\xA2"
-#define _LDYN   "\xA0"
-#define _ORAZ   "\x05"
-#define _PHA    "\x48"
-#define _PLA    "\x68"
-#define _ROLA   "\x2A"
-#define _STA    "\x8D"
-#define _STAIY  "\x91"
-#define _STAZ   "\x85"
-#define _STX    "\x8E"
-#define _STXZ   "\x86"
-#define _STY    "\x8C"
-#define _TAX    "\xAA"
-#define _TAY    "\xA8"
-#define _TXA    "\x8A"
-#define _TYA    "\x98"
-#define _TMP1   "\xFE"                    // zp tmp1 / tmp2 (operands)
-#define _TMP2   "\xFF"
-// slot specs (after an abs op or R_ALU): which slot, lo / hi
-#define RLO1    "\x01"                    // slot operand 1: lo / hi
-#define RHI1    "\x11"
-#define RLO2    "\x02"                    // slot operand 2
-#define RHI2    "\x12"
-#define RLOV    "\x03"                    // return value cell (FR_VAL)
-#define RHIV    "\x13"
-#define RS_HI   0x10                      // spec: hi byte
-#define RS_VAL  3                         // spec: the return value cell
-
-// library routines (JSR n, rule_ref)
-#define LIB_PUTCHAR 0
-#define LIB_PUTNUM  1
-#define LIB_PUTS    2
-#define LIB_FREE    3
-#define LIB_MALLOC  4
-#define LIB_MUL     5
-#define LIB_DIV     6
-#define LIB_MOD     7
-#define LIB_PRINTSTR 8
-#define LIB_TIMED   9
-#define LIB_MULDIV  0xFF                  // MUL / DIV / MOD by the op
-#define L_PUTCHAR   "\x00"
-#define L_PUTNUM    "\x01"
-#define L_PUTS      "\x02"
-#define L_FREE      "\x03"
-#define L_MALLOC    "\x04"
-#define L_MUL       "\x05"
-#define L_PRINTSTR  "\x08"
-#define L_TIMED     "\x09"
-#define L_MULDIV    "\xFF"
-
-// actions: the opcodes a 6502 does not have (columns 2, 3, F; not LDX #)
-#define A_ALU    0x0F                     // ALU op of the op, + slot spec
-#define A_PEND0  0x02                     // LDA lo / hi of the pending ACC
-#define A_PEND1  0x12
-#define A_PTR    0x22                     // zp pointer = mem[slot 1]
-#define A_INC1   0x32                     // mem[slot 1]++
-#define A_PATCH  0x42                     // the forward branch lands here
-#define A_ELW    0x52                     // AI = &slot1[slot2], word
-#define A_ELB    0x62                     // ... uchar
-#define A_YK0    0x72                     // LDY #y
-#define A_YK1    0x82                     // LDY #y + 1
-#define A_TOP    0x92                     // loop top ...
-#define A_BACK   0xB2                     // ... branch back to it: + brop
-#define A_STR    0xC2                     // the inline string, 0 too
-#define A_PATCHU 0xD2                     // A_PATCH the one under the top
-#define A_LD2    0xE2                     // AX = mem[slot 2] (emit_load_slot)
-#define A_LDO    0xF2                     // LDA #operand byte 1
-#define A_NOW    0x03                     // acc_need() here
-#define A_LD1    0x13                     // AX = mem[slot 1]
-#define A_REP    0x23                     // next len bytes, lc_rn times
-#define A_SUB8   0x33                     // lc_rn -= 8
-#define A_LDYRN  0x43                     // LDY #lc_rn
-// ... the same as template strings
-#define R_ALU    "\x0F"
-#define R_PEND0  "\x02"
-#define R_PEND1  "\x12"
-#define R_PTR    "\x22"
-#define R_INC1   "\x32"
-#define R_PATCH  "\x42"
-#define R_ELW    "\x52"
-#define R_ELB    "\x62"
-#define R_YK0    "\x72"
-#define R_YK1    "\x82"
-#define R_TOP    "\x92"
-#define R_BACK   "\xB2"
-#define R_STR    "\xC2"
-#define R_PATCHU "\xD2"
-#define R_LD2    "\xE2"
-#define R_LDO    "\xF2"
-#define R_NOW    "\x03"
-#define R_LD1    "\x13"
-#define R_REP    "\x23"
-#define R_SUB8   "\x33"
-#define R_LDYRN  "\x43"
-
 // rule keys: the op ($20..$7F), or for the C that tries more than one
 // group of rules: not a bytecode op ($80.. are zjp / calls, but those
 // never get here: only the switch's default and the C below look rules up)
@@ -1709,11 +1687,8 @@ static int rule_guard(word g, const uchar *p) {
 // op (R_ALU). p: its slot operands. 0: no rule
 #define RMATCH(r) ((r) == rop || ((r) == G2ANY && rop < 0x20))
 static int jit_rule_k(uchar rop, uchar op, const uchar *p) {
-  const uchar *t, *e, *rs = 0, *re = 0;
   const JitRule *r;                  // a pointer: no index * 7 per use
-  uchar b, c, a, y = 0, zp = 0, rn = 0;
-  word fx[4], top = 0;
-  uchar nfx = 0;
+  uchar b, a;
 
   // first rule of the key; a write of slot 1 first (it may flush ACC):
   // then the guards see the ACC as the template will
@@ -1732,9 +1707,40 @@ again:
   if (a & R_NEED) acc_need();
   else if (a & R_DROP) acc_drop();
 
-  // the template: by the opcode's column (lo nibble c)
-  t = (const uchar *)r->t;
-  for (e = t + r->len; t < e; ) {
+  // the template
+  emit_tpl((const uchar *)r->t, r->len, p, op);
+
+  // ACC after
+  switch (r->acc & 0xF0) {
+  case R_SLOT:   acc_ps(p[0]); break;
+  case R_LOST:   acc_lost(); break;
+  case R_AX:     acc_ax(); break;
+  case R_AXB1:   acc_ax_byte(1); break;
+  case R_AXB0:   acc_ax_byte(0); break;
+  case R_AXSLOT: acc_ax_slot(p[0]); break;
+  case R_AXCOPY:                             // C d s: = mem[s] too
+    acc_ax_slot(p[0]);
+    if (is_const(p[1])) { acc_hk = 1; acc_k = const_val(p[1]); }
+    break;
+  case R_SETS:   acc_keep(); acc_s = p[0]; break;
+  case R_AXZ:    acc_ax(); acc_z = 2; break;
+  default:       acc_keep();
+  }
+
+  // ACC moved for another rule: match again
+  if (r->acc & R_AGAIN) goto again;
+  return 1;
+}
+// emit template t (len bytes) on the slot operands p; op: for A_ALU,
+// LIB_MULDIV
+static void emit_tpl(const uchar *t, uchar len, const uchar *p, uchar op) {
+  const uchar *e, *rs = 0, *re = 0;
+  uchar b, c, a, y = 0, zp = 0, rn = 0;
+  word fx[4], top = 0;
+  uchar nfx = 0;
+
+  // by the opcode's column (lo nibble c)
+  for (e = t + len; t < e; ) {
     b = *t++;
     c = b & 15;
 
@@ -1745,9 +1751,7 @@ again:
         b = op == '+' ? ADC : op == '-' ? SBC : op == '&' ? AND_ :
             op == '|' ? ORA : EOR;
       a = (c & 15) == RS_VAL ? (uchar)(lc_cur_frame + 1) : p[(c & 15) - 1];
-      if (is_const(a) && immop(b))                     // #imm
-        em2(immop(b), (uchar)((c & RS_HI) ? const_val(a) >> 8 : const_val(a)));
-      else emop2(b, (c & RS_HI) ? slothi(a) : slotlo(a));
+      emit_alub(b, a, c & RS_HI);
 
     // actions (columns 2, 3; not LDX #)
     } else if (c == 3 || (c == 2 && b != LDXN)) {
@@ -1807,27 +1811,6 @@ again:
     // end of an R_REP body: again
     if (t == re && --rn) t = rs;
   }
-
-  // ACC after
-  switch (r->acc & 0xF0) {
-  case R_SLOT:   acc_ps(p[0]); break;
-  case R_LOST:   acc_lost(); break;
-  case R_AX:     acc_ax(); break;
-  case R_AXB1:   acc_ax_byte(1); break;
-  case R_AXB0:   acc_ax_byte(0); break;
-  case R_AXSLOT: acc_ax_slot(p[0]); break;
-  case R_AXCOPY:                             // C d s: = mem[s] too
-    acc_ax_slot(p[0]);
-    if (is_const(p[1])) { acc_hk = 1; acc_k = const_val(p[1]); }
-    break;
-  case R_SETS:   acc_keep(); acc_s = p[0]; break;
-  case R_AXZ:    acc_ax(); acc_z = 2; break;
-  default:       acc_keep();
-  }
-
-  // ACC moved for another rule: match again
-  if (r->acc & R_AGAIN) goto again;
-  return 1;
 }
 static int jit_rule(uchar op, const uchar *p) { return jit_rule_k(op, op, p); }
 
@@ -2100,9 +2083,7 @@ static word ivm_jit1(const uchar *code, word code_len,
 
     // arith / logic: in, NEW
     case '+': case '-': case '&': case '|': case '^': {
-      uchar s = PAR, sa[1];
-      uchar ins = op == '+' ? ADC : op == '-' ? SBC : op == '&' ? AND_ :
-                  op == '|' ? ORA : EOR;
+      uchar s = PAR, sa[2];
       lc_plus_src = (op == '+' && acc_at == ACC_PEND && !acc_hk &&
                      is_const(s) && const_val(s) < 128) ? acc_s : 0xff;
       lc_plus_c = (uchar)(is_const(s) ? const_val(s) : 0);
@@ -2130,15 +2111,16 @@ static word ivm_jit1(const uchar *code, word code_len,
           (acc_at == ACC_AX || acc_at == ACC_PEND)) {
         // op v; S d: each byte straight into d, no TAX / TYA. Leaves
         // Y = lo, A = hi (lc_yah), ACC = mem[d]
-        uchar d = p[1];
-        if (acc_at == ACC_PEND) emit_lda_pend(0);
-        emit_alub(ins, s, 0); emop2(STA, slotlo(d)); em(TAY);
-        if (acc_at == ACC_PEND) emit_lda_pend(1); else em(TXA);
-        emit_alub(ins, s, 1); emop2(STA, slothi(d));
+        sa[1] = p[1];
+        if (acc_at == ACC_PEND)
+          TPLOP(R_PEND0 R_ALU RLO1 _STA RLO2 _TAY
+                R_PEND1 R_ALU RHI1 _STA RHI2, sa, op);
+        else
+          TPLOP(R_ALU RLO1 _STA RLO2 _TAY _TXA R_ALU RHI1 _STA RHI2, sa, op);
         p += 2;
         acc_drop();                // AX no longer = old ACC
-        acc_ps(d);
-        lc_yah = d; lc_yah_at = lc_at;
+        acc_ps(sa[1]);
+        lc_yah = sa[1]; lc_yah_at = lc_at;
         break;
       }
       jit_rule_k(G2(op == '^' ? '|' : op), op, sa);              // the rest
@@ -2146,6 +2128,12 @@ static word ivm_jit1(const uchar *code, word code_len,
     }
 
     // compares → boolean ACC (0 or 1), X = 0.  UNSIGNED.
+    //   T_CMPS:  C = ACC >= mem (CMP lo; TXA; SBC hi)
+    //   T_RSUBS: C = mem >= ACC (mem + ~ACC + 1)
+    //   T_NOTC:  A = !C, X = 0
+    #define T_CMPS  _CMP RLO1 _TXA _SBC RHI1
+    #define T_RSUBS _SEC _EORN "\xFF" _ADC RLO1 _TXA _EORN "\xFF" _ADC RHI1
+    #define T_NOTC  _LDAN "\0" _TAX _ROLA _EORN "\x01"
     // '<': ACC < mem  <=>  borrow in ACC - mem  <=>  !C
     case '<': case '>': {
       uchar s = PAR, skip, brc;
@@ -2157,11 +2145,10 @@ static word ivm_jit1(const uchar *code, word code_len,
           if (op == '<') emit_sub_flags(acc_s, s); else emit_sub_flags(s, acc_s);
         } else if (op == '<') {
           acc_need();
-          emit_alub(CMP, s, 0); em(TXA); emit_alub(SBC, s, 1);
+          TPL(T_CMPS, &s);
         } else {
           acc_need();
-          em(SEC); em2(EORN, 0xff); emit_alub(ADC, s, 0);
-          em(TXA); em2(EORN, 0xff); emit_alub(ADC, s, 1);
+          TPL(T_RSUBS, &s);
         }
         p += skip;
         emjump(brc, t);
@@ -2170,9 +2157,7 @@ static word ivm_jit1(const uchar *code, word code_len,
       }
       if (op == '>') goto op_gt;
       acc_need();
-      emit_alub(CMP, s, 0); em(TXA);               // C from lo compare
-      emit_alub(SBC, s, 1);                        // C = ACC >= mem
-      em2(LDAN, 0); em(TAX); em(ROLA); em2(EORN, 1);   // A = !C, X = 0
+      TPL(T_CMPS T_NOTC, &s);
       acc_ax_byte(1);
       break;
     }
@@ -2180,9 +2165,7 @@ static word ivm_jit1(const uchar *code, word code_len,
     op_gt: {
       uchar s = p[-1];
       acc_need();
-      em(SEC); em2(EORN, 0xff); emit_alub(ADC, s, 0);
-      em(TXA); em2(EORN, 0xff); emit_alub(ADC, s, 1);
-      em2(LDAN, 0); em(TAX); em(ROLA); em2(EORN, 1);   // A = !C, X = 0
+      TPL(T_RSUBS T_NOTC, &s);
       acc_ax_byte(1);
       break;
     }
@@ -2423,7 +2406,7 @@ static word ivm_jit1(const uchar *code, word code_len,
     // U: mem[a] += mem[b]; ACC = result. Two slot operands.
     case 'U': {                                    // -, SLOT (a)
       uchar a = PAR;
-      uchar b = PAR;
+      p++;                                         // b: slot operand 2
       // stride loop: next is its closing 'B': leave Y = lo, A = hi
       if (p[0] == 'B') {
         word d = (word)((p + 2 - code) - p[1]);
@@ -2431,10 +2414,8 @@ static word ivm_jit1(const uchar *code, word code_len,
             i_exit_b(code, d, code_len) == (word)(p + 2 - code) &&
             is_stride(code, d, code_len)) {
           acc_drop();
-          em(CLC);
-          emop2(LDA, slotlo(a)); emit_alub(ADC, b, 0); emop2(STA, slotlo(a));
-          em(TAY);
-          emop2(LDA, slothi(a)); emit_alub(ADC, b, 1); emop2(STA, slothi(a));
+          TPL(_CLC _LDA RLO1 _ADC RLO2 _STA RLO1 _TAY
+              _LDA RHI1 _ADC RHI2 _STA RHI1, p - 2);
           acc_lost();              // -, SLOT: ACC unused, the 'B' follows
           break;
         }
