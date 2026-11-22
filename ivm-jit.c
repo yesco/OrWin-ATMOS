@@ -740,6 +740,8 @@ static word  lc_tdest;
 #define A_ZAI    0x73                     // (zp),Y / zp ops: on AI / AS
 #define A_ZAS    0x83
 #define A_BRD    0x93                     // emjump(op, lc_tdest): + op
+#define A_FOLD   0xA3                     // ACC = const ACC op const slot 1
+#define A_CARRY  0xB3                     // CLC for +, SEC for -
 // ... the same as template strings
 #define R_ALU    "\x0F"
 #define R_PEND0  "\x02"
@@ -767,6 +769,8 @@ static word  lc_tdest;
 #define R_ZAI    "\x73"
 #define R_ZAS    "\x83"
 #define R_BRD    "\x93"
+#define R_FOLD   "\xA3"
+#define R_CARRY  "\xB3"
 #define _TZP     "\x00"                   // zp op on the pointer (zp), + 1
 #define _TZP1    "\x01"
 
@@ -1221,6 +1225,7 @@ static void emit_acc_double(void);
 static void emit_lda_pend(uchar hi);
 static int jit_rule_k(uchar rop, uchar op, const uchar *p);
 static uchar lc_rn;            // the rules' shift count (0xff: a variable)
+static uchar lc_rskip;         // bytecode bytes a rule ate after its op
 // ACC <<= n / >>= n, n const. NEW. Folded, by 0, by 16+, << 1 here,
 // else the { } rules, by lc_rn = n
 static void emit_shift(uchar right, uchar n) {
@@ -1392,6 +1397,8 @@ static void loop_align_check(word ibc) {
 //   R_ZAI / R_ZAS  the pointer: AI / AS (at the start: lc_tzp)
 //   zp op _TZP     _TZP / _TZP1 as its operand: the pointer / + 1
 //   R_BRD op       emjump(op, lc_tdest): to a bytecode target
+//   R_FOLD         ACC = the pending const ACC op the const slot 1
+//   R_CARRY        CLC for +, SEC for - (nothing for & | ^)
 //   R_INC1         mem[slot 1]++ (emit_inc)
 //   R_NOW          acc_need() here (a pending const / slot into AX)
 //   R_LD1 / R_LD2  AX = mem[slot 1 / 2] (const: LDA #lo, TAX if hi == lo)
@@ -1402,43 +1409,46 @@ static void loop_align_check(word ibc) {
 //   R_SUB8         lc_rn -= 8
 //   R_LDYRN        LDY #lc_rn
 //
-// Guard: flags (all must hold) and a class (below). Op: the op, or for the + - & | ^ code (it
-// tries two groups, '|' also for '^'): the rule keys G1 G2 G2ANY MULDIV
-// below.
+// Guard: flags (all must hold) and a class (below). Op: the op, or the
+// keys BINOP, MULDIV below.
 // ACC before (any of): R_NEED load into AX, R_DROP not needed, R_WRITE it
 // may be slot 1 (acc_write, before the guards: all rules of the op).
 // After: R_SLOT = mem[slot 1] (pending), R_AXSLOT in AX and = mem[slot 1],
-// R_LOST, R_AX, R_AXB1 / R_AXB0 a byte in AX (X = 0, Z of it valid / not),
+// R_LOST, R_AX, R_AXBZ / R_AXB a byte in AX (X = 0, Z of it valid / not),
 // R_AXCOPY in AX and = mem[slot 1] = mem[slot 2], R_SETS = mem[slot 1]
-// too, R_AXZ in A only (X junk) with Z of it, else kept. R_AGAIN: then
+// too, R_AXZ in A only (X junk) with Z of it, R_FUSED "op v; S d": mem[d]
+// pending, the S eaten (lc_rskip), else kept. R_AGAIN: then
 // match the key again, in the new ACC state (a rule that only moves ACC
 // to where another rule wants it).
-// flags: all set ones must hold
-#define G_PEND  0x0001            // ACC pending
-#define G_AX    0x0002            // ACC not pending
-#define G_X0    0x0004            // X == 0 known
-#define G_ACCK  0x0008            // ACC pending, a const
-#define G_DEAD  0x0010            // ACC is not read after this op
-#define G_ZJD   0x0020            // next: zjp, ACC not read after it
-#define G_ACCB  0x0040            // ACC < 256: byte pending / AX with X = 0
-#define G_LIVE  0x0080            // ACC not lost
-#define G_AIW   0x0100            // &slot1[slot2] (word) in AI already
-#define G_AIB   0x0200            // the same, uchar
-#define G_S1    0x0400            // ACC == mem[slot 1] (G_AX: in AX)
-#define G_S2    0x0800            // ACC == mem[slot 2]
-// class (one, top nibble): like a type signature (%d %D %v ... of old),
-// of slot 1 or of the shift count lc_rn
-#define G_ZP1   0x1000            // slot 1 in zp
-#define G_NK1   0x2000            // slot 1 not a constant (a variable)
-#define G_B1    0x3000            // slot 1 < 256: const < 256 / byte slot
-#define G_HFF1  0x4000            // slot 1 a constant with hi byte $FF
-#define G_N4    0x5000            // count 1..4
-#define G_N7    0x6000            // count 7
-#define G_N8    0x7000            // count 8..15
-#define G_NB    0x8000            // count 0..7 (a byte: < 8)
-#define G_NC    0x9000            // count a const
-#define G_MK0   0xA000            // ACC a pending const 0
-#define G_MKS   0xB000            // ACC a pending const 1..256
+// flags (all set ones must hold): the state of ACC, X, the next op
+#define G_ACC_PEND 0x0001         // ACC pending
+#define G_ACC_AX   0x0002         // ACC not pending (in AX, or lost)
+#define G_ACC_LIVE 0x0004         // ACC not lost
+#define G_ACC_K    0x0008         // ACC a pending const
+#define G_ACC_BYTE 0x0010         // ACC < 256: byte pending / AX with X = 0
+#define G_ACC_IS1  0x0020         // ACC == mem[slot 1] (+ G_ACC_AX: in AX)
+#define G_ACC_IS2  0x0040         // ACC == mem[slot 2]
+#define G_X_0      0x0080         // X == 0 known
+#define G_NEXT_S   0x0100         // next op "S d", not a label
+// class (one, the top 7 bits): like a type signature (%d %D %v ... of
+// old), of slot 1, the shift count lc_rn, ACC, what comes after
+#define GC(n)      ((word)(n) << 9)
+#define G_S1_ZP    GC(1)          // slot 1 in zp
+#define G_S1_VAR   GC(2)          // slot 1 not a const (a variable)
+#define G_S1_K     GC(3)          // slot 1 a const
+#define G_S1_BYTE  GC(4)          // slot 1 < 256: const < 256 / byte slot
+#define G_S1_HIFF  GC(5)          // slot 1 a const with hi byte $FF
+#define G_N_1TO4   GC(6)          // count 1..4
+#define G_N_7      GC(7)          // count 7
+#define G_N_8UP    GC(8)          // count 8..15
+#define G_N_LT8    GC(9)          // count 0..7 (in a byte)
+#define G_N_K      GC(10)         // count a const
+#define G_ACC_K0   GC(11)         // ACC the pending const 0
+#define G_ACC_K256 GC(12)         // ACC a pending const 1..256
+#define G_DEAD     GC(13)         // ACC is not read after this op
+#define G_ZJP_DEAD GC(14)         // next: zjp, ACC not read after it
+#define G_AI_WORD  GC(15)         // &slot1[slot2] (word) in AI already
+#define G_AI_BYTE  GC(16)         // the same, uchar
 #define R_NEED  0x01
 #define R_DROP  0x02
 #define R_WRITE 0x04
@@ -1446,45 +1456,58 @@ static void loop_align_check(word ibc) {
 #define R_SLOT  0x10
 #define R_LOST  0x20
 #define R_AX    0x30
-#define R_AXB1  0x40
-#define R_AXB0  0x50
+#define R_AXBZ  0x40
+#define R_AXB   0x50
 #define R_AXSLOT 0x60
 #define R_AXCOPY 0x70
 #define R_SETS  0x80
 #define R_AXZ   0x90
-// rule keys: the op ($20..$7F), or for the C that tries more than one
-// group of rules: not a bytecode op ($80.. are zjp / calls, but those
-// never get here: only the switch's default and the C below look rules up)
+#define R_FUSED 0xA0
+// rule keys: the op ($20..$7F), BINOP, MULDIV: not bytecode ops ($80..
+// are zjp / calls, but those never get here: only the switch's default
+// and the C below look rules up)
 #define RULE(op, g, acc, t) { op, acc, g, sizeof(t) - 1, t }
-#define G1(op)  ((op) | 0x80)             // + - & | *: group 1
-#define G2(op)  ((op) & 0x1F)             // + - & |: group 2
-#define G2ANY   1                         // any op of group 2
+#define BINOP   1                         // any of + - & | (^: as |)
 #define MULDIV  0x81                      // * / % (not by a power of 2)
 typedef struct {
   uchar op, acc; word g; uchar len; const char *t;
 } JitRule;
 static const JitRule jit_rules[] = {
-  // ---- + - & | ^ (C before: fold, i + i, commutative swap; between the
-  // groups: "op v; S d"). Group 1: operand < 256, or ACC < 256
-  RULE(G1('+'), G_B1 | G_LIVE, R_NEED | R_AX,
-    R_ALU RLO1 _BCC _INX R_PATCH),
-  RULE(G1('-'), G_B1 | G_LIVE, R_NEED | R_AX,
-    R_ALU RLO1 _BCS _DEX R_PATCH),
-  RULE(G1('&'), G_B1 | G_LIVE, R_NEED | R_AX, R_ALU RLO1 _LDXN "\0"),
-  RULE(G1('|'), G_B1 | G_LIVE, R_NEED | R_AX, R_ALU RLO1),
-  RULE(G1('+'), G_ACCB | G_PEND, R_AX,
-    R_PEND0 R_ALU RLO1 _LDX RHI1 _BCC _INX R_PATCH),
-  RULE(G1('+'), G_ACCB | G_AX, R_AX,
-    R_ALU RLO1 _LDX RHI1 _BCC _INX R_PATCH),
-  RULE(G1('&'), G_ACCB | G_PEND, R_AX, R_PEND0 R_ALU RLO1 _LDXN "\0"),
-  RULE(G1('&'), G_ACCB | G_AX, R_AX, R_ALU RLO1),
-  RULE(G1('|'), G_ACCB | G_PEND, R_AX, R_PEND0 R_ALU RLO1 _LDX RHI1),
-  RULE(G1('|'), G_ACCB | G_AX, R_AX, R_ALU RLO1 _LDX RHI1),
-  // group 2: ACC pending in a slot: each byte from there; and $FFxx; any
-  RULE(G2ANY, G_PEND | G_NK1, R_AX,
+  // ---- + - & | ^ (C before: the a[j+c] relation, the commutative
+  // swap). R_CARRY: CLC for +, SEC for -. In order: const OP const,
+  // i + i, operand < 256 or ACC < 256, "op v; S d", ACC pending in a
+  // slot, & $FFxx, any
+  RULE(BINOP, G_ACC_K | G_S1_K, 0, R_FOLD),
+  RULE('+', G_ACC_PEND | G_ACC_IS1, R_AX,
+    _LDA RLO1 _ASLA _TAY _LDA RHI1 _ROLA _TAX _TYA),
+  RULE('+', G_ACC_AX | G_ACC_IS1, R_NEED | R_AX,
+    _ASLA _TAY _TXA _ROLA _TAX _TYA),
+  RULE('+', G_S1_BYTE | G_ACC_LIVE, R_NEED | R_AX,
+    R_CARRY R_ALU RLO1 _BCC _INX R_PATCH),
+  RULE('-', G_S1_BYTE | G_ACC_LIVE, R_NEED | R_AX,
+    R_CARRY R_ALU RLO1 _BCS _DEX R_PATCH),
+  RULE('&', G_S1_BYTE | G_ACC_LIVE, R_NEED | R_AX, R_ALU RLO1 _LDXN "\0"),
+  RULE('|', G_S1_BYTE | G_ACC_LIVE, R_NEED | R_AX, R_ALU RLO1),
+  RULE('+', G_ACC_BYTE | G_ACC_PEND, R_AX,
+    R_CARRY R_PEND0 R_ALU RLO1 _LDX RHI1 _BCC _INX R_PATCH),
+  RULE('+', G_ACC_BYTE | G_ACC_AX, R_AX,
+    R_CARRY R_ALU RLO1 _LDX RHI1 _BCC _INX R_PATCH),
+  RULE('&', G_ACC_BYTE | G_ACC_PEND, R_AX,
+    R_PEND0 R_ALU RLO1 _LDXN "\0"),
+  RULE('&', G_ACC_BYTE | G_ACC_AX, R_AX, R_ALU RLO1),
+  RULE('|', G_ACC_BYTE | G_ACC_PEND, R_AX, R_PEND0 R_ALU RLO1 _LDX RHI1),
+  RULE('|', G_ACC_BYTE | G_ACC_AX, R_AX, R_ALU RLO1 _LDX RHI1),
+  // op v; S d: each byte straight into d, no TAX / TYA. Leaves Y = lo,
+  // A = hi (lc_yah), ACC = mem[d] pending, the S eaten
+  RULE(BINOP, G_NEXT_S | G_ACC_PEND, R_FUSED, R_CARRY
+    R_PEND0 R_ALU RLO1 _STA RLO2 _TAY R_PEND1 R_ALU RHI1 _STA RHI2),
+  RULE(BINOP, G_NEXT_S | G_ACC_AX | G_ACC_LIVE, R_FUSED, R_CARRY
+    R_ALU RLO1 _STA RLO2 _TAY _TXA R_ALU RHI1 _STA RHI2),
+  RULE(BINOP, G_ACC_PEND | G_S1_VAR, R_AX, R_CARRY
     R_PEND0 R_ALU RLO1 _TAY R_PEND1 R_ALU RHI1 _TAX _TYA),
-  RULE(G2('&'), G_HFF1, R_NEED | R_AX, R_ALU RLO1),
-  RULE(G2ANY, 0, R_NEED | R_AX, R_ALU RLO1 _TAY _TXA R_ALU RHI1 _TAX _TYA),
+  RULE('&', G_S1_HIFF, R_NEED | R_AX, R_ALU RLO1),
+  RULE(BINOP, 0, R_NEED | R_AX,
+    R_CARRY R_ALU RLO1 _TAY _TXA R_ALU RHI1 _TAX _TYA),
 
   // I: INC lo; BNE +; INC hi
   RULE('I', 0, R_DROP | R_SLOT, _INC RLO1 _BNE _INC RHI1 R_PATCH),
@@ -1510,28 +1533,28 @@ static const JitRule jit_rules[] = {
   RULE('.', 0, R_NEED, _JSR L_PUTNUM),
   RULE('P', 0, R_NEED, _JSR L_PUTS),
   // l: ACC = lo(mem[s]): LDX #0; LDA lo
-  RULE('l', 0, R_DROP | R_AXB1, _LDXN "\0" _LDA RLO1),
+  RULE('l', 0, R_DROP | R_AXBZ, _LDXN "\0" _LDA RLO1),
   // s: mem[s] = lo(ACC), hi 0. Pending: from where it is (stays pending)
-  RULE('s', G_PEND, R_WRITE, R_PEND0 _STA RLO1 _LDYN "\0" _STY RHI1),
+  RULE('s', G_ACC_PEND, R_WRITE, R_PEND0 _STA RLO1 _LDYN "\0" _STY RHI1),
   RULE('s', 0, R_WRITE | R_NEED, _STA RLO1 _LDYN "\0" _STY RHI1),
   // r: ACC = *(uchar*)mem[s]
-  RULE('r', 0, R_DROP | R_AXB1, R_PTR _LDYN "\0" _LDXN "\0" _LDAIY),
+  RULE('r', 0, R_DROP | R_AXBZ, R_PTR _LDYN "\0" _LDXN "\0" _LDAIY),
   // ': ACC = *(uchar*)ptr; ptr++
-  RULE('\'', 0, R_DROP | R_AXB0, R_PTR _LDYN "\0" _LDAIY _LDXN "\0" R_INC1),
+  RULE('\'', 0, R_DROP | R_AXB, R_PTR _LDYN "\0" _LDAIY _LDXN "\0" R_INC1),
   // w ,: *(uchar*)ptr = ACC (, then ptr++). AX saved if the pointer is
   // copied (not in zp)
-  RULE('w', G_PEND, 0,      R_PTR R_PEND0 _LDYN "\0" _STAIY),
-  RULE('w', G_ZP1,  R_NEED, R_PTR _LDYN "\0" _STAIY),
+  RULE('w', G_ACC_PEND, 0,      R_PTR R_PEND0 _LDYN "\0" _STAIY),
+  RULE('w', G_S1_ZP,  R_NEED, R_PTR _LDYN "\0" _STAIY),
   RULE('w', 0,      R_NEED, _PHA R_PTR _PLA _LDYN "\0" _STAIY),
-  RULE(',', G_PEND, R_WRITE, R_PTR R_PEND0 _LDYN "\0" _STAIY R_INC1),
-  RULE(',', G_ZP1,  R_WRITE | R_NEED, R_PTR _LDYN "\0" _STAIY R_INC1),
+  RULE(',', G_ACC_PEND, R_WRITE, R_PTR R_PEND0 _LDYN "\0" _STAIY R_INC1),
+  RULE(',', G_S1_ZP,  R_WRITE | R_NEED, R_PTR _LDYN "\0" _STAIY R_INC1),
   RULE(',', 0,      R_WRITE | R_NEED,
     _PHA R_PTR _PLA _LDYN "\0" _STAIY R_INC1),
   // @: ACC = *(word*)mem[s]: hi first, then lo
   RULE('@', 0, R_DROP | R_AX,
     R_PTR _LDYN "\x01" _LDAIY _TAX _DEY _LDAIY),
   // !: *(word*)mem[s] = ACC
-  RULE('!', G_PEND, 0,
+  RULE('!', G_ACC_PEND, 0,
     R_PTR _LDYN "\x01" R_PEND1 _STAIY _DEY R_PEND0 _STAIY),
   RULE('!', 0, R_NEED,
     _PHA R_PTR _TXA _LDYN "\x01" _STAIY _PLA _DEY _STAIY),
@@ -1539,33 +1562,33 @@ static const JitRule jit_rules[] = {
   RULE('(', 0, R_DROP | R_AX, R_ELW R_YK1 _LDAIY _TAX _DEY _LDAIY),
   // ) bb ii: ((word*)base)[idx] = ACC. Pending: from where it is; AI
   // there already: AX kept as is; else: AX saved over the AI setup
-  RULE(')', G_PEND, 0,
+  RULE(')', G_ACC_PEND, 0,
     R_ELW R_YK1 R_PEND1 _STAIY _DEY R_PEND0 _STAIY),
-  RULE(')', G_AIW, R_NEED,
+  RULE(')', G_AI_WORD, R_NEED,
     R_ELW R_YK0 _STAIY _PHA _TXA _INY _STAIY _PLA),
   RULE(')', 0, R_NEED,
     _PHA _TXA _PHA R_ELW _PLA R_YK1 _STAIY _TAX _PLA _DEY _STAIY),
   // ] bb ii: ((uchar*)base)[idx] = ACC (the same three)
-  RULE(']', G_PEND, 0,     R_ELB R_PEND0 _STAIY),
-  RULE(']', G_AIB, 0,      R_ELB _STAIY),
+  RULE(']', G_ACC_PEND, 0,     R_ELB R_PEND0 _STAIY),
+  RULE(']', G_AI_BYTE, 0,      R_ELB _STAIY),
   RULE(']', 0,     R_NEED, _PHA R_ELB _PLA _STAIY),
   // [ bb ii: ACC = ((uchar*)base)[idx]; a zjp next and ACC dead after
   // it: only A (Z), else LDA last: Z == (ACC == 0)
-  RULE('[', G_ZJD, R_DROP | R_AXZ,  R_ELB _LDAIY),
-  RULE('[', 0,     R_DROP | R_AXB1, R_ELB _LDXN "\0" _LDAIY),
+  RULE('[', G_ZJP_DEAD, R_DROP | R_AXZ,  R_ELB _LDAIY),
+  RULE('[', 0,     R_DROP | R_AXBZ, R_ELB _LDXN "\0" _LDAIY),
   // N / O c: putchar('\n' / c), A X Y kept: AX saved in Y if read later
-  RULE('N', G_AX | G_LIVE | G_DEAD, R_LOST, _LDAN "\x0A" _JSR L_PUTCHAR),
-  RULE('N', G_AX | G_LIVE, 0, _TAY _LDAN "\x0A" _JSR L_PUTCHAR _TYA),
+  RULE('N', G_ACC_AX | G_ACC_LIVE | G_DEAD, R_LOST, _LDAN "\x0A" _JSR L_PUTCHAR),
+  RULE('N', G_ACC_AX | G_ACC_LIVE, 0, _TAY _LDAN "\x0A" _JSR L_PUTCHAR _TYA),
   RULE('N', 0, 0, _LDAN "\x0A" _JSR L_PUTCHAR),
-  RULE('O', G_AX | G_LIVE | G_DEAD, R_LOST, R_LDO _JSR L_PUTCHAR),
-  RULE('O', G_AX | G_LIVE, 0, _TAY R_LDO _JSR L_PUTCHAR _TYA),
+  RULE('O', G_ACC_AX | G_ACC_LIVE | G_DEAD, R_LOST, R_LDO _JSR L_PUTCHAR),
+  RULE('O', G_ACC_AX | G_ACC_LIVE, 0, _TAY R_LDO _JSR L_PUTCHAR _TYA),
   RULE('O', 0, 0, R_LDO _JSR L_PUTCHAR),
   // * / % (C before: by a power of 2, by 2): ivm-lib, the first in
   // tmp1 / tmp2, the second in AX, result AX. const * x: x first, the
   // const as the multiplier (AX): fewer rounds
-  RULE(G1('*'), G_ACCK | G_NK1, R_AX, _LDA RLO1 _STAZ _TMP1
+  RULE('*', G_ACC_K | G_S1_VAR, R_AX, _LDA RLO1 _STAZ _TMP1
     _LDA RHI1 _STAZ _TMP2 R_NOW _JSR L_MUL),
-  RULE(MULDIV, G_PEND, R_AX, R_PEND0 _STAZ _TMP1 R_PEND1 _STAZ _TMP2
+  RULE(MULDIV, G_ACC_PEND, R_AX, R_PEND0 _STAZ _TMP1 R_PEND1 _STAZ _TMP2
     R_LD1 _JSR L_MULDIV),
   RULE(MULDIV, 0, R_NEED | R_AX, _STAZ _TMP1 _STXZ _TMP2
     R_LD1 _JSR L_MULDIV),
@@ -1582,10 +1605,10 @@ static const JitRule jit_rules[] = {
   // 1..256: inline (LDY #n: 256 is 0, DEY wraps); else opmemset: its STA
   // operand = ptr + X * 256 (the last page), Y = count lo, X = count hi
   #define T_MSET _LDA RLO1 _STA RLOM _TXA _CLC _ADC RHI1 _STA RHIM _LDA RLO2
-  RULE('m', G_MK0, 0, ""),
-  RULE('m', G_MKS, 0,
+  RULE('m', G_ACC_K0, 0, ""),
+  RULE('m', G_ACC_K256, 0,
     R_PTR _LDY RLOA _LDA RLO2 R_TOP _DEY _STAIY R_BACK _BNE),
-  RULE('m', G_PEND, 0, _LDX RHIA T_MSET _LDY RLOA _JSR L_MEMSET),
+  RULE('m', G_ACC_PEND, 0, _LDX RHIA T_MSET _LDY RLOA _JSR L_MEMSET),
   RULE('m', 0, R_NEED | R_LOST, _TAY T_MSET _JSR L_MEMSET),
   // ~: ACC = ~ACC (a pending const: folded, in C)
   RULE('~', 0, R_NEED | R_AX,
@@ -1596,51 +1619,51 @@ static const JitRule jit_rules[] = {
   RULE('Q', 0, R_DROP | R_AX, _LDAN "\0" _TAX _RTS),
   RULE(';', 0, R_DROP | R_AX, _LDA RLOV _LDX RHIV _RTS),
   // S: mem[s] = ACC (in AX after); not if it is mem[s] already
-  RULE('S', G_S1, R_NEED, ""),
+  RULE('S', G_ACC_IS1, R_NEED, ""),
   RULE('S', 0, R_NEED | R_SETS, _STA RLO1 _STX RHI1),
   // C d s: mem[d] = mem[s], ACC = it
-  RULE('C', G_AX | G_S2, R_AXCOPY, _STA RLO1 _STX RHI1),
+  RULE('C', G_ACC_AX | G_ACC_IS2, R_AXCOPY, _STA RLO1 _STX RHI1),
   RULE('C', 0, R_DROP | R_AXCOPY, R_LD2 _STA RLO1 _STX RHI1),
   // U a b: mem[a] += mem[b] byte by byte, ACC = mem[a] left pending
   // (C before: the stride loop form)
-  RULE('U', G_AX | G_S1, R_SLOT,
+  RULE('U', G_ACC_AX | G_ACC_IS1, R_SLOT,
     _CLC _ADC RLO2 _STA RLO1 _TXA _ADC RHI2 _STA RHI1),
   RULE('U', 0, R_DROP | R_SLOT,
     _CLC _LDA RLO1 _ADC RLO2 _STA RLO1 _LDA RHI1 _ADC RHI2 _STA RHI1),
   // =: ACC = ACC == mem[s]: CMP lo, CPX hi; X = 0
-  RULE('=', 0, R_NEED | R_AXB0, _CMP RLO1 _BNE _CPX RHI1 _BNE
+  RULE('=', 0, R_NEED | R_AXB, _CMP RLO1 _BNE _CPX RHI1 _BNE
     _LDAN "\x01" _BNE R_PATCHU R_PATCHU _LDAN "\0" R_PATCH _LDXN "\0"),
   // { }: ACC <<= / >>= n. Const n (lc_rn, C before: fold, 0, 16+, << 1)
   // 8..15: a byte move, the rest in A; 7: a byte move, one bit back;
   // 1..4: ASL A; ROL tmp2 (X in tmp2); 5 6: that as a loop on Y
-  RULE('{', G_PEND | G_N8, R_AX,
+  RULE('{', G_ACC_PEND | G_N_8UP, R_AX,
     R_PEND0 R_SUB8 R_REP "\x01" _ASLA _TAX _LDAN "\0"),
-  RULE('{', G_N8, R_NEED | R_AX,
+  RULE('{', G_N_8UP, R_NEED | R_AX,
     R_SUB8 R_REP "\x01" _ASLA _TAX _LDAN "\0"),
-  RULE('{', G_PEND | G_N7, R_AX,
+  RULE('{', G_ACC_PEND | G_N_7, R_AX,
     R_PEND1 _LSRA R_PEND0 _RORA _TAX _LDAN "\0" _RORA),
-  RULE('{', G_N7, R_NEED | R_AX,
+  RULE('{', G_N_7, R_NEED | R_AX,
     _TAY _TXA _LSRA _TYA _RORA _TAX _LDAN "\0" _RORA),
-  RULE('{', G_N4, R_NEED | R_AX,
+  RULE('{', G_N_1TO4, R_NEED | R_AX,
     _STXZ _TMP2 R_REP "\x03" _ASLA _ROLZ _TMP2 _LDXZ _TMP2),
-  RULE('{', G_NC, R_NEED | R_AX, _STXZ _TMP2 R_LDYRN R_TOP
+  RULE('{', G_N_K, R_NEED | R_AX, _STXZ _TMP2 R_LDYRN R_TOP
     _ASLA _ROLZ _TMP2 _DEY R_BACK _BNE _LDXZ _TMP2),
   // >>: a byte ACC: 8..15: 0, 7: the top bit, else A only (a pending
   // one: in AX first);
   // 8..15: the hi byte (to AX first), then as a byte
-  RULE('}', G_ACCB | G_N8, R_DROP | R_AXB0, _LDAN "\0" _TAX),
-  RULE('}', G_PEND | G_ACCB | G_NB, R_AXB0 | R_AGAIN, R_PEND0 _LDXN "\0"),
-  RULE('}', G_ACCB | G_N7, R_AXB1, _ASLA _LDAN "\0" _ROLA),
-  RULE('}', G_ACCB | G_NB, R_AXB0, R_REP "\x01" _LSRA),
-  RULE('}', G_PEND | G_N8, R_AXB0 | R_AGAIN, R_PEND1 _LDXN "\0" R_SUB8),
-  RULE('}', G_N8, R_NEED | R_AXB0 | R_AGAIN, _TXA _LDXN "\0" R_SUB8),
-  RULE('}', G_PEND | G_N7, R_AX,
+  RULE('}', G_ACC_BYTE | G_N_8UP, R_DROP | R_AXB, _LDAN "\0" _TAX),
+  RULE('}', G_ACC_PEND | G_ACC_BYTE | G_N_LT8, R_AXB | R_AGAIN, R_PEND0 _LDXN "\0"),
+  RULE('}', G_ACC_BYTE | G_N_7, R_AXBZ, _ASLA _LDAN "\0" _ROLA),
+  RULE('}', G_ACC_BYTE | G_N_LT8, R_AXB, R_REP "\x01" _LSRA),
+  RULE('}', G_ACC_PEND | G_N_8UP, R_AXB | R_AGAIN, R_PEND1 _LDXN "\0" R_SUB8),
+  RULE('}', G_N_8UP, R_NEED | R_AXB | R_AGAIN, _TXA _LDXN "\0" R_SUB8),
+  RULE('}', G_ACC_PEND | G_N_7, R_AX,
     R_PEND0 _ASLA R_PEND1 _ROLA _LDXN "\0" _BCC _INX R_PATCH),
-  RULE('}', G_N7, R_NEED | R_AX,
+  RULE('}', G_N_7, R_NEED | R_AX,
     _ASLA _TXA _ROLA _LDXN "\0" _BCC _INX R_PATCH),
-  RULE('}', G_N4, R_NEED | R_AX,
+  RULE('}', G_N_1TO4, R_NEED | R_AX,
     _STXZ _TMP2 R_REP "\x03" _LSRZ _TMP2 _RORA _LDXZ _TMP2),
-  RULE('}', G_NC, R_NEED | R_AX, _STXZ _TMP2 R_LDYRN R_TOP
+  RULE('}', G_N_K, R_NEED | R_AX, _STXZ _TMP2 R_LDYRN R_TOP
     _LSRZ _TMP2 _RORA _DEY R_BACK _BNE _LDXZ _TMP2),
   // a variable n: a loop on Y (n may be 0)
   RULE('{', 0, R_NEED | R_AX, _STXZ _TMP2 _LDY RLO1 _BEQ R_TOP
@@ -1648,9 +1671,9 @@ static const JitRule jit_rules[] = {
   RULE('}', 0, R_NEED | R_AX, _STXZ _TMP2 _LDY RLO1 _BEQ R_TOP
     _LSRZ _TMP2 _RORA _DEY R_BACK _BNE R_PATCH _LDXZ _TMP2),
   // ?: ACC = !ACC  (A = lo | hi; CMP #1: C = ACC != 0; A = !C, X = 0)
-  RULE('?', G_X0 | G_AX, R_NEED | R_AXB1,
+  RULE('?', G_X_0 | G_ACC_AX, R_NEED | R_AXBZ,
     _CMPN "\x01" _LDAN "\0" _TAX _ROLA _EORN "\x01"),
-  RULE('?', 0, R_NEED | R_AXB1, _STXZ _TMP1 _ORAZ _TMP1
+  RULE('?', 0, R_NEED | R_AXBZ, _STXZ _TMP1 _ORAZ _TMP1
     _CMPN "\x01" _LDAN "\0" _TAX _ROLA _EORN "\x01"),
   { 0, 0, 0, 0, 0 }
 };
@@ -1676,48 +1699,52 @@ static word rule_ref(uchar n) {
 
 static int rule_guard(word g, const uchar *p) {
   uchar s = p[0];
-  if ((g & G_PEND) && acc_at != ACC_PEND) return 0;
-  if ((g & G_AX) && acc_at == ACC_PEND) return 0;
-  if ((g & G_ACCK) && !(acc_at == ACC_PEND && acc_hk)) return 0;
-  if ((g & G_X0) && !acc_x0) return 0;
-  if ((g & G_LIVE) && acc_at == ACC_LOST) return 0;
-  if ((g & G_ACCB) && !((acc_at == ACC_PEND &&
-                         (acc_hk ? acc_k < 256 : is_byte(acc_s))) ||
-                        (acc_at == ACC_AX && acc_x0))) return 0;
-  if ((g & G_AIW) && ai_hit('w', s, p[1]) == 0xff) return 0;
-  if ((g & G_AIB) && ai_hit('b', s, p[1]) == 0xff) return 0;
-  if ((g & G_S1) && acc_s != s) return 0;
-  if ((g & G_S2) && acc_s != p[1]) return 0;
-  if (g & (G_DEAD | G_ZJD)) {
-    word nb = (word)(lc_bc + ivm_oplen(lc_code + lc_bc)), t;
-    if ((g & G_DEAD) && !acc_dead(nb)) return 0;
-    if ((g & G_ZJD) &&
-        !(nb + 1 < lc_len && (uchar)(lc_code[nb] - 0x80) < 64 &&
-          !is_label(nb) && acc_unread((word)(nb + 1)) &&
-          (t = ivm_jump(lc_code + nb, nb)) < lc_len &&
-          acc_unread(t))) return 0;
-  }
+  word nb = 0, t;                                // the next op's bc
+  if ((g & G_NEXT_S) || g >= G_DEAD)            // (classes from G_DEAD)
+    nb = (word)(lc_bc + ivm_oplen(lc_code + lc_bc));
 
-  // class: of slot 1, or of the shift count lc_rn
-  switch (g >> 12) {
-  case G_ZP1 >> 12:  return slotlo(s) < 0xff;
-  case G_NK1 >> 12:  return !is_const(s);
-  case G_B1 >> 12:   return hi0(s);
-  case G_HFF1 >> 12: return is_const(s) && (const_val(s) >> 8) == 0xff;
-  case G_N4 >> 12:   return (uchar)(lc_rn - 1) < 4;
-  case G_N7 >> 12:   return lc_rn == 7;
-  case G_N8 >> 12:   return (uchar)(lc_rn - 8) < 8;
-  case G_NB >> 12:   return lc_rn < 8;
-  case G_NC >> 12:   return lc_rn != 0xff;
-  case G_MK0 >> 12:  return acc_at == ACC_PEND && acc_hk && !acc_k;
-  case G_MKS >> 12:  return acc_at == ACC_PEND && acc_hk && acc_k - 1 < 256;
+  // flags
+  if ((g & G_ACC_PEND) && acc_at != ACC_PEND) return 0;
+  if ((g & G_ACC_AX) && acc_at == ACC_PEND) return 0;
+  if ((g & G_ACC_LIVE) && acc_at == ACC_LOST) return 0;
+  if ((g & G_ACC_K) && !(acc_at == ACC_PEND && acc_hk)) return 0;
+  if ((g & G_ACC_BYTE) && !((acc_at == ACC_PEND &&
+                             (acc_hk ? acc_k < 256 : is_byte(acc_s))) ||
+                            (acc_at == ACC_AX && acc_x0))) return 0;
+  if ((g & G_ACC_IS1) && acc_s != s) return 0;
+  if ((g & G_ACC_IS2) && acc_s != p[1]) return 0;
+  if ((g & G_X_0) && !acc_x0) return 0;
+  if ((g & G_NEXT_S) && !(lc_code[nb] == 'S' && !is_label(nb))) return 0;
+
+  // class
+  switch (g >> 9) {
+  case G_S1_ZP >> 9:    return slotlo(s) < 0xff;
+  case G_S1_VAR >> 9:   return !is_const(s);
+  case G_S1_K >> 9:     return is_const(s);
+  case G_S1_BYTE >> 9:  return hi0(s);
+  case G_S1_HIFF >> 9:  return is_const(s) && (const_val(s) >> 8) == 0xff;
+  case G_N_1TO4 >> 9:   return (uchar)(lc_rn - 1) < 4;
+  case G_N_7 >> 9:      return lc_rn == 7;
+  case G_N_8UP >> 9:    return (uchar)(lc_rn - 8) < 8;
+  case G_N_LT8 >> 9:    return lc_rn < 8;
+  case G_N_K >> 9:      return lc_rn != 0xff;
+  case G_ACC_K0 >> 9:   return acc_at == ACC_PEND && acc_hk && !acc_k;
+  case G_ACC_K256 >> 9: return acc_at == ACC_PEND && acc_hk && acc_k - 1 < 256;
+  case G_DEAD >> 9:     return acc_dead(nb);
+  case G_ZJP_DEAD >> 9:
+    return nb + 1 < lc_len && (uchar)(lc_code[nb] - 0x80) < 64 &&
+           !is_label(nb) && acc_unread((word)(nb + 1)) &&
+           (t = ivm_jump(lc_code + nb, nb)) < lc_len && acc_unread(t);
+  case G_AI_WORD >> 9:  return ai_hit('w', s, p[1]) != 0xff;
+  case G_AI_BYTE >> 9:  return ai_hit('b', s, p[1]) != 0xff;
   }
   return 1;
 }
 
 // emit the first rule of rop (see above) whose guard holds; op: the real
 // op (R_ALU). p: its slot operands. 0: no rule
-#define RMATCH(r) ((r) == rop || ((r) == G2ANY && rop < 0x20))
+#define RMATCH(r) ((r) == rop || ((r) == BINOP && (rop == '+' || \
+                   rop == '-' || rop == '&' || rop == '|')))
 static int jit_rule_k(uchar rop, uchar op, const uchar *p) {
   const JitRule *r;                  // a pointer: no index * 7 per use
   uchar b, a;
@@ -1747,8 +1774,8 @@ again:
   case R_SLOT:   acc_ps(p[0]); break;
   case R_LOST:   acc_lost(); break;
   case R_AX:     acc_ax(); break;
-  case R_AXB1:   acc_ax_byte(1); break;
-  case R_AXB0:   acc_ax_byte(0); break;
+  case R_AXBZ:   acc_ax_byte(1); break;
+  case R_AXB:   acc_ax_byte(0); break;
   case R_AXSLOT: acc_ax_slot(p[0]); break;
   case R_AXCOPY:                             // C d s: = mem[s] too
     acc_ax_slot(p[0]);
@@ -1756,6 +1783,11 @@ again:
     break;
   case R_SETS:   acc_keep(); acc_s = p[0]; break;
   case R_AXZ:    acc_ax(); acc_z = 2; break;
+  case R_FUSED:                              // op v; S d: d pending, Y A
+    acc_drop(); acc_ps(p[1]);
+    lc_yah = p[1]; lc_yah_at = lc_at;
+    lc_rskip = 2;                            // the S eaten
+    break;
   default:       acc_keep();
   }
 
@@ -1820,6 +1852,16 @@ static void emit_tpl(const uchar *t, uchar len, const uchar *p, uchar op) {
       case A_ZAI:   zp = AI; break;
       case A_ZAS:   zp = AS; break;
       case A_BRD:   emjump(*t++, lc_tdest); break;
+      case A_CARRY:
+        if (op == '+') em(CLC); else if (op == '-') em(SEC);
+        break;
+      case A_FOLD: {
+        word k = const_val(p[0]);
+        acc_pk((word)(op == '+' ? acc_k + k : op == '-' ? acc_k - k :
+                      op == '&' ? (acc_k & k) : op == '|' ? (acc_k | k) :
+                      (acc_k ^ k)));
+        break;
+      }
       case A_TOP:   top = lc_at; break;
       case A_BACK:  b = *t++; em2(b, (uchar)(top - (lc_at + 2))); break;
       case A_LD1:   emit_load_slot(p[0]); break;
@@ -2136,46 +2178,26 @@ static word ivm_jit1(const uchar *code, word code_len,
     // arith / logic: in, NEW
     case '+': case '-': case '&': case '|': case '^': {
       uchar s = PAR, sa[2];
+
+      // the a[j+c] relation: "+ c" on a pending slot
       lc_plus_src = (op == '+' && acc_at == ACC_PEND && !acc_hk &&
                      is_const(s) && const_val(s) < 128) ? acc_s : 0xff;
       lc_plus_c = (uchar)(is_const(s) ? const_val(s) : 0);
-      if (acc_at == ACC_PEND && acc_hk && is_const(s)) {
-        // const OP const: fold
-        word a = acc_k, b = const_val(s);
-        acc_pk((word)(op == '+' ? a + b : op == '-' ? a - b :
-                      op == '&' ? (a & b) : op == '|' ? (a | b) : (a ^ b)));
-        break;
+
+      // commutative, AX already holds mem[s] (k = i + prime right after
+      // S prime): mem[s] OP mem[x]
+      if (acc_at == ACC_PEND && !acc_hk && lc_axs == s && acc_s != s &&
+          op != '-') {
+        uchar x = acc_s;
+        acc_ax_slot(s);
+        s = x;
       }
-      if (op == '+' && acc_s == s &&             // ACC == mem[s] (AX or
-          (acc_at == ACC_AX || (acc_at == ACC_PEND && !acc_hk))) {  // pend)
-        emit_acc_double();                         // ACC == mem[s]: i + i
-        break;
-      }
-      if (op == '+') em(CLC); else if (op == '-') em(SEC);
-      if (acc_at == ACC_PEND && !acc_hk && lc_axs == s && op != '-') {
-        uchar x = acc_s;           // commutative: AX already holds mem[s],
-        acc_ax_slot(s);            // so mem[s] OP mem[x] (k = i + prime
-        s = x;                     // right after S prime): swap, go on
-      }
-      sa[0] = s;
-      if (jit_rule_k(G1(op == '^' ? '|' : op), op, sa)) break;   // < 256
-      if (p[0] == 'S' && !is_label((word)(bc_pc + 2)) &&
-          (acc_at == ACC_AX || acc_at == ACC_PEND)) {
-        // op v; S d: each byte straight into d, no TAX / TYA. Leaves
-        // Y = lo, A = hi (lc_yah), ACC = mem[d]
-        sa[1] = p[1];
-        if (acc_at == ACC_PEND)
-          TPLOP(R_PEND0 R_ALU RLO1 _STA RLO2 _TAY
-                R_PEND1 R_ALU RHI1 _STA RHI2, sa, op);
-        else
-          TPLOP(R_ALU RLO1 _STA RLO2 _TAY _TXA R_ALU RHI1 _STA RHI2, sa, op);
-        p += 2;
-        acc_drop();                // AX no longer = old ACC
-        acc_ps(sa[1]);
-        lc_yah = sa[1]; lc_yah_at = lc_at;
-        break;
-      }
-      jit_rule_k(G2(op == '^' ? '|' : op), op, sa);              // the rest
+
+      // the rules ('^' as '|': R_ALU uses the op)
+      sa[0] = s; sa[1] = p[1];
+      lc_rskip = 0;
+      jit_rule_k(op == '^' ? '|' : op, op, sa);
+      p += lc_rskip;
       break;
     }
 
@@ -2265,7 +2287,7 @@ static word ivm_jit1(const uchar *code, word code_len,
         break;
       }
       sa[0] = s;                           // ivm-lib: JSR
-      if (!jit_rule_k(G1(op), op, sa)) jit_rule_k(MULDIV, op, sa);
+      if (!jit_rule_k(op, op, sa)) jit_rule_k(MULDIV, op, sa);
       break;
     }
 
