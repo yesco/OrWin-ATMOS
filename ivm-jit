@@ -15,13 +15,12 @@ jit=$(cat "$name.cycles.jit")
 jitandrun=$(grep cycles "$name.log" | sed 's/ cycles//')
 run=$((jitandrun - jit))
 
-rm ivm-jit-map.sim
+rm ivm-jit-map.sim $name.ivm.sim
 
 echo 
 echo 
 echo "--- -t generate file ---"
-cl65 -DMEMMAP -DJIT -Oirs -C sim6502.cfg -t sim6502 ivm-lib.o ivm.c -o ivm-jit-map.sim
-#cl65 -DMEMMAP -DJIT -Oirs -C sim6502.cfg -t sim6502 ivm-lib.o ivm.c -o ivm-jit-map.sim || exit 1
+cl65 -DMEMMAP -DJIT -Oirs -C sim6502.cfg -t sim6502 ivm-lib.o ivm.c -o ivm-jit-map.sim || exit 1
 sim65 -c ivm-jit-map.sim -j -z -tsim6502 $* $name.ivm -o$name.ivm.sim
 echo
 echo

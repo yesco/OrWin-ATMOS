@@ -1235,6 +1235,12 @@ static int jit_rule_k(uchar rop, uchar op, const uchar *p);
 static uchar lc_rn;            // the rules' shift count (0xff: a variable)
 static uchar lc_rskip;         // bytecode bytes a rule ate after its op
 static word  lc_libtop;        // the highest lib routine a JSR went to
+// main's global inits done at JIT time (init_fold): into lc_initmem,
+// the mem[] the program starts with (the -o image, the simulator's); 0: not
+static word *lc_initmem;
+static uchar lc_ifold, lc_ifk; // folding; ACC known: lc_ifv
+static uchar lc_main_vec;      // main's vector if it folds, else 0xff
+static word  lc_ifv;
 // ACC <<= n / >>= n, n const. NEW. Folded, by 0, by 16+, << 1 here,
 // else the { } rules, by lc_rn = n
 static void emit_shift(uchar right, uchar n) {
@@ -1970,6 +1976,56 @@ static void emit_tpl(const uchar *t, uchar len, const uchar *p, uchar op) {
 }
 static int jit_rule(uchar op, const uchar *p) { return jit_rule_k(op, op, p); }
 
+// main's vector, if main runs once: _start's call (the first call op from
+// lc_main_bc) is the only call of it, and no jump goes to its start. 0xff:
+// not so
+static uchar main_once(void) {
+  word pc = lc_main_bc, k;
+  uchar v = 0xff, n = 0, op;
+
+  // _start calls it
+  while (pc < lc_len && lc_code[pc] < 0xC0) {
+    k = ivm_oplen(lc_code + pc);
+    pc += k ? k : 1;
+  }
+  if (pc >= lc_len) return 0xff;
+  v = (uchar)(lc_code[pc] - 0xC0);
+  if (!lc_vec_bc || v >= lc_ncall) return 0xff;
+
+  // only there; no jump back to its start
+  for (pc = 0; pc < lc_len; pc += k ? k : 1) {
+    op = lc_code[pc];
+    if (op == (uchar)(0xC0 + v)) n++;
+    if (ivm_jump(lc_code + pc, pc) == lc_vec_bc[v]) return 0xff;
+    k = ivm_oplen(lc_code + pc);
+  }
+  return n == 1 ? v : 0xff;
+}
+
+// One op of main's global inits, done now: C L S Z l s on mem[] and ACC.
+// 0: not one of them (or ACC unknown for an S): the inits end here
+static uchar init_fold(const uchar *p) {
+  uchar op = p[0], d = p[1], k = lc_constidx;
+
+  // a load: ACC = mem[s] (a const, or what the inits put there)
+  if (op < 32 || op == 'L' || op == 'l' || op == 'C') {
+    uchar s = op < 32 ? op : op == 'C' ? p[2] : d;
+    lc_ifv = s >= k ? lc_constmem[s] : lc_initmem[s];
+    if (op == 'l') lc_ifv &= 0xff;
+    lc_ifk = 1;
+    if (op != 'C') return 1;
+  } else if (op == 'Z') {
+    if (d >= k) return 0;
+    lc_initmem[d] = 0;
+    return 1;
+  } else if ((op != 'S' && op != 's') || !lc_ifk) return 0;
+
+  // a store: mem[d] = ACC (s: its lo, hi 0)
+  if (d >= k) return 0;
+  lc_initmem[d] = op == 's' ? (word)(lc_ifv & 0xff) : lc_ifv;
+  return 1;
+}
+
 static word ivm_jit1(const uchar *code, word code_len,
   uchar *out, word out_max,
   word *map, word map_n,
@@ -2000,10 +2056,12 @@ static word ivm_jit1(const uchar *code, word code_len,
   ai_drop(); lc_plus_src = 0xff;
   lc_out_org = out_org;
   lc_libtop = 0;
+  lc_ifold = 0;
   lc_ncall = ncall;
   lc_fbase = frame_base;
   lc_vec_bc = vec_bc;
   lc_cur_frame = frame_base ? frame_base[0] : 0;
+  lc_main_vec = lc_initmem ? main_once() : 0xff;
 
   for (i = 0; i < code_len; i++)
     map[i] = 0xffff;
@@ -2112,9 +2170,24 @@ static word ivm_jit1(const uchar *code, word code_len,
           // first in function: mem[fp+FR_ACC] = AX (incoming arg / ACC home)
           emit_store_slot((uchar)(lc_cur_frame + FR_ACC));
           acc_ax_slot((uchar)(lc_cur_frame + FR_ACC));
+
+          // main starts with the global inits: fold them (main_once)
+          if (i == lc_main_vec) { lc_ifold = 1; lc_ifk = 0; }
           break;
         }
       }
+    }
+
+    // main's global inits: done now, into mem[]: no code. Until another
+    // op or a label: then ACC is the pending const they left
+    if (lc_ifold) {
+      if ((bc_pc == lc_vec_bc[lc_main_vec] || !is_label(bc_pc)) &&
+          init_fold(p)) {
+        p += ivm_oplen(p);
+        continue;
+      }
+      lc_ifold = 0;
+      if (lc_ifk) acc_pk(lc_ifv);
     }
 
     // NEXT op
@@ -2595,6 +2668,11 @@ static word ivm_jit1(const uchar *code, word code_len,
   free(lc_lbl);
   lc_lbl = NULL;
 
+  if (lc_at > lc_max) {                 // em() dropped the rest
+    printf("%%JIT: code buffer full (%u of %u bytes)\n", (unsigned)lc_at,
+      (unsigned)lc_max);
+    return 0;
+  }
   if (lc_err) {
     printf("%%JIT: short branch out of range\n");
     return 0;
@@ -2828,7 +2906,7 @@ static void mm_print(uchar n) {
                mm_fn[k] ? mm_fn[k] : mm_vn[k]);
       }
       if (lc_main_at)
-        mm_add((word)(lc_out_org + lc_main_at), "_start (inits, main)");
+        mm_add((word)(lc_out_org + lc_main_at), "_start (calls main)");
       mm_list(end);
       break;
     }
@@ -3004,9 +3082,7 @@ word sim_run_blob(uchar *blob, uchar zp, uchar zp_at, word org) {
       w = w >= len ? (word)(bss + (w - len)) : (word)(data + (w - hdata));
     img[cidx + i] = w;
   }
-  for (i = 0; i < memsz; i++) SIM_SETW(mem_base + 2 * i, img[i]);
-
-  // JIT
+  // JIT (folds _start's global inits into img)
   for (i = 0; i < ncall; i++)
     vec_bc[i] = (word)((blob[hcall + 2 * i] | (blob[hcall + 2 * i + 1] << 8)) - hcode);
   code_len = (word)((hdata > hcode ? hdata : len) - hcode);
@@ -3016,8 +3092,10 @@ word sim_run_blob(uchar *blob, uchar zp, uchar zp_at, word org) {
   lc_main_at = 0;
   lc_constidx = (uchar)cidx;
   lc_constmem = img;
+  lc_initmem = img;
   size = ivm_jit(blob + hcode, code_len, out, 8192, map, code_len,
                  mem_base, org, vec_bc, blob + hfp, ncall);
+  for (i = 0; i < memsz; i++) SIM_SETW(mem_base + 2 * i, img[i]);
   if (!size || org + size > bss) {
     printf("%%SIM: JIT failed (%u bytes)\n", (unsigned)size);
     free(img); free(map); free(out);

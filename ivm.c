@@ -1932,6 +1932,7 @@ static int jit_layout(Process *proc, uchar *base, word *mem_base, word *out_org)
     else
       *mem_base = (word)(unsigned)proc->h.mem;
     if (jit_org) *out_org = jit_org;
+    lc_initmem = 0;           // -rN runs again: _start must init
     return 1;
   }
 #endif
@@ -1947,6 +1948,7 @@ static int jit_layout(Process *proc, uchar *base, word *mem_base, word *out_org)
       if (jit_memimg[i] < bss_end)               // strings
         jit_memimg[i] += (ivmvar)(jit_imgdata - (word)(unsigned)jit_data);
   lc_constmem = jit_memimg;
+  lc_initmem = jit_memimg;    // a fresh load: _start's inits go in here
 
   // static arrays: page aligned at the top, below the target's heapend:
   // not in the file, zeroed by the startup (ivmlib_bss, opmemset)
@@ -2100,12 +2102,20 @@ word jit_compile(Process* proc) {
   for (i = 0; i < ncall; i++)
     vec_bc[i] = callv[i] - bh->code;
 
+  // the code buffer: what the heap has left (up to 8K), 1K kept for the
+  // mem[] image, stdio, the map's names
   map = (word *)calloc(code_len ? code_len : 1, sizeof(word));
+  if (map) {
+    word n = (word)_heapmaxavail();
+    n = n > 1024 + 512 ? (word)(n - 1024) : 512;
+    if (out_max > n) out_max = n;
+  }
   out = (uchar *)malloc(out_max);
   out_org = (word)(unsigned)out;
   if (!map || !out) {
 
-    printf("--- JIT: alloc fail ---\n");
+    printf("--- JIT: alloc fail (map %u, code %u bytes) ---\n",
+      (unsigned)(code_len * 2), (unsigned)out_max);
     free(map); free(out);
     return 0;
 
