@@ -61,7 +61,8 @@
 .export _ivmlib_start, _ivmlib_end
 .export _ivmlib_entry, _ivmlib_heap, _ivmlib_heapend
 .export _ivmlib_zpsrc, _ivmlib_zpdst, _ivmlib_zplen, _ivmlib_spzp
-.export _ivmlib_load, _ivmlib_seg
+.export _ivmlib_load, _ivmlib_seg, _ivmlib_dst
+.export _ivmlib_cut0, _ivmlib_cut1, _ivmlib_cut2, _ivmlib_cut3
 
 .export _opmul, _opdiv, _opmod, _opputnum
 .export _opputchar, _opgetchar, _opputs, _opprintstr
@@ -103,17 +104,19 @@ JT = $FE
 ;;;; ===========================================================================
 ;;; ===========================================================================
 ;;; Load in place (ivm.c jit_load, sim65 run in place): copy the -o image
-;;; after the lib down to _ivmlib_end, then start it as if loaded. The image
+;;; after the lib down to _ivmlib_dst (the image's end of the lib: a cut),
+;;; then start it as if loaded. The image
 ;;; is 4 segments (src, len): mem image, strings, gap (src 0: zeros), JIT
 ;;; code: no buffer to build it in. Before _ivmlib_start: not in -o images,
 ;;; not overwritten by the copy. Forward: the sources are above.  63 B + 16
 ;;; ===========================================================================
 _ivmlib_seg:     .res 16                ;; 4 x (src, len)
+_ivmlib_dst:     .word 0                ;; where: the image's lib end (a cut)
 
 _ivmlib_load:
-        lda     #<_ivmlib_end
+        lda     _ivmlib_dst
         sta     ptr2
-        lda     #>_ivmlib_end
+        lda     _ivmlib_dst+1
         sta     ptr2+1
         ldx     #0
 @seg:   cpx     #16
@@ -237,28 +240,6 @@ _opputchar:
         lda     pcbuf                   ;; last: Z/N from the char
         rts
 
-;;; SIM 22 B, ATMOS 10 B
-_opgetchar:
-.ifdef SIM
-        ldx     #0                      ;; stdin
-        jsr     pvio
-        jsr     _read                   ;; AX = read(0, &pcbuf, 1)
-        cmp     #1
-        bne     @eof
-        lda     pcbuf
-        ldx     #0
-        rts
-@eof:   lda     #$FF
-        tax
-        rts
-.else
-@wait:  jsr     ROM_GETKEY              ;; UNTESTED: N=1 when key valid?
-        bpl     @wait
-        and     #$7F
-        ldx     #0
-        rts
-.endif
-
 .ifdef SIM
 ;;; push (fd=X, buf=&pcbuf) on the C stack by hand (no pushax: outside image),
 ;;; AX = count 1. The paravirt hook pops them.
@@ -287,29 +268,26 @@ pvio:   lda     CSP
 .endif
 
 ;;; ---------------------------------------------------------------------------
-;;; ": JSR _opprintstr / .asciiz "..." / next instruction
-;;; 40 B; ~70 c + ~25 c per char + opputchar
+;;; ": JSR _opprintstr / .asciiz "..." / next instruction: via opputs
+;;; 30 B; ~90 c + ~24 c per char + opputchar
 
 _opprintstr:
-        sta     tmp3
-        stx     tmp4
+        sta     sreg                    ;; AX kept for the return
+        stx     sreg+1
+        pla                             ;; -> last byte of the JSR
+        clc
+        adc     #1
+        tay
         pla
-        sta     ptr1
-        pla
-        sta     ptr1+1                  ;; -> last byte of the JSR
-@n:     inc     ptr1
+        adc     #0
+        tax
+        tya                             ;; AX -> the string
+        jsr     _opputs                 ;; ptr1 -> its 0
+        inc     ptr1                    ;; past it: the next instruction
         bne     :+
         inc     ptr1+1
-:       ldy     #0
-        lda     (ptr1),y
-        beq     @done
-        jsr     _opputchar
-        bne     @n                      ;; A kept: the char, never 0
-@done:  inc     ptr1                    ;; skip the 0
-        bne     :+
-        inc     ptr1+1
-:       lda     tmp3
-        ldx     tmp4
+:       lda     sreg
+        ldx     sreg+1
         jmp     (ptr1)
 
 ;;; ---------------------------------------------------------------------------
@@ -368,6 +346,46 @@ _opputs:
         bne     @l
         beq     retax                   ;; wrapped past $FFFF
 
+
+
+;;; ---- cut 0: an -o image ends here if it prints only (no m * / % M F) ----
+_ivmlib_cut0:
+
+;;; ===========================================================================
+;;; m: memset. Self-moddifying (savas 1c/byte using LDA ,x instead of LDA (),y)
+;;;
+;;; A : fill byte
+;;; Y : rest (i.e. low byte size)
+;;; _opmemset_adr: pointer +
+;;;
+;;;   LDA #fill / LDY #rest / JSR _opmemset
+;;;
+;;; Algo: First rest of last page; full pages downwards.
+;;; NOTE: Max 32K (because terminate by BPL)
+;;; ===========================================================================
+
+;;; Only called for large/variable sized memset
+
+;;; 17 B; ~20 c + 10 c per byte + 11 c per page
+_opmemset:
+        cpy     #0
+        beq     opms_page               ;; no rest
+opms_loop:
+        dey
+opms_sta:
+        sta     $FFFF,y                 ;; operand patched by the caller
+        bne     opms_loop
+opms_page:
+        dec     opms_sta+2              ;; next page down
+        dex
+        bpl     opms_loop
+        rts
+_opmemset_adr = opms_sta + 1
+
+
+
+;;; ---- cut 1: an -o image ends here if no * / % M F ----
+_ivmlib_cut1:
 
 ;;; ===========================================================================
 ;;; Arithmetic: JT = first (ACC), AX = second, AX = result (unsigned 16 bit)
@@ -451,6 +469,10 @@ _opdiv:
         rts
 
 
+
+;;; ---- cut 2: an -o image ends here if no M F ----
+_ivmlib_cut2:
+
 ;;; ===========================================================================
 ;;; Heap: bump allocator, zeroed (calloc), even sizes. free is a no-op.
 ;;; ===========================================================================
@@ -518,36 +540,35 @@ _opfree:
         rts
 
 
+
+;;; ---- cut 3: an -o image ends here if getchar isn't used (the JIT never) ----
+_ivmlib_cut3:
+
 ;;; ===========================================================================
-;;; m: memset. Self-moddifying (savas 1c/byte using LDA ,x instead of LDA (),y)
-;;;
-;;; A : fill byte
-;;; Y : rest (i.e. low byte size)
-;;; _opmemset_adr: pointer +
-;;;
-;;;   LDA #fill / LDY #rest / JSR _opmemset
-;;;
-;;; Algo: First rest of last page; full pages downwards.
-;;; NOTE: Max 32K (because terminate by BPL)
+;;; Not used by JIT code (after the last cut)
 ;;; ===========================================================================
 
-;;; Only called for large/variable sized memset
-
-;;; 17 B; ~20 c + 10 c per byte + 11 c per page
-_opmemset:
-        cpy     #0
-        beq     opms_page               ;; no rest
-opms_loop:
-        dey
-opms_sta:
-        sta     $FFFF,y                 ;; operand patched by the caller
-        bne     opms_loop
-opms_page:
-        dec     opms_sta+2              ;; next page down
-        dex
-        bpl     opms_loop
+;;; SIM 22 B, ATMOS 10 B
+_opgetchar:
+.ifdef SIM
+        ldx     #0                      ;; stdin
+        jsr     pvio
+        jsr     _read                   ;; AX = read(0, &pcbuf, 1)
+        cmp     #1
+        bne     @eof
+        lda     pcbuf
+        ldx     #0
         rts
-_opmemset_adr = opms_sta + 1
+@eof:   lda     #$FF
+        tax
+        rts
+.else
+@wait:  jsr     ROM_GETKEY              ;; UNTESTED: N=1 when key valid?
+        bpl     @wait
+        and     #$7F
+        ldx     #0
+        rts
+.endif
 
 
 _ivmlib_end:

@@ -2801,7 +2801,7 @@ static void mm_print(uchar n) {
         #ifndef HOSTSIM
         if (k == LIB_TIMED) continue;
         #endif
-        mm_add(rule_ref(k), lib[k]);
+        if (rule_ref(k) < end) mm_add(rule_ref(k), lib[k]);   // (not cut)
       }
       mm_list(end);
       break;

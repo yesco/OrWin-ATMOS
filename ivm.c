@@ -294,6 +294,10 @@ static word runs = 1;   // -rN
 #ifdef JIT_6502
   // ivm-lib.asm (link it FIRST): [start .. end[ is copied by -o
   extern uchar ivmlib_start[], ivmlib_end[];
+  // the lib is in tiers: an -o image ends at the cut after the last one
+  // its program needs (lib_cut)
+  extern uchar ivmlib_cut0[], ivmlib_cut1[], ivmlib_cut2[], ivmlib_cut3[];
+  extern word  ivmlib_dst;
   extern word  ivmlib_entry, ivmlib_heap, ivmlib_heapend, ivmlib_zpsrc;
   extern uchar ivmlib_zpdst, ivmlib_zplen, ivmlib_spzp;
 
@@ -1817,7 +1821,7 @@ char save_blob(const char *path, uchar *img, int len) {
 // ---- -t -z -a -o support -------------------------------------------------
 //
 // -o image (all at fixed addresses, loads at ivmlib_start):
-//   [hdr][ivm-lib: ivmlib_start..ivmlib_end[][mem[] image][strings][0 gap][JIT code]
+//   [hdr][ivm-lib: ivmlib_start..a cut[][mem[] image][strings][0 gap][JIT code]
 // Entry is ivmlib_start: it sets up (sim65 sp, -z copy of mem[] to zp),
 // JSRs the JIT code (ivmlib_entry), then exits (sim65) or RTS (atmos).
 // Heap (opmalloc) bumps from the end of the image up to the target's heapend.
@@ -1845,6 +1849,24 @@ static uchar  *jit_blob;            // the loaded blob (its real address)
 static uchar  *jit_data;            // blob string section
 static word    jit_membytes, jit_datalen, jit_imgmem, jit_imgdata;
 static word    jit_bss_at, jit_bss_n;    // static arrays (-o / in place)
+static uchar  *jit_libend;              // the image's lib: start .. a cut
+
+// the lib tier the code needs: its end (ivm-lib.asm: print, memset,
+// * / %, malloc free; getchar: never)
+static uchar *lib_cut(const uchar *c, word n) {
+  word pc = 0, k;
+  uchar t = 0, op;
+  while (pc < n) {
+    op = c[pc];
+    if (op == 'm' && t < 1) t = 1;
+    if ((op == '*' || op == '/' || op == '%') && t < 2) t = 2;
+    if (op == 'M' || op == 'F') t = 3;
+    k = ivm_oplen(c + pc);
+    pc += k ? k : 1;
+  }
+  return t == 0 ? ivmlib_cut0 : t == 1 ? ivmlib_cut1 :
+         t == 2 ? ivmlib_cut2 : ivmlib_cut3;
+}
 
 // Decide mem_base / out_org (and const view) before ivm_jit(). 0 = error.
 static int jit_layout(Process *proc, uchar *base, word *mem_base, word *out_org) {
@@ -1872,7 +1894,9 @@ static int jit_layout(Process *proc, uchar *base, word *mem_base, word *out_org)
   // the strings: from data to the blob's end (cc65: data is absolute)
   jit_datalen  = bh->data ?
     (word)((unsigned)jit_blob + bh->len - (unsigned)jit_data) : 0;
-  jit_imgmem   = (word)(unsigned)ivmlib_end;
+  jit_libend   = lib_cut(base + bh->code,
+    (word)((bh->data > bh->code ? bh->data : bh->len) - bh->code));
+  jit_imgmem   = (word)(unsigned)jit_libend;
   jit_imgdata  = (word)(jit_imgmem + jit_membytes);
 
   if (jit_force_zp) {
@@ -1994,7 +2018,7 @@ static int jit_save(uchar *out, word size, word org) {
   f = fopen(jit_outfile, "wb");
   if (!f) { printf("cannot write %s\n", jit_outfile); return 0; }
   fwrite(h, 1, n, f);
-  fwrite(ivmlib_start, 1, (unsigned)(ivmlib_end - ivmlib_start), f);
+  fwrite(ivmlib_start, 1, (unsigned)(jit_libend - ivmlib_start), f);
   fwrite(jit_memimg, 1, jit_membytes, f);
   fwrite(jit_data, 1, jit_datalen, f);
   while (gap--) fputc(0, f);
@@ -2011,7 +2035,7 @@ static int jit_save(uchar *out, word size, word org) {
 #ifdef JIT_INMEM
 // Run in place: the -o image after the lib, as 4 segments (mem image,
 // strings, gap, JIT code) where they are now; ivmlib_load copies them down
-// to ivmlib_end and starts it. No buffer (the heap may be full). Never
+// to the image's lib end (ivmlib_dst) and starts it. No buffer (the heap may be full). Never
 // returns.
 static void jit_load(uchar *out, word size, word org) {
   word end = (word)(org + size);
@@ -2022,6 +2046,7 @@ static void jit_load(uchar *out, word size, word org) {
   ivmlib_seg[4] = 0;                          ivmlib_seg[5] = gap;
   ivmlib_seg[6] = (word)(unsigned)out;        ivmlib_seg[7] = size;
 
+  ivmlib_dst     = jit_imgmem;            // after the image's lib
   ivmlib_entry   = org;
   ivmlib_heap    = (word)((end + 0xFF) & ~0xFF);   // page: no (zp),Y crossing
   ivmlib_heapend = jit_tg->heapend;
@@ -2146,7 +2171,7 @@ word jit_compile(Process* proc) {
         word heap = (word)((out_org + jit_size + 0xFF) & ~0xFF);
         mm_area(MM_SLOTS, mem_base, jit_membytes);
         mm_area(MM_LIB, (word)(unsigned)ivmlib_start,
-                (word)(ivmlib_end - ivmlib_start));
+                (word)(jit_libend - ivmlib_start));
         if (mem_base != jit_imgmem)            // -z: the zp copy's source
           mm_area(MM_IMG, jit_imgmem, jit_membytes);
         mm_area(MM_DATA, jit_imgdata, jit_datalen);
