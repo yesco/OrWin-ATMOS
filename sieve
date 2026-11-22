@@ -311,9 +311,9 @@ echo
 # 104,195,115  716 B - 35,780,961  1559 B - Aswap CSR	224; 381 BC
 # 104,194,175  716 B - 					224; 381
 # 104,193,899  716 B -  my hash Common Subexpressions...
-
-
-
+# 104,161,499  696 B -  reverse ^                       215;
+# 104,148,961  688 B -  c.bnf rules for reverse commut  212;
+#                       35,440,952 1531 B -                  369 BC
 
 
 

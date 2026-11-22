@@ -754,6 +754,10 @@ static uchar const_slot(unsigned int v) {
   return as_addr(lit_addr(v));
 }
 
+// the last plain load emitted by \lN: [pl_at, pl_end[ loads slot pl_slot
+static word  pl_at, pl_end = 0xffff;
+static uchar pl_slot;
+
 // record a value-producing match into \\1..\\9 of current frame
 static void record_capture(word val) {
   uchar n = cur.prod_n;
@@ -962,8 +966,11 @@ static uchar *run_production(uchar *p) {
         } else if (e == HIBIT('l')) {
 
           // \lN: load capture N into ACC unless it already is there
-          if (w != VAL_ACC)
+          if (w != VAL_ACC) {
+            pl_at = bin_ptr;
             emitop2('L', as_addr(w & 0xff));
+            pl_end = bin_ptr; pl_slot = as_addr(w & 0xff);
+          }
 
         } else {
 
@@ -987,11 +994,27 @@ static uchar *run_production(uchar *p) {
       // \t: new temp slot, emit it, remember it as a capture
       // \e: value - 1! "exclusive limit" (< and not <=)
       //     — S temp; J temp (store ACC-1)
-      case HIBIT('t'): case HIBIT('e'):
+      case HIBIT('t'): case HIBIT('e'): case HIBIT('j'):
         b = alloc_slot();
+
+        // \j: a temp only read (O, an index): after a plain load of a var
+        // / const (\l) right before the S, its slot has the value: no temp
+        // ("x ^ (x << 7)": x itself). The L goes too: what follows \j
+        // (R, E, '[') loads ACC itself. Not \t: a rule may write the
+        // temp, or want a snapshot (a loop limit)
+        if (e == HIBIT('j') && bin_ptr && bin[bin_ptr - 1] == 'S' &&
+            pl_end == bin_ptr - 1 &&
+            (bin[pl_at] == 'L' ? bin[pl_at + 1] : bin[pl_at]) == pl_slot) {
+          bin_ptr = pl_at;                     // the L, the S
+          acc_invalidate();
+          pl_end = 0xffff;
+          next_slot--;                         // the temp is not needed
+          record_capture(pl_slot);
+          break;
+        }
 #ifndef IVM_NO_VN
         // value numbering: ACC's value in a slot already? use that one
-        if (e == HIBIT('t') && bin_ptr && bin[bin_ptr - 1] == 'S' &&
+        if (e != HIBIT('e') && bin_ptr && bin[bin_ptr - 1] == 'S' &&
             (cv = vn_temp(cur.code_save, b)) != 0) {
           next_slot--;                         // the temp is not needed
           record_capture(cv);
@@ -1756,7 +1779,7 @@ static void free_rules(void) {
 // note: '>' is load-time only (not stored)
 //       '<' becomes HIBIT(x), x=1..31 (alt jump) or HIBIT('<')
 static uchar is_dir(uchar e) {
-  return isdigit(e) || strchr("insfdprlxywmzkcahvgetoub+{}#='?*", e) != NULL;
+  return isdigit(e) || strchr("insfdprlxywmzkcahvgetoubj+{}#='?*", e) != NULL;
 }
 
 static void build_one_rule(uchar r, char *rhs) {
@@ -2074,6 +2097,7 @@ static void restore_scope(void) {
 // — caller fail-fasts.
 static int frame_rewind(void) {
   bin_ptr = cur.code_save;
+  if (pl_end > bin_ptr) pl_end = 0xffff;     // that load is gone
   if (ginit_len != cur.ginit_save) {
     ginit_len = cur.ginit_save;
     ginit_acc = 0xff;   // ACC after the kept init code: unknown
