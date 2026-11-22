@@ -1234,6 +1234,7 @@ static void emit_lda_pend(uchar hi);
 static int jit_rule_k(uchar rop, uchar op, const uchar *p);
 static uchar lc_rn;            // the rules' shift count (0xff: a variable)
 static uchar lc_rskip;         // bytecode bytes a rule ate after its op
+static word  lc_libtop;        // the highest lib routine a JSR went to
 // ACC <<= n / >>= n, n const. NEW. Folded, by 0, by 16+, << 1 here,
 // else the { } rules, by lc_rn = n
 static void emit_shift(uchar right, uchar n) {
@@ -1836,7 +1837,7 @@ again:
 static void emit_tpl(const uchar *t, uchar len, const uchar *p, uchar op) {
   const uchar *e, *rs = 0, *re = 0;
   uchar b, c, a, zp = lc_tzp, rn = 0;
-  word fx[4], top = 0, smfix = 0;
+  word fx[4], top = 0, smfix = 0, a16;
   uchar nfx = 0;
 
   // by the opcode's column (lo nibble c)
@@ -1946,7 +1947,9 @@ static void emit_tpl(const uchar *t, uchar len, const uchar *p, uchar op) {
       c = *t++;
       if (c == LIB_MULDIV)
         c = op == '*' ? LIB_MUL : op == '/' ? LIB_DIV : LIB_MOD;
-      ema(JSR, rule_ref(c));
+      a16 = rule_ref(c);
+      if (a16 > lc_libtop) lc_libtop = a16;    // the lib the image needs
+      ema(JSR, a16);
     }
 
     // BRK RTI RTS: one byte
@@ -1996,6 +1999,7 @@ static word ivm_jit1(const uchar *code, word code_len,
   lc_yas = 0xff; lc_yas_at = 0xffff; lc_ya_bc = 0xffff;
   ai_drop(); lc_plus_src = 0xff;
   lc_out_org = out_org;
+  lc_libtop = 0;
   lc_ncall = ncall;
   lc_fbase = frame_base;
   lc_vec_bc = vec_bc;

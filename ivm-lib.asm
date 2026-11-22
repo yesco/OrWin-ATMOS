@@ -62,7 +62,8 @@
 .export _ivmlib_entry, _ivmlib_heap, _ivmlib_heapend
 .export _ivmlib_zpsrc, _ivmlib_zpdst, _ivmlib_zplen, _ivmlib_spzp
 .export _ivmlib_load, _ivmlib_seg, _ivmlib_dst
-.export _ivmlib_cut0, _ivmlib_cut1, _ivmlib_cut2, _ivmlib_cut3
+.export _ivmlib_cut0, _ivmlib_cut1, _ivmlib_cut2
+.export _ivmlib_bss, _ivmlib_bssn
 
 .export _opmul, _opdiv, _opmod, _opputnum
 .export _opputchar, _opgetchar, _opputs, _opprintstr
@@ -180,6 +181,22 @@ _ivmlib_start:
         cpy     _ivmlib_zplen
         bne     @cp
 @nozp:
+        ;; static arrays (bss, not in the file): zeroed by opmemset, the
+        ;; last page first: its STA at bss + pages * 256, Y = rest, X = pages
+        ldy     _ivmlib_bssn
+        ldx     _ivmlib_bssn+1
+        bne     @bss
+        tya
+        beq     @nobss
+@bss:   lda     _ivmlib_bss
+        sta     _opmemset_adr
+        txa
+        clc
+        adc     _ivmlib_bss+1
+        sta     _opmemset_adr+1
+        lda     #0
+        jsr     _opmemset
+@nobss:
         jsr     @call
 .ifdef SIM
         jmp     exit                    ;; A = exit code (lo of result)
@@ -199,6 +216,8 @@ _ivmlib_start:
 _ivmlib_entry:   .word 0                ;; JIT code start (NOPs, JMP main)
 _ivmlib_heap:    .word 0                ;; next free heap byte
 _ivmlib_heapend: .word 0                ;; first byte after heap
+_ivmlib_bss:     .word 0                ;; static arrays: zeroed at start
+_ivmlib_bssn:    .word 0                ;; their bytes (< 32K)
 _ivmlib_zpsrc:   .word 0                ;; -z: mem[] image in the file
 _ivmlib_zpdst:   .byte 0                ;; -z: zp base
 _ivmlib_zplen:   .byte 0                ;; -z: bytes, 0 = mem[] not in zp
@@ -348,9 +367,6 @@ _opputs:
 
 
 
-;;; ---- cut 0: an -o image ends here if it prints only (no m * / % M F) ----
-_ivmlib_cut0:
-
 ;;; ===========================================================================
 ;;; m: memset. Self-moddifying (savas 1c/byte using LDA ,x instead of LDA (),y)
 ;;;
@@ -384,8 +400,9 @@ _opmemset_adr = opms_sta + 1
 
 
 
-;;; ---- cut 1: an -o image ends here if no * / % M F ----
-_ivmlib_cut1:
+;;; ---- cut 0: an -o image ends here if it calls none of the below ----
+_ivmlib_cut0:
+
 
 ;;; ===========================================================================
 ;;; Arithmetic: JT = first (ACC), AX = second, AX = result (unsigned 16 bit)
@@ -470,8 +487,8 @@ _opdiv:
 
 
 
-;;; ---- cut 2: an -o image ends here if no M F ----
-_ivmlib_cut2:
+;;; ---- cut 1: ... none of the below ----
+_ivmlib_cut1:
 
 ;;; ===========================================================================
 ;;; Heap: bump allocator, zeroed (calloc), even sizes. free is a no-op.
@@ -541,8 +558,8 @@ _opfree:
 
 
 
-;;; ---- cut 3: an -o image ends here if getchar isn't used (the JIT never) ----
-_ivmlib_cut3:
+;;; ---- cut 2: ... not getchar (the JIT never calls it) ----
+_ivmlib_cut2:
 
 ;;; ===========================================================================
 ;;; Not used by JIT code (after the last cut)

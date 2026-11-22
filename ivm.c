@@ -294,10 +294,10 @@ static word runs = 1;   // -rN
 #ifdef JIT_6502
   // ivm-lib.asm (link it FIRST): [start .. end[ is copied by -o
   extern uchar ivmlib_start[], ivmlib_end[];
-  // the lib is in tiers: an -o image ends at the cut after the last one
-  // its program needs (lib_cut)
-  extern uchar ivmlib_cut0[], ivmlib_cut1[], ivmlib_cut2[], ivmlib_cut3[];
-  extern word  ivmlib_dst;
+  // the lib is in tiers: an -o image ends at the cut after the last
+  // routine its code calls (jit_lib_more)
+  extern uchar ivmlib_cut0[], ivmlib_cut1[], ivmlib_cut2[];
+  extern word  ivmlib_dst, ivmlib_bss, ivmlib_bssn;
   extern word  ivmlib_entry, ivmlib_heap, ivmlib_heapend, ivmlib_zpsrc;
   extern uchar ivmlib_zpdst, ivmlib_zplen, ivmlib_spzp;
 
@@ -1851,21 +1851,18 @@ static word    jit_membytes, jit_datalen, jit_imgmem, jit_imgdata;
 static word    jit_bss_at, jit_bss_n;    // static arrays (-o / in place)
 static uchar  *jit_libend;              // the image's lib: start .. a cut
 
-// the lib tier the code needs: its end (ivm-lib.asm: print, memset,
-// * / %, malloc free; getchar: never)
-static uchar *lib_cut(const uchar *c, word n) {
-  word pc = 0, k;
-  uchar t = 0, op;
-  while (pc < n) {
-    op = c[pc];
-    if (op == 'm' && t < 1) t = 1;
-    if ((op == '*' || op == '/' || op == '%') && t < 2) t = 2;
-    if (op == 'M' || op == 'F') t = 3;
-    k = ivm_oplen(c + pc);
-    pc += k ? k : 1;
-  }
-  return t == 0 ? ivmlib_cut0 : t == 1 ? ivmlib_cut1 :
-         t == 2 ? ivmlib_cut2 : ivmlib_cut3;
+static word    jit_heapend;             // the heap's end (the bss below it)
+
+// The lib the image has: up to the cut after the last routine the code
+// calls (lc_libtop: the JIT notes each JSR into it). 1: more than the
+// layout had, so lay out and compile again
+static uchar jit_lib_more(void) {
+  uchar *need = lc_libtop < (word)(unsigned)ivmlib_cut0 ? ivmlib_cut0 :
+                lc_libtop < (word)(unsigned)ivmlib_cut1 ? ivmlib_cut1 :
+                ivmlib_cut2;
+  if (need <= jit_libend) return 0;
+  jit_libend = need;
+  return 1;
 }
 
 // Decide mem_base / out_org (and const view) before ivm_jit(). 0 = error.
@@ -1894,8 +1891,7 @@ static int jit_layout(Process *proc, uchar *base, word *mem_base, word *out_org)
   // the strings: from data to the blob's end (cc65: data is absolute)
   jit_datalen  = bh->data ?
     (word)((unsigned)jit_blob + bh->len - (unsigned)jit_data) : 0;
-  jit_libend   = lib_cut(base + bh->code,
-    (word)((bh->data > bh->code ? bh->data : bh->len) - bh->code));
+  if (!jit_libend) jit_libend = ivmlib_cut0;  // first the smallest lib
   jit_imgmem   = (word)(unsigned)jit_libend;
   jit_imgdata  = (word)(jit_imgmem + jit_membytes);
 
@@ -1942,6 +1938,7 @@ static int jit_layout(Process *proc, uchar *base, word *mem_base, word *out_org)
 
   // -o: own copy of mem[]; string consts point into the loaded blob,
   // move them to the strings copy in the image (pool: strings first, 0, ints)
+  free(jit_memimg);                          // (an earlier layout's)
   jit_memimg = (ivmvar *)malloc(jit_membytes);
   if (!jit_memimg) { printf("%%JIT: alloc fail\n"); return 0; }
   memcpy(jit_memimg, proc->h.mem, jit_membytes);
@@ -1951,18 +1948,20 @@ static int jit_layout(Process *proc, uchar *base, word *mem_base, word *out_org)
         jit_memimg[i] += (ivmvar)(jit_imgdata - (word)(unsigned)jit_data);
   lc_constmem = jit_memimg;
 
-  // static arrays: page aligned after the strings, before the code: in the
-  // zeroed gap (the file has the zeros, ivmlib_load zero-fills)
-  bss_img = (word)((jit_imgdata + jit_datalen + 255) & ~255u);
+  // static arrays: page aligned at the top, below the target's heapend:
+  // not in the file, zeroed by the startup (ivmlib_bss, opmemset)
+  bss_img = (word)((jit_tg->heapend - bss_n) & 0xFF00);
   if (bss_n) bss_move(jit_memimg + bh->constidx, bss_end, bss_img);
   jit_bss_at = bss_img; jit_bss_n = bss_n;
+  jit_heapend = bss_n ? bss_img : jit_tg->heapend;
+  ivmlib_bss = bss_img; ivmlib_bssn = bss_n;
 
   if (!jit_force_zp) *mem_base = jit_imgmem;
   ivmlib_zpsrc = jit_imgmem;
   ivmlib_zpdst = (uchar)jit_zp;
   ivmlib_zplen = jit_force_zp ? (uchar)jit_membytes : 0;
 
-  *out_org = bss_n ? (word)(bss_img + bss_n) : (word)(jit_imgdata + jit_datalen);
+  *out_org = (word)(jit_imgdata + jit_datalen);
   if (jit_org) {
     if (jit_org < *out_org) {
       printf("%%JIT: -a %04X overlaps ivm-lib/mem/strings, min %04X\n",
@@ -1986,7 +1985,7 @@ static int jit_save(uchar *out, word size, word org) {
 
   ivmlib_entry   = org;
   ivmlib_heap    = (word)((end + 0xFF) & ~0xFF);   // page: no (zp),Y crossing
-  ivmlib_heapend = jit_tg->heapend;
+  ivmlib_heapend = jit_heapend;
   if (ivmlib_heap >= ivmlib_heapend)
     printf("%%JIT: warning: no heap left ($%04X >= $%04X)\n",
       ivmlib_heap, ivmlib_heapend);
@@ -2049,7 +2048,7 @@ static void jit_load(uchar *out, word size, word org) {
   ivmlib_dst     = jit_imgmem;            // after the image's lib
   ivmlib_entry   = org;
   ivmlib_heap    = (word)((end + 0xFF) & ~0xFF);   // page: no (zp),Y crossing
-  ivmlib_heapend = jit_tg->heapend;
+  ivmlib_heapend = jit_heapend;
   printf("--- JIT: load $%04X-$%04X, code $%04X, heap $%04X-$%04X ---\n",
     jit_imgmem, end - 1, org, ivmlib_heap, ivmlib_heapend);
   printf("\n--- RUN IVM ---\n");
@@ -2120,15 +2119,23 @@ word jit_compile(Process* proc) {
     lc_constidx = (uchar)bh->constidx;
     lc_constmem = proc->h.mem;
 
-    mem_base = 0;
-    if (!jit_layout(proc, base, &mem_base, &out_org)) {
-      free(map); free(out);
-      return 0;
-    }
-    printf("--- JIT: mem[] at $%04X ---\n", mem_base);
+    // lay out, compile; again if the code calls more of the lib than the
+    // image had (only an image has a cut: -o, in place)
+    jit_libend = 0;
+    do {
+      mem_base = 0;
+      if (!jit_layout(proc, base, &mem_base, &out_org)) {
+        free(map); free(out);
+        return 0;
+      }
+      printf("--- JIT: mem[] at $%04X ---\n", mem_base);
 
-    jit_size = ivm_jit(code, code_len, out, out_max, map, code_len,
-      mem_base, out_org, vec_bc, frame_base, ncall);
+      jit_size = ivm_jit(code, code_len, out, out_max, map, code_len,
+        mem_base, out_org, vec_bc, frame_base, ncall);
+    #ifndef JIT_INMEM
+      if (!jit_outfile) break;
+    #endif
+    } while (jit_size && jit_lib_more());
 
     if (jit_size) {
 
@@ -2177,7 +2184,7 @@ word jit_compile(Process* proc) {
         mm_area(MM_DATA, jit_imgdata, jit_datalen);
         mm_area(MM_BSS, jit_bss_at, jit_bss_n);
         mm_area(MM_CODE, out_org, jit_size);
-        mm_area(MM_HEAP, heap, (word)(jit_tg->heapend - heap));
+        mm_area(MM_HEAP, heap, (word)(jit_heapend - heap));
         mm_print((uchar)(jit_membytes / 2));
       }
     #endif

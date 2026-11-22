@@ -182,20 +182,23 @@ In benchmarks targeting the MOS 6502 (specifically variants of the
 classic BYTE Sieve prime-number test), Oscar64 and LLVM-MOS
 consistently lead in execution speed, while vbcc produces the smallest
 compiled binaries. Traditional compilers like cc65 lag significantly
-behind in cycle counts due to heavy reliance on a software stack. [1]
-(https://www.c64-wiki.com/wiki/oscar64), [2]
-(https://raxiss.com/article/id/30-MOS6502-compiler-benchmark), [3]
-(https://github.com/kassane/mos-toolchains-research/blob/main/Research.md),
-[4] (https://www.youtube.com/watch?v=ejbTKtgSZI0&vl=en), [5]
-(https://www.reddit.com/r/retrogamedev/comments/1xhp8dk/i_wrote_a_compiler_that_turns_typescript_into/)
+behind in cycle counts due to heavy reliance on a software stack.
+
+[1](https://www.c64-wiki.com/wiki/oscar64),
+[2](https://raxiss.com/article/id/30-MOS6502-compiler-benchmark),
+[3](https://github.com/kassane/mos-toolchains-research/blob/main/Research.md),
+[4](https://www.youtube.com/watch?v=ejbTKtgSZI0&vl=en),
+[5](https://www.reddit.com/r/retrogamedev/comments/1xhp8dk/i_wrote_a_compiler_that_turns_typescript_into/)
+
 Because different benchmark suites use varying iteration counts, array
 sizes, and runtime libraries, results are best evaluated through the
 two most comprehensive modern 6502 C compiler test suites: C-Bench-64
-and the Raxiss MOS6502 Benchmark. [1]
-(https://thred.github.io/c-bench-64/), [2]
-(https://raxiss.com/article/id/30-MOS6502-compiler-benchmark)
+and the Raxiss MOS6502 Benchmark.
 
-1. Execution Speed & Cycles (C-Bench-64 / GGLabs Suite)
+[1](https://thred.github.io/c-bench-64/),
+[2](https://raxiss.com/article/id/30-MOS6502-compiler-benchmark)
+
+### 1. Execution Speed & Cycles (C-Bench-64 / GGLabs Suite)
 
 The C-Bench-64 suite (adapted from the GGLabs benchmarks) measures
 real-world execution time on a ~1 MHz Commodore 64 (where 1 second ≈
