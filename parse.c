@@ -1035,8 +1035,13 @@ static uchar *run_production(uchar *p) {
 
 
 
-      // \x: forward jump placeholder
+      // \xHH: the byte HH; \x: forward jump placeholder
       case HIBIT('x'):
+        if (isxdigit(p[1]) && isxdigit(p[2])) {
+          emit(hex2(p + 1));
+          adv = 3;
+          break;
+        }
         emit(0);
         b = cur.npatch;
         if (b < 4) {
@@ -1878,8 +1883,9 @@ static void build_one_rule(uchar r, char *rhs) {
     
     blob[bi++] = e;
 
-    // \#xx => copy next two chars verbatim
-    if (e == HIBIT('#')) verbatim = 2;
+    // \#xx \xHH => copy next two chars verbatim
+    if (e == HIBIT('#') ||
+        (e == HIBIT('x') && isxdigit(p[1]) && isxdigit(p[2]))) verbatim = 2;
     
   }
 
@@ -2263,6 +2269,12 @@ int run() {
        if (c == HIBIT('o')) line_commit();
   else if (c == HIBIT('{')) scope_enter();
   else if (c == HIBIT('}')) scope_leave();
+
+  // \xHH: match the byte HH exactly (no ws skipped)
+  else if (c == HIBIT('x') && isxdigit(a[1]) && isxdigit(a[2])) {
+    ok = got(hex2(a + 1));
+    adv = 3;
+  }
 
   // SET # RETURN VALUE OF RULE
   else if (c == HIBIT('#')) {

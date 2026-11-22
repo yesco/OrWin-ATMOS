@@ -400,7 +400,7 @@ E=\i+=\i [U\1\2]
 |(char*)E
 |(int*) E
 |(word*)E
-|(char)E[&\xff] # TODO: doesn't work
+|(char)E\#ff[&\2]
 
 |RO
 |S[\l1]O
