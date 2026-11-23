@@ -75,10 +75,10 @@ Q=#define \+ \d\c[\g]\n
 
 # - Declarations: optional register\b -> REGISTER slot 0..31
 # -O: REGISTER 0..31, other globals 32..95, frames at 96+
-V=const\c $T $M;|register\b $T $M;|static $T $M;
+V=const\c $T $M|register\b $T $M|static $T $M
 |struct\'s \i \+={\:$N}\.;|struct\'s \i \+\[$S\]\@;|struct\'s \i \+\@;
 |__striped struct\'z \i \+\[$S\]\@;
-|$T $M;
+|$T $M
 # name[N]: a static array of N (a number or const) elements: zeroed (\@),
 #   also = {0}; initialized: = "text" / = {1, 2, 'c', ...} (\: \, \.),
 #   [] its size from the initializer, [N] zeros after it. Arrays are
@@ -86,13 +86,16 @@ V=const\c $T $M;|register\b $T $M;|static $T $M;
 M=\+\[$S\]={0}\@$U
 |\+\[$S\]=\:\s\.$U|\+\[\]=\:\s\.$U
 |\+\[$S\]={\:$N}\.$U|\+\[\]={\:$N}\.$U
-|\+\[$S\]\@$U|\+=$S[\g]$U|\+=$E[S\1]$U|\+$U|
+|\+\[$S\]\@$U|\+=$S[\g]$U|\+=$E[S\1]$U|\+$U
 # initializer elements: consts, a trailing , allowed. The , before \, : a
 #   failed alt does not take back data (the last one went in twice)
 N=$S,\,\<|$S\,|
 
 # - TODO: deep recursion might be bad...
-U=,$M|
+# the ; here, not in V: "int b = a + 1;" - M's "\+=$S" alt matched "b = a"
+#   and returned, V's ; then failed (a rule that returned is not tried
+#   again); now that alt fails itself, the "\+=$E" one comes
+U=,$M|;
 
 # - TODO: why I^* - pascal artifact?
 T=struct\'W \i *|$I *\'^|$I^*\'^|$I
@@ -169,9 +172,10 @@ K=$Y
 
 |printf(\i);[L\1P]
 
-# - TODO: lol?
-|printf("%u%u%u\\\\n",$E,$E,$E);[...N]
-|printf("%u%u%u",$E,$E,$E);[...]
+# three numbers: each printed after its E (all at the end printed the last
+#   one three times)
+|printf("%u%u%u\\\\n",$E[.],$E[.],$E[.]);[N]
+|printf("%u%u%u",$E[.],$E[.],$E[.]);
 |printf("\\"%s\\" has %d characters\\n",\i,\i($Z)[\v]);[S\tL\1P" has \#00L\3.N]
 
 |printf($E);[P]

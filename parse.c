@@ -522,6 +522,7 @@ static word  nerr;                 // \! errors reported (no .ivm then)
 static word  err_at;               // the last one's position (+1): reported
 static void  err_statement(word s0);
 static void  check_consts(word from);
+static void  err_here(const char *msg);
 static void  err_skip(void);
 static void  pp_skip(void);
 
@@ -2342,11 +2343,16 @@ static int frame_rewind(void) {
   // by the first emit after \f (pending_func_entry). If this rewind
   // threw away that code, ask for it again.
   
-  // re-arm function entry if rewind ate gen_func_entry / ginit bytes
+  // re-arm function entry if rewind ate gen_func_entry / ginit bytes.
+  // main: only if its global init code is gone (before main_offset +
+  // ginit_len), not at main_offset itself: \j can take bin_ptr back to it
+  // for a moment (main's first load cut), an outer rewind then restores
+  // that load; armed, the next emit made main start after it ("x = 7 * 4"
+  // as main's first statement gave 0)
   if (last_func_vec != 0xff) {
     if (last_func_vec < MAX_VECTORS && vectors[last_func_vec] > bin_ptr)
       pending_func_entry = last_func_vec;
-    else if (last_func_vec == main_vec && main_offset >= bin_ptr)
+    else if (last_func_vec == main_vec && bin_ptr < main_offset + ginit_len)
       pending_func_entry = last_func_vec;
   }
 
@@ -2403,6 +2409,13 @@ int run() {
   if (!c) {
     rch = 'A' + cur.rule;
     if (rch == 'K') check_consts(cur.code_save);
+
+    // a global declaration made code: nothing runs it ("int g = 2 + 3;":
+    // only consts, \g, at the top)
+    if (rch == 'V' && !scope_depth && bin_ptr > cur.code_save) {
+      bin_ptr = cur.code_save;
+      err_here("global initializer: a constant only");
+    }
     vlog("ok %c alt %u -> @%u\n", rch, (unsigned)(cur.alts - rule[cur.rule]), abs_pos());
 
     #ifdef VERBOSE
@@ -2750,13 +2763,23 @@ static void err_statement(word s0) {
 // (err_code: a block's K sees its statements' code again)
 static word err_code;
 
-static void check_consts(word from) {
-  word n, start, line, at = abs_pos();
-  uchar *p;
+// an error at the end of what was just accepted: its line (its last
+// token's, not after the gap: "$K [n..]"), msg
+static void err_here(const char *msg) {
+  word start, line, at = abs_pos();
 
-  // the line its last token is on (not after the gap: "$K [n..]")
   if (at == ws_end) at = ws_at;
   at = at > line_abs ? (word)(at - line_abs) : 0;
+  nerr++;
+  line = err_line(at, &start);
+  err_prefix(line);
+  eprintf("error: %s\n", msg);
+  show_line(line, start);
+}
+
+static void check_consts(word from) {
+  word n;
+  uchar *p;
 
   for (; from < (word)bin_ptr; from += n) {
     p = bin + from;
@@ -2764,11 +2787,7 @@ static void check_consts(word from) {
     if (n < 2 || !WRITES_VAR(*p) || !is_lit(p[1]) || from < err_code)
       continue;
     err_code = (word)(from + 1);
-    nerr++;
-    line = err_line(at, &start);
-    err_prefix(line);
-    eprintf("error: const modified\n");
-    show_line(line, start);
+    err_here("const modified");
   }
 }
 
