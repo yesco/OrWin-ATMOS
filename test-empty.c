@@ -7,8 +7,8 @@
 //   137 bytes - test-empty.prg
 //
 // ./pc test-empty && ./ivm-jit ... 
-//   144 cycles
-//    53 bytes test-emtpy.ivm.sim
+//    37 cycles
+//    33 bytes test-emtpy.ivm.sim
 
 int main() {
 }

@@ -1830,6 +1830,7 @@ char save_blob(const char *path, uchar *img, int len) {
 //
 // -o image (all at fixed addresses, loads at jit_libbeg):
 //   [hdr][ivm-lib: jit_libbeg..a cut[][mem[] image][strings][0 gap][JIT code]
+//   -z: [hdr][ivm-lib][strings][0 gap][JIT code][mem[] image: zp copy source]
 // Entry is jit_libbeg: the startup parts it needs (bss zeroed, -z copy of
 // mem[] to zp), JSR the JIT code (ivmlib_entry), exit (sim65) / RTS (atmos).
 // Heap (opmalloc) bumps from the end of the image up to the target's heapend.
@@ -1860,6 +1861,8 @@ static word    jit_bss_at, jit_bss_n;    // static arrays (-o / in place)
 static uchar  *jit_libbeg;              // the image's lib: a startup part ..
 static uchar  *jit_libend;              // .. a cut
 static word    jit_libfloor;            // the startup's own call: memset (bss)
+static uchar   jit_zero;                // memory starts zeroed (a sim65 file)
+static word    jit_imgbytes, jit_imgend;   // mem[] image bytes; image end
 static uchar   jit_kkeep;               // consts in mem[] (the code reads one)
 static word    jit_cells;               // mem[] cells, consts too
 
@@ -1923,13 +1926,17 @@ static int jit_layout(Process *proc, uchar *base, word *mem_base, word *out_org)
   // the strings: from data to the blob's end (cc65: data is absolute)
   jit_datalen  = bh->data ?
     (word)((unsigned)jit_blob + bh->len - (unsigned)jit_data) : 0;
-  // startup: from the first part needed; bss needs memset
-  jit_libbeg = bss_n ? ivmlib_init : jit_force_zp ? ivmlib_zpinit :
-    ivmlib_start;
-  jit_libfloor = bss_n ? rule_ref(LIB_MEMSET) : 0;
+  // a sim65 file: all memory 0 at load (no bss zeroing, mem[] copy only to
+  // its last non-0 byte); in place / atmos: what was there
+  jit_zero = jit_outfile && jit_tg->hdr == 1;
+
+  // the startup zeroes bss with memset (jit_image: which startup parts)
+  jit_libfloor = bss_n && !jit_zero ? rule_ref(LIB_MEMSET) : 0;
   if (!jit_libend) jit_libend = jit_cut(0);   // first the smallest lib
+
+  // -z: the mem[] image goes after the code (its size: once compiled)
   jit_imgmem   = (word)(unsigned)jit_libend;
-  jit_imgdata  = (word)(jit_imgmem + jit_membytes);
+  jit_imgdata  = jit_force_zp ? jit_imgmem : (word)(jit_imgmem + jit_membytes);
 
   if (jit_force_zp) {
     if (!jit_zp) {
@@ -2007,11 +2014,9 @@ static int jit_layout(Process *proc, uchar *base, word *mem_base, word *out_org)
     opmemset_adr[1] = (uchar)((bss_img + bss_n) >> 8);
   }
 
-  // -z: copied down from the last byte (operands: base - 1)
+  // -z: copied down from the last byte (operands: base - 1; jit_image)
   if (!jit_force_zp) *mem_base = jit_imgmem;
-  ivmlib_zpsrc = (word)(jit_imgmem - 1);
   ivmlib_zpdst = (uchar)(jit_zp - 1);
-  ivmlib_zplen = jit_force_zp ? (uchar)jit_membytes : 0;
 
   *out_org = (word)(jit_imgdata + jit_datalen);
   if (jit_org) {
@@ -2025,12 +2030,31 @@ static int jit_layout(Process *proc, uchar *base, word *mem_base, word *out_org)
   return 1;
 }
 
+// The image, once compiled. -z: its mem[] image after the code, copied to
+// zp at start up to its last non-0 byte (memory zeroed: init folding left
+// the values), else all; the startup: from the first part it needs
+static void jit_image(word org, word size) {
+  uchar *m = (uchar *)jit_memimg;
+  word n = jit_membytes;
+
+  // -z copy: its bytes, from where
+  if (jit_zero) while (n && !m[n - 1]) n--;
+  jit_imgbytes = jit_force_zp ? n : jit_membytes;
+  ivmlib_zpsrc = (word)(org + size - 1);
+  ivmlib_zplen = jit_force_zp ? (uchar)n : 0;
+  jit_imgend   = (word)(org + size + (jit_force_zp ? n : 0));
+
+  // startup parts
+  jit_libbeg = jit_bss_n && !jit_zero ? ivmlib_init :
+               ivmlib_zplen ? ivmlib_zpinit : ivmlib_start;
+}
+
 // Write the -o image. Library vars are patched in place first, so the
 // copied library bytes carry them.
 static int jit_save(uchar *out, word size, word org) {
   FILE *f;
   word lib = (word)(unsigned)jit_libbeg;
-  word end = (word)(org + size);              // first byte after image
+  word end = jit_imgend;                      // first byte after image
   word gap = (word)(org - (jit_imgdata + jit_datalen));
   uchar h[17];
   uchar n = 0;
@@ -2070,10 +2094,11 @@ static int jit_save(uchar *out, word size, word org) {
   if (!f) { printf("cannot write %s\n", jit_outfile); return 0; }
   fwrite(h, 1, n, f);
   fwrite(jit_libbeg, 1, (unsigned)(jit_libend - jit_libbeg), f);
-  fwrite(jit_memimg, 1, jit_membytes, f);
+  if (!jit_force_zp) fwrite(jit_memimg, 1, jit_membytes, f);
   fwrite(jit_data, 1, jit_datalen, f);
   while (gap--) fputc(0, f);
   fwrite(out, 1, size, f);
+  if (jit_force_zp) fwrite(jit_memimg, 1, jit_imgbytes, f);
   fclose(f);
 
   printf("--- JIT: wrote %s (%s) $%04X-$%04X, code $%04X, heap $%04X-$%04X ---\n",
@@ -2085,17 +2110,20 @@ static int jit_save(uchar *out, word size, word org) {
 
 #ifdef JIT_INMEM
 // Run in place: the -o image after the lib, as 4 segments (mem image,
-// strings, gap, JIT code) where they are now; ivmlib_load copies them down
+// strings, gap, JIT code; -z: the mem image last) where they are now;
+// ivmlib_load copies them down
 // to the image's lib end (ivmlib_dst) and starts it. No buffer (the heap may be full). Never
 // returns.
 static void jit_load(uchar *out, word size, word org) {
-  word end = (word)(org + size);
+  word end = jit_imgend;
   word gap = (word)(org - (jit_imgdata + jit_datalen));
+  uchar k = jit_force_zp ? 0 : 2;              // the mem image: first / last
 
-  ivmlib_seg[0] = (word)(unsigned)jit_memimg; ivmlib_seg[1] = jit_membytes;
-  ivmlib_seg[2] = (word)(unsigned)jit_data;   ivmlib_seg[3] = jit_datalen;
-  ivmlib_seg[4] = 0;                          ivmlib_seg[5] = gap;
-  ivmlib_seg[6] = (word)(unsigned)out;        ivmlib_seg[7] = size;
+  ivmlib_seg[k]     = (word)(unsigned)jit_data; ivmlib_seg[k + 1] = jit_datalen;
+  ivmlib_seg[k + 2] = 0;                        ivmlib_seg[k + 3] = gap;
+  ivmlib_seg[k + 4] = (word)(unsigned)out;      ivmlib_seg[k + 5] = size;
+  k = jit_force_zp ? 6 : 0;
+  ivmlib_seg[k]     = (word)(unsigned)jit_memimg; ivmlib_seg[k + 1] = jit_imgbytes;
 
   ivmlib_dst     = jit_imgmem;            // after the image's lib
   ivmlib_run     = (word)(unsigned)jit_libbeg;   // its startup
@@ -2229,6 +2257,12 @@ word jit_compile(Process* proc) {
       printf("\n--- JIT: emitted %u bytes (BC: %u) of 6502 at org 0x%04X ---\n\n",
         jit_size, code_len, out_org);
 
+      // the image's ends, its startup
+    #ifndef JIT_INMEM
+      if (jit_outfile)
+    #endif
+      jit_image(out_org, jit_size);
+
     #ifdef MEMMAP
       // the -o / in place (sim65) image: always there with JIT_INMEM (-j
       // too), else only with -o
@@ -2237,12 +2271,12 @@ word jit_compile(Process* proc) {
       #else
       if (jit_outfile) {
       #endif
-        word heap = (word)((out_org + jit_size + 0xFF) & ~0xFF);
+        word heap = (word)((jit_imgend + 0xFF) & ~0xFF);
         mm_area(MM_SLOTS, mem_base, jit_membytes);
         mm_area(MM_LIB, (word)(unsigned)jit_libbeg,
                 (word)(jit_libend - jit_libbeg));
-        if (mem_base != jit_imgmem)            // -z: the zp copy's source
-          mm_area(MM_IMG, jit_imgmem, jit_membytes);
+        if (jit_force_zp)                       // -z: the zp copy's source
+          mm_area(MM_IMG, (word)(jit_imgend - jit_imgbytes), jit_imgbytes);
         mm_area(MM_DATA, jit_imgdata, jit_datalen);
         mm_area(MM_BSS, jit_bss_at, jit_bss_n);
         mm_area(MM_CODE, out_org, jit_size);
