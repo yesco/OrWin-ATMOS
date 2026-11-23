@@ -4,8 +4,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-const int SIZE = 8190;
-const int SIZEPL = 8191;
+#define SIZE   8190
+#define SIZEPL 8191
 
 char *flags;
 
@@ -49,4 +49,6 @@ int main() {
   free(flags);
 
   putz("primes: "); printf("%u \n", count);
+
+  return 0;
 }

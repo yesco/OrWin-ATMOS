@@ -129,8 +129,8 @@ def repro(name, t):
         "asm":   "./ivm-asm {t}",
         "jit":   "./ivm-jit {t}",
         "hjit":  "./jit {t}",
-        "cc65":  "cl65 -t sim6502 -Cl -Os -o {t}.sim {t}.c && sim65 -c {t}.sim",
-        "oscar": "./oscar -Os -ep {t}.c",
+        "cc65":  "cl65 -Dputz=printf -t sim6502 -Cl -Os -o {t}.sim {t}.c && sim65 -c {t}.sim",
+        "oscar": "./oscar -Dputz=printf -Os -ep {t}.c",
     }[name].format(t=t)
 
 
@@ -173,7 +173,7 @@ def test(t):
                     t + ".hjit.log"))
 
     rm(t + ".sim")
-    s = run(["cl65", "-t", "sim6502", "-Cl", "-Os", "-o", t + ".sim", t + ".c"],
+    s = run(["cl65", "-Dputz=printf", "-t", "sim6502", "-Cl", "-Os", "-o", t + ".sim", t + ".c"],
             t + ".cc65-build.log")
     if os.path.exists(t + ".sim"):
         s = run(["sim65", "-c", t + ".sim"], t + ".cc65.log")
@@ -185,7 +185,7 @@ def test(t):
                     t + ".cc65-build.log"))
 
     rm(t + ".prg")
-    s = run([OSCAR64, "-Os", "-ep", t + ".c"], t + ".oscar.log")
+    s = run([OSCAR64, "-Dputz=printf", "-Os", "-ep", t + ".c"], t + ".oscar.log")
     res.append(("oscar", last_int(r"^Total Cycles (\d+)", s),
                 fsize(t + ".prg"), t + ".prg",
                 between(s, r"Running emulation", r"Emulation result"),

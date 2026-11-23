@@ -3,10 +3,9 @@
 // -
 
 #include <stdio.h>
-#include <stdlib.h>
 
-const unsigned int SIZE = 8190;
-const unsigned int SIZEPL = 8191;
+#define SIZE   8190
+#define SIZEPL 8191
 
 unsigned char flags[SIZEPL];
 
@@ -46,4 +45,6 @@ int main() {
   }
 
   putz("primes: "); printf("%u \n", count);
+
+  return 0;
 }
