@@ -1,0 +1,31 @@
+name=$1
+name="${name%.ivm}"
+shift
+echo "ARGS: $*"
+
+rm ivm-jit.x 2>/dev/null
+clang -DVERBOSE -DJIT -g ivm.c -o ivm-jit.x || exit 1
+time ./ivm-jit.x $name.ivm
+
+#jit=$(cat "$name.cycles.jit")
+#jitandrun=$(grep cycles "$name.log" | sed 's/ cycles//')
+#run=$((jitandrun - jit))
+
+echo
+echo
+echo "============================================"
+echo
+#echo "JIT      : $jit"
+#echo "JIT&RUN  : $jitandrun"
+#echo "RUN      : $run"
+echo
+
+echo
+echo
+ls -ugGlf $name.ivm 2>/dev/null
+echo
+echo "=== ivm.c: `./wcode ivm.c` LOC ==="
+echo "=== jit c: `./wcode ivm-jit.c` LOC ==="
+echo "=== cpu c: `./wcode cpu6502.c` LOC ==="
+echo
+
