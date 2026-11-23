@@ -1,7 +1,7 @@
 rm ivm.sim ivm-novim.sim 2>/dev/null
 
 name=$1
-name="${name%.ivm}"
+case "${name##*/}" in ?*.*) name="${name%.*}";; esac  # PROG, PROG.c, PROG.ivm all ok
 shift
 
 cl65 -Oirs -T -l ivm.lst -vm -C sim6502.cfg -t sim6502 -m ivm.map -o ivm.sim ivm.c || exit 1

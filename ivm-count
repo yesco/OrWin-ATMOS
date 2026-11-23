@@ -1,7 +1,7 @@
 rm ivm.x
 
 name=$1
-name="${name%.ivm}"
+case "${name##*/}" in ?*.*) name="${name%.*}";; esac  # PROG, PROG.c, PROG.ivm all ok
 
 clang -DCOUNTOPS -g ivm.c -o ivm.x || exit 1
 
