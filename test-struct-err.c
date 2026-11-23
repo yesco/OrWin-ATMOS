@@ -8,6 +8,8 @@
 //   on each statement's code (by the slot: also what the grammar emits)
 // - a plain int declared after a struct one: it was linked to that
 //   struct too, "i.x" compiled (and crashed)
+// - an array of structs is SoA (field-major): only a[i].f has a meaning.
+//   a alone, a.f, a[i], &a[i] would silently be the first field's array
 
 #define N 3
 const int two = 2;
@@ -21,6 +23,8 @@ int main(void) {
   int i;
   int w[4];
   int v[4];
+  struct pt s[3];
+  struct pt *q;
 
   b.x = 7;
   a = b;                            // ERR a static struct's address
@@ -31,6 +35,13 @@ int main(void) {
   for (N = 0; N < 9; N++) i = 1;    // ERR a loop on a #define
   i.x = 1;                          // ERR i is no struct
   ps[1] = ps[0];
+  q = s;                            // ERR an array of structs, no pointer
+  q = &s[1];                        // ERR the same
+  i = s.x;                          // ERR a.f: no index
+  i = s[1];                         // ERR a[i]: no field
+  s[2] = i;                         // ERR the same
+  s[i + 1] = i;                     // ERR the same
+  s[1].y = s[2].x + 1;
   a.x = b.x + N + two;
   return a.x;
 }

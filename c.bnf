@@ -42,6 +42,9 @@ D=static \<|extern \<
 #   code, the params stay, the name is a const (the field count).
 #   A struct variable is a static array (\@ bss, = {..} \: data, consts
 #   only), p.f and p->f are the same: ( p k  (\m: k, R and H rules)
+#   An array of them: SoA, f of all N in a row: a[i].f is ( f's array i
+#   (\&: the const a + 2kN, R and H rules), like an int array. Bss only;
+#   a is only a[i] (no pointer to it, to an element: not the C layout)
 d=struct \f\{ {$f}\q;
 f=$T \p$e;\<|
 e=,\p\<|
@@ -68,7 +71,7 @@ Q=#define \+ \d\c[\g]\n
 # - Declarations: optional register\b -> REGISTER slot 0..31
 # -O: REGISTER 0..31, other globals 32..95, frames at 96+
 V=const\c $T $M;|register\b $T $M;|static $T $M;
-|struct\'w \i \+={\:$N}\.;|struct\'w \i \+\@;
+|struct\'s \i \+={\:$N}\.;|struct\'s \i \+\[$S\]\@;|struct\'s \i \+\@;
 |$T $M;
 # name[N]: a static array of N (a number or const) elements: zeroed (\@),
 #   also = {0}; initialized: = "text" / = {1, 2, 'c', ...} (\: \, \.),
@@ -412,24 +415,17 @@ H=\i=\i\?\W\[\i\]; \2\[\3\]=\2\[\i\]; \2\[\7\]=\1;[A\2\3\7S\1]
 |* \i=$E;[!\1]
 
 # p[i]: char* -> byte ops [ ], int* -> word ops ( ) (\?\C = \?C now);
-#   anything else (an int used as pointer): bytes
+#   an int (\?w) used as pointer: bytes. Not a struct array (SoA: a[i]
+#   alone has no meaning, only a[i].f)
 |\i\?\C\[$S\]=$E;[\]\1\2]
 |\i\?\W\[$S\]=$E;[)\1\2]
-|\i\[$S\]=$E;[\]\1\2]
+|\i\?w\[$S\]=$E;[\]\1\2]
 # p[expr] = ...: index into a temp first   captures: 1=p 2=index 3=temp 4=value
 |\i\?\C\[$E[S\j]\]=$E;[\]\1\3]
 |\i\?\W\[$E[S\j]\]=$E;[)\1\3]
-|\i\[$E[S\j]\]=$E;[\]\1\3]
-# p.f p->f   captures: 1=p 2=k 3=E / const 1 (4: E in a temp, only read)
-|\i\m=$E;[)\1\2]
-|\i\m+=$E;[S\j(\1\2+\4)\1\2]
-|\i\m++;\#01[(\1\2+\3)\1\2]
-|\i\m--;\#01[(\1\2-\3)\1\2]
-# a chain: the pointer in ACC, then $c   (a.next->v = ps[i]->x = mk()->x =)
-|\i\m[(\1\2]$c
-|\i\?\W\[$S\][(\1\2]$c
-|\i\?\W\[$E[S\j]\][(\1\3]$c
-|\i($Z)[\v]$c
+|\i\?w\[$E[S\j]\]=$E;[\]\1\3]
+# structs: p.f p->f, chains, a[i].f (rule h: H had more than MAX_ALTS)
+|$h
 
 |\i=0;[Z\1]
 |\i=$S+$S;[L\2+\3S\1]
@@ -442,6 +438,27 @@ H=\i=\i\?\W\[\i\]; \2\[\3\]=\2\[\i\]; \2\[\7\]=\1;[A\2\3\7S\1]
 |\i--;[J\1]
 |--\i;[J\1]
 |\i=$E;[S\1]
+
+# - Struct stores (from H)
+# a[i].f (an array of structs, SoA): word i of f's array (\&)
+#   captures: 1=a 2=i 3=f's array 4=E / const 1 (5: E in a temp)
+h=\i\[$S\]\&=$E;[)\3\2]
+|\i\[$S\]\&+=$E;[S\j(\3\2+\5)\3\2]
+|\i\[$S\]\&++;\#01[(\3\2+\4)\3\2]
+|\i\[$S\]\&--;\#01[(\3\2-\4)\3\2]
+#   a[expr].f = E   captures: 1=a 2=expr 3=temp 4=f's array 5=E
+|\i\[$E[S\j]\]\&=$E;[)\4\3]
+
+# p.f p->f   captures: 1=p 2=k 3=E / const 1 (4: E in a temp, only read)
+|\i\m=$E;[)\1\2]
+|\i\m+=$E;[S\j(\1\2+\4)\1\2]
+|\i\m++;\#01[(\1\2+\3)\1\2]
+|\i\m--;\#01[(\1\2-\3)\1\2]
+# a chain: the pointer in ACC, then $c   (a.next->v = ps[i]->x = mk()->x =)
+|\i\m[(\1\2]$c
+|\i\?\W\[$S\][(\1\2]$c
+|\i\?\W\[$E[S\j]\][(\1\3]$c
+|\i($Z)[\v]$c
 
 # - PrintF support (ingore formatting, lol)
 W=,$J\<|
@@ -476,6 +493,11 @@ R=getchar()[K]
 |malloc($E)[M\t]
 |\i($Z)[\v]$x
 
+# - a[i].f (an array of structs, SoA): word i of f's array (\&)
+#   captures: 1=a 2=i 3=f's array   (a[expr].f: 2=expr 3=f's array 4=temp)
+|\i\[$S\]\&[(\3\2]
+|\i\[$E\]\&[S\j(\3\4]
+
 # - Dereferencing points
 #   *charptr++ (TODO: block for intptr, put guard/other gen)
 |* \i\?\W++[@\1S\tH\1L\2]
@@ -486,11 +508,11 @@ R=getchar()[K]
 
 |\i\?\C\[$S\][\[\1\2]
 |\i\?\W\[$S\][(\1\2]$x
-|\i\[$S\][\[\1\2]
+|\i\?w\[$S\][\[\1\2]
 # p[expr]   captures: 1=p 2=index 3=temp
 |\i\?\C\[$E\][S\j\[\1\3]
 |\i\?\W\[$E\][S\j(\1\3]$x
-|\i\[$E\][S\j\[\1\3]
+|\i\?w\[$E\][S\j\[\1\3]
 # p.f p->f: word k   captures: 1=p 2=k
 |\i\m[(\1\2]$x
 

@@ -62,6 +62,7 @@
 //   \r         end of param list OR flag REGISTER after literal "register"
 //   \q         end of a struct: "struct \f\{ { params } \q" (instead of \})
 //   \m         member: .f or ->f of the struct of the last \i: const k
+//   \&         a[i].f, an array of structs (SoA): const, f's array
 //   \b         flag REGISTER after literal "register" (use this, not \r)
 //   \d         number / char literal
 //   \s         string const "..." → data pool + reloc pointer (capture)
@@ -98,11 +99,11 @@
 //   [] alone   no code, result is ACC
 //
 // Directive chars used (ASCII order, match + production):
-//   # + 0-9 < = > ? ' a b c d e f g h i k l m n o p r s t u v w x y z { }
+//   ! # $ % & ' * + , . 0-9 : < = > ? @ a-z (all) { }
 //   (A-Z are rule names; space is the ws-gap directive)
 //
 // Free (not directives; ok as \X literal or future ops):
-//   ! " $ % & ( ) * , - . / : ; @ ^ _ ` j q ~
+//   " ( ) - / ; ^ _ ` ~
 //
 // Explicit stack — no recursive match.
 //
@@ -479,8 +480,8 @@ typedef struct {
   uchar reg_save;
   uchar func_vec;     // vector of the function matched by \i in THIS frame (for \v)
   uchar arg_i;        // call args stored so far (rule Z, for \k)
-  uchar rec;          // struct of what \i / \m matched here (its name's
-                      // symbol, 0xff none): \m's start (here or parent)
+  uchar rec;          // the symbol \i / \m matched here (0xff none): its
+                      // struct (ret_slot) is \m's start (here or parent)
   uchar npatch;       // pending forward jumps (\x pushes, \y pops)
   word patch[4];
   word mark;          // \m loop start (for \z)
@@ -1550,14 +1551,16 @@ static uchar match_ident(void) {
     // arguments, must not change \v. Not last_func_vec: that is the one
     // being declared, "struct pt *q" in its params is an \i too)
     cur.func_vec = s->address;
-    cur.rec = s[1].ret_slot;          // the ret value's struct (mk()->x)
+    cur.rec = (uchar)(i + 1);         // the ret value: its struct, mk()->x
     slot = s->ret_slot;
 
   } else {
 
-    // It's a variable name?
+    // It's a variable name? (an array of structs: only a[i]. Its name
+    // is the first field's array (SoA), as a pointer it would be wrong)
+    if (s->ret_addr_slot != 0xff && c != '[') return 0;
     cur.func_vec = 0xff;
-    cur.rec = s->ret_slot;
+    cur.rec = (uchar)i;
     slot = s->address;
   }
   record_capture(MAKE_CAP(slot, sym_type(s)));
@@ -1626,20 +1629,31 @@ static uchar array_sym(word cnt, uchar k) {
 // element size of the last declared ident
 #define ESIZE() (syms[nsym - 1].vtype == 'c' ? 1 : 2)
 
-// the element count: capture 2 ("\+\[N\]"), else 1 ("struct \i \+")
-static uchar cap_count(void) {
-  uchar n = CAP_SLOT(cap_val(2));
-  return is_lit(n) ? n : CAP_SLOT(cap_val(1));
+// the element count: the product of the const captures, 0 none:
+//   \+\[N\]: N   struct \i \+: its fields   struct \i \+\[N\]: fields * N
+static word cap_count(void) {
+  uchar i, k;
+  word n = 0;
+
+  for (i = 1; i <= cur.prod_n; i++) {
+    k = CAP_SLOT(cur.prod_cap[i]);
+    if (is_lit(k)) n = (word)((n ? n : 1) * lit_val(k));
+  }
+  return n;
 }
 
-// \@: a static array of capture 2 elements: zeroed (bss)
+// \@: a static array of cap_count() elements: zeroed (bss). Three captures
+// (struct \i \+\[N\]): an array of structs, SoA (\&): N in ret_addr_slot
+// (else 0xff; N < 255)
 static uchar make_array(void) {
-  uchar n = cap_count();
-  word cnt;
+  word cnt = cap_count(), n = 0xff;
 
-  if (!nsym || !is_lit(n)) return 0;
-  cnt = (word)lit_val(n);
-  return cnt && array_sym(cnt, add_bss_array((word)(cnt * ESIZE())));
+  if (cur.prod_n > 2 && (n = lit_val(CAP_SLOT(cur.prod_cap[3]))) >= 0xff)
+    return 0;
+  if (!nsym || !cnt || !array_sym(cnt, add_bss_array((word)(cnt * ESIZE()))))
+    return 0;
+  syms[nsym - 1].ret_addr_slot = (uchar)n;
+  return 1;
 }
 
 // Initialized arrays: \: starts its data (capture 2: the size, if given),
@@ -1648,8 +1662,7 @@ static uchar make_array(void) {
 static word ia_start, ia_n;
 
 static uchar init_start(void) {
-  uchar n = cap_count();
-  ia_n = (cur.prod_n >= 2 && is_lit(n)) ? (word)lit_val(n) : 0;
+  ia_n = cap_count();
   ia_start = data_string_start();
   return nsym != 0;
 }
@@ -1750,25 +1763,43 @@ static void struct_end(void) {
   scope_leave();
 }
 
+// SoA: the address of field k's array in array of structs a: a + 2 * k *
+// N, a bss const (one per field: reused)
+static uchar soa_base(Symbol *a, uchar k) {
+  uchar i;
+  word v = (word)(const_val(a->address) + 2 * k * a->ret_addr_slot);
+
+  for (i = 0; i < nconst; i++)
+    if (const_pool[i] == v && const_is_reloc[i] == 2 &&
+        (uchar)(CONST_TOP - i) != bss_end_slot)
+      return (uchar)(CONST_TOP - i);
+  return add_const_raw(v, 2);
+}
+
 // \m — member: .f or ->f, f a param of the struct (stub) of what \i or
 //   \m matched last in this frame, else in the parent (a chain rule):
-//   rec, its name. Searched as if in its scope: the params right after
-//   it. Result = const k (the word index for the ( ) ops); rec = f's
-//   struct (a pointer field: the next ->)
-static uchar match_member(void) {
-  Symbol *s, *e = syms + nsym;
-  uchar t = cur.rec;
+//   rec, its symbol, links (ret_slot) the struct's name. Searched as if
+//   in its scope: the params right after it. Result = const k (the word
+//   index for the ( ) ops); rec = f (a pointer field: the next ->)
+// \& — a[i].f, a an array of structs (SoA: f of all the N elements in a
+//   row): result = the const a + 2 * k * N, f's array (index it with i)
+static uchar match_member(uchar soa) {
+  Symbol *s, *a;
+  uchar r = cur.rec, t, i;
 
-  if (t == 0xff && sp) t = stack[sp - 1].rec;
+  if (r == 0xff && sp) r = stack[sp - 1].rec;
   skip_ws();
   if (!got('.') && !(got('-') && got('>'))) return 0;
-  if (!read_ident()) return 0;
-  s = syms + t;
-  if (!t || s >= e || s[-1].type == SYM_VAR) return 0;
-  while (++s < e && s->pidx)
+  if (!read_ident() || r >= nsym) return 0;
+  a = syms + r;
+  t = a->ret_slot;
+  if (!t || t >= nsym || syms[t - 1].type == SYM_VAR) return 0;
+  if (soa != (a->ret_addr_slot != 0xff)) return 0;         // a[i]. a.
+  for (i = t + 1, s = syms + i; i < nsym && s->pidx; i++, s++)
     if (!strcmp(s->name, id_buf)) {
-      record_capture(const_slot(s->pidx - 1));
-      cur.rec = s->ret_slot;
+      cur.rec = i;
+      i = s->pidx - 1;
+      record_capture(soa ? soa_base(a, i) : const_slot(i));
       return 1;
     }
   return 0;
@@ -1957,7 +1988,7 @@ static void free_rules(void) {
 // note: '>' is load-time only (not stored)
 //       '<' becomes HIBIT('<') + ALT_JUMP + alt (1..31, 0: restart)
 static uchar is_dir(uchar e) {
-  return isdigit(e) || strchr("insfdprlxywmzkcahvgetoubjq+{}#='?*@$:,.!%", e) != NULL;
+  return isdigit(e) || strchr("insfdprlxywmzkcahvgetoubjq+{}#='?*@$:,.!%&", e) != NULL;
 }
 
 static void build_one_rule(uchar r, char *rhs) {
@@ -2528,7 +2559,8 @@ int run() {
   else if (c == HIDIR('f')) ok = match_ident_func_decl();
   else if (c == HIDIR('p')) ok = match_param_decl();
   else if (c == HIDIR('q')) struct_end();
-  else if (c == HIDIR('m')) ok = match_member();
+  else if (c == HIDIR('m')) ok = match_member(0);
+  else if (c == HIBIT('&')) ok = match_member(1);
   else if (c == HIDIR('r')) {
     // end of params: params_end() (ivm-gen.c) moves the last to fp+3
     if (last_func_vec != 0xff) {

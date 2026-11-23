@@ -14,6 +14,9 @@
 // - &s: a static struct is its address already (s alone works too)
 // - chains: ->f after any pointer: a field (a.next->v), an array element
 //   (ps[i]->x), a call (mk(6)->x), as often as it comes; loads and stores
+// - an array of structs is SoA: field f of all the elements in a row, so
+//   a[i].f is f's array [i] (like an int array). a alone is no pointer
+//   (test-struct-err.c)
 // Values stay below 32768 (gcc int is 32 bit, ours 16).
 
 #include <stdio.h>
@@ -22,6 +25,9 @@
 struct pt { int x; int y; };
 struct pt4 { int a; int b; int c; int d; };
 struct node { int v; struct node *next; };
+struct pt3 { int x; int y; int z; };
+
+struct pt3 s3[5];
 
 struct pt4 g = {5, 6};
 
@@ -53,6 +59,7 @@ int main(void) {
   struct node *n;
   struct pt *ps[4];
   int i;
+  struct pt b4[4];
 
   // --- a struct variable: its fields ---------------------------------------
   printf("fields .:\t3 4 7\n\t\t");
@@ -183,6 +190,31 @@ int main(void) {
   if (q->x == 3) printf("y ");
   while (q->x < 13) q->x++;
   printf("%d ", q->x);
+  printf("\n");
+
+  // --- an array of structs (SoA), a global and a local one ---------------
+  printf("a[i].f:\t\t30 31 8 3 49 30 0\n\t\t");
+  for (i = 0; i < 5; i++) s3[i].x = i * 10;
+  for (i = 0; i < 5; i++) s3[i].y = s3[i].x + 1;
+  s3[2].z = 7;
+  s3[2].z++;
+  s3[i - 1].z = s3[4].z + 3;
+  b4[3].y = s3[2].z + s3[4].y;
+  printf("%d ", s3[3].x);
+  printf("%d ", s3[3].y);
+  printf("%d ", s3[2].z);
+  printf("%d ", s3[4].z);
+  printf("%d ", b4[3].y);
+  printf("%d ", s3[i - 2].x);
+  printf("%d ", s3[0].z);
+  printf("\n");
+
+  printf("a[i].f += --:\t16 15\n\t\t");
+  i = 1;
+  s3[i].y += 5;
+  printf("%d ", s3[1].y);
+  s3[i].y--;
+  printf("%d ", s3[i].y);
   printf("\n");
 
   printf("sizeof:\t\t2 4\n\t\t");
