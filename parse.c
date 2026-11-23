@@ -176,7 +176,7 @@
 //
 // Alts are HIBIT-ENCODED (build_one_rule): a byte < 0x80 is a LITERAL (match it
 // / emit it as is), a byte >= 0x80 is a DIRECTIVE: HIBIT('A'..'Z') call rule,
-// HIBIT(' ') ws-gap, HIBIT('i') is \i, HIBIT('[') HIBIT(']') production,
+// HIBIT(' ') ws-gap, HIDIR('i') is \i, HIBIT('[') HIBIT(']') production,
 // HIBIT(1..31) alt jump (from \> \<). Quoted \| \\ \[ \] \  \; \A are just the
 // plain byte. \C \S are stored as \o \u (they would be the rule calls C S).
 
@@ -231,7 +231,7 @@ static uchar max_sp;    // deepest the stack got (frames)
 // call right AFTER sp was incremented
 static void anim_push(uchar r) {
   if (sp > max_sp) max_sp = sp;
-  eputc('A' + r);
+  eputc(RULE_CH(r));
   fflush(ERROUT);
 }
 
@@ -368,13 +368,28 @@ static void *xrealloc(void *p, word n) {
 // ------------------------------------------------------------
 
 // A-Z
-#define NRULES      26
+#define NRULES      52     // $A..$Z $a..$z
 
 #define MAX_STACK   64
 #define MAX_ALTS    64
 
 
 #define HIBIT(c) ((c) | 0x80)
+
+// Rule bytes: plain ASCII is a literal; with the hibit:
+//   $81-$9A  letter directives \a..\z: HIDIR (so $A..$Z $a..$z are free)
+//   $A0-$C0  ws gap, punctuation / digit directives \+ \# \< ..: HIBIT
+//   $C1-$DA  rule calls $A..$Z, $E1-$FA $a..$z: HIBIT(letter)
+//   $DB $DD  production [ ], $FB $FD \{ \}
+// \< is 2 bytes: HIBIT('<'), ALT_JUMP + alt (1-based; 0: the rule again)
+#define HIDIR(c)    (0x80 | ((c) & 31))  // a..z only (a case label: no ?:)
+#define DIR_CH(c)   ((c) < 0xA0 ? (c) - 0x80 + 'a' - 1 : (c) & 0x7f)
+#define IS_RULE(c)  (((c) >= HIBIT('A') && (c) <= HIBIT('Z')) || \
+                     ((c) >= HIBIT('a') && (c) <= HIBIT('z')))
+#define RULE_IX(ch) ((ch) >= 'a' ? (ch) - 'a' + 26 : (ch) - 'A')   // a letter
+#define RULE_CH(r)  ((r) < 26 ? 'A' + (r) : 'a' + (r) - 26)
+#define ALT_JUMP    0x20         // printable, not | [ ] \ \n: scans keep working
+#define MAX_JUMP    31           // \< to alt 1..31
 
 
 // rule['X'-'A'] = NULL-terminated array of uchar* into one malloc blob
@@ -571,7 +586,8 @@ static void eputc(uchar c) {
 #else
 static void show_alt(uchar *a) {
   for (; *a; a++)
-    if (*a & 0x80) eprintf(INVERSE "%c" NORMAL, *a & 0x7f);
+    if (IS_RULE(*a)) eprintf(INVERSE "$%c" NORMAL, *a & 0x7f);
+    else if (*a & 0x80) eprintf(INVERSE "%c" NORMAL, DIR_CH(*a));
     else eputc(*a);
 }
 #endif // !CC65
@@ -733,11 +749,11 @@ static void note_progress(void) {
   n = sp;
   if (n > MAX_STACK - 1) n = MAX_STACK - 1;
   for (i = 0; i < n; i++) {
-    far_stack[i] = 'A' + stack[i].rule;
+    far_stack[i] = RULE_CH(stack[i].rule);
     far_alt[i] = (uchar)(stack[i].alts - rule[stack[i].rule]);
   }
   if (n < MAX_STACK) {
-    far_stack[n] = 'A' + cur.rule;
+    far_stack[n] = RULE_CH(cur.rule);
     far_alt[n] = (uchar)(cur.alts - rule[cur.rule]);
     n++;
   }
@@ -931,7 +947,7 @@ static uchar *run_production(uchar *p) {
   for (q = p; (e = *q) && e != HIBIT(']'); q++) {
 
     n = q[1];
-    if (e == HIBIT('a') && n) { n -= '0'; q++; }     // \aN: N is a plain digit
+    if (e == HIDIR('a') && n) { n -= '0'; q++; }     // \aN: N is a plain digit
     else if (e >= HIBIT('1') && e <= HIBIT('9')) n = e - HIBIT('0');
     else continue;
 
@@ -964,17 +980,17 @@ static uchar *run_production(uchar *p) {
         if (w == VAL_ACC) w = force_addr(e - HIBIT('0'));
         emit(as_addr(w & 0xff));
 
-      } else if ((e == HIBIT('a') || e == HIBIT('l') || e == HIBIT('c') || e == HIBIT('h')) && n >= 1 && n <= 9) {
+      } else if ((e == HIDIR('a') || e == HIDIR('l') || e == HIDIR('c') || e == HIDIR('h')) && n >= 1 && n <= 9) {
 
         adv = 2;
         w = cap_val(n);
 
-        if (e == HIBIT('a')) {
+        if (e == HIDIR('a')) {
 
           // \aN: force addr
           emit(force_addr(n) & 0xff);
 
-        } else if (e == HIBIT('l')) {
+        } else if (e == HIDIR('l')) {
 
           // \lN: load capture N into ACC unless it already is there
           if (w != VAL_ACC) {
@@ -993,19 +1009,19 @@ static uchar *run_production(uchar *p) {
             if (is_lit(b) || isconst(b))
               val = lit_val(b);
           }
-          emit((e == HIBIT('c') ? val : val >> 8) & 0xff);
+          emit((e == HIDIR('c') ? val : val >> 8) & 0xff);
 
         }
       } else switch (e) {
 
-      case HIBIT('v'):
+      case HIDIR('v'):
         emitop(0xC0 | (cur.func_vec & 0x3f));
         break;
 
       // \t: new temp slot, emit it, remember it as a capture
       // \e: value - 1! "exclusive limit" (< and not <=)
       //     — S temp; J temp (store ACC-1)
-      case HIBIT('t'): case HIBIT('e'): case HIBIT('j'):
+      case HIDIR('t'): case HIDIR('e'): case HIDIR('j'):
         b = alloc_slot();
 
         // \j: a temp only read (O, an index): after a plain load of a var
@@ -1013,7 +1029,7 @@ static uchar *run_production(uchar *p) {
         // ("x ^ (x << 7)": x itself). The L goes too: what follows \j
         // (R, E, '[') loads ACC itself. Not \t: a rule may write the
         // temp, or want a snapshot (a loop limit)
-        if (e == HIBIT('j') && bin_ptr && bin[bin_ptr - 1] == 'S' &&
+        if (e == HIDIR('j') && bin_ptr && bin[bin_ptr - 1] == 'S' &&
             pl_end == bin_ptr - 1 &&
             (bin[pl_at] == 'L' ? bin[pl_at + 1] : bin[pl_at]) == pl_slot) {
           bin_ptr = pl_at;                     // the L, the S
@@ -1025,14 +1041,14 @@ static uchar *run_production(uchar *p) {
         }
 #ifndef IVM_NO_VN
         // value numbering: ACC's value in a slot already? use that one
-        if (e != HIBIT('e') && bin_ptr && bin[bin_ptr - 1] == 'S' &&
+        if (e != HIDIR('e') && bin_ptr && bin[bin_ptr - 1] == 'S' &&
             (cv = vn_temp(cur.code_save, b)) != 0) {
           next_slot--;                         // the temp is not needed
           record_capture(cv);
           break;
         }
 #endif
-        if (e == HIBIT('e')) {
+        if (e == HIDIR('e')) {
           // TODO: replace with better loop/test code-gen
           // A: \e makes "i < n" into "i <= n-1" for the t/n loop ops,
           //   at the cost of a temp + 2 ops. A loop op with < (exclusive)
@@ -1047,7 +1063,7 @@ static uchar *run_production(uchar *p) {
 
 
       // \xHH: the byte HH; \x: forward jump placeholder
-      case HIBIT('x'):
+      case HIDIR('x'):
         if (isxdigit(p[1]) && isxdigit(p[2])) {
           emit(hex2(p + 1));
           adv = 3;
@@ -1062,7 +1078,7 @@ static uchar *run_production(uchar *p) {
         break;
 
       // \y: patch newest placeholder to jump here
-      case HIBIT('y'):
+      case HIDIR('y'):
         b = cur.npatch;
         if (b) {
           cur.npatch = --b;
@@ -1081,7 +1097,7 @@ static uchar *run_production(uchar *p) {
         break;
 
       // \w: swap the two newest placeholders
-      case HIBIT('w'):
+      case HIDIR('w'):
         b = cur.npatch;
         if (b >= 2) {
           w = cur.patch[b - 1];
@@ -1091,7 +1107,7 @@ static uchar *run_production(uchar *p) {
         break;
 
       // \m: remember loop start - destination for B call
-      case HIBIT('m'):
+      case HIDIR('m'):
         cur.mark = bin_ptr;
 #ifndef IVM_NO_VN
         vn_label = bin_ptr;
@@ -1099,7 +1115,7 @@ static uchar *run_production(uchar *p) {
         break;
 
       // \z: backward jump delta to the mark (after the B opcode)
-      case HIBIT('z'):
+      case HIDIR('z'):
         w = bin_ptr + 1 - cur.mark;
         if (w > 255) FAIL("loop body too large");
         emit(w);
@@ -1112,7 +1128,7 @@ static uchar *run_production(uchar *p) {
 
       // \k: param slot for the next call argument; frame above is the caller
       // (the rule that matched \i and called Z)
-      case HIBIT('k'):
+      case HIDIR('k'):
         cv = (sp >= 1) ? stack[sp - 1].func_vec : 0xff;
         if (cv == 0xff) FAIL("call of unknown function");
         // (the "S" opcode is not missing: the BNF has [S\k], \k is only the slot)
@@ -1130,7 +1146,7 @@ static uchar *run_production(uchar *p) {
 
       // \g: global/local init from captures \1=dest slot, \2=src const
       //   scope 0: defer until main entry; else emit L+S now
-      case HIBIT('g'):
+      case HIDIR('g'):
         dest = cur.prod_cap[1] & 0xff;
         src  = as_addr(cur.prod_cap[2] & 0xff);
         if (pending_const) {
@@ -1189,7 +1205,7 @@ static uchar *run_production(uchar *p) {
         //   build_one_rule (is_dir), so emit the plain letter. Plain
         //   letters in [ ] have no hibit and go to emit(e) below.
         // emit quoted \[ and /] basically
-        emit(e & 0x7f);
+        emit(DIR_CH(e));
       }
 
       p += adv;
@@ -1888,7 +1904,7 @@ static void free_rules(void) {
 
 // \X is a directive (stored with the hibit) or a quoted literal char e
 // note: '>' is load-time only (not stored)
-//       '<' becomes HIBIT(x), x=1..31 (alt jump) or HIBIT('<')
+//       '<' becomes HIBIT('<') + ALT_JUMP + alt (1..31, 0: restart)
 static uchar is_dir(uchar e) {
   return isdigit(e) || strchr("insfdprlxywmzkcahvgetoubj+{}#='?*@$:,.!%", e) != NULL;
 }
@@ -1905,7 +1921,7 @@ static void build_one_rule(uchar r, char *rhs) {
   // quoted \| \c (not specials) become the plain char
   //
   // \> is not stored; it only updates taildest
-  // \< becomes HIBIT(x) (x=1..31) = jump to alt x-1, or HIBIT('<') if no \> yet
+  // \< becomes HIBIT('<'), ALT_JUMP + x: jump to alt x-1, x = 0 if no \> yet
   // build contiguous string with 0 separators between alts.
 
   blob = xrealloc(NULL, strlen(rhs) + 2);
@@ -1943,12 +1959,18 @@ static void build_one_rule(uchar r, char *rhs) {
 
       if (e == '<') {
 
-        // \< : with a \> target jump code 1..31, else full rule restart
-        e = HIBIT(taildest && taildest < 32 ? taildest : '<');
+        // \< : HIBIT('<'), then the \> target alt (1..31), else 0: the
+        //   whole rule again
+        if (taildest > MAX_JUMP) {
+          eprintf("\nrule %c: ", RULE_CH(r));
+          FAIL("\\< to an alt past 31");
+        }
+        blob[bi++] = HIBIT('<');
+        e = (uchar)(ALT_JUMP + taildest);
 
       } else {
 
-        if (is_dir(e)) e = HIBIT(e);
+        if (is_dir(e)) e = (e >= 'a' && e <= 'z') ? HIDIR(e) : HIBIT(e);
       }
 
     } else if (e == '|' && !inprod) {
@@ -1963,7 +1985,7 @@ static void build_one_rule(uchar r, char *rhs) {
       if (na >= MAX_ALTS) {
         // TODO: don't repeat message
         // A: done: the rule letter here, the rest in the FAIL message
-        eprintf("\nrule %c: ", 'A' + r);
+        eprintf("\nrule %c: ", RULE_CH(r));
         FAIL("too many alts (MAX_ALTS)");
       }
       alt_starts[na++] = bi;
@@ -1982,8 +2004,9 @@ static void build_one_rule(uchar r, char *rhs) {
 
     } else {
 
-      // rule calls and the ws-gap are directives, but not inside a production
-      e = (!inprod && (isupper(e) || e == ' ')) ? HIBIT(e) : e;
+      // rule calls $R $r and the ws-gap are directives, not in a production
+      if (!inprod && e == '$' && isalpha(p[1])) e = HIBIT(*++p);
+      else if (!inprod && e == ' ') e = HIBIT(e);
 
     }
     
@@ -1991,7 +2014,7 @@ static void build_one_rule(uchar r, char *rhs) {
 
     // \#xx \xHH => copy next two chars verbatim
     if (e == HIBIT('#') ||
-        (e == HIBIT('x') && isxdigit(p[1]) && isxdigit(p[2]))) verbatim = 2;
+        (e == HIDIR('x') && isxdigit(p[1]) && isxdigit(p[2]))) verbatim = 2;
     
   }
 
@@ -2081,12 +2104,12 @@ static void load_bnf(const char *path) {
         build_one_rule(cr, acc);
       have_cur = 0;
 
-      if (!isupper(c)) continue;
+      if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'))) continue;
 
       eq = strchr(line, '=');
       if (!eq) continue;
 
-      cr = c - 'A';
+      cr = RULE_IX(c);
       have_cur = 1;
       p = eq + 1;
       acc_len = 0;
@@ -2146,7 +2169,7 @@ static void push(uchar r) {
   // the STACK in the report is the furthest-position snapshot, not this
   // one: so say which rule is missing, and who called it
   if (!rule[r]) {
-    eprintf("\nrule %c (called from %c): ", 'A' + r, sp ? 'A' + cur.rule : '-');
+    eprintf("\nrule %c (called from %c): ", RULE_CH(r), sp ? RULE_CH(cur.rule) : '-');
     FAIL("rule not defined");
   }
   if (sp >= MAX_STACK) FAIL("stack overflow");
@@ -2170,7 +2193,7 @@ static void push(uchar r) {
   //   straight from rule P, so its start is main's entry (main_offset).
   //   C doesn't get here: its main is a \f function (main_vec).
 
-  if (r == 'B' - 'A' && sp > 0 && cur.rule == 'P' - 'A')
+  if (r == RULE_IX('B') && sp > 0 && cur.rule == RULE_IX('P'))
     main_offset = bin_ptr;
 
   // suspend active frame (memcpy via struct assignment), open a new cur
@@ -2284,7 +2307,7 @@ int run() {
 
   // end of alt → accept (pop), parent advances past the call
   if (!c) {
-    rch = 'A' + cur.rule;
+    rch = RULE_CH(cur.rule);
     vlog("ok %c alt %u -> @%u\n", rch, (unsigned)(cur.alts - rule[cur.rule]), abs_pos());
 
     #ifdef VERBOSE
@@ -2350,9 +2373,9 @@ int run() {
   }
 
   // RULE
-  if (c >= HIBIT('A') && c <= HIBIT('Z')) {
-    uchar r = c - HIBIT('A');
-    vlog("  call %c from %c @%u\n", c & 0x7f, 'A' + cur.rule, abs_pos());
+  if (IS_RULE(c)) {
+    uchar r = RULE_IX(c & 0x7f);
+    vlog("  call %c from %c @%u\n", c & 0x7f, RULE_CH(cur.rule), abs_pos());
     push(r);
     return 1;
   }
@@ -2367,21 +2390,21 @@ int run() {
   adv = 1;
 
   // TAIL-RECURSE rule ( go back beginning or previoius \>)
-  //   encoded as HIBIT(1..31): alt n-1
-  if (c == HIBIT('<') || c <= HIBIT(31)) {
-    e = (c == HIBIT('<')) ? 0 : (uchar)(c - HIBIT(1));
+  //   HIBIT('<'), ALT_JUMP + n: alt n-1 (0: the first)
+  if (c == HIBIT('<')) {
+    e = a[1] > ALT_JUMP ? (uchar)(a[1] - ALT_JUMP - 1) : 0;
     goto_alt(e);
-    vlog("  tail>%u %c @%u\n", (unsigned)e, 'A' + cur.rule, abs_pos());
+    vlog("  tail>%u %c @%u\n", (unsigned)e, RULE_CH(cur.rule), abs_pos());
     return 1;
   }
 
   // COMMIT (remove src not needed anymore)
-       if (c == HIBIT('o')) line_commit();
+       if (c == HIDIR('o')) line_commit();
   else if (c == HIBIT('{')) scope_enter();
   else if (c == HIBIT('}')) scope_leave();
 
   // \xHH: match the byte HH exactly (no ws skipped)
-  else if (c == HIBIT('x') && isxdigit(a[1]) && isxdigit(a[2])) {
+  else if (c == HIDIR('x') && isxdigit(a[1]) && isxdigit(a[2])) {
     ok = got(hex2(a + 1));
     adv = 3;
   }
@@ -2445,11 +2468,11 @@ int run() {
     adv = 2;
   }
 
-  else if (c == HIBIT('i')) ok = match_ident();
+  else if (c == HIDIR('i')) ok = match_ident();
   else if (c == HIBIT('+')) ok = match_ident_decl();
-  else if (c == HIBIT('f')) ok = match_ident_func_decl();
-  else if (c == HIBIT('p')) ok = match_param_decl();
-  else if (c == HIBIT('r')) {
+  else if (c == HIDIR('f')) ok = match_ident_func_decl();
+  else if (c == HIDIR('p')) ok = match_param_decl();
+  else if (c == HIDIR('r')) {
     // end of params: params_end() (ivm-gen.c) moves the last to fp+3
     if (last_func_vec != 0xff) {
       params_end(last_func_vec);
@@ -2460,19 +2483,19 @@ int run() {
   }
   // REGISTER flag SET ("register\b"): \r does it too, but only when
   // last_func_vec happens to be 0xff (see above)
-  else if (c == HIBIT('b')) pending_register = 1;
+  else if (c == HIDIR('b')) pending_register = 1;
 
   // CONSTANT flag SET
-  else if (c == HIBIT('c')) {
+  else if (c == HIDIR('c')) {
     pending_const = 1;
     ok = 1;
   }
 
   // NUMBER
-  else if (c == HIBIT('d')) ok = match_num();
+  else if (c == HIDIR('d')) ok = match_num();
 
   // NEWLINE
-  else if (c == HIBIT('n')) ok = match_newline();
+  else if (c == HIDIR('n')) ok = match_newline();
 
   // \!: a statement that does not parse (not a } / the end: no statement)
   else if (c == HIBIT('!')) {
@@ -2490,7 +2513,8 @@ int run() {
   // \*c: skip input up to and including the next c (Kleene ".*c")
   //   \*\n: to end of line   \*>: through '>'   (\*\[ \*\| for [ |)
   else if (c == HIBIT('*')) {
-    uchar stop = a[1] == HIBIT('n') ? '\n' : (uchar)(a[1] & 0x7f);
+    uchar stop = a[1] == HIDIR('n') ? '\n' :
+      (uchar)(a[1] & 0x80 ? DIR_CH(a[1]) : a[1]);
     if (!a[1]) FAIL("bad \\* in grammar");
     while (nextc && nextc != stop) skip();
     ok = got(stop);
@@ -2499,10 +2523,10 @@ int run() {
   }
 
   // "STRING" value
-  else if (c == HIBIT('s')) ok = match_str(0);
+  else if (c == HIDIR('s')) ok = match_str(0);
 
   // "INLINE STRING\0
-  else if (c == HIBIT('u')) ok = match_str(1);
+  else if (c == HIDIR('u')) ok = match_str(1);
 
 
 
@@ -2515,7 +2539,7 @@ int run() {
   //   we're OK, so not need the flag, just goto OK: ???
 
   if (ok) {
-    vlog("  ok \\%c @%u\n", c & 0x7f, abs_pos());
+    vlog("  ok \\%c @%u\n", DIR_CH(c), abs_pos());
     cur.rip += adv;
     return 1;
   }
@@ -2526,7 +2550,7 @@ int run() {
   // A: the failing ones only set ok = 0 and fall to here, which is the
   //   jump. The "if (!ok)" was redundant (ok is 0 here) and is gone.
   
-  vlog("  fail \\%c @%u\n", c & 0x7f, abs_pos());
+  vlog("  fail \\%c @%u\n", DIR_CH(c), abs_pos());
 
 fail_alt:
   // next alt, or pop if none left / mark committed away
@@ -2542,9 +2566,9 @@ fail_alt:
   }
 
   // rule failed — pop to parent and fail that element's alt
-  vlog("fail %c (no alt) @%u\n", 'A' + cur.rule, abs_pos());
+  vlog("fail %c (no alt) @%u\n", RULE_CH(cur.rule), abs_pos());
   anim_pop();
-  if (sp == 0) return 0;
+  if (sp == 0 || !stack[sp - 1].alts) return 0;   // the root rule failed
   sp--;
   cur = stack[sp];
   goto fail_alt;
@@ -2697,7 +2721,7 @@ static void report_reject(void) {
     uchar a = far_alt[far_sp - 1];
 
     eprintf("EXPECTED: rule %c", r);
-    r -= 'A';
+    r = RULE_IX(r);
     {
       uchar **alts = rule[r], k;
       for (k = 0; alts && k < a && alts[k]; k++)
@@ -2848,7 +2872,7 @@ static void init(char *bnf_path, char *src_path) {
   sym_reset();
 
   // get started with rule P
-  push('P' - 'A');
+  push(RULE_IX('P'));
 }
 
 static void shutdown(void) {
@@ -2948,7 +2972,7 @@ int main(int argc, char **argv) {
       for (i = 0; i < NRULES; i++)
   
         if (rule[i]) {
-          eprintf("%c =", 'A' + (int)i);
+          eprintf("%c =", RULE_CH((int)i));
           for (a = 0; rule[i][a]; a++) {
             if (a) eprintf("|");
             show_alt(rule[i][a]);

@@ -2,6 +2,7 @@ mv ~/storage/downloads/*.c .
 mv ~/storage/downloads/*.h .
 mv ~/storage/downloads/*.bnf .
 mv ~/storage/downloads/*.p .
+mv ~/storage/downloads/*.py .
 mv ~/storage/downloads/*.asm .
 mv ~/storage/downloads/*.md .
 
@@ -9,6 +10,7 @@ mv ~/downloads/*.c .
 mv ~/downloads/*.h .
 mv ~/downloads/*.bnf .
 mv ~/downloads/*.p .
+mv ~/downloads/*.py .
 mv ~/downloads/*.asm .
 mv ~/downloads/*.md .
 

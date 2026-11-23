@@ -5,7 +5,9 @@
 # Q#lines RstartvalueofE Simpleval
 # Type Uvardecl Var WprintitemJ Z H
 #
-# -- letters free: N
+# Rules are called as $X: $A..$Z, $a..$z for minor helpers (same letter
+# as the rule they help); plain letters in a pattern are literals
+# -- letters free: N, all of $a..$z
 
 # Features TODO/missing:
 # - casting, advanced pointer stuff
@@ -27,12 +29,12 @@
 #= //
 
 # - Program starts with P
-P=D
+P=$D
 
 # - Top level: declarations, functions, # lines (Q)
 D=static \<|extern \<
-|Q\o\<
-|V\o\<|F\o\<|\!\o\<|
+|$Q\o\<
+|$V\o\<|$F\o\<|\!\o\<|
 
 # - # lines, at the top and in blocks (C)
 #   #define NAME number|"string" -> const (\c only after a full match: a
@@ -55,35 +57,35 @@ Q=#define \+ \d\c[\g]\n
 
 # - Declarations: optional register\b -> REGISTER slot 0..31
 # -O: REGISTER 0..31, other globals 32..95, frames at 96+
-V=const\c T M;|register\b T M;|static T M;|T M;
+V=const\c $T $M;|register\b $T $M;|static $T $M;|$T $M;
 # name[N]: a static array of N (a number or const) elements: zeroed (\@),
 #   also = {0}; initialized: = "text" / = {1, 2, 'c', ...} (\: \, \.),
 #   [] its size from the initializer, [N] zeros after it. Arrays are
 #   static: initialized once (locals too: C wants "static" there)
-M=\+\[S\]={0}\@U
-|\+\[S\]=\:\s\.U|\+\[\]=\:\s\.U
-|\+\[S\]={\:N}\.U|\+\[\]={\:N}\.U
-|\+\[S\]\@U|\+=S[\g]U|\+=E[S\1]U|\+U|
+M=\+\[$S\]={0}\@$U
+|\+\[$S\]=\:\s\.$U|\+\[\]=\:\s\.$U
+|\+\[$S\]={\:$N}\.$U|\+\[\]={\:$N}\.$U
+|\+\[$S\]\@$U|\+=$S[\g]$U|\+=$E[S\1]$U|\+$U|
 # initializer elements: consts, a trailing , allowed
-N=S\,,\<|S\,|
+N=$S\,,\<|$S\,|
 
 # - TODO: deep recursion might be bad...
-U=,M|
+U=,$M|
 
 # - TODO: why I^* - pascal artifact?
-T=I *\'^|I^*\'^|I
+T=$I *\'^|$I^*\'^|$I
 I=int\'w|word\'w|void\'w|char\'c|unsigned int\'w|unsigned char\'c
 
 # - Function/Args definition
-F=\oT \f\{(A)\r B \}[X]\o
-A=void|T \p,A|T \p|
+F=\o$T \f\{($A)\r $B \}[X]\o
+A=void|$T \p,$A|$T \p|
 
 # - Block
 # a statement that does not parse: reported, skipped (\!: to its ;, over
 #   a { } block), the next one is tried: all the errors of a file in one
 #   run, no .ivm. The same for declarations / functions (rule D)
-B={ \{ C } \}
-C=V\<|K\<|Q\<|\!\<|
+B={ \{ $C } \}
+C=$V\<|$K\<|$Q\<|\!\<|
 
 # - Statements — keywords / specific forms first
 # if (l OP r), l simple (S), r simple or an R (into a temp): t / u as
@@ -91,9 +93,9 @@ C=V\<|K\<|Q\<|\!\<|
 #   t: <=, > and >= swap l r. Not closed by n / B, the JIT sees it is no
 #   loop. Smaller than the generic form (that spills l). R OP ...: the
 #   generic if (E) is smaller, the JIT fuses "< s ? G" into a branch
-K=Y
-|if (E)[?G\x] K else[0?G\x\w\y] K[\y]
-|if (E)[?G\x] K[\y]
+K=$Y
+|if ($E)[?G\x] $K else[0?G\x\w\y] $K[\y]
+|if ($E)[?G\x] $K[\y]
 
 # - Switch
 # \sXX - not implemented cannot enable
@@ -103,16 +105,16 @@ K=Y
 
 # - Loops
 
-|for(L
+|for($L
 
 # while (v <= lim): the VM 't' is the test itself, 'B' jumps back to it
-|while (\i<=\d) [\mt\1\2\x] K[B\z\y]
-|while (\i<=\i) [\mt\1\2\x] K[B\z\y]
-|while (\i<\d) [\mu\1\2\x] K[B\z\y]
-|while (\i<\i) [\mu\1\2\x] K[B\z\y]
+|while (\i<=\d) [\mt\1\2\x] $K[B\z\y]
+|while (\i<=\i) [\mt\1\2\x] $K[B\z\y]
+|while (\i<\d) [\mu\1\2\x] $K[B\z\y]
+|while (\i<\i) [\mu\1\2\x] $K[B\z\y]
 # while (l OP r): the same t / u test at the top, B back to the mark
-|X
-|while ([\m]E) [?G\x] K[B\z\y]
+|$X
+|while ([\m]$E) [?G\x] $K[B\z\y]
 
 
 # - Input / Output
@@ -120,7 +122,7 @@ K=Y
 |putchar('\\n');[N]
 |putchar(\d);[O\c1]
 |putchar(\i);[L\1E]
-|putchar(E);[E]
+|putchar($E);[E]
 
 |puts("["]\u);[N]
 |puts(\i);[L\1PN]
@@ -134,41 +136,41 @@ K=Y
 
 |printf("%s",\i);[L\1P]
 
-|printf("%u\ ",E);[.O ]
-|printf("%d\ ",E);[.O ]
+|printf("%u\ ",$E);[.O ]
+|printf("%d\ ",$E);[.O ]
 
-|printf("%u\\n",E);[.N]
-|printf("%d\\n",E);[.N]
+|printf("%u\\n",$E);[.N]
+|printf("%d\\n",$E);[.N]
 
-|printf("%d",E);[.]
-|printf("%u",E);[.]
+|printf("%d",$E);[.]
+|printf("%u",$E);[.]
 
 |printf(\i);[L\1P]
 
 # - TODO: lol?
-|printf("%u%u%u\\\\n",E,E,E);[...N]
-|printf("%u%u%u",E,E,E);[...]
-|printf("\\"%s\\" has %d characters\\n",\i,\i(Z)[\v]);[S\tL\1P" has \#00L\3.N]
+|printf("%u%u%u\\\\n",$E,$E,$E);[...N]
+|printf("%u%u%u",$E,$E,$E);[...]
+|printf("\\"%s\\" has %d characters\\n",\i,\i($Z)[\v]);[S\tL\1P" has \#00L\3.N]
 
-|printf(E);[P]
+|printf($E);[P]
 
 |putz("["]\u);
-|putz(E);[P]
-|putnl(E);[.N]
-|putn(E);[.O ]
+|putz($E);[P]
+|putnl($E);[.N]
+|putn($E);[.O ]
 |nl();[N]
 
 # - TODO: vararg printf?
 #|printf(JW);
 
 # - a dummy catch all - WRONG!
-|printf("["]\u, E);[.]
+|printf("["]\u, $E);[.]
 
 # - other functions
-|memset(\i,\d,E);[m\1\2]
+|memset(\i,\d,$E);[m\1\2]
 
 # - Return
-|return E;[X]
+|return $E;[X]
 |return;[Q]
 
 # - benchmarking dispatch
@@ -189,12 +191,12 @@ K=Y
 #|free(\i);[F\1]
 |free(\i);
 # TODO: expression usage?
-|\i=malloc(E);[M\1]
+|\i=malloc($E);[M\1]
 
 # - Statement can be a Block, or lastly Assignments
-|B|;
-|R;
-|H
+|$B|;
+|$R;
+|$H
 
 # END STATEMENT
 
@@ -204,7 +206,7 @@ K=Y
 
 # memset: for(i=0; i<=n; i++) a[i]=v;  -> ACC=n+1; S i; m ptr val
 #   (ACC=size, i ends at size like real C; char* only: \?\C guard,
-#    \C not \?C since a bare C would be the rule call C)
+#    \?\C = \?C now: a bare C is a literal, not the rule $C)
 #   TODO: I don't think the guard is working yet!
 #   captures: 1=i 2=i 3=E 4=const 1 5=i 6=ptr 7=i 8=val
 #   E is left in ACC (never use \3: E's capture value is not reliable)
@@ -218,14 +220,14 @@ K=Y
 #   scoped (for (int i = ..): no end value for i -> no S i (cheaper)
 #   captures: 1=I (a rule's result is a capture too) 2=i 3=i 4=E 5=i
 #             6=ptr 7=i 8=val 9=const 2
-L=I\{ \+=0; \2<E; \2++) \i\?\C\[\2\]=\d;\}[m\6\8]
-|I\{ \+=0; \2<E; \2++) \i\?\W\[\2\]=0;\#00\#02\}[*\9m\6\8]
-|I\{ \+=0; \2<E; \2++) \i\?\W\[\2\]=-1;\#ff\#02\}[*\9m\6\8]
+L=$I\{ \+=0; \2<$E; \2++) \i\?\C\[\2\]=\d;\}[m\6\8]
+|$I\{ \+=0; \2<$E; \2++) \i\?\W\[\2\]=0;\#00\#02\}[*\9m\6\8]
+|$I\{ \+=0; \2<$E; \2++) \i\?\W\[\2\]=-1;\#ff\#02\}[*\9m\6\8]
 #   not scoped: i ends at n (C)
 #   captures: 1=i 2=i 3=E 4=i 5=ptr 6=i 7=val 8=const 2
-|\i=0; \1<E; \1++) \i\?\C\[\1\]=\d;[S\1m\5\7]
-|\i=0; \1<E; \1++) \i\?\W\[\1\]=0;\#00\#02[S\1*\8m\5\7]
-|\i=0; \1<E; \1++) \i\?\W\[\1\]=-1;\#ff\#02[S\1*\8m\5\7]
+|\i=0; \1<$E; \1++) \i\?\C\[\1\]=\d;[S\1m\5\7]
+|\i=0; \1<$E; \1++) \i\?\W\[\1\]=0;\#00\#02[S\1*\8m\5\7]
+|\i=0; \1<$E; \1++) \i\?\W\[\1\]=-1;\#ff\#02[S\1*\8m\5\7]
 
 # - dangerous: for(i=0; i<42; i++) arr[i]=i; // lol!
 #|\i=0; \1<E; \1++) \i\[\1\]=\i;[m\5\7]
@@ -239,29 +241,29 @@ L=I\{ \+=0; \2<E; \2++) \i\?\C\[\2\]=\d;\}[m\6\8]
 
 # for(i=0; i<n; i++) a[i]=v;   captures: 1=i 2=i 3=E 4=i 5=ptr 6=i 7=val
 
-|\i=0; [Z\1]   \1<=\d; \1++) [\mt\1\3\x] K [n\z\y]
-|\i=\d;[C\1\2] \1<=\d; \1++) [\mt\1\4\x] K [n\z\y]
-|\i=\i;[C\1\2] \1<=\d; \1++) [\mt\1\4\x] K [n\z\y]
+|\i=0; [Z\1]   \1<=\d; \1++) [\mt\1\3\x] $K [n\z\y]
+|\i=\d;[C\1\2] \1<=\d; \1++) [\mt\1\4\x] $K [n\z\y]
+|\i=\i;[C\1\2] \1<=\d; \1++) [\mt\1\4\x] $K [n\z\y]
 
 # limit is a name (#define const or variable): use its slot directly, no
 # copy. t/n read the limit slot every round, so a variable limit that the
 # body changes behaves like C (the E[S\t] copy below is a snapshot)
-|\i=0; [Z\1]   \1<=\i; \1++) [\mt\1\3\x] K [n\z\y]
-|\i=\d;[C\1\2] \1<=\i; \1++) [\mt\1\4\x] K [n\z\y]
-|\i=\i;[C\1\2] \1<=\i; \1++) [\mt\1\4\x] K [n\z\y]
+|\i=0; [Z\1]   \1<=\i; \1++) [\mt\1\3\x] $K [n\z\y]
+|\i=\d;[C\1\2] \1<=\i; \1++) [\mt\1\4\x] $K [n\z\y]
+|\i=\i;[C\1\2] \1<=\i; \1++) [\mt\1\4\x] $K [n\z\y]
 
 # i < lim: the 'u' loop op (exclusive), same layout as 't'
-|\i=0; [Z\1]   \1<\d; \1++) [\mu\1\3\x] K [n\z\y]
-|\i=\d;[C\1\2] \1<\d; \1++) [\mu\1\4\x] K [n\z\y]
-|\i=\i;[C\1\2] \1<\d; \1++) [\mu\1\4\x] K [n\z\y]
-|\i=0; [Z\1]   \1<\i; \1++) [\mu\1\3\x] K [n\z\y]
-|\i=\d;[C\1\2] \1<\i; \1++) [\mu\1\4\x] K [n\z\y]
-|\i=\i;[C\1\2] \1<\i; \1++) [\mu\1\4\x] K [n\z\y]
+|\i=0; [Z\1]   \1<\d; \1++) [\mu\1\3\x] $K [n\z\y]
+|\i=\d;[C\1\2] \1<\d; \1++) [\mu\1\4\x] $K [n\z\y]
+|\i=\i;[C\1\2] \1<\d; \1++) [\mu\1\4\x] $K [n\z\y]
+|\i=0; [Z\1]   \1<\i; \1++) [\mu\1\3\x] $K [n\z\y]
+|\i=\d;[C\1\2] \1<\i; \1++) [\mu\1\4\x] $K [n\z\y]
+|\i=\i;[C\1\2] \1<\i; \1++) [\mu\1\4\x] $K [n\z\y]
 
 
-|\i=E[S\1]; \1<=E[S\t];  \1++) [\mt\1\5\x] K [n\z\y]
+|\i=$E[S\1]; \1<=$E[S\t];  \1++) [\mt\1\5\x] $K [n\z\y]
 # -- TODO: \t is wrong, it's taking a snapshot like PASCAL!
-|\i=E[S\1]; \1<E[S\t];   \1++) [\mu\1\5\x] K [n\z\y]
+|\i=$E[S\1]; \1<$E[S\t];   \1++) [\mu\1\5\x] $K [n\z\y]
 
 # counting-down-to-zero (very common in C)
 #   (commented out: needs a down-loop op, \mu below is from before 'u' = <)
@@ -285,24 +287,24 @@ L=I\{ \+=0; \2<E; \2++) \i\?\C\[\2\]=\d;\}[m\6\8]
 # body runs N times for N>0, i ends at 0
 # for (i = N; i--; )          and  for (i = N; i-->0; )
 #   C: test the old i, then i-1; the exit path decrements too (i = -1)
-|\i=E[S\1];\1--;)     [\mL\1?G\xJ\1] K[B\z\yJ\1]
-|\i=E[S\1];\1-->0;)   [\mL\1G\x0?G\x\w\yJ\1] K[B\z\yJ\1]
+|\i=$E[S\1];\1--;)     [\mL\1?G\xJ\1] $K[B\z\yJ\1]
+|\i=$E[S\1];\1-->0;)   [\mL\1G\x0?G\x\w\yJ\1] $K[B\z\yJ\1]
 # for (i = N; --i; )          (runs N-1 times — keep if you want it)
-|\i=E[S\1];--\1;)     [\mJ\1?G\x] K[B\z\y]
+|\i=$E[S\1];--\1;)     [\mJ\1?G\x] $K[B\z\y]
 # for (i = N; i; i--)         and  for (i = N; i>0; i--)
-|\i=E[S\1];\1;\i--)   [\mL\1?G\x] K[J\1B\z\y]
-|\i=E[S\1];\1>0;\i--) [\mL\1G\x0?G\x\w\y] K[J\1B\z\y]
+|\i=$E[S\1];\1;\i--)   [\mL\1?G\x] $K[J\1B\z\y]
+|\i=$E[S\1];\1>0;\i--) [\mL\1G\x0?G\x\w\y] $K[J\1B\z\y]
 
-|\i\?c=E[s\1]; [\m]E[?G\x] ;\1++) K[i\4B\z\y]
-|\i\?c=E[s\1]; [\m]E[?G\x] ;\1--) K[j\4B\z\y]
-|\i=E[S\1]; [\m]E[?G\x] ;\i++) K[I\4B\z\y]
-|\i=E[S\1]; [\m]E[?G\x] ;\i--) K[J\4B\z\y]
+|\i\?c=$E[s\1]; [\m]$E[?G\x] ;\1++) $K[i\4B\z\y]
+|\i\?c=$E[s\1]; [\m]$E[?G\x] ;\1--) $K[j\4B\z\y]
+|\i=$E[S\1]; [\m]$E[?G\x] ;\i++) $K[I\4B\z\y]
+|\i=$E[S\1]; [\m]$E[?G\x] ;\i--) $K[J\4B\z\y]
 
-|E; [\m] E [?G\x] ;E) K[B\z\y]
+|$E; [\m] $E [?G\x] ;$E) $K[B\z\y]
 
-|\i=E[S\1]; [\m]E[?G\x]; \i+=\i) K[U\1\5B\z\y]
+|\i=$E[S\1]; [\m]$E[?G\x]; \i+=\i) $K[U\1\5B\z\y]
 
-|\i=E[S\1]; \1<=E[S\t]; \1++) [\mt\1\5\x] K [n\z\y]
+|\i=$E[S\1]; \1<=$E[S\t]; \1++) [\mt\1\5\x] $K [n\z\y]
 
 # END FOR
 
@@ -310,10 +312,10 @@ L=I\{ \+=0; \2<E; \2++) \i\?\C\[\2\]=\d;\}[m\6\8]
 # G = Switch interior items (declarations, case/default labels, or normal statements)
 # TODO: oh, I guess one could declare vars at beginning, lol, even seen
 #   actually, REAL C is worse! This grammar is actually structured!
-G=V\<
+G=$V\<
 |case \d:[\s1]\<
-|default : [\s2] G\<
-|K\<
+|default : [\s2] $G\<
+|$K\<
 |
 
 
@@ -322,31 +324,31 @@ G=V\<
 # char (unsigned) vars: the value is a byte, s stores the low byte (hi 0)
 #   \?c: plain c, \c would be a directive
 # - if / while (l OP r): rules Y / X (K has too many alts otherwise)
-Y=if (S<=S)[t\1\2\x] K else[0?G\x\w\y] K[\y]
-|if (S<=S)[t\1\2\x] K[\y]
-|if (S>=S)[t\2\1\x] K else[0?G\x\w\y] K[\y]
-|if (S>=S)[t\2\1\x] K[\y]
-|if (S<S)[u\1\2\x] K else[0?G\x\w\y] K[\y]
-|if (S<S)[u\1\2\x] K[\y]
-|if (S>S)[u\2\1\x] K else[0?G\x\w\y] K[\y]
-|if (S>S)[u\2\1\x] K[\y]
-|if (S<=R[S\t])[t\1\3\x] K else[0?G\x\w\y] K[\y]
-|if (S<=R[S\t])[t\1\3\x] K[\y]
-|if (S>=R[S\t])[t\3\1\x] K else[0?G\x\w\y] K[\y]
-|if (S>=R[S\t])[t\3\1\x] K[\y]
-|if (S<R[S\t])[u\1\3\x] K else[0?G\x\w\y] K[\y]
-|if (S<R[S\t])[u\1\3\x] K[\y]
-|if (S>R[S\t])[u\3\1\x] K else[0?G\x\w\y] K[\y]
-|if (S>R[S\t])[u\3\1\x] K[\y]
+Y=if ($S<=$S)[t\1\2\x] $K else[0?G\x\w\y] $K[\y]
+|if ($S<=$S)[t\1\2\x] $K[\y]
+|if ($S>=$S)[t\2\1\x] $K else[0?G\x\w\y] $K[\y]
+|if ($S>=$S)[t\2\1\x] $K[\y]
+|if ($S<$S)[u\1\2\x] $K else[0?G\x\w\y] $K[\y]
+|if ($S<$S)[u\1\2\x] $K[\y]
+|if ($S>$S)[u\2\1\x] $K else[0?G\x\w\y] $K[\y]
+|if ($S>$S)[u\2\1\x] $K[\y]
+|if ($S<=$R[S\t])[t\1\3\x] $K else[0?G\x\w\y] $K[\y]
+|if ($S<=$R[S\t])[t\1\3\x] $K[\y]
+|if ($S>=$R[S\t])[t\3\1\x] $K else[0?G\x\w\y] $K[\y]
+|if ($S>=$R[S\t])[t\3\1\x] $K[\y]
+|if ($S<$R[S\t])[u\1\3\x] $K else[0?G\x\w\y] $K[\y]
+|if ($S<$R[S\t])[u\1\3\x] $K[\y]
+|if ($S>$R[S\t])[u\3\1\x] $K else[0?G\x\w\y] $K[\y]
+|if ($S>$R[S\t])[u\3\1\x] $K[\y]
 
-X=while ([\m]S<=S) [t\1\2\x] K[B\z\y]
-|while ([\m]S>=S) [t\2\1\x] K[B\z\y]
-|while ([\m]S<S) [u\1\2\x] K[B\z\y]
-|while ([\m]S>S) [u\2\1\x] K[B\z\y]
-|while ([\m]S<=R[S\t]) [t\1\3\x] K[B\z\y]
-|while ([\m]S>=R[S\t]) [t\3\1\x] K[B\z\y]
-|while ([\m]S<R[S\t]) [u\1\3\x] K[B\z\y]
-|while ([\m]S>R[S\t]) [u\3\1\x] K[B\z\y]
+X=while ([\m]$S<=$S) [t\1\2\x] $K[B\z\y]
+|while ([\m]$S>=$S) [t\2\1\x] $K[B\z\y]
+|while ([\m]$S<$S) [u\1\2\x] $K[B\z\y]
+|while ([\m]$S>$S) [u\2\1\x] $K[B\z\y]
+|while ([\m]$S<=$R[S\t]) [t\1\3\x] $K[B\z\y]
+|while ([\m]$S>=$R[S\t]) [t\3\1\x] $K[B\z\y]
+|while ([\m]$S<$R[S\t]) [u\1\3\x] $K[B\z\y]
+|while ([\m]$S>$R[S\t]) [u\3\1\x] $K[B\z\y]
 
 # swap: t = a[i]; a[i] = a[j]; a[j] = t;  (int*)  -> A a i j, S t
 #   captures (back references count too): 1=t 2=a 3=i 4=a 5=i 6=a 7=j.
@@ -358,9 +360,9 @@ H=\i=\i\?\W\[\i\]; \2\[\3\]=\2\[\i\]; \2\[\7\]=\1;[A\2\3\7S\1]
 |--\i\?c;[j\1]
 |\i\?c=\1+1;[i\1]
 |\i\?c=\1-1;[j\1]
-|\i\?c+=E;[+\1s\1]
+|\i\?c+=$E;[+\1s\1]
 |\i\?c=0;[Z\1]
-|\i\?c=E;[s\1]
+|\i\?c=$E;[s\1]
 # int* (word pointer): ++ -- move one element = 2 bytes
 #   captures: 1=p   (+=: 1=p 2=n)
 |\i\?\W++;[H\1]
@@ -369,7 +371,7 @@ H=\i=\i\?\W\[\i\]; \2\[\3\]=\2\[\i\]; \2\[\7\]=\1;[A\2\3\7S\1]
 |--\i\?\W;[J\1J\1]
 |\i\?\W+=1;[H\1]
 |\i\?\W+=2;[H\1H\1]
-|\i\?\W+=S;[L\2+\2+\1S\1]
+|\i\?\W+=$S;[L\2+\2+\1S\1]
 |\i\?\W=\1+1;[H\1]
 |\i\?\W=\1-1;[J\1J\1]
 |\i+=\i;[U\1\2]
@@ -378,11 +380,11 @@ H=\i=\i\?\W\[\i\]; \2\[\3\]=\2\[\i\]; \2\[\7\]=\1;[A\2\3\7S\1]
 |\i\?w=\1+2;[H\1]
 |\i\?w=2+\1;[H\1]
 # += -= with any expression   captures: 1=v 2=E 3=temp
-|\i\?\W+=E;[S\t+\3+\1S\1]
-|\i\?\W-=E;[S\t+\3S\3L\1-\3S\1]
-|\i\?c-=E;[S\tL\1-\3s\1]
-|\i+=E;[+\1S\1]
-|\i-=E;[S\tL\1-\3S\1]
+|\i\?\W+=$E;[S\t+\3+\1S\1]
+|\i\?\W-=$E;[S\t+\3S\3L\1-\3S\1]
+|\i\?c-=$E;[S\tL\1-\3s\1]
+|\i+=$E;[+\1S\1]
+|\i-=$E;[S\tL\1-\3S\1]
 |\i=\1+1;[I\1]
 |\i=1+\1;[I\1]
 |\i=\1-1;[J\1]
@@ -393,34 +395,34 @@ H=\i=\i\?\W\[\i\]; \2\[\3\]=\2\[\i\]; \2\[\7\]=\1;[A\2\3\7S\1]
 |\i\?w=\i+2;[C\1\2H\1]
 |\i\?w=2+\i;[C\1\2H\1]
 |\i\?w=\i-1;[C\1\2J\1]
-|* \i\?\C=E;[w\1]
-|* \i=E;[!\1]
+|* \i\?\C=$E;[w\1]
+|* \i=$E;[!\1]
 
-# p[i]: char* -> byte ops [ ], int* -> word ops ( ) (\?\C: \?C would
-#   call rule C); anything else (an int used as pointer): bytes
-|\i\?\C\[S\]=E;[\]\1\2]
-|\i\?\W\[S\]=E;[)\1\2]
-|\i\[S\]=E;[\]\1\2]
+# p[i]: char* -> byte ops [ ], int* -> word ops ( ) (\?\C = \?C now);
+#   anything else (an int used as pointer): bytes
+|\i\?\C\[$S\]=$E;[\]\1\2]
+|\i\?\W\[$S\]=$E;[)\1\2]
+|\i\[$S\]=$E;[\]\1\2]
 # p[expr] = ...: index into a temp first   captures: 1=p 2=index 3=temp 4=value
-|\i\?\C\[E[S\j]\]=E;[\]\1\3]
-|\i\?\W\[E[S\j]\]=E;[)\1\3]
-|\i\[E[S\j]\]=E;[\]\1\3]
+|\i\?\C\[$E[S\j]\]=$E;[\]\1\3]
+|\i\?\W\[$E[S\j]\]=$E;[)\1\3]
+|\i\[$E[S\j]\]=$E;[\]\1\3]
 
 |\i=0;[Z\1]
-|\i=S+S;[L\2+\3S\1]
-|\i=S-S;[L\2-\3S\1]
+|\i=$S+$S;[L\2+\3S\1]
+|\i=$S-$S;[L\2-\3S\1]
 # C dest src — mem[dest]=mem[src]; ACC=value  (var=var, var=const-slot, var=string-slot)
 |\i=\i;[C\1\2]
-|\i=S;[C\1\2]
+|\i=$S;[C\1\2]
 |\i++;[I\1]
 |++\i;[I\1]
 |\i--;[J\1]
 |--\i;[J\1]
-|\i=E;[S\1]
+|\i=$E;[S\1]
 
 # - PrintF support (ingore formatting, lol)
-W=,J\<|
-J="%u\\\\n"|"%d\\\\n"|"%s\\\\n"|"%s"|"%u "|"%d "|"%u"|"%d"|"["]\u|E[.]
+W=,$J\<|
+J="%u\\\\n"|"%d\\\\n"|"%s\\\\n"|"%s"|"%u "|"%d "|"%u"|"%d"|"["]\u|$E[.]
 
 # - Expressions
 E=\i+=\i [U\1\2]
@@ -428,19 +430,19 @@ E=\i+=\i [U\1\2]
 # - Casting
 #|(I)E  - not work (type annotation require a symbol?
 #|(T*)E - not work
-|(char*)E
-|(int*) E
-|(word*)E
+|(char*)$E
+|(int*) $E
+|(word*)$E
 # (char): binds tighter than the operators: (char)x + y casts x only
-|(char)R\#ff[&\2]O
-|(char)S\#ff[\l1&\2]O
+|(char)$R\#ff[&\2]$O
+|(char)$S\#ff[\l1&\2]$O
 
-|RO
-|S[\l1]O
+|$R$O
+|$S[\l1]$O
 
 # - Function call
 R=getchar()[K]
-|\i(Z)[\v]
+|\i($Z)[\v]
 
 # - Dereferencing points
 #   *charptr++ (TODO: block for intptr, put guard/other gen)
@@ -450,29 +452,29 @@ R=getchar()[K]
 |* \i\?\C[r\1]
 |* \i[@\1]
 
-|\i\?\C\[S\][\[\1\2]
-|\i\?\W\[S\][(\1\2]
-|\i\[S\][\[\1\2]
+|\i\?\C\[$S\][\[\1\2]
+|\i\?\W\[$S\][(\1\2]
+|\i\[$S\][\[\1\2]
 # p[expr]   captures: 1=p 2=index 3=temp
-|\i\?\C\[E\][S\j\[\1\3]
-|\i\?\W\[E\][S\j(\1\3]
-|\i\[E\][S\j\[\1\3]
+|\i\?\C\[$E\][S\j\[\1\3]
+|\i\?\W\[$E\][S\j(\1\3]
+|\i\[$E\][S\j\[\1\3]
 
 # - Parens
-|(E)
+|($E)
 
 # - Not: binds tight (!a + b is (!a) + b): an operand, not an E
-|! R[?]
-|! S[\l1?]
+|! $R[?]
+|! $S[\l1?]
 
 # - Simple Expression: \s = string const, \d = number
 # sizeof: by the type's guard: char 1, int / word / any pointer 2 (\#xx:
 # the result is the const xx); a static array: its size (\$)
-S=\d|sizeof(T\?c)\#01|sizeof(T)\#02|sizeof(\i\$)|sizeof(\i\?c)\#01|sizeof(\i)\#02|\s|\i
+S=\d|sizeof($T\?c)\#01|sizeof($T)\#02|sizeof(\i\$)|sizeof(\i\?c)\#01|sizeof(\i)\#02|\s|\i
 
 # - List of expressions (limited, TODO: get rid of?)
 # TODO: think it'll parse E twice?
-Z=E,[S\k]\<|E|
+Z=$E,[S\k]\<|$E|
 
 # Binary operators, left to right (no temps for precedence): an operator
 #   may only be followed by one of the same or a looser level, C's
@@ -483,40 +485,40 @@ Z=E,[S\k]\<|E|
 # With an R right operand: the left one spilled (\j), R in ACC; - / % <<
 #   >>: R into a temp, the left loaded
 O=
-|\>* [S\j] R[*\a1]\<
-|/ [S\j] R[S\tL\a1/\a3]\<
-|% [S\j] R[S\tL\a1%\a3]\<
-|* S[*\a1]\<
-|/ S[/\a1]\<
-|% S[%\a1]\<
-|\>+ [S\j] R[+\a1]\<
-|- [S\j] R[S\tL\a1-\a3]\<
-|+ S[+\a1]\<
-|- S[-\a1]\<
-|\><<[S\j] R[S\tL\a1\{\a3]\<
-|>>[S\j] R[S\tL\a1\}\a3]\<
-|<<S[\{\a1]\<
-|>>S[\}\a1]\<
+|\>* [S\j] $R[*\a1]\<
+|/ [S\j] $R[S\tL\a1/\a3]\<
+|% [S\j] $R[S\tL\a1%\a3]\<
+|* $S[*\a1]\<
+|/ $S[/\a1]\<
+|% $S[%\a1]\<
+|\>+ [S\j] $R[+\a1]\<
+|- [S\j] $R[S\tL\a1-\a3]\<
+|+ $S[+\a1]\<
+|- $S[-\a1]\<
+|\><<[S\j] $R[S\tL\a1\{\a3]\<
+|>>[S\j] $R[S\tL\a1\}\a3]\<
+|<<$S[\{\a1]\<
+|>>$S[\}\a1]\<
 # compare with an R: left spilled, R in ACC, compare swapped (no 2nd temp):
 #   l <= r  =  !(r < l)    l >= r  =  !(r > l)    l < r  =  r > l
-|\><=[S\j] R[<\a1?]\<
-|>=[S\j] R[>\a1?]\<
-|< [S\j] R[>\a1]\<
-|> [S\j] R[<\a1]\<
-|<=S[>\a1?]\<
-|>=S[<\a1?]\<
-|< S[<\a1]\<
-|> S[>\a1]\<
-|\>!=[S\j] R[=\a1?]\<
-|==[S\j] R[=\a1]\<
-|!=S[=\a1?]\<
-|==S[=\a1]\<
-|\>& [S\j] R[&\a1]\<
-|& S[&\a1]\<
-|\>^ [S\j] R[^\a1]\<
-|^ S[^\a1]\<
-|\>\|[S\j] R[|\a1]\<
-|\|S[|\a1]\<
+|\><=[S\j] $R[<\a1?]\<
+|>=[S\j] $R[>\a1?]\<
+|< [S\j] $R[>\a1]\<
+|> [S\j] $R[<\a1]\<
+|<=$S[>\a1?]\<
+|>=$S[<\a1?]\<
+|< $S[<\a1]\<
+|> $S[>\a1]\<
+|\>!=[S\j] $R[=\a1?]\<
+|==[S\j] $R[=\a1]\<
+|!=$S[=\a1?]\<
+|==$S[=\a1]\<
+|\>& [S\j] $R[&\a1]\<
+|& $S[&\a1]\<
+|\>^ [S\j] $R[^\a1]\<
+|^ $S[^\a1]\<
+|\>\|[S\j] $R[|\a1]\<
+|\|$S[|\a1]\<
 |
 .
 
@@ -524,6 +526,9 @@ O=
 -- Legend
 .   end of rules
 |   at line start = continue previous rule
+$X  rule call: $A..$Z, and $a..$z for minor helper rules (best: the
+    same letter as the rule they help); defined by X= at the line start.
+    A plain letter (any case) in a pattern is a literal
 
 Tokens:
   \i  ident in scope -> slot (call vector remembered in the frame for \v)
