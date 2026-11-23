@@ -12,8 +12,8 @@
 ;;; Note: Newer cc65 renamed the C stack pointer sp -> c_sp:
 ;;;  add -Wa -DUSE_C_SP
 ;;;
-;;; Everything between _ivmlib_start and _ivmlib_end is copied
-;;; verbatim by ivm -o, so NOTHING here may reference code outside
+;;; An -o image copies a part of _ivmlib_init .. _ivmlib_end verbatim
+;;; (from the startup it needs to a cut), so NOTHING here may reference code outside
 ;;; that range (no cc65 runtime/lib calls). Allowed: zero page, ROM,
 ;;; sim65 paravirt hooks (_write/_read/exit are fixed hook addresses,
 ;;; not code).
@@ -44,38 +44,30 @@
 ;;; Sizes and cycles: per routine (cycles: the JSR to it included;
 ;;; opputnum..opdiv measured in cpu6502.c, the rest estimated).
 ;;;
-;;; Uses cc65 zp scratch: ptr1 ptr2 tmp1-tmp4  (as most cc65), and JT.
+;;; Zero page: its own, set below (ZP_LIB), and JT.
 ;;;
-;;;
-;;; TODO: possibly the 6502 vars may not be present at runtime,
-;;;   potentially they will clash with ZP jit compiled code,
-;;;   which is why they were using their safe variants. We
-;;;   don't especially need to "exit" nicely.
-;;;
-;;; TODO: possibly in sim6502.cfg minimal "allocate" space in
-;;;   upper zero page. Like our generated code assumed 0xFE,0xFF
-;;;   tmp1, tmp2
+;;;   sim65: never returns to the C program (in place: ivmlib_load
+;;;     jumps; -o image: exit), so all zp is ours:
+;;;       CSP      2  sim65's arg pointer (header byte 7): set to pvframe
+;;;                   before each call, no C stack kept
+;;;       ZP_LIB   6  ptr1 ptr2 tmp3/tmp4 (tmp1/tmp2, sreg: aliases)
+;;;     -z mem[] must stay above (ivm.c checks _ivmlib_zplo).
+;;;   atmos: the in-process run returns to C, and the ROM owns low zp:
+;;;     cc65's own scratch (zeropage.inc), the one place known free.
 
-.include "zeropage.inc"
-
-.export _ivmlib_start, _ivmlib_end
+.export _ivmlib_init, _ivmlib_zpinit, _ivmlib_start, _ivmlib_end
 .export _ivmlib_entry, _ivmlib_heap, _ivmlib_heapend
 .export _ivmlib_zpsrc, _ivmlib_zpdst, _ivmlib_zplen, _ivmlib_spzp
-.export _ivmlib_load, _ivmlib_seg, _ivmlib_dst
-.export _ivmlib_cut0, _ivmlib_cut1, _ivmlib_cut2
-.export _ivmlib_bss, _ivmlib_bssn
+.export _ivmlib_zplo
+.export _ivmlib_load, _ivmlib_seg, _ivmlib_dst, _ivmlib_run
+.export _ivmlib_cut0, _ivmlib_cut1, _ivmlib_cut2, _ivmlib_cut3, _ivmlib_cut4
+.export _ivmlib_bssp, _ivmlib_bssr
 
 .export _opmul, _opdiv, _opmod, _opputnum
 .export _opputchar, _opgetchar, _opputs, _opprintstr
 .export _opmalloc, _opfree
 .export _opmemset, _opmemset_adr
 
-
-.ifdef USE_C_SP
-        .define CSP c_sp
-.else
-        .define CSP sp
-.endif
 
 ;;; JIT scratch word (ivm-jit.c tmp1/tmp2): first operand of opmul/opdiv/opmod
 JT = $FE
@@ -89,8 +81,31 @@ JT = $FE
 	;; .if .defined(__CC65___) ??? TODO:
         SIM = 1
         .import _write, _read, exit     ;; sim65 paravirt hooks
-        SIM_SP = $FF00                  ;; C stack top, stand-alone run
+
+        ;; sim65's arg pointer: the running program's header names it, so
+        ;; in place it is the compiler's c_sp (the -o header copies it)
+.ifdef USE_C_SP
+        .importzp c_sp
+        CSP = c_sp
+.else
+        .importzp sp
+        CSP = sp
+.endif
+
+        ;; lib scratch: our own, after CSP ($00/$01)
+        ZP_LIB  = $02
+        ZP_LIBN = 6
+        ptr1    = ZP_LIB                ;; pointer: puts, load, div, malloc
+        ptr2    = ZP_LIB+2              ;; pointer: load, mul, div, malloc
+        tmp3    = ZP_LIB+4              ;; word: AX kept, mul result, mod flag
+        tmp4    = ZP_LIB+5
+        tmp1    = tmp3                  ;; length: load, malloc (no tmp3 there)
+        tmp2    = tmp4
+        sreg    = ptr2                  ;; printstr's AX (opputs: no ptr2)
+
+        .assert CSP+2 <= ZP_LIB || CSP >= ZP_LIB+ZP_LIBN, lderror, "ivm-lib: CSP inside ZP_LIB"
 .elseif .defined(__ATMOS__)
+        .include "zeropage.inc"
         ROM_PRCHR  = $0238              ;; ROM 1.1: print char in X
         ROM_GETKEY = $023B              ;; ROM 1.1: get key (UNTESTED)
 .else
@@ -106,13 +121,25 @@ JT = $FE
 ;;; ===========================================================================
 ;;; Load in place (ivm.c jit_load, sim65 run in place): copy the -o image
 ;;; after the lib down to _ivmlib_dst (the image's end of the lib: a cut),
-;;; then start it as if loaded. The image
+;;; then start it as if loaded (_ivmlib_run: the image's first byte). The image
 ;;; is 4 segments (src, len): mem image, strings, gap (src 0: zeros), JIT
-;;; code: no buffer to build it in. Before _ivmlib_start: not in -o images,
+;;; code: no buffer to build it in. Before _ivmlib_init: not in -o images,
 ;;; not overwritten by the copy. Forward: the sources are above.  63 B + 16
 ;;; ===========================================================================
 _ivmlib_seg:     .res 16                ;; 4 x (src, len)
 _ivmlib_dst:     .word 0                ;; where: the image's lib end (a cut)
+_ivmlib_spzp:                           ;; sim65 header needs sp's zp address
+.ifdef SIM
+                 .byte CSP
+.else
+                 .byte 0
+.endif
+_ivmlib_zplo:                           ;; -z mem[] from here up (lib zp below)
+.ifdef SIM
+                 .byte ZP_LIB+ZP_LIBN
+.else
+                 .byte 0
+.endif
 
 _ivmlib_load:
         lda     _ivmlib_dst
@@ -121,7 +148,7 @@ _ivmlib_load:
         sta     ptr2+1
         ldx     #0
 @seg:   cpx     #16
-        beq     _ivmlib_start           ;; all copied: run
+        beq     ldrun                   ;; all copied: run
         lda     _ivmlib_seg,x
         sta     ptr1
         lda     _ivmlib_seg+1,x
@@ -155,83 +182,96 @@ _ivmlib_load:
         bne     @byte
         inc     ptr2+1
         bne     @byte                   ;; always
+ldrun:  jmp     _ivmlib_start           ;; patched: the image's first byte
+_ivmlib_run = ldrun + 1
 
+
+;;; ===========================================================================
+;;; Startup. An image starts at the first part it needs (ivm.c jit_libbeg):
+;;;   _ivmlib_init    static arrays: zeroed (needs memset: cut1)
+;;;   _ivmlib_zpinit  -z: mem[] image copied to zp
+;;;   _ivmlib_start   run main, exit
+;;; each falls into the next. Operands patched by ivm.c, no variables.
+;;; ===========================================================================
+
+;;; bss zero: opmemset with X pages, Y rest; ivm.c set _opmemset_adr to
+;;; bss + pages * 256 (the last page)
+;;; 10 B
+_ivmlib_init:
+        ldx     #0                      ;; patched: pages
+_ivmlib_bssp = * - 1
+        ldy     #0                      ;; patched: rest
+_ivmlib_bssr = * - 1
+        lda     #0                      ;; fill
+        jsr     _opmemset
+
+;;; -z: copy mem[] image to zp, down from the last byte. 0 bytes: none
+;;; 12 B
+_ivmlib_zpinit:
+        ldx     #0                      ;; patched: bytes
+_ivmlib_zplen = * - 1
+        beq     _ivmlib_start
+zpcp:   lda     $FFFF,x                 ;; patched: image - 1
+_ivmlib_zpsrc = * - 2
+        sta     $00,x                   ;; patched: zp base - 1
+_ivmlib_zpdst = * - 1
+        dex
+        bne     zpcp
+
+;;; JSR the JIT code, then exit (sim65: A = exit code) / back to BASIC
+;;; SIM 9 B, ATMOS 3 B
 _ivmlib_start:
 .ifdef SIM
-        ldx     #$FF
+        ldx     #$FF                    ;; no C stack: pvio points CSP
         txs
-        lda     #<SIM_SP
-        sta     CSP
-        lda     #>SIM_SP
-        sta     CSP+1
-.endif
-        ;; -z: copy initial mem[] image (globals + consts) to zero page
-        ldy     _ivmlib_zplen
-        beq     @nozp
-        lda     _ivmlib_zpsrc
-        sta     ptr1
-        lda     _ivmlib_zpsrc+1
-        sta     ptr1+1
-        ldx     _ivmlib_zpdst
-        ldy     #0
-@cp:    lda     (ptr1),y
-        sta     $00,x
-        inx
-        iny
-        cpy     _ivmlib_zplen
-        bne     @cp
-@nozp:
-        ;; static arrays (bss, not in the file): zeroed by opmemset, the
-        ;; last page first: its STA at bss + pages * 256, Y = rest, X = pages
-        ldy     _ivmlib_bssn
-        ldx     _ivmlib_bssn+1
-        bne     @bss
-        tya
-        beq     @nobss
-@bss:   lda     _ivmlib_bss
-        sta     _opmemset_adr
-        txa
-        clc
-        adc     _ivmlib_bss+1
-        sta     _opmemset_adr+1
-        lda     #0
-        jsr     _opmemset
-@nobss:
-        jsr     @call
-.ifdef SIM
+        jsr     $FFFF                   ;; patched: JIT code start
+_ivmlib_entry = * - 2
         jmp     exit                    ;; A = exit code (lo of result)
 .else
-        rts                             ;; back to BASIC
+        jmp     $FFFF                   ;; patched: its RTS returns to BASIC
+_ivmlib_entry = * - 2
 .endif
-@call:  lda     _ivmlib_entry           ;; via zp: no JMP ($xxFF) bug
-        sta     ptr2
-        lda     _ivmlib_entry+1
-        sta     ptr2+1
-        jmp     (ptr2)
 
-;;; ---------------------------------------------------------------------------
-;;; Variables, patched by ivm.c before the image is written (and for runs
-;;; in place: heap/heapend)
+;;; ---- cut 0: an -o image ends here if it calls nothing ----
+_ivmlib_cut0:
 
-_ivmlib_entry:   .word 0                ;; JIT code start (NOPs, JMP main)
-_ivmlib_heap:    .word 0                ;; next free heap byte
-_ivmlib_heapend: .word 0                ;; first byte after heap
-_ivmlib_bss:     .word 0                ;; static arrays: zeroed at start
-_ivmlib_bssn:    .word 0                ;; their bytes (< 32K)
-_ivmlib_zpsrc:   .word 0                ;; -z: mem[] image in the file
-_ivmlib_zpdst:   .byte 0                ;; -z: zp base
-_ivmlib_zplen:   .byte 0                ;; -z: bytes, 0 = mem[] not in zp
-_ivmlib_spzp:                           ;; sim65 header needs sp's zp address
-.ifdef SIM
-                 .byte CSP
-.else
-                 .byte 0
-.endif
+;;; ===========================================================================
+;;; m: memset. Self-moddifying (savas 1c/byte using LDA ,x instead of LDA (),y)
+;;;
+;;; A : fill byte
+;;; Y : rest (i.e. low byte size)
+;;; _opmemset_adr: pointer +
+;;;
+;;;   LDA #fill / LDY #rest / JSR _opmemset
+;;;
+;;; Algo: First rest of last page; full pages downwards.
+;;; NOTE: Max 32K (because terminate by BPL)
+;;; ===========================================================================
+
+;;; Only called for large/variable sized memset
+
+;;; 17 B; ~20 c + 10 c per byte + 11 c per page
+_opmemset:
+        cpy     #0
+        beq     opms_page               ;; no rest
+opms_loop:
+        dey
+opms_sta:
+        sta     $FFFF,y                 ;; operand patched by the caller
+        bne     opms_loop
+opms_page:
+        dec     opms_sta+2              ;; next page down
+        dex
+        bpl     opms_loop
+        rts
+_opmemset_adr = opms_sta + 1
+
+;;; ---- cut 1: ... no printing ----
+_ivmlib_cut1:
 
 pcbuf:  .byte   0                       ;; char for putchar/getchar
 pcx:    .byte   0
 pcy:    .byte   0
-
 
 ;;; ===========================================================================
 ;;; Character I/O trampolines
@@ -260,30 +300,21 @@ _opputchar:
         rts
 
 .ifdef SIM
-;;; push (fd=X, buf=&pcbuf) on the C stack by hand (no pushax: outside image),
-;;; AX = count 1. The paravirt hook pops them.
-;;; 36 B, ~60 c
-pvio:   lda     CSP
-        sec
-        sbc     #4
+;;; the args (buf=&pcbuf, fd=X) as a static frame: CSP points at it, the
+;;; hook pops them from there (and moves CSP: set again each call).
+;;; AX = count 1. No C stack.
+;;; 16 B + 4 B frame, ~24 c
+pvio:   stx     pvfd                    ;; fd lo (hi stays 0)
+        lda     #<pvframe
         sta     CSP
-        bcs     :+
-        dec     CSP+1
-:       ldy     #3
-        lda     #0
-        sta     (CSP),y                 ;; fd hi
-        dey
-        txa
-        sta     (CSP),y                 ;; fd lo
-        dey
-        lda     #>pcbuf
-        sta     (CSP),y                 ;; buf hi
-        dey
-        lda     #<pcbuf
-        sta     (CSP),y                 ;; buf lo
+        lda     #>pvframe
+        sta     CSP+1
         lda     #1
         ldx     #0
         rts
+
+pvframe: .word  pcbuf                   ;; buf
+pvfd:    .word  0                       ;; fd
 .endif
 
 ;;; ---------------------------------------------------------------------------
@@ -366,44 +397,8 @@ _opputs:
         beq     retax                   ;; wrapped past $FFFF
 
 
-
-;;; ===========================================================================
-;;; m: memset. Self-moddifying (savas 1c/byte using LDA ,x instead of LDA (),y)
-;;;
-;;; A : fill byte
-;;; Y : rest (i.e. low byte size)
-;;; _opmemset_adr: pointer +
-;;;
-;;;   LDA #fill / LDY #rest / JSR _opmemset
-;;;
-;;; Algo: First rest of last page; full pages downwards.
-;;; NOTE: Max 32K (because terminate by BPL)
-;;; ===========================================================================
-
-;;; Only called for large/variable sized memset
-
-;;; 17 B; ~20 c + 10 c per byte + 11 c per page
-_opmemset:
-        cpy     #0
-        beq     opms_page               ;; no rest
-opms_loop:
-        dey
-opms_sta:
-        sta     $FFFF,y                 ;; operand patched by the caller
-        bne     opms_loop
-opms_page:
-        dec     opms_sta+2              ;; next page down
-        dex
-        bpl     opms_loop
-        rts
-_opmemset_adr = opms_sta + 1
-
-
-
-;;; ---- cut 0: an -o image ends here if it calls none of the below ----
-_ivmlib_cut0:
-
-
+;;; ---- cut 2: ... no mul/div/mod ----
+_ivmlib_cut2:
 ;;; ===========================================================================
 ;;; Arithmetic: JT = first (ACC), AX = second, AX = result (unsigned 16 bit)
 ;;; ===========================================================================
@@ -487,8 +482,8 @@ _opdiv:
 
 
 
-;;; ---- cut 1: ... none of the below ----
-_ivmlib_cut1:
+;;; ---- cut 3: ... no malloc/free ----
+_ivmlib_cut3:
 
 ;;; ===========================================================================
 ;;; Heap: bump allocator, zeroed (calloc), even sizes. free is a no-op.
@@ -556,10 +551,13 @@ _opmalloc:
 _opfree:
         rts
 
+_ivmlib_heap:    .word 0                ;; next free heap byte
+_ivmlib_heapend: .word 0                ;; first byte after heap
 
 
-;;; ---- cut 2: ... not getchar (the JIT never calls it) ----
-_ivmlib_cut2:
+
+;;; ---- cut 4: ... not getchar (the JIT never calls it) ----
+_ivmlib_cut4:
 
 ;;; ===========================================================================
 ;;; Not used by JIT code (after the last cut)

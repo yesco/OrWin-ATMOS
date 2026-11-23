@@ -2877,7 +2877,7 @@ static void mm_print(uchar n) {
     // the routines (the startup before them)
     case MM_LIB:
       #ifndef HOSTSIM
-      mm_add(mm_at[j], "startup, loader");
+      mm_add(mm_at[j], "startup");
       #endif
       for (k = 0; k <= LIB_MEMSET; k++) {
         #ifndef HOSTSIM

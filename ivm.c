@@ -294,12 +294,19 @@ static word runs = 1;   // -rN
 #ifdef JIT_6502
   // ivm-lib.asm (link it FIRST): [start .. end[ is copied by -o
   extern uchar ivmlib_start[], ivmlib_end[];
+  // the startup in parts: an image starts at the first it needs
+  // (jit_libbeg): init (bss), zpinit (-z), start
+  extern uchar ivmlib_init[], ivmlib_zpinit[];
   // the lib is in tiers: an -o image ends at the cut after the last
   // routine its code calls (jit_lib_more)
-  extern uchar ivmlib_cut0[], ivmlib_cut1[], ivmlib_cut2[];
-  extern word  ivmlib_dst, ivmlib_bss, ivmlib_bssn;
+  extern uchar ivmlib_cut0[], ivmlib_cut1[], ivmlib_cut2[], ivmlib_cut3[],
+    ivmlib_cut4[];
+  // patched operands (startup), vars (heap)
+  extern word  ivmlib_dst;
+  extern uchar ivmlib_bssp, ivmlib_bssr;   // bss: pages, rest
   extern word  ivmlib_entry, ivmlib_heap, ivmlib_heapend, ivmlib_zpsrc;
   extern uchar ivmlib_zpdst, ivmlib_zplen, ivmlib_spzp;
+  extern uchar ivmlib_zplo;           // -z mem[] from here up: the lib's zp below
 
   #if defined(__SIM6502__) || defined(__SIM65C02__)
     // sim65, run in place = load the -o image into memory: code made for
@@ -308,6 +315,7 @@ static word runs = 1;   // -rN
     // C stack at $F000-$FF00, 'q' exits sim65
     #define JIT_INMEM
     extern word ivmlib_seg[8];            // 4 x (src, len)
+    extern word ivmlib_run;               // the loader's JMP: image start
     extern uchar ivmlib_load[];
   #endif
 #endif
@@ -1820,10 +1828,10 @@ char save_blob(const char *path, uchar *img, int len) {
 
 // ---- -t -z -a -o support -------------------------------------------------
 //
-// -o image (all at fixed addresses, loads at ivmlib_start):
-//   [hdr][ivm-lib: ivmlib_start..a cut[][mem[] image][strings][0 gap][JIT code]
-// Entry is ivmlib_start: it sets up (sim65 sp, -z copy of mem[] to zp),
-// JSRs the JIT code (ivmlib_entry), then exits (sim65) or RTS (atmos).
+// -o image (all at fixed addresses, loads at jit_libbeg):
+//   [hdr][ivm-lib: jit_libbeg..a cut[][mem[] image][strings][0 gap][JIT code]
+// Entry is jit_libbeg: the startup parts it needs (bss zeroed, -z copy of
+// mem[] to zp), JSR the JIT code (ivmlib_entry), exit (sim65) / RTS (atmos).
 // Heap (opmalloc) bumps from the end of the image up to the target's heapend.
 
 #if defined(__SIM6502__) || defined(__SIM65C02__)
@@ -1849,17 +1857,29 @@ static uchar  *jit_blob;            // the loaded blob (its real address)
 static uchar  *jit_data;            // blob string section
 static word    jit_membytes, jit_datalen, jit_imgmem, jit_imgdata;
 static word    jit_bss_at, jit_bss_n;    // static arrays (-o / in place)
-static uchar  *jit_libend;              // the image's lib: start .. a cut
+static uchar  *jit_libbeg;              // the image's lib: a startup part ..
+static uchar  *jit_libend;              // .. a cut
+static word    jit_libfloor;            // the startup's own call: memset (bss)
 
 static word    jit_heapend;             // the heap's end (the bss below it)
 
 // The lib the image has: up to the cut after the last routine the code
 // calls (lc_libtop: the JIT notes each JSR into it). 1: more than the
 // layout had, so lay out and compile again
+// the cut after lib address top (the highest routine called)
+static uchar *jit_cut(word top) {
+  static uchar *const cut[] = { ivmlib_cut0, ivmlib_cut1, ivmlib_cut2,
+    ivmlib_cut3, ivmlib_cut4 };
+  uchar k;
+
+  if (top < jit_libfloor) top = jit_libfloor;
+  for (k = 0; k < 4 && top >= (word)(unsigned)cut[k]; k++) ;
+  return cut[k];
+}
+
 static uchar jit_lib_more(void) {
-  uchar *need = lc_libtop < (word)(unsigned)ivmlib_cut0 ? ivmlib_cut0 :
-                lc_libtop < (word)(unsigned)ivmlib_cut1 ? ivmlib_cut1 :
-                ivmlib_cut2;
+  uchar *need = jit_cut(lc_libtop);
+
   if (need <= jit_libend) return 0;
   jit_libend = need;
   return 1;
@@ -1891,7 +1911,11 @@ static int jit_layout(Process *proc, uchar *base, word *mem_base, word *out_org)
   // the strings: from data to the blob's end (cc65: data is absolute)
   jit_datalen  = bh->data ?
     (word)((unsigned)jit_blob + bh->len - (unsigned)jit_data) : 0;
-  if (!jit_libend) jit_libend = ivmlib_cut0;  // first the smallest lib
+  // startup: from the first part needed; bss needs memset
+  jit_libbeg = bss_n ? ivmlib_init : jit_force_zp ? ivmlib_zpinit :
+    ivmlib_start;
+  jit_libfloor = bss_n ? rule_ref(LIB_MEMSET) : 0;
+  if (!jit_libend) jit_libend = jit_cut(0);   // first the smallest lib
   jit_imgmem   = (word)(unsigned)jit_libend;
   jit_imgdata  = (word)(jit_imgmem + jit_membytes);
 
@@ -1908,6 +1932,14 @@ static int jit_layout(Process *proc, uchar *base, word *mem_base, word *out_org)
       printf("%%JIT: -z: mem[] $%02X+%u bytes overruns $FA\n", jit_zp, jit_membytes);
       return 0;
     }
+
+    // lib zp: below ivmlib_zplo
+    if (jit_zp < ivmlib_zplo) {
+      printf("%%JIT: -z: mem[] at $%02X hits the lib's zp (below $%02X)\n",
+        jit_zp, ivmlib_zplo);
+      return 0;
+    }
+
     *mem_base = jit_zp;
     printf("--- JIT: mem[] in zp $%02X-$%02X ---\n",
       jit_zp, jit_zp + jit_membytes - 1);
@@ -1951,16 +1983,22 @@ static int jit_layout(Process *proc, uchar *base, word *mem_base, word *out_org)
   lc_initmem = jit_memimg;    // a fresh load: _start's inits go in here
 
   // static arrays: page aligned at the top, below the target's heapend:
-  // not in the file, zeroed by the startup (ivmlib_bss, opmemset)
+  // not in the file, zeroed by the startup (ivmlib_init, opmemset)
   bss_img = (word)((jit_tg->heapend - bss_n) & 0xFF00);
   if (bss_n) bss_move(jit_memimg + bh->constidx, bss_end, bss_img);
   jit_bss_at = bss_img; jit_bss_n = bss_n;
   jit_heapend = bss_n ? bss_img : jit_tg->heapend;
-  ivmlib_bss = bss_img; ivmlib_bssn = bss_n;
+  if (bss_n) {
+    ivmlib_bssp = (uchar)(bss_n >> 8);         // startup: memset X, Y
+    ivmlib_bssr = (uchar)bss_n;
+    opmemset_adr[0] = 0;                        // .. its last page
+    opmemset_adr[1] = (uchar)((bss_img + bss_n) >> 8);
+  }
 
+  // -z: copied down from the last byte (operands: base - 1)
   if (!jit_force_zp) *mem_base = jit_imgmem;
-  ivmlib_zpsrc = jit_imgmem;
-  ivmlib_zpdst = (uchar)jit_zp;
+  ivmlib_zpsrc = (word)(jit_imgmem - 1);
+  ivmlib_zpdst = (uchar)(jit_zp - 1);
   ivmlib_zplen = jit_force_zp ? (uchar)jit_membytes : 0;
 
   *out_org = (word)(jit_imgdata + jit_datalen);
@@ -1979,7 +2017,7 @@ static int jit_layout(Process *proc, uchar *base, word *mem_base, word *out_org)
 // copied library bytes carry them.
 static int jit_save(uchar *out, word size, word org) {
   FILE *f;
-  word lib = (word)(unsigned)ivmlib_start;
+  word lib = (word)(unsigned)jit_libbeg;
   word end = (word)(org + size);              // first byte after image
   word gap = (word)(org - (jit_imgdata + jit_datalen));
   uchar h[17];
@@ -2002,7 +2040,7 @@ static int jit_save(uchar *out, word size, word org) {
     #endif
     h[7]  = ivmlib_spzp;
     h[8]  = (uchar)lib; h[9]  = (uchar)(lib >> 8);   // load
-    h[10] = (uchar)lib; h[11] = (uchar)(lib >> 8);   // reset = ivmlib_start
+    h[10] = (uchar)lib; h[11] = (uchar)(lib >> 8);   // reset = its start
     n = 12;
   } else if (jit_tg->hdr == 2) {        // oric tap, machine code, autorun
     h[0] = h[1] = h[2] = 0x16; h[3] = 0x24;
@@ -2019,7 +2057,7 @@ static int jit_save(uchar *out, word size, word org) {
   f = fopen(jit_outfile, "wb");
   if (!f) { printf("cannot write %s\n", jit_outfile); return 0; }
   fwrite(h, 1, n, f);
-  fwrite(ivmlib_start, 1, (unsigned)(jit_libend - ivmlib_start), f);
+  fwrite(jit_libbeg, 1, (unsigned)(jit_libend - jit_libbeg), f);
   fwrite(jit_memimg, 1, jit_membytes, f);
   fwrite(jit_data, 1, jit_datalen, f);
   while (gap--) fputc(0, f);
@@ -2048,6 +2086,7 @@ static void jit_load(uchar *out, word size, word org) {
   ivmlib_seg[6] = (word)(unsigned)out;        ivmlib_seg[7] = size;
 
   ivmlib_dst     = jit_imgmem;            // after the image's lib
+  ivmlib_run     = (word)(unsigned)jit_libbeg;   // its startup
   ivmlib_entry   = org;
   ivmlib_heap    = (word)((end + 0xFF) & ~0xFF);   // page: no (zp),Y crossing
   ivmlib_heapend = jit_heapend;
@@ -2187,8 +2226,8 @@ word jit_compile(Process* proc) {
       #endif
         word heap = (word)((out_org + jit_size + 0xFF) & ~0xFF);
         mm_area(MM_SLOTS, mem_base, jit_membytes);
-        mm_area(MM_LIB, (word)(unsigned)ivmlib_start,
-                (word)(jit_libend - ivmlib_start));
+        mm_area(MM_LIB, (word)(unsigned)jit_libbeg,
+                (word)(jit_libend - jit_libbeg));
         if (mem_base != jit_imgmem)            // -z: the zp copy's source
           mm_area(MM_IMG, jit_imgmem, jit_membytes);
         mm_area(MM_DATA, jit_imgdata, jit_datalen);
