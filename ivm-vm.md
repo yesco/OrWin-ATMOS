@@ -1,4 +1,6 @@
-# JSK thinking
+# IVM Virtual Machine - Some random implementaiton notes
+
+TODO: edit!
 
 Actually the ALTCODE=1 and INLINE of FIXIPC: I think the dispatch is
 very expensive,a ND ALTCODE was one attempt to improve on that, I

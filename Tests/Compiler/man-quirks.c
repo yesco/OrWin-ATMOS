@@ -5,9 +5,6 @@
 
 #include <stdio.h>
 
-struct sc { char c; int n; };
-struct sc v;
-
 int w[3] = {1, 2, 3};
 
 int keep(void) {
@@ -26,20 +23,10 @@ int main(void) {
   printf("%d ", x);
   if (x < 0) printf("neg\n"); else printf("pos\n");
 
-  // 017 is decimal: octal is 0o17
-  printf("octal:\t\t17 15\n\t\t");
-  x = 017; printf("%d ", x);
-  x = 0o17; printf("%d\n", x);
-
   // a local array is static: its initializer runs once
   printf("static array:\t6 7\n\t\t");
   printf("%d ", keep());
   printf("%d\n", keep());
-
-  // a char field is a word
-  printf("char field:\t300\n\t\t");
-  v.c = 300;
-  printf("%d\n", v.c);
 
   // ptr + n in an expression: bytes, not elements (p++ p += n scale)
   printf("ptr + 1:\t512 2\n\t\t");

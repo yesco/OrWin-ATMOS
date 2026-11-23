@@ -28,11 +28,12 @@ int main(void) {
   printf("word:\t\t65535\n\t\t");
   w = 65535; printf("%u\n", w);
 
-  // literals: decimal hex binary octal (0o) char
-  printf("literals:\t31 5 15 97 10 92\n\t\t");
+  // literals: decimal hex binary octal (0o17 or, as in C, 017) char
+  printf("literals:\t31 5 15 15 97 10 92\n\t\t");
   x = 0x1f; printf("%d ", x);
   x = 0b101; printf("%d ", x);
   x = 0o17; printf("%d ", x);
+  x = 017; printf("%d ", x);
   x = 'a'; printf("%d ", x);
   x = '\n'; printf("%d ", x);
   x = '\\'; printf("%d\n", x);

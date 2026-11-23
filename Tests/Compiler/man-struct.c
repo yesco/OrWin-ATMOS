@@ -14,11 +14,15 @@
 
 struct pt { int x; int y; };
 struct node { int v; struct node *next; };
+struct cn { char c; int n; struct cn *nx; };
 
 struct pt p;
 struct pt g = {5, 6};
 struct pt sa[8];
 __striped struct pt st[8];
+struct cn cv;
+struct cn ca[8];
+__striped struct cn cs[8];
 
 void move(struct pt *q, int d) {
   q->x += d;
@@ -37,6 +41,7 @@ int main(void) {
   struct pt *q;
   struct pt *ps[4];
   struct node *n;
+  struct cn *cp;
   int i;
 
   printf("fields:\t\t3 4 5 6\n\t\t");
@@ -76,5 +81,37 @@ int main(void) {
   printf("%d ", sa[3].y);
   st[1].y += 300;
   printf("%d\n", st[1].y);
+
+  // sizeof: in ints (gcc's int is 4 bytes, ours 2)
+  printf("sizeof:\t\t2 2 16 16\n\t\t");
+  i = sizeof(struct pt) / sizeof(int); printf("%d ", i);
+  i = sizeof(p) / sizeof(int); printf("%d ", i);
+  i = sizeof(sa) / sizeof(int); printf("%d ", i);
+  i = sizeof(st) / sizeof(int); printf("%d\n", i);
+  // a char field is a byte (as a char variable): [ ] ops, the lo byte
+  printf("char fields:\t44 300 45 66 6 7 1\n\t\t");
+  cv.c = 300; cv.n = 300;
+  printf("%d ", cv.c);
+  printf("%d ", cv.n);
+  cv.c++;
+  printf("%d ", cv.c);
+  cp = &cv;
+  cp->c = 'B';
+  printf("%d ", cp->c);
+  cv.nx = &cv;
+  cp->nx->c = 6;
+  printf("%d ", cv.c);
+  cp->c += 1;
+  printf("%d ", cp->nx->c);
+  cv.c = 257;
+  printf("%d\n", cv.c);
+
+  printf("a[i].c:\t\t44 45 1 2 300\n\t\t");
+  i = 3;
+  ca[i].c = 300;  printf("%d ", ca[3].c);
+  ca[i].c++;      printf("%d ", ca[i].c);
+  cs[i].c = 257;  printf("%d ", cs[i].c);
+  cs[i + 1].c = 2; printf("%d ", cs[4].c);
+  cs[i].n = 300;  printf("%d\n", cs[3].n);
   return 0;
 }

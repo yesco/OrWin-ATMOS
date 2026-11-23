@@ -29,6 +29,7 @@ int main(void) {
   x = a++;                   // ERR ++ only as a statement
   x *= 2;                    // ERR only += and -=
   x <<= 1;                   // ERR the same
+  x = 09;                    // ERR 0... is octal: no 8 or 9
   x = a * b + c;
   x = f(a) + (b * c);
   return x;

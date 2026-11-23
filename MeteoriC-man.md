@@ -2,24 +2,43 @@
 
 ## Introduction
 
-MeteoriC-65 is the C compiler of the IVM project, a small system for
-the 6502 (sim65, Oric Atmos): a bytecode VM, a 6502 JIT, and compilers
-for C and Pascal that are small enough to run on the 6502 itself.
+MeteoriC-65 is a limited C compiler (subset) for the OrWin-ATMOS
+project.  Its used to run several cooperative programs at the same
+time using a virtual machine (VM). This is similar to the
+`UCSD-Pascal` system, however creating smaller byte-code programs, and
+with a faster virtual machine that interprets them.  It mainly
+focusses on a small virtual machhine (IVM) for the 6502 (sim65, Oric
+Atmos): a bytecode VM, a 6502 JIT, with compilers for C and Pascal.
+These are small enough to run on the 6502 itself.
 
-`parse` with the grammar `c.bnf` turns a C file into an `.ivm` bytecode
-image. The design, from the `parse.c` header: a tiny declarative grammar
-both *recognises* the source and *emits* the bytecode in the same rules,
-matched by an iterative backtracking engine (no recursion in C), "a direct
-descendant of META II": no AST, no separate IR, no register allocator, just
-"match this pattern, drop these bytes". The grammar *is* the compiler: a
-new idiom (a loop form, a fused op) is one more line in `c.bnf`.
+Currently, it probably generates the smallest binaries for simple
+programs, with minimal overhead. The code generated for the supported
+C-subset is more efficient than `CC65` nearing `oschar64` in
+performance. It performs limited peep-hole optimizations on byte-code
+and has optimized fused operators for fast loops. The JIT outputs
+variants of that optimizes the generated 6502 code both in size and
+speed.
 
-The bytecode (`ivm.c`, `ivm-vm.md`) is for an ACCumulator machine with
-readable opcodes (`L` load, `S` store, `+`, `I` increment, ...), a register
-for every variable (up to 254 slots: globals, frames, constants), a static
-stack (FORTRAN style: each function's frame is fixed memory, frames of
-functions never active together share it), call vectors, and loop ops for
-the common counting loops.
+The way it functions: `parse` with the grammar `c.bnf` turns a C file
+into an `.ivm` bytecode image. The design, from the `parse.c` header:
+a tiny declarative grammar both *recognises* the source and *emits*
+the bytecode in the same rules, matched by an iterative backtracking
+engine. It's written iteratively, thus isn't a call-recursive descent
+parser implementation but its process is basiclly intepretes BNF
+rules. It coiuld be said to be "a direct descendant of META II": no
+AST, no separate IR, no register allocator, just "match this pattern,
+drop these bytes". The grammar *is* the compiler: a new idiom (a loop
+form, a fused op) is one more line in `c.bnf`. There is also a smaller
+`p.bnf` implementing a similar, but smaller pascal compiler.
+
+The bytecode (`ivm.c`, `ivm-vm.md` implementation notes) is for an
+ACCumulator machine with ASCII readable opcodes (`L` load, `S` store,
+`+`, `I` increment, ...), a register for every variable (up to 254
+slots: globals, frames, constants), a static compressed stack (FORTRAN
+style: each function's frame is fixed memory, frames of functions
+never active together share it), call vectors, and loop ops for the
+improving interpretation speed and minimizing code of/for common
+counting loops.
 
 | backend   | what                                | command                    |
 |-----------|-------------------------------------|----------------------------|
@@ -27,19 +46,26 @@ the common counting loops.
 | `ivm-asm` | the VM in 6502 assembler            | `./ivm-asm prog`           |
 | `ivm-jit` | a 6502 JIT: bytecode to native code | `./ivm-jit prog [-z]`      |
 | `jit`     | gen native code and run on a 6502   | `./jit prog ...            |
+|`ivm-count`| virtual machine with "profiling"    | `./ivm-count prog ...      |
+|`ivm-trace`| virtual machine with tracing of ops | `./ivm-trace prog ...      |
 
-The same `.ivm` runs on all of them.
+The same `.ivm` file runs on all of them. The JIT variants generate
+actual binary 6502 machine code that is executed directly, or can be
+saved as a stand-alone program, effectively making it a native
+compiler. It's now, working for generating .sim files for `sim65`.
 
 ### Context and features
 
-- The compiler runs on the host (gcc / clang) and on the 6502 (cc65).
+- The compiler either runs on the host (gcc / clang), or on the 6502
+  (compiled by `cc65`). 
 - Small: the cc65 build of `parse` is about 38 KB; programs are bytecode
   (a statement is a few bytes), the JIT makes 6502 code at load.
-- Errors are reported and skipped, all of a file in one run.
-- Speed comes from the grammar: common idioms (counting loops, `memset`
-  loops, `x++`, compare-and-branch, array indexing, struct fields) have
-  their own ops; the JIT turns them into tight 6502 code (`LDY i / LDA
-  a,Y`).
+- Several Errors are reported and skipped, for the whole file in one run.
+
+- Actual execution speed comes from the specialized optimizing
+  grammar: common idioms (counting loops, `memset` loops, `x++`,
+  compare-and-branch, array indexing, struct fields) have their own
+  ops; the JIT turns them into tight 6502 code (`LDY i / LDA a,Y`).
 
 ### Goals
 
@@ -47,26 +73,32 @@ The same `.ivm` runs on all of them.
 - Rules, templates, the grammar (data) rather than C code.
 - A useful C subset for small 6502 programs: integers, chars, arrays,
   pointers, structs, functions, the usual statements.
+- Standard compliant as much as possible. Restricted to be safe.
 - Errors, not silent surprises: what does not compile is reported.
 
 ### Non-goals
 
-- Full ANSI C, or compiling existing C programs unchanged.
-- A stack: recursion, reentrant functions.
-- `long`, floating point, signed arithmetic, a full standard library.
-- A classic optimizing compiler (AST, IR, register allocation).
+- NO: Full ANSI C, or compiling existing C programs unchanged.
+- NO: Dynamic stack: recursion, reentrant functions.
+- NO: `long`, floating point, signed arithmetic.
+- NO: Full standard library.
+- NO: Classic optimizing compiler (AST, IR, register allocation).
 
 It is not a complete C compiler: a statement that matches no rule is
-reported as an error (file, line, a caret), parsing goes on with the next
-statement, and no `.ivm` is written. So most things that are not supported
-simply do not compile. The dangerous cases are the few that compile but do
-something other than C would: they are marked **NOTE (silent)** below.
+reported as an error (file, line, a caret), parsing goes on with the
+next statement, and no `.ivm` is written. So most things that are not
+supported simply do not compile. The dangerous cases are the few that
+compile but do something other than C would: they are marked **NOTE
+(silent)** below. In general it is intended that they would be
+detected and disallowed/give error. Report any differences of
+incorrect code execution.
 
-This manual describes the language from a programmer's view: what works,
-what does not (with a rewrite where there is one), and what is cheap or
-expensive on each backend. Every example is checked by a file in
-`Tests/Compiler/` (`man-*.c`, run `./run.sh` there): what works compiles
-and gives what gcc gives, what does not is a reported error.
+This manual describes the language from a programmer's view: what
+works, what does not (but that with a rewrite can can work), and what
+is cheap or expensive on each backend. Every example is checked by a
+file in [`Tests/Compiler/`](Tests/Compiler/) (`man-*.c`, run
+[`./run.sh`](Tests/Compiler/run.sh) there): what works compiles and
+gives what gcc gives, what does not is a reported error.
 
 ---
 
@@ -74,18 +106,18 @@ and gives what gcc gives, what does not is a reported error.
 
 | area | |
 |------|---|
-| types | `int` `unsigned int` `word` (16 bit), `char` `unsigned char` (8 bit), `void`, pointers, `struct` |
+| types        | `word` `unsigned int` (16 bit), `char` `unsigned char` (8 bit), `void`, pointers, `struct`, for convenience `int` but comparisions may not agree, TODO: warnings |
 | declarations | globals, locals, several per line, initializers, `const`, `static`, `register` |
-| expressions | `+ - * / % & ^ \|` `<< >>`, compares (as values too), `!`, casts, calls anywhere, `sizeof` |
-| assignment | `=` `+=` `-=` `++` `--` |
-| statements | `if` / `else`, `while`, counting `for` loops (up, down, `<` `<=`, a variable limit or step), blocks, `return` |
-| functions | parameters, `int` / `char` / pointer results, calls in expressions and as arguments |
-| arrays | `char` and `int` arrays, initializers (`{...}`, `"..."`, size from the initializer), `sizeof`, any index expression |
-| pointers | `char *` `int *` `struct *`, `*p` `*p++` `p[i]` `p++` `p += n`, strings, `malloc` / `free` / `memset` |
-| structs | fields `s.f` `p->f`, initializers, pointers, chains (`a.next->v`, `ps[i]->x`, `mk()->x`), arrays of pointers, arrays of structs (SoA, `__striped`) |
-| output | `printf` (text, one number, a string), `putchar` `puts` `fputs`, `getchar` |
-| preprocessor | `#define` (numbers, strings), `#ifdef` `#ifndef` `#if` `#else` `#endif`, `__MC65__` |
-| tools | error recovery, `-O` (packing, peephole), `-S` (striping), `-v` (bytecode per statement) |
+| expressions  | `+ - * / % & ^ \|` `<< >>`, compares (as values too), `!`, casts, calls anywhere, `sizeof` |
+| assignment   | `=` `+=` `-=` `++` `--` |
+| statements   | `if` / `else`, `while`, counting `for` loops (up, down, `<` `<=`, a variable limit or step), blocks, `return` |
+| functions    | parameters, `int` / `char` / pointer results, calls in expressions and as arguments |
+| arrays       | `char` and `int` arrays, initializers (`{...}`, `"..."`, size from the initializer), `sizeof`, any index expression |
+| pointers     | `char*` `word*` `struct *` `int*` `*p` `*p++` `p[i]` `p++` `p += n`, strings, `malloc` / `free` / `memset` |
+| structs      | fields `s.f` `p->f`, initializers, pointers, chains (`a.next->v`, `ps[i]->x`, `mk()->x`), arrays of pointers, arrays of structs (SoA, `__striped`) |
+| output       | `printf` (text, one number, a string), `putchar` `puts` `fputs` `getchar` `putz` `putn` |
+| preprocessor | `#define` (numbers, strings), simple: `#ifdef` `#ifndef` `#if` `#else` `#endif`, `__MC65__` |
+| tools        | error recovery, `-O` (packing, peephole), `-S` (striping), `-v` (bytecode per statement) |
 
 ---
 
@@ -93,14 +125,16 @@ and gives what gcc gives, what does not is a reported error.
 
 On host (does "more" optimizations, and more verbose output):
 
-    ./pc prog          builds parse.x (clang -DRUN -DVERBOSE -DSYMS) and runs
-                       parse.x -O -v c.bnf prog.c
+    ./pc prog          builds parse.x and runs parse.x
+                       `(clang -DRUN -DVERBOSE -DSYMS)` and runs
+                       `parse.x -O -v c.bnf prog.c`
+
     parse.x [-v ...] [-O] [-S] c.bnf prog.c
 
 On simulated 6502:
 
     ./parse prog       builds parse.sim (cc65) and runs it in sim65:
-                       parse.sim -v c.bnf prog.c
+                       `parse.sim -v c.bnf prog.c`
 
 Both write `prog.ivm`; a `-DRUN` build also runs it (on the VM in C).
 
@@ -120,7 +154,7 @@ The compiler predefines `__MC65__` (the `.ivm` version) and
 #endif
 ```
 
-All the `test-*.c` files and `Tests/Compiler/man-*.c` are written that
+All the `test-*.c` files and [`Tests/Compiler/man-*.c`](Tests/Compiler/) are written that
 way: gcc's output is the reference (except where `int` size shows, see 3).
 
 ---
@@ -172,19 +206,20 @@ int main(void) {
 
 | | |
 |---|---|
-| `#define NAME number` / `"string"` | a constant (a `const`, no storage) |
+| `#define NAME number` / `"string"`  | a constant (a `const`, no storage) |
 | `#ifdef` `#ifndef` `#else` `#endif` | nested ones too |
-| `#if 0` `#if 1` | a number |
-| `__MC65__` `__TARGET_6502__` | predefined |
-| `#pragma timed "name"` | cycle marks (the JIT on the host simulator) |
-| other `#` lines (`#include`) | skipped |
+| `#if 0` `#if 1`                     | a number |
+| `__MC65__` `__TARGET_6502__`        | predefined |
+| `#pragma timed "name"`              | cycle marks (the JIT on the host simulator) |
+| other `#` lines (`#include`)        | skipped |
 
-Examples: `Tests/Compiler/man-pp.c`.
+Examples: [`man-pp.c`](Tests/Compiler/man-pp.c).
 
 **NOTE:** `#define` takes one number or string (no expressions, no
-arguments: use a `const int`, a function). **NOTE (silent):** `#if NAME`
-is always true (only a number is evaluated): use `#ifdef`.
-*TODO: evaluate a name.*
+arguments: use a `const int`, a function).
+
+**NOTE (silent):** `#if NAME` is always true (only a number is
+evaluated): use `#ifdef`.  *TODO: evaluate a name.*
 
 ---
 
@@ -192,13 +227,15 @@ is always true (only a number is evaluated): use `#ifdef`.
 
 | type | size | notes |
 |------|------|-------|
-| `int`, `unsigned int`, `word` | 16 bit | all arithmetic is **unsigned** 16 bit |
-| `char`, `unsigned char` | 8 bit | **unsigned**: 0..255, wraps |
-| `void` | | function results / params |
-| `char *`, `int *` (any `T *`) | 16 bit | |
-| `struct NAME`, `struct NAME *` | | see 10 |
+| `word`, `unsigned int`, `int` | 16 bit | all arithmetic is **unsigned** 16 bit |
+| `char`, `unsigned char`       | 8 bit  | **unsigned**: 0..255, wraps |
+| `void`                        |        | function results / params |
+| `char *`, `int *` (any `T *`) | 16 bit |                           |
+| `struct NAME`, `struct NAME *`| slots  | see 10                    |
 
-`sizeof(char)` is 1, `sizeof(int)` and any pointer 2.
+`sizeof(char)` is 1, `sizeof(int)` and any pointer 2. `sizeof(struct
+pt)`, `sizeof(p)` of a struct variable and `sizeof(a)` of an array of
+structs (plain or `__striped`) are their size in bytes: 2 per field.
 
 **NOTE (silent):** `int` is 16 bits and unsigned. Compares are unsigned,
 `%d` prints unsigned, and there are no negative literals:
@@ -217,7 +254,7 @@ Test the top bit when you need a sign: `if (x & 0x8000)`.
 **NOTE:** not supported: `long`, `short`, `float`/`double`, `signed`,
 `typedef`, `enum`, `union`, 2D arrays (`int m[3][3]`).
 
-Examples: `Tests/Compiler/man-types.c`, errors: `man-decl-err.c`.
+Examples: [`man-types.c`](Tests/Compiler/man-types.c), errors: [`man-decl-err.c`](Tests/Compiler/man-decl-err.c).
 
 ---
 
@@ -239,8 +276,8 @@ static int s;             /* accepted */
 - Locals: an initializer may be any expression: `int x = f(2) + 1;`.
 - Declarations may come after statements in a block.
 
-**NOTE:** a global initializer must be a constant (a number, a string, a
-`#define` / `const`, another global's name):
+**NOTE:** a global initializer must be a constant (a number, a string,
+a `#define` / `const`, another global's name):
 
 ```c
 int g = 5;                /* ok */
@@ -249,8 +286,9 @@ char *code = (char *)0x500; /* error too: the cast is an expression */
 char *code = 0x500;         /* ok (gcc wants the cast here) */
 ```
 
-**NOTE:** writing a constant is an error, also the name of an array or a
-static struct (it is the address):
+**NOTE:** writing to a constant (variable) is an error, also the name
+of an array or a static struct (it is the address), as well as a
+#defined name:
 
 ```c
 #define N 3
@@ -259,7 +297,7 @@ int w[4], v[4];
 N = 4;     two = 3;     two++;     w = v;     /* error: const modified */
 ```
 
-Examples: `Tests/Compiler/man-decl.c`, errors: `man-decl-err.c`.
+Examples: [`man-decl.c`](Tests/Compiler/man-decl.c), errors: [`man-decl-err.c`](Tests/Compiler/man-decl-err.c).
 
 ---
 
@@ -269,30 +307,37 @@ Examples: `Tests/Compiler/man-decl.c`, errors: `man-decl-err.c`.
 
 | works | |
 |-------|---|
-| `+ - * / % & ^ \|` `<< >>` | binary |
-| `< <= > >= == !=` | give 0 / 1, also as values: `x = a < b;` |
-| `!x` | binds tight: `!a + 1` is `(!a) + 1` |
-| `(char)x` `(char *)p` `(int *)p` | casts |
-| `f(a, b)` | calls, also in expressions and as arguments: `add(f(1), f(2))` |
-| `sizeof(T)` `sizeof(a)` | see 3, 8 |
-| `0x1f` `0b101` `0o17` `'a'` `'\n'` | literals |
+| `+ - * / % & ^ \|` `<< >>`         | binary |
+| `< <= > >= == !=`                  | give 0 / 1, also as values: `x = a < b;` |
+| `!x`                               | binds tight: `!a + 1` is `(!a) + 1` |
+| `(char)x` `(char *)p` `(int *)p`   | casts |
+| `f(a, b)`                          | calls, also in expressions and as arguments: `add(f(1), f(2))` |
+| `sizeof(T)` `sizeof(a)`            | see 3, 8 |
+| `0x1f` `0b101` `017` `0o17` `'a'` `'\n'` | literals (`017` and `0o17`: octal, as in C) |
 
 **NOTE:** not supported in expressions: unary minus (`-x`, `-5`: write
 `0 - x`), `~x` (write `x ^ 0xffff`), `&&` `||` (nest the `if`s), `?:`,
 assignments (`b = (a = 3)`, `a = b = 3`), `x++` / `--x` inside an
 expression, `*(p + 1)` (write `p[1]`), `&x` of a plain variable.
 
-**NOTE (silent):** `017` is decimal 17, not octal: write `0o17`.
 
 ### 5.2 Precedence: left to right, never "up"
 
-There are no precedence levels in the usual sense. An expression is read
-**left to right**, and after an operator only an operator of the **same
-or a looser** level may follow. A tighter one after a looser one is an
-error; it never computes the wrong value. The levels, tightest first:
+The precedence levels are strictly adhered to, but restricted to what
+is only very efficient in a `train of operators` manipulating the
+transformed value.  An expression is read **left to right**, and after
+an operator only an operator of the **same or a lower** level may
+follow. A tighter one after a looser one is an error; it never allows
+to express a semanticially errorious calculation. So result is always
+correct. This optimizes efficiency, and exceptions can be made using
+parenthesized expressions, or using an explicitly defined temp
+variable (equivalant).
+
+The levels, tightest first:
 
 | level | operators |
 |-------|-----------|
+| 0 | the operands: `!x` `*p` `(char)x` `sizeof(T)` `f(a)` `a[i]` `p->f` `( ... )` |
 | 1 | `* / %` |
 | 2 | `+ -` |
 | 3 | `<< >>` |
@@ -301,6 +346,9 @@ error; it never computes the wrong value. The levels, tightest first:
 | 6 | `&` |
 | 7 | `^` |
 | 8 | `\|` |
+
+Level 0 always binds tightest: `!a + 1` is `(!a) + 1`, `*p * 2` is
+`(*p) * 2`. `++` and `--` are not operators here but statements (5.3).
 
 So C's precedence holds wherever the expression parses:
 
@@ -325,8 +373,9 @@ if (a + 1 <= b) ...      /* rewrite: the arithmetic first */
 if (a <= b) ...          /* or simpler */
 ```
 
-Parentheses cost nothing: `35 + (d * a)`, `(d * a) + 35` and
-`d * a + 35` compile to the same bytecode.
+Parentheses make it correct, and we can sometimes reorder calculations
+to avoid using extra temps: `35 + (d * a)`, `(d * a) + 35` and `d * a
++ 35` compile to the same bytecode.
 
 ### 5.3 Assignment forms
 
@@ -337,11 +386,21 @@ Parentheses cost nothing: `35 + (d * a)`, `(d * a) + 35` and
 | `x += E;` `x -= E;` | |
 | `a[i] = E;` `p[i] = E;` `*p = E;` `s.f = E;` `p->f = E;` | |
 
+`x++` and `x--` are the cheapest: one op (`I x`, `J x`), 2 bytes. Use
+them rather than `x += 1`: half the cycles on every backend (13.1):
+
+| statement | bytecode | ivm | ivm-asm | JIT |
+|---|---:|---:|---:|---:|
+| `x++;` (also `x = x + 1;`) | 2 B | 325 | 80 | 10 |
+| `x += 1;` | 6 B | 536 | 196 | 21 |
+| `x += 2;` | 2 B | 255 | 83 | 15 |
+| `x += d;` | 3 B | 479 | 112 | 22 |
+
 **NOTE:** no `*= /= %= &= |= ^= <<= >>=`: write `x = x * 2;`.
 **NOTE:** on array elements only `=`: `a[i]++` and `a[i] += 2` are
 errors, write `a[i] = a[i] + 2;` (struct fields: see 10).
 
-Examples: `Tests/Compiler/man-expr.c`, errors: `man-expr-err.c`.
+Examples: [`man-expr.c`](Tests/Compiler/man-expr.c), errors: [`man-expr-err.c`](Tests/Compiler/man-expr-err.c).
 
 ---
 
@@ -357,9 +416,11 @@ Examples: `Tests/Compiler/man-expr.c`, errors: `man-expr-err.c`.
 | `{ ... }` | blocks, nested |
 | `return E;` `return;` | |
 
-**NOTE:** not supported: `do ... while`, `break`, `continue`, `switch`,
-`goto` and labels, `for (;;)`, `for (int i = 0; ...)`,
-`for (...; i += 2)` (a constant step: put it in a variable).
+**NOTE:** not supported: `do ... while`, `break`, `continue`,
+`switch`, `goto` and labels, `for (;;)`, `for (int i = 0; ...)`, `for
+(...; i += 2)` (a constant step: put it in a variable).
+*TODO: `break` / `continue` (cheaply: a jump per loop to patch), or
+`label:` / `goto` as a first step.*
 
 Without `break`: put the loop in a function and `return`, or fold the
 exit into the condition:
@@ -371,7 +432,7 @@ i = 0;                                            /* ok */
 while (i < n) { if (a[i] == x) n = i; else i++; }
 ```
 
-Examples: `Tests/Compiler/man-stmt.c`, errors: `man-stmt-err.c`.
+Examples: [`man-stmt.c`](Tests/Compiler/man-stmt.c), errors: [`man-stmt-err.c`](Tests/Compiler/man-stmt-err.c).
 
 ---
 
@@ -397,11 +458,11 @@ int fact(int n) { if (n <= 1) return 1; return n * fact(n - 1); }
 /* fact(5) runs forever */
 ```
 
-Write it as a loop (`man-func.c`: `fact` with a `while`).
+Write it as a loop ([`man-func.c`](Tests/Compiler/man-func.c): `fact` with a `while`).
 *TODO: report a call of a function to itself (directly or not) as an
 error; later: tail calls, recursion with frames on a stack.*
 
-Examples: `Tests/Compiler/man-func.c`, errors: `man-stmt-err.c`.
+Examples: [`man-func.c`](Tests/Compiler/man-func.c), errors: [`man-stmt-err.c`](Tests/Compiler/man-stmt-err.c).
 
 ---
 
@@ -438,7 +499,7 @@ standard C).*
 
 **NOTE:** 2D arrays are not supported; index by hand: `m[r * COLS + c]`.
 
-Examples: `Tests/Compiler/man-array.c`, errors: `man-decl-err.c`.
+Examples: [`man-array.c`](Tests/Compiler/man-array.c), errors: [`man-decl-err.c`](Tests/Compiler/man-decl-err.c).
 
 ---
 
@@ -474,7 +535,7 @@ error, until it is scaled.*
 **NOTE:** `&` works only on arrays and static structs (where it is the
 name itself): `&x` of a variable is an error. `*(p + i)`: write `p[i]`.
 
-Examples: `Tests/Compiler/man-pointer.c`, errors: `man-decl-err.c`.
+Examples: [`man-pointer.c`](Tests/Compiler/man-pointer.c), errors: [`man-decl-err.c`](Tests/Compiler/man-decl-err.c).
 
 ---
 
@@ -492,15 +553,13 @@ struct pt *q;
 ```
 
 - A struct is declared at the top (not inside a function).
-- Every field is a 16 bit word (also a `char` field).
+- Every field takes a 16 bit cell. A `char` field is a byte as in C
+  (`v.c = 300;` reads back 44): the low byte of its cell, read and written
+  with the byte ops `[ ]`, in every kind of struct (a variable, a pointer,
+  an array of structs plain or `__striped`).
 - A struct variable is static (like an array): its name is its address,
   so `q = &p;` `q = p;` and `move(&p, 3)` all work.
 - Different structs may have fields with the same name.
-
-**NOTE (silent):** a `char` *field* holds the whole word: `v.c = 300;`
-reads back 300, not 44 (in every kind of struct: a variable, a pointer, an
-array of structs plain or striped). A plain `char` variable or array is a
-byte as in C (its own byte ops).
 
 **NOTE:** not supported: `struct s x, y;` (one variable per declaration),
 `struct s { ... } x;` (declare the struct, then the variable), struct
@@ -564,7 +623,7 @@ bytes. On the JIT an element is then
 `LDY i / LDA lo,Y / LDX hi,Y`. `parse -S` stripes every array of structs.
 It is not the default, because the interpreters get slower:
 
-`test-bench-striped-struct.c` (32 particles, 200 rounds), sim65 cycles:
+[`test-bench-striped-struct.c`](test-bench-striped-struct.c) (32 particles, 200 rounds), sim65 cycles:
 
 | | plain | striped |
 |---|---|---|
@@ -575,8 +634,8 @@ It is not the default, because the interpreters get slower:
 
 Use `-S` / `__striped` when the program runs on the JIT.
 
-Examples: `Tests/Compiler/man-struct.c`, `test-struct.c`, errors:
-`test-struct-err.c`.
+Examples: [`man-struct.c`](Tests/Compiler/man-struct.c), [`test-struct.c`](test-struct.c), errors:
+[`test-struct-err.c`](test-struct-err.c).
 
 ---
 
@@ -608,8 +667,8 @@ printf("%d %d\n", a, b);  /* error */
 Split it: `printf("a="); printf("%d\n", a);` and use `putchar(c)` for a
 character. There is no `%x`, `%c`, no widths.
 
-Examples: `Tests/Compiler/man-io.c`. The silent cases of this manual:
-`Tests/Compiler/man-quirks.c`.
+Examples: [`man-io.c`](Tests/Compiler/man-io.c). The silent cases of this manual:
+[`man-quirks.c`](Tests/Compiler/man-quirks.c).
 
 ---
 
@@ -739,10 +798,15 @@ The loop itself: an empty `for (k = 0; k < 1000; k++)` costs 695 / 132 /
 
 (per round, compared to the first form)
 
-- The counting `for (i = A; i < B; i++)` / `<=` is one loop op: the
-  cheapest loop on every backend. `<` and `<=` cost exactly the same
-  (constant or variable limit). Prefer it to `while`, and to counting
-  down.
+- The counting `for (i = A; i < B; i++)` / `<=` is one fused loop op:
+  `u` for `<`, `t` for `<=` (the same op twice: test, body, `n`: i++ and
+  back), so `<` and `<=` cost the same, a constant or a variable limit:
+
+      for (k = 0; k < 1000; k++) n++;     Z k  u k 1000 end  I n  n back
+      for (k = 0; k <= 999; k++) n++;     Z k  t k 999 end   I n  n back
+
+  The cheapest loop on every backend: prefer it to `while`, and to
+  counting down.
 
 ### 13.6 memset loops
 
@@ -804,4 +868,3 @@ A call is cheap in bytecode; on the VMs it costs about two loop rounds.
 | `#if NAME` (always true: silent) | `#ifdef NAME` |
 | `printf` beyond the listed forms (silent) | split, `putchar` |
 | `struct s x, y;` `struct s {..} x;` struct copies, by-value | one per line, pointers |
-| octal `017` (silent: decimal) | `0o17` |

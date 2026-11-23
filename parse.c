@@ -62,6 +62,7 @@
 //   \r         end of param list OR flag REGISTER after literal "register"
 //   \q         end of a struct: "struct \f\{ { params } \q" (instead of \})
 //   \m         member: .f or ->f of the struct of the last \i: const k
+//   \^         the next \i may name an array of structs alone (sizeof(a))
 //   \&         a[i].f, an array of structs (SoA): const, f's array (striped:
 //              its lo bytes; its hi bytes: the next const slot)
 //   \b         flag REGISTER after literal "register" (use this, not \r)
@@ -100,11 +101,11 @@
 //   [] alone   no code, result is ACC
 //
 // Directive chars used (ASCII order, match + production):
-//   ! # $ % & ' * + , . 0-9 : < = > ? @ a-z (all) { }
+//   ! # $ % & ' * + , . 0-9 : < = > ? @ ^ a-z (all) { }
 //   (A-Z are rule names; space is the ws-gap directive)
 //
 // Free (not directives; ok as \X literal or future ops):
-//   " ( ) - / ; ^ _ ` ~
+//   " ( ) - / ; _ ` ~
 //
 // Explicit stack — no recursive match.
 //
@@ -484,6 +485,7 @@ typedef struct {
   uchar arg_i;        // call args stored so far (rule Z, for \k)
   uchar rec;          // the symbol \i / \m matched here (0xff none): its
                       // struct (ret_slot) is \m's start (here or parent)
+  uchar rec_save;     // rec at alt entry (a failed "\m\?c" alt: undone)
   uchar npatch;       // pending forward jumps (\x pushes, \y pops)
   word patch[4];
   word mark;          // \m loop start (for \z)
@@ -1521,12 +1523,17 @@ static uchar predef(void) {
   return 1;
 }
 
+// \^: the next \i may be an array of structs alone (sizeof(a))
+static uchar any_name;
+
 static uchar match_ident(void) {
-  uchar c, slot;
+  uchar c, slot, any;
   word start_abs, i;
   Symbol *s;
 
   start_abs = abs_pos();
+  any = any_name;               // once: for this \i only
+  any_name = 0;
   if (!read_ident()) return 0;
 
   // next char after the name, no newline crossed: '(' means a call
@@ -1561,7 +1568,7 @@ static uchar match_ident(void) {
 
     // It's a variable name? (an array of structs: only a[i]. Its name
     // is the first field's array (SoA), as a pointer it would be wrong)
-    if (s->ret_addr_slot != 0xff && c != '[') return 0;
+    if (s->ret_addr_slot != 0xff && c != '[' && !any) return 0;
     cur.func_vec = 0xff;
     cur.rec = (uchar)i;
     slot = s->address;
@@ -1790,7 +1797,10 @@ static uchar soa_base(Symbol *a, uchar k) {
 //   \m matched last in this frame, else in the parent (a chain rule):
 //   rec, its symbol, links (ret_slot) the struct's name. Searched as if
 //   in its scope: the params right after it. Result = const k (the word
-//   index for the ( ) ops); rec = f (a pointer field: the next ->)
+//   index for the ( ) ops); rec = f (a pointer field: the next ->). A
+//   char field (type 'c'): 2k, the byte index of its cell's lo byte, for
+//   the [ ] ops (a[i].f: the plane's first N bytes, the same address
+//   striped or not: [ f i)
 // \& — a[i].f, a an array of structs (SoA: f of all the N elements in a
 //   row): the const a + 2 * k * N, f's array. Striped (vtype 'z', __striped
 //   or -S: their N lo bytes, then their N hi bytes): its next slot is that
@@ -1810,8 +1820,10 @@ static uchar match_member(uchar soa) {
   for (i = t + 1, s = syms + i; i < nsym && s->pidx; i++, s++)
     if (!strcmp(s->name, id_buf)) {
       cur.rec = i;
+      t = s->vtype == 'c' && !s->is_ptr;     // a char field: [ ] bytes
       i = s->pidx - 1;
-      record_capture(soa ? soa_base(a, i) : const_slot(i));
+      record_capture(MAKE_CAP(soa ? soa_base(a, i) : const_slot(t ? 2 * i : i),
+                              t ? TY_CHAR : TY_WORD));
       return 1;
     }
   return 0;
@@ -1940,9 +1952,13 @@ static uchar match_num(void) {
       case 'x': base = 16; break;
       case 'o': base =  8; break;
       case 'b': base =  2; break;
+      default:
+        // 017: octal as in C (was decimal 17); 08 09: an error (the 8 is
+        // left, nothing parses it)
+        if (isdigit(nextc)) { base = 8; n = 0; }
       }
 
-      if (base != 10) {
+      if (base != 10 && n) {
         skip();
         n = 0;      // need at least one digit after the prefix
       }
@@ -2000,7 +2016,7 @@ static void free_rules(void) {
 // note: '>' is load-time only (not stored)
 //       '<' becomes HIBIT('<') + ALT_JUMP + alt (1..31, 0: restart)
 static uchar is_dir(uchar e) {
-  return isdigit(e) || strchr("insfdprlxywmzkcahvgetoubjq+{}#='?*@$:,.!%&", e) != NULL;
+  return isdigit(e) || strchr("insfdprlxywmzkcahvgetoubjq+{}#='?*@$:,.!%&^", e) != NULL;
 }
 
 static void build_one_rule(uchar r, char *rhs) {
@@ -2245,6 +2261,7 @@ static void alt_mark(void) {
   cur.reg_save = next_reg;
   cur.code_save = bin_ptr;
   cur.ginit_save = ginit_len;
+  cur.rec_save = cur.rec;
   cur.prod_n = 0;
 }
 
@@ -2338,6 +2355,7 @@ static int frame_rewind(void) {
   }
   cur.prod_n = 0;
   cur.npatch = 0;
+  cur.rec = cur.rec_save;
 
   // Function entry code (and main's global inits) is emitted lazily,
   // by the first emit after \f (pending_func_entry). If this rewind
@@ -2585,6 +2603,7 @@ int run() {
   else if (c == HIDIR('q')) struct_end();
   else if (c == HIDIR('m')) ok = match_member(0);
   else if (c == HIBIT('&')) ok = match_member(1);
+  else if (c == HIBIT('^')) any_name = 1;
   else if (c == HIDIR('r')) {
     // end of params: params_end() (ivm-gen.c) moves the last to fp+3
     if (last_func_vec != 0xff) {

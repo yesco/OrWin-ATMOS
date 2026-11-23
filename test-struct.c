@@ -9,7 +9,7 @@
 // - a struct is declared like a function: its params are the fields,
 //   field k is word k. A struct variable is a static array (zeroed, or
 //   = { consts }: data), p.f and p->f are both word k of the memory
-// - the fields are words: a char field would hold the whole value
+// - the fields take a word cell each: a char field is a byte, its low byte
 // - sizeof(struct pt) is 4 bytes here, 8 on gcc: the test prints it in ints
 // - &s: a static struct is its address already (s alone works too)
 // - chains: ->f after any pointer: a field (a.next->v), an array element
