@@ -1860,12 +1860,11 @@ static word    jit_bss_at, jit_bss_n;    // static arrays (-o / in place)
 static uchar  *jit_libbeg;              // the image's lib: a startup part ..
 static uchar  *jit_libend;              // .. a cut
 static word    jit_libfloor;            // the startup's own call: memset (bss)
+static uchar   jit_kkeep;               // consts in mem[] (the code reads one)
+static word    jit_cells;               // mem[] cells, consts too
 
 static word    jit_heapend;             // the heap's end (the bss below it)
 
-// The lib the image has: up to the cut after the last routine the code
-// calls (lc_libtop: the JIT notes each JSR into it). 1: more than the
-// layout had, so lay out and compile again
 // the cut after lib address top (the highest routine called)
 static uchar *jit_cut(word top) {
   static uchar *const cut[] = { ivmlib_cut0, ivmlib_cut1, ivmlib_cut2,
@@ -1877,8 +1876,14 @@ static uchar *jit_cut(word top) {
   return cut[k];
 }
 
+// The lib the image has: up to the cut after the last routine the code
+// calls (lc_libtop: the JIT notes each JSR into it). Its mem[]: no consts,
+// unless the code read one (lc_kread). 1: more than the layout had, so lay
+// out and compile again
 static uchar jit_lib_more(void) {
   uchar *need = jit_cut(lc_libtop);
+
+  if (lc_kread && !jit_kkeep) { jit_kkeep = 1; return 1; }
 
   if (need <= jit_libend) return 0;
   jit_libend = need;
@@ -1906,7 +1911,14 @@ static int jit_layout(Process *proc, uchar *base, word *mem_base, word *out_org)
     printf("%%JIT: warning: target %s, but ivm-lib built for %s\n",
       jit_target, JIT_DEFAULT_TARGET);
 
-  jit_membytes = (word)(cells * 2);
+  // mem[]: the consts are immediates, an image needs none (lc_kcut: unless
+  // the code reads one). In process: all, the live mem[]
+  #ifndef JIT_INMEM
+  if (!jit_outfile) jit_kkeep = 1;
+  #endif
+  lc_kcut = (uchar)(jit_kkeep || bh->constidx >= cells ? 0xff : bh->constidx);
+  jit_cells    = cells;
+  jit_membytes = (word)((lc_kcut == 0xff ? cells : lc_kcut) * 2);
   jit_data     = base + bh->data;
   // the strings: from data to the blob's end (cc65: data is absolute)
   jit_datalen  = bh->data ?
@@ -1972,9 +1984,9 @@ static int jit_layout(Process *proc, uchar *base, word *mem_base, word *out_org)
   // -o: own copy of mem[]; string consts point into the loaded blob,
   // move them to the strings copy in the image (pool: strings first, 0, ints)
   free(jit_memimg);                          // (an earlier layout's)
-  jit_memimg = (ivmvar *)malloc(jit_membytes);
+  jit_memimg = (ivmvar *)malloc(cells * 2);     // (consts: JIT time)
   if (!jit_memimg) { printf("%%JIT: alloc fail\n"); return 0; }
-  memcpy(jit_memimg, proc->h.mem, jit_membytes);
+  memcpy(jit_memimg, proc->h.mem, cells * 2);
   if (bh->constidx != 255)
     for (i = bh->constidx; i < cells && jit_memimg[i]; i++)
       if (jit_memimg[i] < bss_end)               // strings
@@ -2171,6 +2183,7 @@ word jit_compile(Process* proc) {
     // lay out, compile; again if the code calls more of the lib than the
     // image had (only an image has a cut: -o, in place)
     jit_libend = 0;
+    jit_kkeep = 0;
     do {
       mem_base = 0;
       if (!jit_layout(proc, base, &mem_base, &out_org)) {
@@ -2234,7 +2247,7 @@ word jit_compile(Process* proc) {
         mm_area(MM_BSS, jit_bss_at, jit_bss_n);
         mm_area(MM_CODE, out_org, jit_size);
         mm_area(MM_HEAP, heap, (word)(jit_heapend - heap));
-        mm_print((uchar)(jit_membytes / 2));
+        mm_print((uchar)jit_cells);
       }
     #endif
       if (jit_outfile) jit_save(out, jit_size, out_org);

@@ -572,7 +572,14 @@ static void emjump(uchar bop, word bc_target) {
 }
 
 
-static word slotlo(uchar s) { return (word)(lc_mem + ((word)s << 1)); }
+// consts are not in an image's mem[] (from lc_kcut on: their values are
+// immediates); a read of one from memory sets lc_kread: lay out again with them
+static uchar lc_kcut = 0xff, lc_kread;
+
+static word slotlo(uchar s) {
+  if (s >= lc_kcut) lc_kread = 1;
+  return (word)(lc_mem + ((word)s << 1));
+}
 static word slothi(uchar s) { return (word)(slotlo(s) + 1); }
 
 static uchar lc_constidx;     // first constant slot (255 = none)
@@ -2056,6 +2063,7 @@ static word ivm_jit1(const uchar *code, word code_len,
   ai_drop(); lc_plus_src = 0xff;
   lc_out_org = out_org;
   lc_libtop = 0;
+  lc_kread = 0;
   lc_ifold = 0;
   lc_ncall = ncall;
   lc_fbase = frame_base;
@@ -2870,7 +2878,7 @@ static void mm_print(uchar n) {
 
     // each slot: its name, a frame cell or a const
     case MM_SLOTS:
-      for (i = 0; i < memsz; i++)
+      for (i = 0; i < mm_len[j] / 2; i++)       // (consts: not in it)
         mm_slotline((word)(mm_at[j] + 2 * i), (uchar)i, memsz);
       break;
 
@@ -3031,7 +3039,9 @@ word sim_run_blob(uchar *blob, uchar zp, uchar zp_at, word org) {
   word len = HW(0), memsz = HW(1), cidx = HW(2), hmain = HW(3);
   word hcode = HW(4), hcall = HW(5), hfp = HW(6), hcon = HW(7), hdata = HW(8);
   #undef HW
-  word membytes = (word)(memsz * 2), mem_base, data, code_len, size, i, w;
+  // mem[] without the consts (immediates; lc_kcut checks)
+  word membytes = (word)((cidx < memsz ? cidx : memsz) * 2);
+  word mem_base, data, code_len, size, i, w;
   word bss_n = 0, bss;
   word vec_bc[64], *map, *img;
   uchar ncall = (uchar)((hcon - hcall) / 2), seen0 = 0, *out;
@@ -3093,9 +3103,14 @@ word sim_run_blob(uchar *blob, uchar zp, uchar zp_at, word org) {
   lc_constidx = (uchar)cidx;
   lc_constmem = img;
   lc_initmem = img;
+  lc_kcut = (uchar)(cidx < memsz ? cidx : 0xff);
   size = ivm_jit(blob + hcode, code_len, out, 8192, map, code_len,
                  mem_base, org, vec_bc, blob + hfp, ncall);
-  for (i = 0; i < memsz; i++) SIM_SETW(mem_base + 2 * i, img[i]);
+  for (i = 0; i < membytes / 2; i++) SIM_SETW(mem_base + 2 * i, img[i]);
+  if (lc_kread) {
+    printf("%%SIM: JIT code reads a const from mem[]\n");
+    size = 0;
+  }
   if (!size || org + size > bss) {
     printf("%%SIM: JIT failed (%u bytes)\n", (unsigned)size);
     free(img); free(map); free(out);
