@@ -3,10 +3,12 @@ case "${name##*/}" in ?*.*) name="${name%.*}";; esac  # PROG, PROG.c, PROG.ivm a
 shift
 echo "ARGS: $*"
 
-rm ivm-jit.x ivm-vm.lst ivm-jit.sim ivm-jit.lst 2>/dev/null
+. ./deps   # stale: rebuild only when a source changed
 
-# recreate .lst asm and merge C force comments
-./cafix
+# recreate .lst asm and merge C force comments (also ivm-lib.o)
+if stale ivm-jit.sim $IVM_SRC ivm-lib.asm cafix cafix.py ivm-jit; then
+  ./cafix || exit 1
+fi
 
 sim65 -c ivm-jit.sim -z -j $* $name.ivm | grep cycles | sed 's/ cycles//' > $name.cycles.jit
 sim65 -c ivm-jit.sim -z $* $name.ivm | tee $name.log
@@ -15,12 +17,14 @@ jit=$(cat "$name.cycles.jit")
 jitandrun=$(grep cycles "$name.log" | sed 's/ cycles//')
 run=$((jitandrun - jit))
 
-rm ivm-jit-map.sim $name.ivm.sim
+rm -f $name.ivm.sim
 
 echo 
 echo 
 echo "--- -t generate file ---"
-cl65 -DMEMMAP -DJIT -Oirs -C sim6502.cfg -t sim6502 ivm-lib.o ivm.c -o ivm-jit-map.sim || exit 1
+if stale ivm-jit-map.sim $IVM_SRC ivm-lib.o ivm-jit; then
+  cl65 -DMEMMAP -DJIT -Oirs -C sim6502.cfg -t sim6502 ivm-lib.o ivm.c -o ivm-jit-map.sim || exit 1
+fi
 sim65 -c ivm-jit-map.sim -j -z -tsim6502 $* $name.ivm -o$name.ivm.sim
 echo
 echo

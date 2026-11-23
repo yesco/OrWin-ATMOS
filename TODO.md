@@ -1,6 +1,20 @@
 # OrWIN-ATMOS
 
 # MeteoriC-65 (parse.c c.bnf): next, after the manual (MeteoriC-man.md)
+
+** tests failing **
+- jit fails to build test-loops and test-struct ("JIT: compilation
+  failed"), and test-shifts ("alloc fail (map 4426, code 512 bytes)").
+- ivm char* *q = v in test-incdec prints 0 where everyone else prints
+  67.
+- x << 16 / x >> 16 in test-shifts: asm prints 0, the others print x
+  unchanged. hjit is wrong in 240 of 249 lines there.
+- Other output differences:
+  - asm: dispatch-pon
+  - hjit: memset
+  - cc65 and oscar: ifdef
+  - oscar: loops
+
 - recursion: report a call of a function to itself (directly or through
   others) as an error. Later: tail calls (a loop), recursion with frames
   copied to a stack
@@ -23,6 +37,7 @@
   next (the patch stack, like \x \y). Or first label: / goto as a
   substitute; the JIT may take a backward goto for THE loop (its loop
   detection, lc_lbl): check it
+
 
 # tpi.c parse.c
 - parse: save .ivm

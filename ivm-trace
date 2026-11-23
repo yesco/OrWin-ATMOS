@@ -1,15 +1,17 @@
-rm ivm.x 2>/dev/null
+. ./deps   # stale: rebuild only when a source changed
 
 name=$1
 case "${name##*/}" in ?*.*) name="${name%.*}";; esac  # PROG, PROG.c, PROG.ivm all ok
 
-clang -DTRACE -g ivm.c -o ivm.x || exit 1
+if stale ivm-trace.x $IVM_SRC ivm-trace; then
+  clang -DTRACE -g ivm.c -o ivm-trace.x || exit 1
+fi
 
-time ./ivm.x $name.ivm
+time ./ivm-trace.x $name.ivm
 
 echo
 echo
-ls -ugGlf ivm.x $name.ivm 2>/dev/null
+ls -ugGlf ivm-trace.x $name.ivm 2>/dev/null
 echo
 echo "=== ivm.c: `./wcode ivm.c` LOC ==="
 echo

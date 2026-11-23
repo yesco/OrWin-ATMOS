@@ -3,8 +3,10 @@ case "${name##*/}" in ?*.*) name="${name%.*}";; esac  # PROG, PROG.c, PROG.ivm a
 shift
 echo "ARGS: $*"
 
-rm ivm-jit.x 2>/dev/null
-clang -DVERBOSE -DJIT -g ivm.c -o ivm-jit.x || exit 1
+. ./deps   # stale: rebuild only when a source changed
+if stale ivm-jit.x $IVM_SRC jit; then
+  clang -DVERBOSE -DJIT -g ivm.c -o ivm-jit.x || exit 1
+fi
 time ./ivm-jit.x $name.ivm
 
 #jit=$(cat "$name.cycles.jit")

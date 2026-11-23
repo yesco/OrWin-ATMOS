@@ -55,9 +55,10 @@
 ;;;   atmos: the in-process run returns to C, and the ROM owns low zp:
 ;;;     cc65's own scratch (zeropage.inc), the one place known free.
 
-.export _ivmlib_init, _ivmlib_zpinit, _ivmlib_start, _ivmlib_end
+.export _ivmlib_init, _ivmlib_zpclr, _ivmlib_zpinit, _ivmlib_start, _ivmlib_end
 .export _ivmlib_entry, _ivmlib_heap, _ivmlib_heapend
 .export _ivmlib_zpsrc, _ivmlib_zpdst, _ivmlib_zplen, _ivmlib_spzp
+.export _ivmlib_zpclen, _ivmlib_zpcn, _ivmlib_zpcdst
 .export _ivmlib_zplo
 .export _ivmlib_load, _ivmlib_seg, _ivmlib_dst, _ivmlib_run
 .export _ivmlib_cut0, _ivmlib_cut1, _ivmlib_cut2, _ivmlib_cut3, _ivmlib_cut4
@@ -189,6 +190,7 @@ _ivmlib_run = ldrun + 1
 ;;; ===========================================================================
 ;;; Startup. An image starts at the first part it needs (ivm.c jit_libbeg):
 ;;;   _ivmlib_init    static arrays: zeroed (needs memset: cut1)
+;;;   _ivmlib_zpclr   -z: mem[] past the image's last non-0 byte zeroed
 ;;;   _ivmlib_zpinit  -z: mem[] image copied to zp
 ;;;   _ivmlib_start   run main, exit
 ;;; each falls into the next. Operands patched by ivm.c, no variables.
@@ -204,6 +206,22 @@ _ivmlib_bssp = * - 1
 _ivmlib_bssr = * - 1
         lda     #0                      ;; fill
         jsr     _opmemset
+
+;;; -z: zero the live mem[] the image doesn't carry: from its last byte
+;;; (the const cut) down to the image's bytes (memory isn't 0 at load:
+;;; sim65 fills it with $FF). Equal: none
+;;; 13 B
+_ivmlib_zpclr:
+        ldx     #0                      ;; patched: mem[] bytes
+_ivmlib_zpclen = * - 1
+        lda     #0
+        beq     zpcl2                   ;; (always)
+zpcl1:  sta     $00,x                   ;; patched: zp base - 1
+_ivmlib_zpcdst = * - 1
+        dex
+zpcl2:  cpx     #0                      ;; patched: image bytes
+_ivmlib_zpcn = * - 1
+        bne     zpcl1
 
 ;;; -z: copy mem[] image to zp, down from the last byte. 0 bytes: none
 ;;; 12 B

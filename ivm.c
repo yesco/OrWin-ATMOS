@@ -295,8 +295,8 @@ static word runs = 1;   // -rN
   // ivm-lib.asm (link it FIRST): [start .. end[ is copied by -o
   extern uchar ivmlib_start[], ivmlib_end[];
   // the startup in parts: an image starts at the first it needs
-  // (jit_libbeg): init (bss), zpinit (-z), start
-  extern uchar ivmlib_init[], ivmlib_zpinit[];
+  // (jit_libbeg): init (bss), zpclr (-z), zpinit (-z), start
+  extern uchar ivmlib_init[], ivmlib_zpclr[], ivmlib_zpinit[];
   // the lib is in tiers: an -o image ends at the cut after the last
   // routine its code calls (jit_lib_more)
   extern uchar ivmlib_cut0[], ivmlib_cut1[], ivmlib_cut2[], ivmlib_cut3[],
@@ -306,6 +306,7 @@ static word runs = 1;   // -rN
   extern uchar ivmlib_bssp, ivmlib_bssr;   // bss: pages, rest
   extern word  ivmlib_entry, ivmlib_heap, ivmlib_heapend, ivmlib_zpsrc;
   extern uchar ivmlib_zpdst, ivmlib_zplen, ivmlib_spzp;
+  extern uchar ivmlib_zpclen, ivmlib_zpcn, ivmlib_zpcdst;
   extern uchar ivmlib_zplo;           // -z mem[] from here up: the lib's zp below
 
   #if defined(__SIM6502__) || defined(__SIM65C02__)
@@ -1876,7 +1877,6 @@ static word    jit_bss_at, jit_bss_n;    // static arrays (-o / in place)
 static uchar  *jit_libbeg;              // the image's lib: a startup part ..
 static uchar  *jit_libend;              // .. a cut
 static word    jit_libfloor;            // the startup's own call: memset (bss)
-static uchar   jit_zero;                // memory starts zeroed (a sim65 file)
 static word    jit_imgbytes, jit_imgend;   // mem[] image bytes; image end
 static uchar   jit_kkeep;               // consts in mem[] (the code reads one)
 static word    jit_cells;               // mem[] cells, consts too
@@ -1941,12 +1941,9 @@ static int jit_layout(Process *proc, uchar *base, word *mem_base, word *out_org)
   // the strings: from data to the blob's end (cc65: data is absolute)
   jit_datalen  = bh->data ?
     (word)((unsigned)jit_blob + bh->len - (unsigned)jit_data) : 0;
-  // a sim65 file: all memory 0 at load (no bss zeroing, mem[] copy only to
-  // its last non-0 byte); in place / atmos: what was there
-  jit_zero = jit_outfile && jit_tg->hdr == 1;
-
-  // the startup zeroes bss with memset (jit_image: which startup parts)
-  jit_libfloor = bss_n && !jit_zero ? rule_ref(LIB_MEMSET) : 0;
+  // memory isn't 0 at load (sim65 2.18 fills it, zp too, with $FF): the
+  // startup zeroes bss with memset (jit_image: which startup parts)
+  jit_libfloor = bss_n ? rule_ref(LIB_MEMSET) : 0;
   if (!jit_libend) jit_libend = jit_cut(0);   // first the smallest lib
 
   // -z: the mem[] image goes after the code (its size: once compiled)
@@ -2031,7 +2028,7 @@ static int jit_layout(Process *proc, uchar *base, word *mem_base, word *out_org)
 
   // -z: copied down from the last byte (operands: base - 1; jit_image)
   if (!jit_force_zp) *mem_base = jit_imgmem;
-  ivmlib_zpdst = (uchar)(jit_zp - 1);
+  ivmlib_zpdst = ivmlib_zpcdst = (uchar)(jit_zp - 1);
 
   *out_org = (word)(jit_imgdata + jit_datalen);
   if (jit_org) {
@@ -2045,22 +2042,29 @@ static int jit_layout(Process *proc, uchar *base, word *mem_base, word *out_org)
   return 1;
 }
 
-// The image, once compiled. -z: its mem[] image after the code, copied to
-// zp at start up to its last non-0 byte (memory zeroed: init folding left
-// the values), else all; the startup: from the first part it needs
+// The image, once compiled. -z: its mem[] image after the code up to its
+// last non-0 byte (init folding left the values), copied to zp at start,
+// the rest of mem[] zeroed there; else all. The startup: from the first
+// part it needs
 static void jit_image(word org, word size) {
   uchar *m = (uchar *)jit_memimg;
   word n = jit_membytes;
 
-  // -z copy: its bytes, from where
-  if (jit_zero) while (n && !m[n - 1]) n--;
-  jit_imgbytes = jit_force_zp ? n : jit_membytes;
-  ivmlib_zpsrc = (word)(org + size - 1);
-  ivmlib_zplen = jit_force_zp ? (uchar)n : 0;
-  jit_imgend   = (word)(org + size + (jit_force_zp ? n : 0));
+  // -z copy: its bytes, from where; zeroed: the rest of the live mem[]
+  // (main's frame too: its stores fold into the image, a 0 one is trimmed
+  // off here; none: equal)
+  if (jit_force_zp) while (n && !m[n - 1]) n--;
+  else n = 0;
+  jit_imgbytes  = jit_force_zp ? n : jit_membytes;
+  ivmlib_zpsrc  = (word)(org + size - 1);
+  ivmlib_zplen  = (uchar)n;
+  ivmlib_zpcn   = (uchar)n;
+  ivmlib_zpclen = jit_force_zp ? (uchar)jit_membytes : 0;
+  jit_imgend    = (word)(org + size + n);
 
   // startup parts
-  jit_libbeg = jit_bss_n && !jit_zero ? ivmlib_init :
+  jit_libbeg = jit_bss_n ? ivmlib_init :
+               ivmlib_zpclen > n ? ivmlib_zpclr :
                ivmlib_zplen ? ivmlib_zpinit : ivmlib_start;
 }
 
@@ -2448,7 +2452,7 @@ static const char usage[] =
 
 #ifdef OSCAR64
 int main(void) {
-  int argc;
+  int argc = 2;
   const char *av[] = {"ivm", #FILENAME, NULL}; // #embed'ed in run_file
   const char **argv = av;
 #else
@@ -2459,7 +2463,7 @@ int main(int argc, char** argv) {
   printf("ivm started.. doing args..\n");
 
   // options before or after the file
-  while ((s = (char *)*++argv) != NULL)
+  while (--argc > 0 && (s = (char *)*++argv) != NULL)
     if (*s != '-') file = s;
     else switch (s[1]) {
     case 'r': runs = (word)strtoul(s + 2, NULL, 10); break;

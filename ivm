@@ -1,11 +1,15 @@
-rm ivm.sim ivm-novim.sim 2>/dev/null
+. ./deps   # stale: rebuild only when a source changed
 
 name=$1
 case "${name##*/}" in ?*.*) name="${name%.*}";; esac  # PROG, PROG.c, PROG.ivm all ok
 shift
 
-cl65 -Oirs -T -l ivm.lst -vm -C sim6502.cfg -t sim6502 -m ivm.map -o ivm.sim ivm.c || exit 1
-cl65 -DNOIVM -vm -C sim6502.cfg -Oirs -t sim6502 -m ivm.map -o ivm-noivm.sim ivm.c || exit 1
+if stale ivm.sim $IVM_SRC ivm; then
+  cl65 -Oirs -T -l ivm.lst -vm -C sim6502.cfg -t sim6502 -m ivm.map -o ivm.sim ivm.c || exit 1
+fi
+if stale ivm-noivm.sim $IVM_SRC ivm; then
+  cl65 -DNOIVM -vm -C sim6502.cfg -Oirs -t sim6502 -m ivm.map -o ivm-noivm.sim ivm.c || exit 1
+fi
 
 sim65 -c ivm.sim $* $name.ivm
 

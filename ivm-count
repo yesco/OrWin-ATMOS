@@ -1,15 +1,17 @@
-rm ivm.x
+. ./deps   # stale: rebuild only when a source changed
 
 name=$1
 case "${name##*/}" in ?*.*) name="${name%.*}";; esac  # PROG, PROG.c, PROG.ivm all ok
 
-clang -DCOUNTOPS -g ivm.c -o ivm.x || exit 1
+if stale ivm-count.x $IVM_SRC ivm-count; then
+  clang -DCOUNTOPS -g ivm.c -o ivm-count.x || exit 1
+fi
 
-time ./ivm.x $name.ivm | tee $name.count
+time ./ivm-count.x $name.ivm | tee $name.count
 
 echo
 echo
-ls -ugGlf ivm.x $name.ivm 2>/dev/null
+ls -ugGlf ivm-count.x $name.ivm 2>/dev/null
 echo
 echo "=== ivm.c: `./wcode ivm.c` LOC ==="
 echo

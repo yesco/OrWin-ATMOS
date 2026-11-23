@@ -1,9 +1,11 @@
-rm ivm-asm.sim ivm-asm.map ivm-asm.asm ivm-asm.lst ivm-asm.s 2>/dev/null
+. ./deps   # stale: rebuild only when a source changed
 
 name=$1
 case "${name##*/}" in ?*.*) name="${name%.*}";; esac  # PROG, PROG.c, PROG.ivm all ok
 
-cl65 -DIVMASM -Oirs -C sim6502.cfg -t sim6502 -vm -m ivm-asm.map -o ivm-asm.sim ivm-vm.asm ivm.c  || exit 1
+if stale ivm-asm.sim $IVM_SRC ivm-vm.asm ivm-asm; then
+  cl65 -DIVMASM -Oirs -C sim6502.cfg -t sim6502 -vm -m ivm-asm.map -o ivm-asm.sim ivm-vm.asm ivm.c  || exit 1
+fi
 #cl65 -DNOIVM -DIVMASM -Oirs -C sim6502.cfg -t sim6502 -o ivm-asm-noivm.sim ivm.c || exit 1
 
 #ca65 -t sim6502 ivm-vm.asm -l ivm-vm.lst # 2>/dev/null 1>/dev/null

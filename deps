@@ -1,0 +1,27 @@
+# deps - sourced by the run scripts (. ./deps): rebuild a binary only when
+# it is missing or older than one of its sources (or the script itself).
+#
+#   if stale ivm.sim $IVM_SRC ivm; then cl65 ... -o ivm.sim ivm.c || exit 1; fi
+#
+# FORCE=1 ./ivm foo    rebuilds anyway
+
+# ivm.c and what it #includes; sim6502.cfg: the cc65 builds' memory map
+IVM_SRC="ivm.c ivm-jit.c ivm-walk.c cpu6502.c disasm.c ivm-print.c
+ ivm-jtable.c ivm-btable.c ivm-print.h sim6502.cfg"
+
+# parse.c and what it #includes (ivm.c too)
+PARSE_SRC="parse.c ivm-gen.c parse-syms.c $IVM_SRC"
+
+# stale TARGET DEP...: true if TARGET must be (re)built. It is removed
+# then, so a failed build doesn't leave the old one to run.
+stale() {
+  t=$1; shift
+  if [ -z "$FORCE" ] && [ -e "$t" ]; then
+    for d in "$@"; do
+      [ "$d" -nt "$t" ] && { rm -f "$t"; return 0; }
+    done
+    return 1
+  fi
+  rm -f "$t"
+  return 0
+}

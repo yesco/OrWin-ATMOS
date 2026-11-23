@@ -10,7 +10,10 @@ fi
 rm $name.ivm 2>/dev/null
 
 
-clang -DSYMS -DRUN -DVERBOSE -O3 parse.c -o parse.x || exit 1
+. ./deps   # stale: rebuild only when a source changed
+if stale parse.x $PARSE_SRC pc; then
+  clang -DSYMS -DRUN -DVERBOSE -O3 parse.c -o parse.x || exit 1
+fi
 
 time ./parse.x -O -v c.bnf $name.c
 

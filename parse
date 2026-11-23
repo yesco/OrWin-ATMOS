@@ -4,13 +4,18 @@ name=$1
 case "${name##*/}" in ?*.*) name="${name%.*}";; esac  # PROG, PROG.c, PROG.ivm all ok
 echo "NAME: $name"
 
-rm parse.sim parse-run.sim $name.ivm 2>/dev/null
+. ./deps   # stale: rebuild only when a source changed
+rm -f $name.ivm
 
 #cl65 -DVERBOSE -t sim6502 -Oirs -o parse.sim parse.c | exit 1
 
-cl65 -DRUN -t sim6502 -Oirs -o parse-run.sim parse.c | exit 1
+if stale parse-run.sim $PARSE_SRC parse; then
+  cl65 -DRUN -t sim6502 -Oirs -o parse-run.sim parse.c || exit 1
+fi
 
-cl65 -T -l parse.lst -t sim6502 -Oirs -o parse.sim     parse.c -vm -m parse.map | exit 1
+if stale parse.sim $PARSE_SRC parse; then
+  cl65 -T -l parse.lst -t sim6502 -Oirs -o parse.sim     parse.c -vm -m parse.map || exit 1
+fi
 
 sim65 -c parse.sim -v c.bnf $name.c
 

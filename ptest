@@ -1,0 +1,310 @@
+#!/usr/bin/env python3
+# ptest - compile a test-NAME.c with ./pc, run it on every backend, compare
+# the output to test-NAME.out (if any), report cycles and sizes.
+#
+#   ./ptest              all test-*.c
+#   ./ptest empty        test-empty.c        (test-empty.c, test-empty ok too)
+#   ./ptest 'dispatch*'  test-dispatch*.c    (quote it, or the shell globs)
+#   ./ptest byte-sieve-prime   no test-byte-sieve-prime.c: byte-sieve-prime.c
+#
+# Per test, logs: test-NAME.{pc,ivm,asm,jit,hjit,cc65-build,cc65,oscar}.log
+#   outputs:      test-NAME.expect (.out or majority), test-NAME.VARIANT.got
+# stdout: = lines are results (./ptest | grep ^=), %Error: lines failures
+# Whole run:      ptest.log (all tests), ptest-SPEC.log (./ptest SPEC)
+#
+# Variants:
+#   ivm    ./ivm       cc65 C VM            size: .ivm
+#   asm    ./ivm-asm   asm VM               size: .ivm
+#   jit    ./ivm-jit   JIT -> .ivm.sim      size: .ivm.sim (cycles: SIM)
+#   hjit   ./jit       JIT on host cpu sim  size: emitted code
+#   cc65   cl65 -Cl -Os                     size: .sim
+#   oscar  oscar64 -Os -ep                  size: .prg
+
+import collections, difflib, glob, os, pty, re, shlex, subprocess, sys, threading
+
+TIMEOUT = 600
+OSCAR64 = os.environ.get("OSCAR64",
+                         os.path.expanduser("~/GIT/oscar64/bin/oscar64"))
+
+out = None  # the whole-run log
+
+
+def say(s=""):
+    sys.stdout.write(s + "\n")
+    sys.stdout.flush()
+    out.write(s + "\n")
+    out.flush()
+
+
+def run(cmd, log):
+    """Run cmd (list), stream its output as '  | ' lines (never ^=), save
+    stdout+stderr to log, return the text. A pty keeps the tools (sim65,
+    printf) line buffered, so the output moves while it runs."""
+    sys.stderr.write("\n$ %s    > %s\n" % (" ".join(cmd), log))
+    sys.stderr.flush()
+    out.write("\n$ %s    > %s\n" % (" ".join(cmd), log))
+    master, slave = pty.openpty()
+    p = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=slave,
+                         stderr=slave, close_fds=True)
+    os.close(slave)
+    timer = threading.Timer(TIMEOUT, p.kill)
+    timer.start()
+    buf, lines = b"", []
+    with open(log, "w") as f:
+        f.write("$ " + " ".join(cmd) + "\n")
+
+        def line(l):
+            l = l.decode("latin-1").rstrip("\r")
+            lines.append(l)
+            f.write(l + "\n")
+            say("  | " + l)
+
+        while True:
+            try:
+                d = os.read(master, 4096)
+            except OSError:  # EIO: child side closed
+                d = b""
+            if not d: break
+            buf += d
+            while b"\n" in buf:
+                l, buf = buf.split(b"\n", 1)
+                line(l)
+        if buf: line(buf)
+        os.close(master)
+        p.wait()
+        if not timer.is_alive():
+            line(b"%%Error: TIMEOUT after %d s" % TIMEOUT)
+        timer.cancel()
+    return "\n".join(lines) + "\n"
+
+
+def between(text, start, end):
+    """Lines after the first line matching start, before one matching end."""
+    lines, on = [], False
+    for l in text.splitlines():
+        if on and re.match(end, l): return lines
+        if on: lines.append(l)
+        elif re.match(start, l): on = True
+    return lines if on else None
+
+
+def norm(lines):
+    if lines is None: return None
+    # whitespace runs count as one space: oscar64 prints tabs as spaces
+    lines = [" ".join(l.split()) for l in lines]
+    while lines and not lines[0]: lines.pop(0)
+    while lines and not lines[-1]: lines.pop()
+    return lines
+
+
+def last_int(pat, text):
+    m = re.findall(pat, text, re.M)
+    return int(m[-1]) if m else None
+
+
+def fsize(f):
+    return os.path.getsize(f) if os.path.exists(f) else None
+
+
+def rm(*fs):
+    for f in fs:
+        if os.path.exists(f): os.remove(f)
+
+
+def ivm_out(text):
+    return between(text, r"--- RUN IVM", r"--- END ---")
+
+
+def sim_out(text):
+    # sim65 run: all lines but the trailing "N cycles"
+    return [l for l in text.splitlines()
+            if not re.match(r"^\d+ cycles$", l)]
+
+
+def repro(name, t):
+    """The command that reruns variant name of test t by hand."""
+    return {
+        "pc":    "./pc {t}",
+        "ivm":   "./ivm {t}",
+        "asm":   "./ivm-asm {t}",
+        "jit":   "./ivm-jit {t}",
+        "hjit":  "./jit {t}",
+        "cc65":  "cl65 -t sim6502 -Cl -Os -o {t}.sim {t}.c && sim65 -c {t}.sim",
+        "oscar": "./oscar -Os -ep {t}.c",
+    }[name].format(t=t)
+
+
+def test(t):
+    """Run all variants of test t (e.g. test-empty). Returns result list."""
+    res = []  # (name, cycles, bytes, file, output-lines, log)
+
+    say("#" * 60)
+    say("=== ./ptest %s" % re.sub(r"^test-", "", t))
+    say("#" * 60)
+
+    rm(t + ".ivm")
+    run(["bash", "./pc", t], t + ".pc.log")
+    have_ivm = os.path.exists(t + ".ivm")
+    if not have_ivm:
+        say("%%Error: ./pc %s: no %s.ivm (see %s.pc.log)" % (t, t, t))
+
+    if have_ivm:
+        s = run(["bash", "./ivm", t], t + ".ivm.log")
+        res.append(("ivm", last_int(r"^(\d+) cycles$", s),
+                    fsize(t + ".ivm"), t + ".ivm", ivm_out(s), t + ".ivm.log"))
+
+        s = run(["bash", "./ivm-asm", t], t + ".asm.log")
+        res.append(("asm", last_int(r"^(\d+) cycles$", s),
+                    fsize(t + ".ivm"), t + ".ivm", ivm_out(s), t + ".asm.log"))
+
+        rm(t + ".ivm.sim", t + ".sim.log")
+        s = run(["bash", "./ivm-jit", t], t + ".jit.log")
+        o = None
+        if os.path.exists(t + ".sim.log"):
+            o = sim_out(open(t + ".sim.log", encoding="latin-1").read())
+        res.append(("jit", last_int(r"^SIM\s*:\s*(\d+)", s),
+                    fsize(t + ".ivm.sim"), t + ".ivm.sim", o, t + ".jit.log"))
+
+        s = run(["bash", "./jit", t], t + ".hjit.log")
+        m = re.search(r"code \$\w+-\$\w+ \((\d+) B\)", s)
+        res.append(("hjit", last_int(r"^--- SIM: (\d+) cycles", s),
+                    int(m.group(1)) if m else None, "code",
+                    between(s, r"--- SIM: mem\[\]", r"--- SIM: \d+ cycles"),
+                    t + ".hjit.log"))
+
+    rm(t + ".sim")
+    s = run(["cl65", "-t", "sim6502", "-Cl", "-Os", "-o", t + ".sim", t + ".c"],
+            t + ".cc65-build.log")
+    if os.path.exists(t + ".sim"):
+        s = run(["sim65", "-c", t + ".sim"], t + ".cc65.log")
+        res.append(("cc65", last_int(r"^(\d+) cycles$", s),
+                    fsize(t + ".sim"), t + ".sim", sim_out(s),
+                    t + ".cc65.log"))
+    else:
+        res.append(("cc65", None, None, t + ".sim", None,
+                    t + ".cc65-build.log"))
+
+    rm(t + ".prg")
+    s = run([OSCAR64, "-Os", "-ep", t + ".c"], t + ".oscar.log")
+    res.append(("oscar", last_int(r"^Total Cycles (\d+)", s),
+                fsize(t + ".prg"), t + ".prg",
+                between(s, r"Running emulation", r"Emulation result"),
+                t + ".oscar.log"))
+
+    # expected output: .out (its RUN IVM .. END part if it has one), else
+    # the majority. Saved as t.expect, each variant's as t.NAME.got: diff them
+    ref, refname = None, None
+    if os.path.exists(t + ".out"):
+        e = open(t + ".out", encoding="latin-1").read()
+        ref = norm(ivm_out(e) or e.splitlines())
+        refname = t + ".out"
+    else:  # no .out: what most backends print (ties: the first, ivm)
+        outs = [tuple(norm(r[4])) for r in res if r[4] is not None]
+        if outs:
+            ref = list(collections.Counter(outs).most_common(1)[0][0])
+            refname = "majority"
+    if ref is not None:
+        with open(t + ".expect", "w") as f:
+            f.write("".join(l + "\n" for l in ref))
+
+    # per variant: None ok, "FAILED", or "DIFFERS k/n"
+    status = {}
+    for name, cyc, size, f, o, log in res:
+        say()
+        say("-- %s --" % name.upper())
+        o = norm(o)
+        if cyc is None or o is None:
+            status[name] = "FAILED"
+            say("%%Error: %s FAILED on %s (see %s)" % (name, t, log))
+            say("  rerun: " + repro(name, t))
+            continue
+        say("%8s bytes %s" % (size if size is not None else "?", f))
+        say("%8d cycles" % cyc)
+        got = "%s.%s.got" % (t, name)
+        with open(got, "w") as gf:
+            gf.write("".join(l + "\n" for l in o))
+        if ref is None:
+            say("(no %s.out)" % t)
+        elif o == ref:
+            say("matches" if refname != "majority" else "same as majority")
+        else:
+            ops = difflib.SequenceMatcher(None, ref, o).get_opcodes()
+            k = sum(max(i2 - i1, j2 - j1) for op, i1, i2, j1, j2 in ops
+                    if op != "equal")
+            status[name] = "DIFFERS %d/%d" % (k, max(len(ref), len(o)))
+            say("%%Error: %s %s lines from %s on %s" %
+                (name, status[name], refname, t))
+            say("  rerun: " + repro(name, t))
+            say("diff %s.expect %s" % (t, got))
+            d = list(difflib.unified_diff(ref, o, t + ".expect", got, n=1,
+                                          lineterm=""))
+            for l in d[:24]: say("  " + l)
+            if len(d) > 24: say("  ...")
+
+    say()
+    say("# results")
+    w = max([len("{:,}".format(c or 0)) for _, c, *_ in res] + [1])
+    if not have_ivm:
+        say("= %s %-21s - %-5s - %s" % ("-".rjust(w), "FAILED", "pc", t))
+        say("= %s %s" % (" " * w, repro("pc", t)))
+    for name, cyc, size, f, o, log in res:
+        st = status.get(name)
+        if st == "FAILED":
+            say("= %s %-21s - %-5s - %s" % ("-".rjust(w), "FAILED", name, t))
+        else:
+            say("= %s cycles (%5s bytes) - %-5s - %s%s" %
+                ("{:,}".format(cyc).rjust(w),
+                 size if size is not None else "?",
+                 name, t, "  " + st if st else ""))
+        if st:
+            say("= %s %s" % (" " * w, repro(name, t)))
+    say()
+    return res, status
+
+
+def main():
+    global out
+    specs = sys.argv[1:]
+    tests = []
+    if not specs:
+        tests = sorted(glob.glob("test-*.c"))
+    for s in specs:
+        s = re.sub(r"([^/])\.[^./]*$", r"\1", s)   # foo.c foo.ivm -> foo
+        s = re.sub(r"^test-", "", s)
+        # test-NAME.c, else the literal NAME.c (./ptest byte-sieve-prime)
+        got = sorted(glob.glob("test-%s.c" % s)) or sorted(glob.glob(s + ".c"))
+        if not got: print("%%Error: no test-%s.c or %s.c" % (s, s))
+        tests += [g for g in got if g not in tests]
+    tests = [t[:-2] for t in tests]
+
+    spec = "-".join(re.sub(r"^test-|\.c$", "", s) for s in specs)
+    spec = spec.replace("*", "ALL").replace("?", "_").replace("/", "_")
+    logname = "ptest-%s.log" % spec if spec else "ptest.log"
+    out = open(logname, "w")
+
+    allres = [(t, test(t)) for t in tests]
+
+    if len(tests) > 1:
+        say("#" * 60)
+        say("=== ./ptest %s   (%d tests)" %
+            (" ".join(shlex.quote(a) for a in specs), len(tests)))
+        say("#" * 60)
+        names = ["ivm", "asm", "jit", "hjit", "cc65", "oscar"]
+        say("= %-28s" % "test" + "".join("%15s" % n for n in names))
+        for t, (res, status) in allres:
+            row = {r[0]: r for r in res}
+            cells = []
+            for n in names:
+                r, st = row.get(n), status.get(n)
+                cells.append("%15s" % ("- " if r is None else
+                             "FAIL " if st == "FAILED" else
+                             "{:,}".format(r[1]) + ("*" if st else " ")))
+            say("= %-28s" % t + "".join(cells))
+        say("= (* output differs, FAIL: failed, -: not run; see each test's"
+            " results above)")
+        say()
+    out.close()
+    print("log: " + logname)
+
+
+main()
