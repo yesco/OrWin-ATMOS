@@ -1,0 +1,18 @@
+int list:	3 100 300
+		3 100 300
+char list:	97 66 3 0 5
+		97 66 3 0 5
+string:		97 0 0 8
+		97 0 0 8
+exact:		122 3
+		122 3
+auto size:	6 111
+		6 111
+zero:		0 8
+		0 8
+write:		7
+		7
+static:		5 6 7
+		5 6 7
+const:		2 3
+		2 3

@@ -2,7 +2,16 @@
 
 # MeteoriC-65 (parse.c c.bnf): next, after the manual (MeteoriC-man.md)
 
-** tests failing **
+** tests failing **:
+
+- Against the .out files, ptest now reports these differences:
+  - incdec: ivm
+  - shifts: ivm and hjit; jit fails to build it
+  - loops: oscar
+  - dispatch-pon: asm prints a stray %
+  - ifdef: cc65 and oscar. That's expected, because they don't define
+    MeteoriC's predefined macros, so they print 0 0 instead of 1 19712.
+
 - jit fails to build test-loops and test-struct ("JIT: compilation
   failed"), and test-shifts ("alloc fail (map 4426, code 512 bytes)").
 - ivm char* *q = v in test-incdec prints 0 where everyone else prints

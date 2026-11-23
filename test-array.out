@@ -1,0 +1,20 @@
+char idx:	12 27
+		12 27
+word idx:	3 10 7
+		3 10 7
+zeroed:		0 0
+		0 0
+int array:	700 0
+		700 0
+int const:	7 301 302
+		7 301 302
+int* const:	5 6 8 9 8 9
+		5 6 8 9 8 9
+const idx:	5
+		5
+sizeof:		20 20
+		20 20
+pointer:	12
+		12
+local:		9
+		9

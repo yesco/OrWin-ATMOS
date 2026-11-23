@@ -1,0 +1,10 @@
+if 1 0:		1 2
+		1 2
+ifdef:		3 4 5 6
+		3 4 5 6
+nested:		7 8
+		7 8
+top level:	1
+		1
+predefined:	1 19712
+		1 19712

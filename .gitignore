@@ -31,3 +31,20 @@ fish
 foo.*
 
 *.dsk
+
+# expected test output (ptest): checked in, despite *.out above
+!test-*.out
+!test.out
+
+# ptest's own outputs
+*.got
+*.expect
+ptest*.log
+*.pc.log
+*.ivm.log
+*.asm.log
+*.jit.log
+*.hjit.log
+*.cc65.log
+*.cc65-build.log
+*.oscar.log
