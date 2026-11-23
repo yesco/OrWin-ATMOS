@@ -39,6 +39,7 @@
       t['\'']= &&op_ri;   t[','] = &&op_wi;
       t['('] = &&op_idxl; t[')'] = &&op_idxs;
       t['['] = &&op_bidxl;t[']'] = &&op_bidxs;
+      t['a'] = &&op_sidxl;t['b'] = &&op_sidxs;
 
       t['t'] = &&op_t;    t['n'] = &&op_n;
       t['u'] = &&op_u;    t['k'] = &&op_k;

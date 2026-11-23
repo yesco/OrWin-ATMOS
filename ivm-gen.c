@@ -929,7 +929,7 @@ static word vn_chain(word from, word to) {
     op = bin[pc];
     n = ivm_oplen(bin + pc);
     if (!n) return 0xffff;
-    if (op < 32 || strchr("L([@rl09", op)) st = pc;
+    if (op < 32 || strchr("L([@rl09a", op)) st = pc;
     else if (!(strchr("+-*/%&|^{}<=>?~", op))) st = 0xffff;
   }
   return pc == to ? st : 0xffff;
@@ -942,7 +942,7 @@ static int vn_reads(word at, uchar len, uchar v, uchar mem) {
   for (pc = at; pc < at + len; pc += n) {
     n = ivm_oplen(bin + pc);
     if (bin[pc] < 32) { if (bin[pc] == v) r = 1; continue; }
-    if (mem && strchr("([@rl", bin[pc])) r = 1;
+    if (mem && strchr("([@rla", bin[pc])) r = 1;
     IVM_EACH_SLOT(bin + pc, q, { if (*q == v) r = 1; });
   }
   return r;
@@ -971,7 +971,7 @@ uchar vn_temp(word from, uchar t) {
     w = WRITES_VAR(op) ? bin[pc + 1] : 0xffff;
     if (w == vn_t[k].t || (w != 0xffff && vn_reads(e, len, (uchar)w, 0)))
       ok = 0;
-    if (strchr(")]!w,Am", op) && vn_reads(e, len, 0xff, 1)) ok = 0;
+    if (strchr(")]!w,Amb", op) && vn_reads(e, len, 0xff, 1)) ok = 0;
   }
   if (ok && pc == st) {
     bin_ptr = st;
@@ -1029,7 +1029,7 @@ static int gen_deadload(void) {
     m = pc + n;
     if (TGT(m)) continue;
     // next op sets ACC from scratch (and does not read it)
-    if (bin[m] < 32 || strchr("L09([@rlK", bin[m])) {
+    if (bin[m] < 32 || strchr("L09([@rlKa", bin[m])) {
       for (k = 0; k < n; k++) DEL(pc + k);
       hit = 1;
     }
@@ -1331,6 +1331,13 @@ uchar *build_blob(int *out_len) {
           op, isprint(op)?op:' ');
         exit(1);
       }
+
+      // a b ll ii (striped): the hi plane is const ll + 1 (created right
+      // after ll: the reloc consts keep their order). Host builds check it
+#ifndef __CC65__
+      if ((op == 'a' || op == 'b') && map[a[1] - 1] != (uchar)(map[a[1]] + 1))
+        IVM_GEN_FAIL("striped: hi plane const not next to lo");
+#endif
 
       // short load of slot op — only remap if that slot moved
       if (op < 32) {

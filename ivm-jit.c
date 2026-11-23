@@ -648,6 +648,7 @@ static word  lc_tdest;
 #define _LDA    "\xAD"
 #define _LDAIY  "\xB1"
 #define _LDAAY  "\xB9"
+#define _LDXAY  "\xBE"
 #define _LDAN   "\xA9"
 #define _LDAZ   "\xA5"
 #define _CPXN   "\xE0"
@@ -703,6 +704,10 @@ static word  lc_tdest;
 #define RKW     "\x08"                    // ... slot 1 + 2 * slot 2 (word
 #define RKWH    "\x18"                    // a[k], a static struct's s.f)
 #define RS_KW   8
+#define RKA3    "\x09"                    // slot 1 + 1's const as the address
+#define RS_KA3  9                         // (abs,Y too: a striped hi)
+#define RK32    "\x0A"                    // that + slot 2, consts (the hi
+#define RS_K32  10                        // byte of a striped a[k])
 
 // library routines (JSR n, rule_ref)
 #define LIB_PUTCHAR 0
@@ -1309,7 +1314,7 @@ static void ksa_check(word bc_target) {
 // a KEEP op needn't save it (ivm-walk.c contract: "- SLOT/NEW/UNDEF")
 static int acc_unread(word bc) {
   uchar op = lc_code[bc];
-  return op < 32 || strchr("09Q12345678@r'l([KLCUIJijH;tun", op);
+  return op < 32 || strchr("09Q12345678@r'l([aKLCUIJijH;tun", op);
 }
 static int acc_dead(word bc) {
   return bc < lc_len && !is_label(bc) && acc_unread(bc);
@@ -1430,7 +1435,8 @@ static void loop_align_check(word ibc) {
 //                  index lo, then A = index hi + base hi into the hi byte
 //                  of the next abs,Y (self-modifying): base + index with
 //                  no pointer
-//   abs,Y op spec  RKA1: slot 1's const as the address (+ an R_ELBK's hi)
+//   abs,Y op spec  RKA1 / RKA3: slot 1's / 1 + 1's const as the address
+//                  (+ an R_ELBK's hi)
 //   abs op RKW     RKWH: slot 1's const + 2 * slot 2's (a word a[k])
 //   R_INC1         mem[slot 1]++ (emit_inc)
 //   R_NOW          acc_need() here (a pending const / slot into AX)
@@ -1629,6 +1635,17 @@ static const JitRule jit_rules[] = {
   RULE(']', G_ACC_PEND, 0,     R_ELB R_PEND0 _STAIY),
   RULE(']', G_AI_BYTE, 0,      R_ELB _STAIY),
   RULE(']', 0,     R_NEED, _PHA R_ELB _PLA _STAIY),
+  // a ll ii: ACC = striped word: lo[i] | hi[i] << 8 (an array of structs'
+  // field, lo: const ll, hi: const ll + 1, i < N <= 254: Y = its lo).
+  // b: stored
+  RULE('a', G_K1_K2, R_DROP | R_AX, _LDA RKK _LDX RK32),
+  RULE('a', 0,       R_DROP | R_AX, _LDY RLO2 _LDAAY RKA1 _LDXAY RKA3),
+  RULE('b', G_ACC_PEND | G_K1_K2, 0,      R_PEND0 _STA RKK R_PEND1 _STA RK32),
+  RULE('b', G_K1_K2,              R_NEED, _STA RKK _STX RK32),
+  RULE('b', G_ACC_PEND, 0,
+    _LDY RLO2 R_PEND0 _STAAY RKA1 R_PEND1 _STAAY RKA3),
+  RULE('b', 0,          R_NEED,
+    _LDY RLO2 _STAAY RKA1 _PHA _TXA _STAAY RKA3 _PLA),
   // [ bb ii: ACC = ((uchar*)base)[idx]; a zjp next and ACC dead after
   // it: only A (Z), else LDA last: Z == (ACC == 0). A static array: LDA
   // base,Y (as for ])
@@ -1899,6 +1916,8 @@ static void emit_tpl(const uchar *t, uchar len, const uchar *p, uchar op) {
       else if (a == RS_KK) ema(b, (word)(const_val(p[0]) + const_val(p[1])));
       else if (a == RS_KW)
         ema(b, (word)(const_val(p[0]) + (const_val(p[1]) << 1) + (c ? 1 : 0)));
+      else if (a == RS_KA3) ema(b, const_val(p[0] + 1));
+      else if (a == RS_K32) ema(b, (word)(const_val(p[0] + 1) + const_val(p[1])));
 
       // a slot
       else {
@@ -1972,11 +1991,10 @@ static void emit_tpl(const uchar *t, uchar len, const uchar *p, uchar op) {
     // branch: forward, A_PATCH lands it
     } else if ((b & 0x10) && c == 0) fx[nfx++ & 3] = emrel(b);
 
-    // abs,Y (column 9, odd rows) + RKA1: slot 1's const as the address; an
-    // R_ELBK before stores into its hi
+    // abs,Y (column 9, odd rows) + RKA1 / RKA3: slot 1's / 1 + 1's const
+    // as the address; an R_ELBK before stores into its hi
     else if (c == 9 && (b & 0x10)) {
-      t++;
-      ema(b, const_val(p[0]));
+      ema(b, const_val(p[0] + (*t++ == RS_KA3)));
       if (smfix) {
         lc_out[smfix]     = (uchar)(lc_out_org + lc_at - 1);
         lc_out[smfix + 1] = (uchar)((lc_out_org + lc_at - 1) >> 8);

@@ -15,12 +15,19 @@
 // - chains: ->f after any pointer: a field (a.next->v), an array element
 //   (ps[i]->x), a call (mk(6)->x), as often as it comes; loads and stores
 // - an array of structs is SoA: field f of all the elements in a row, so
-//   a[i].f is f's array [i] (like an int array). a alone is no pointer
-//   (test-struct-err.c)
+//   a[i].f is f's array [i] (like an int array). __striped (b4 here; parse
+//   -S: all of them): f's lo bytes, then its hi bytes (values > 255 check
+//   both). a alone is no pointer (test-struct-err.c)
+//   Run it also with parse -S
 // Values stay below 32768 (gcc int is 32 bit, ours 16).
 
 #include <stdio.h>
 #include <stdlib.h>
+
+// not C: only our compiler knows it (oscar64 has one too)
+#ifndef __MC65__
+#define __striped
+#endif
 
 struct pt { int x; int y; };
 struct pt4 { int a; int b; int c; int d; };
@@ -59,7 +66,7 @@ int main(void) {
   struct node *n;
   struct pt *ps[4];
   int i;
-  struct pt b4[4];
+  __striped struct pt b4[4];
 
   // --- a struct variable: its fields ---------------------------------------
   printf("fields .:\t3 4 7\n\t\t");
@@ -215,6 +222,23 @@ int main(void) {
   printf("%d ", s3[1].y);
   s3[i].y--;
   printf("%d ", s3[i].y);
+  printf("\n");
+
+  // values > 255: the hi bytes (striped), var / const index, += ++
+  printf("hi bytes:\t1001 4660 1301 513 30000\n\t\t");
+  i = 1;
+  s3[i].z = 1000 + i;
+  s3[3].z = 0x1234;
+  s3[4].y = 1000;
+  s3[4].y += 301;
+  b4[2].x = 512;
+  b4[2].x++;
+  s3[0].x = 30000;
+  printf("%d ", s3[1].z);
+  printf("%d ", s3[3].z);
+  printf("%d ", s3[i + 3].y);
+  printf("%d ", b4[2].x);
+  printf("%d ", s3[0].x);
   printf("\n");
 
   printf("sizeof:\t\t2 4\n\t\t");

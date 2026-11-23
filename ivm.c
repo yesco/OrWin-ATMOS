@@ -1434,6 +1434,21 @@ ZL(op_bidxs,']')
     CHKP(PAR + zp.mem[zp.ipc[1]], 1);
     ((uchar*)(IVM_PTR(PAR)))[zp.mem[zp.ipc[1]]] = zp.acc;
     zp.ipc += 2; goto xnext; // 2 args
+
+// a ll ii - striped word index read (an array of structs' field: the lo
+// bytes at mem[ll], the hi bytes at mem[ll + 1]); b - the same, write.
+// One body: op picks
+ZL(op_sidxl,'a')
+ZL(op_sidxs,'b') {
+    static word i;                     // static: cc65 addresses it directly
+    static uchar *h;
+    i = zp.mem[zp.ipc[1]];
+    CHKP(PAR + i, 1); CHKP(zp.mem[*zp.ipc + 1] + i, 1);
+    h = (uchar *)IVM_PTR(zp.mem[*zp.ipc + 1] + i);   // the hi byte
+    tpc = (uchar *)IVM_PTR(PAR + i);                 // the lo byte (zp)
+    if (op == 'a') zp.acc = *tpc | (*h << 8);
+    else { *tpc = (uchar)zp.acc; *h = (uchar)(zp.acc >> 8); }
+    zp.ipc += 2; goto xnext; } // 2 args
  
 // M: malloc: operand = slot of pointer var; ACC = size in bytes
 ZL(op_M,   'M') zp.acc = zp.mem[*zp.ipc] = ivm_zalloc(zp.acc); goto pnext;

@@ -42,9 +42,14 @@ D=static \<|extern \<
 #   code, the params stay, the name is a const (the field count).
 #   A struct variable is a static array (\@ bss, = {..} \: data, consts
 #   only), p.f and p->f are the same: ( p k  (\m: k, R and H rules)
-#   An array of them: SoA, f of all N in a row: a[i].f is ( f's array i
-#   (\&: the const a + 2kN, R and H rules), like an int array. Bss only;
-#   a is only a[i] (no pointer to it, to an element: not the C layout)
+#   An array of them: SoA, f of all N in a row: a[i].f is "( f i" (\&:
+#   f's const, R and H rules), like an int array.
+#   __striped (or parse -S: all of them; for the JIT): type 'z', f's N lo
+#   bytes, then its N hi bytes: "a lo i" (load), "b lo i" (store), hi:
+#   the const slot after lo. The JIT: LDY i; LDA lo,Y; LDX hi,Y (twice as
+#   fast); the interpreters: a bit slower than ( ).
+#   Bss only; a is only a[i] (no pointer to it, to an element: not the C
+#   layout)
 d=struct \f\{ {$f}\q;
 f=$T \p$e;\<|
 e=,\p\<|
@@ -72,6 +77,7 @@ Q=#define \+ \d\c[\g]\n
 # -O: REGISTER 0..31, other globals 32..95, frames at 96+
 V=const\c $T $M;|register\b $T $M;|static $T $M;
 |struct\'s \i \+={\:$N}\.;|struct\'s \i \+\[$S\]\@;|struct\'s \i \+\@;
+|__striped struct\'z \i \+\[$S\]\@;
 |$T $M;
 # name[N]: a static array of N (a number or const) elements: zeroed (\@),
 #   also = {0}; initialized: = "text" / = {1, 2, 'c', ...} (\: \, \.),
@@ -441,12 +447,18 @@ H=\i=\i\?\W\[\i\]; \2\[\3\]=\2\[\i\]; \2\[\7\]=\1;[A\2\3\7S\1]
 
 # - Struct stores (from H)
 # a[i].f (an array of structs, SoA): word i of f's array (\&)
-#   captures: 1=a 2=i 3=f's array 4=E / const 1 (5: E in a temp)
-h=\i\[$S\]\&=$E;[)\3\2]
+#   captures: 1=a 2=i 3=f / its lo 4=E / const 1 (5: E in a temp)
+#   striped (\?Z): the b op, f's lo (its hi: the next const slot)
+h=\i\?Z\[$S\]\&=$E;[b\3\2]
+|\i\?Z\[$S\]\&+=$E;[S\ja\3\2+\5b\3\2]
+|\i\?Z\[$S\]\&++;\#01[a\3\2+\4b\3\2]
+|\i\?Z\[$S\]\&--;\#01[a\3\2-\4b\3\2]
+|\i\[$S\]\&=$E;[)\3\2]
 |\i\[$S\]\&+=$E;[S\j(\3\2+\5)\3\2]
 |\i\[$S\]\&++;\#01[(\3\2+\4)\3\2]
 |\i\[$S\]\&--;\#01[(\3\2-\4)\3\2]
-#   a[expr].f = E   captures: 1=a 2=expr 3=temp 4=f's array 5=E
+#   a[expr].f = E   captures: 1=a 2=expr 3=temp 4=f / its lo 5=E
+|\i\?Z\[$E[S\j]\]\&=$E;[b\4\3]
 |\i\[$E[S\j]\]\&=$E;[)\4\3]
 
 # p.f p->f   captures: 1=p 2=k 3=E / const 1 (4: E in a temp, only read)
@@ -494,7 +506,10 @@ R=getchar()[K]
 |\i($Z)[\v]$x
 
 # - a[i].f (an array of structs, SoA): word i of f's array (\&)
-#   captures: 1=a 2=i 3=f's array   (a[expr].f: 2=expr 3=f's array 4=temp)
+#   captures: 1=a 2=i 3=f / its lo   (a[expr].f: 2=expr 3=f 4=temp)
+#   striped (\?Z): the a op, f's lo (its hi: the next const slot)
+|\i\?Z\[$S\]\&[a\3\2]
+|\i\?Z\[$E\]\&[S\ja\3\4]
 |\i\[$S\]\&[(\3\2]
 |\i\[$E\]\&[S\j(\3\4]
 

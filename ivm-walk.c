@@ -42,10 +42,10 @@
 //
 //   in  out    ops
 //   -   KEEP   ' ' DEL B O N W Z # (#TIMED: JIT on the host sim only)
-//   in  KEEP   S(+SLOT) ! , w s ) ] m . P E zjp X(returns it)
+//   in  KEEP   S(+SLOT) ! , w s ) ] b m . P E zjp X(returns it)
 //   -   SLOT   L <32 C(dst) U(1st) I J i j H
 //   in  SLOT   M(acc = mem[s] = alloc(acc))
-//   -   NEW    0 9 Q 1..8 @ r ' l ( [ K A (old a[i])
+//   -   NEW    0 9 Q 1..8 @ r ' l ( [ a K A (old a[i])
 //   in  NEW    + - * / % & | ^ { } < = > ? ~ x y z call(arg -> result)
 //   -   UNDEF  t u n (VM: loop var; JIT: clobbered) F
 //   ;   NEW    ACC = return value cell, then return
@@ -90,7 +90,7 @@ static const uchar ivm_optab[96] = {
   //  X    Y    Z    [   bsl   ]    ^    _
   _A0, _SP, _S1, _S2, _SP, _S2, _S1, _SP,
   //  `    a    b    c    d    e    f    g
-  _SP, _SP, _SP, _SP, _SP, _SP, _SP, _SP,
+  _SP, _S2, _S2, _SP, _SP, _SP, _SP, _SP,
   //  h    i    j    k    l    m    n    o
   _SP, _S1, _S1, _SP, _S1, _S2, _BK, _SP,
   //  p    q    r    s    t    u    v    w

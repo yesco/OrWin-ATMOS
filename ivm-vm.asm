@@ -53,7 +53,7 @@ tmp_hi: .res 1
 
 savey:  .res 1
 
-swp2:   .res 2                  ; op_A: &base[j]
+swp2:   .res 2                  ; op_A: &base[j]   a b: hi plane
 swpb:   .res 1                  ; op_A: base slot
 swpi:   .res 1                  ; op_A: i slot
         
@@ -1213,6 +1213,60 @@ op_A:
 .endif
         jmp     pnext
 
+;;; a ll ii  ACC = ((uchar*)mem[ll])[mem[ii]] | ((uchar*)mem[ll+1])[mem[ii]] << 8
+;;; b ll ii  the same, written: a striped word array (an array of structs'
+;;;          field: its lo bytes at mem[ll], its hi bytes at mem[ll + 1])
+;;; SELEM: (tmp_lo),Y = &lo[ii] (Y saved in swpi), (swp2),Y = &hi[ii]: as
+;;;   BELEM, ptr = (idx lo, base hi + idx hi), Y = base lo. Inline: a b are
+;;;   as fast as ( )
+.macro SELEM
+.if ALTCODE=0
+        ldy     #0
+.endif
+        lda     (_ivm_ipc),y        ; ll
+        tax
+        iny
+        USEY                        ; at ii: pnext skips it
+        lda     (_ivm_ipc),y        ; ii
+        tay
+        lda     (_ivm_memlo),y      ; idx lo: both pointers' lo
+        sta     tmp_lo
+        sta     swp2
+        lda     (_ivm_memhi),y      ; idx hi
+        sta     swpb
+        txa                         ; ll: the lo plane
+        tay
+        lda     (_ivm_memhi),y
+        clc
+        adc     swpb
+        sta     tmp_hi
+        lda     (_ivm_memlo),y
+        sta     swpi
+        iny                         ; ll + 1: the hi plane
+        lda     (_ivm_memhi),y
+        clc
+        adc     swpb
+        sta     swp2+1
+        lda     (_ivm_memlo),y
+        tay
+.endmacro
+
+op_a:   SELEM
+        lda     (swp2),y
+        sta     _ivm_acc+1
+        ldy     swpi
+        lda     (tmp_lo),y
+        sta     _ivm_acc
+        P2NEXT
+
+op_b:   SELEM
+        lda     _ivm_acc+1
+        sta     (swp2),y
+        ldy     swpi
+        lda     _ivm_acc
+        sta     (tmp_lo),y
+        P2NEXT
+
 ;;; tmp = mem[X] + 2 * mem[A]   (A = index slot, X = base slot; Y used)
 elem_adr:
         tay
@@ -1935,8 +1989,6 @@ op__:
 op_tick:
 
 ;;; TODO: single opcode save local
-op_a:
-op_b:
 op_c:
 op_d:
 op_e:

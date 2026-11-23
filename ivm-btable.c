@@ -5,7 +5,7 @@
 // #included in run_ivm() with -DUSE_BTABLE.
 // 
 // Works on any compiler (no labels as values, no switch):
-//   80 op ranges, 6-7 compares for any op.
+//   83 op ranges, 6-7 compares for any op.
 //
 // GENERATED from ivm-jtable.c:
 // 
@@ -14,7 +14,7 @@
 
   if (op & 0x80) goto op_hibit;
 
-  if (op < 'N') {
+  if (op < 'O') {
     if (op < ':') {
       if (op < '*') {
         if (op < '%') {
@@ -78,78 +78,81 @@
       if (op < 'H') goto op_G;
       goto op_H;
     }
-    if (op < 'K') {
+    if (op < 'L') {
       if (op < 'J') goto op_I;
-      goto op_J;
+      if (op < 'K') goto op_J;
+      goto op_K;
     }
-    if (op < 'L') goto op_K;
     if (op < 'M') goto op_L;
-    goto op_M;
+    if (op < 'N') goto op_M;
+    goto op_N;
   }
-  if (op < 'k') {
-    if (op < 'X') {
-      if (op < 'S') {
-        if (op < 'P') {
-          if (op < 'O') goto op_N;
-          goto op_O;
+  if (op < 'j') {
+    if (op < 'Y') {
+      if (op < 'T') {
+        if (op < 'Q') {
+          if (op < 'P') goto op_O;
+          goto op_P;
         }
-        if (op < 'Q') goto op_P;
         if (op < 'R') goto op_Q;
-        goto op_unk;
+        if (op < 'S') goto op_unk;
+        goto op_S;
       }
-      if (op < 'U') {
-        if (op < 'T') goto op_S;
-        goto op_unk;
+      if (op < 'V') {
+        if (op < 'U') goto op_unk;
+        goto op_U;
       }
-      if (op < 'V') goto op_U;
       if (op < 'W') goto op_unk;
-      goto op_W;
+      if (op < 'X') goto op_W;
+      goto op_X;
     }
-    if (op < ']') {
-      if (op < 'Z') {
-        if (op < 'Y') goto op_X;
-        goto op_unk;
+    if (op < '^') {
+      if (op < '[') {
+        if (op < 'Z') goto op_unk;
+        goto op_Z;
       }
-      if (op < '[') goto op_Z;
       if (op < 0x5C) goto op_bidxl;
-      goto op_unk;
+      if (op < ']') goto op_unk;
+      goto op_bidxs;
     }
-    if (op < '_') {
-      if (op < '^') goto op_bidxs;
-      goto op_xor;
+    if (op < 'b') {
+      if (op < '_') goto op_xor;
+      if (op < 'a') goto op_unk;
+      goto op_sidxl;
     }
+    if (op < 'c') goto op_sidxs;
     if (op < 'i') goto op_unk;
-    if (op < 'j') goto op_bi;
-    goto op_bj;
+    goto op_bi;
   }
-  if (op < 'v') {
-    if (op < 'q') {
-      if (op < 'm') {
-        if (op < 'l') goto op_k;
-        goto op_l;
+  if (op < 'u') {
+    if (op < 'o') {
+      if (op < 'l') {
+        if (op < 'k') goto op_bj;
+        goto op_k;
       }
+      if (op < 'm') goto op_l;
       if (op < 'n') goto op_m;
-      if (op < 'o') goto op_n;
+      goto op_n;
+    }
+    if (op < 'r') {
+      if (op < 'q') goto op_unk;
+      goto op_q;
+    }
+    if (op < 's') goto op_r;
+    if (op < 't') goto op_s;
+    goto op_t;
+  }
+  if (op < 'z') {
+    if (op < 'w') {
+      if (op < 'v') goto op_u;
       goto op_unk;
     }
-    if (op < 's') {
-      if (op < 'r') goto op_q;
-      goto op_r;
-    }
-    if (op < 't') goto op_s;
-    if (op < 'u') goto op_t;
-    goto op_u;
-  }
-  if (op < '{') {
-    if (op < 'x') {
-      if (op < 'w') goto op_unk;
-      goto op_w;
-    }
+    if (op < 'x') goto op_w;
     if (op < 'y') goto op_x;
-    if (op < 'z') goto op_y;
-    goto op_z;
+    goto op_y;
   }
   if (op < '}') {
+    if (op < '{') goto op_z;
     if (op < '|') goto op_shl;
     goto op_or;
   }

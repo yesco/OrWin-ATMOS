@@ -62,7 +62,8 @@
 //   \r         end of param list OR flag REGISTER after literal "register"
 //   \q         end of a struct: "struct \f\{ { params } \q" (instead of \})
 //   \m         member: .f or ->f of the struct of the last \i: const k
-//   \&         a[i].f, an array of structs (SoA): const, f's array
+//   \&         a[i].f, an array of structs (SoA): const, f's array (striped:
+//              its lo bytes; its hi bytes: the next const slot)
 //   \b         flag REGISTER after literal "register" (use this, not \r)
 //   \d         number / char literal
 //   \s         string const "..." → data pool + reloc pointer (capture)
@@ -438,6 +439,7 @@ static uchar far_sp;
 
 // ------------------------------------------------------------
 static uchar verbose;       // 0 off, 1 compact, 2+ detail
+static uchar stripe;        // -S: all arrays of structs striped (the JIT)
 static uchar ignore_case;   // default 1
 
 // ------------------------------------------------------------
@@ -1653,6 +1655,7 @@ static uchar make_array(void) {
   if (!nsym || !cnt || !array_sym(cnt, add_bss_array((word)(cnt * ESIZE()))))
     return 0;
   syms[nsym - 1].ret_addr_slot = (uchar)n;
+  if (stripe && n != 0xff) syms[nsym - 1].vtype = 'z';   // -S: striped
   return 1;
 }
 
@@ -1763,17 +1766,23 @@ static void struct_end(void) {
   scope_leave();
 }
 
-// SoA: the address of field k's array in array of structs a: a + 2 * k *
-// N, a bss const (one per field: reused)
+// SoA: field k of array of structs a: its array at a + 2kN, a bss const
+// (one per field, reused). Striped (vtype 'z'): that is its lo plane, the
+// hi plane N after it: two consts made together (the a b ops read the hi
+// one at the lo slot + 1, build_blob keeps it so)
 static uchar soa_base(Symbol *a, uchar k) {
-  uchar i;
-  word v = (word)(const_val(a->address) + 2 * k * a->ret_addr_slot);
+  uchar i, n = a->ret_addr_slot, z = a->vtype == 'z';
+  word v = (word)(const_val(a->address) + 2 * k * n);
+  uint16_t *c = const_pool;
 
-  for (i = 0; i < nconst; i++)
-    if (const_pool[i] == v && const_is_reloc[i] == 2 &&
-        (uchar)(CONST_TOP - i) != bss_end_slot)
+  for (i = 0; i < nconst; i++, c++)
+    if (c[0] == v && const_is_reloc[i] == 2 &&
+        (uchar)(CONST_TOP - i) != bss_end_slot &&
+        (!z || (i + 1 < nconst && c[1] == v + n && const_is_reloc[i + 1] == 2)))
       return (uchar)(CONST_TOP - i);
-  return add_const_raw(v, 2);
+  i = add_const_raw(v, 2);
+  if (z) add_const_raw(v + n, 2);
+  return i;
 }
 
 // \m — member: .f or ->f, f a param of the struct (stub) of what \i or
@@ -1782,7 +1791,9 @@ static uchar soa_base(Symbol *a, uchar k) {
 //   in its scope: the params right after it. Result = const k (the word
 //   index for the ( ) ops); rec = f (a pointer field: the next ->)
 // \& — a[i].f, a an array of structs (SoA: f of all the N elements in a
-//   row): result = the const a + 2 * k * N, f's array (index it with i)
+//   row): the const a + 2 * k * N, f's array. Striped (vtype 'z', __striped
+//   or -S: their N lo bytes, then their N hi bytes): its next slot is that
+//   + N (index them with i: a b ops)
 static uchar match_member(uchar soa) {
   Symbol *s, *a;
   uchar r = cur.rec, t, i;
@@ -3054,6 +3065,7 @@ int main(int argc, char **argv) {
       switch (arg[1]) {
       case 'v': verbose++;       continue;
       case 'O': optimize = 1;    continue;
+      case 'S': stripe = 1;      continue;
       case 'i': ignore_case = 1; continue; // LOL
       default: ;// TODO: give error
       }
@@ -3064,7 +3076,7 @@ int main(int argc, char **argv) {
   }
 
   if (!bnf || !srcpath) {
-    eprintf("usage: %s [-v ...] [-O] [-i] c.bnf src.c\n", argv[0]);
+    eprintf("usage: %s [-v ...] [-O] [-S] [-i] c.bnf src.c\n", argv[0]);
     return 1;
   }
 
