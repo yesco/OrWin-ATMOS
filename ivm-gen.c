@@ -419,7 +419,7 @@ uchar lit_addr(unsigned int v) {
 
 //#define SYM_GROW  250
 
-typedef enum { SYM_VAR, SYM_FUNC } SymbolType;
+typedef enum { SYM_VAR, SYM_FUNC, SYM_STRUCT } SymbolType;
 
 // ~15 bytes + name; shrink later if needed (pack flags into vtype etc.)
 typedef struct {
@@ -451,6 +451,7 @@ typedef struct {
 Symbol *syms;          // grows on demand
 word nsym;
 uchar scope_depth;
+word func_sym;         // FUNC symbol of the function being declared (\f)
 static word sym_cap;
 
 Symbol *sym_add(const char *name, SymbolType type, uchar address) {
@@ -492,12 +493,15 @@ Symbol *sym_add(const char *name, SymbolType type, uchar address) {
 
 // innermost declaration wins. type: SYM_VAR, SYM_FUNC or SYM_ANY.
 // local=1: only names declared in the current scope. SYM_NONE if not found.
+// The params of an earlier function (kept by scope_leave): jumped over,
+// only those after func_sym (the current function's) are in scope
 word sym_find(const char *name, uchar type, uchar local) {
   word i;
   Symbol *s;
 
   for (i = nsym; i > 0; i--) {
     s = &syms[i - 1];
+    if (s->scope > scope_depth || (s->scope && i <= func_sym)) continue;
     if (local && s->scope != scope_depth) continue;
     if ((type == SYM_ANY || s->type == type) && strcmp(s->name, name) == 0)
       return (word)(i - 1);
@@ -551,10 +555,13 @@ static Symbol sym_dead[MAX_DEAD];
 static word nsym_dead;
 #endif
 
+// the params stay (sym_find jumps over them): right after their function,
+// in order, for a struct's members (\m)
 void scope_leave(void) {
   if (scope_depth == 0) return;
 
-  while (nsym > 0 && syms[nsym - 1].scope >= scope_depth) {
+  while (nsym > 0 && syms[nsym - 1].scope >= scope_depth &&
+         !syms[nsym - 1].pidx) {
     nsym--;
     #ifdef SYMS
       if (nsym_dead < MAX_DEAD) {
@@ -586,7 +593,7 @@ uchar func_begin(const char *name) {
   uchar base, vec;
   Symbol *s;
 
-  if (sym_find(name, SYM_FUNC, 1) != SYM_NONE) return 0xff;
+  if (sym_find(name, SYM_ANY, 1) != SYM_NONE) return 0xff;   // a struct too
   if (nvector >= (uchar)(MAX_VECTORS - 1)) IVM_GEN_FAIL("too many functions");
 
   // -O: frames start at FRAME_BASE (96), after the global bands 0..95
@@ -598,6 +605,7 @@ uchar func_begin(const char *name) {
   next_slot = base + 4;
 
   vec = nvector++;
+  func_sym = nsym;
   s = sym_add(name, SYM_FUNC, vec);
   s->ret_addr_slot = base;
   s->ret_slot = base + 1;

@@ -31,10 +31,20 @@
 # - Program starts with P
 P=$D
 
-# - Top level: declarations, functions, # lines (Q)
+# - Top level: declarations, functions, # lines (Q), structs (d: after V,
+#   a backtracked \f leaks its vector: no code, the JIT calls 0)
 D=static \<|extern \<
 |$Q\o\<
-|$V\o\<|$F\o\<|\!\o\<|
+|$V\o\<|$d\o\<|$F\o\<|\!\o\<|
+
+# - Structs: a prototype, declared like a function (\f \{ \p), its params
+#   are the fields: field k is word k. \q ends it (instead of \}): no
+#   code, the params stay, the name is a const (the field count).
+#   A struct variable is a static array (\@ bss, = {..} \: data, consts
+#   only), p.f and p->f are the same: ( p k  (\m: k, R and H rules)
+d=struct \f\{ {$f}\q;
+f=$T \p$e;\<|
+e=,\p\<|
 
 # - # lines, at the top and in blocks (C)
 #   #define NAME number|"string" -> const (\c only after a full match: a
@@ -57,7 +67,9 @@ Q=#define \+ \d\c[\g]\n
 
 # - Declarations: optional register\b -> REGISTER slot 0..31
 # -O: REGISTER 0..31, other globals 32..95, frames at 96+
-V=const\c $T $M;|register\b $T $M;|static $T $M;|$T $M;
+V=const\c $T $M;|register\b $T $M;|static $T $M;
+|struct\'w \i \+={\:$N}\.;|struct\'w \i \+\@;
+|$T $M;
 # name[N]: a static array of N (a number or const) elements: zeroed (\@),
 #   also = {0}; initialized: = "text" / = {1, 2, 'c', ...} (\: \, \.),
 #   [] its size from the initializer, [N] zeros after it. Arrays are
@@ -66,14 +78,15 @@ M=\+\[$S\]={0}\@$U
 |\+\[$S\]=\:\s\.$U|\+\[\]=\:\s\.$U
 |\+\[$S\]={\:$N}\.$U|\+\[\]={\:$N}\.$U
 |\+\[$S\]\@$U|\+=$S[\g]$U|\+=$E[S\1]$U|\+$U|
-# initializer elements: consts, a trailing , allowed
-N=$S\,,\<|$S\,|
+# initializer elements: consts, a trailing , allowed. The , before \, : a
+#   failed alt does not take back data (the last one went in twice)
+N=$S,\,\<|$S\,|
 
 # - TODO: deep recursion might be bad...
 U=,$M|
 
 # - TODO: why I^* - pascal artifact?
-T=$I *\'^|$I^*\'^|$I
+T=struct\'W \i *|$I *\'^|$I^*\'^|$I
 I=int\'w|word\'w|void\'w|char\'c|unsigned int\'w|unsigned char\'c
 
 # - Function/Args definition
@@ -192,6 +205,8 @@ K=$Y
 |free(\i);
 # TODO: expression usage?
 |\i=malloc($E);[M\1]
+# p.f = malloc(..): into a temp, then word k   captures: 1=p 2=k 3=E 4=temp
+|\i\m=malloc($E);[M\t)\1\2]
 
 # - Statement can be a Block, or lastly Assignments
 |$B|;
@@ -407,6 +422,11 @@ H=\i=\i\?\W\[\i\]; \2\[\3\]=\2\[\i\]; \2\[\7\]=\1;[A\2\3\7S\1]
 |\i\?\C\[$E[S\j]\]=$E;[\]\1\3]
 |\i\?\W\[$E[S\j]\]=$E;[)\1\3]
 |\i\[$E[S\j]\]=$E;[\]\1\3]
+# p.f p->f   captures: 1=p 2=k 3=E / const 1 (4: E in a temp, only read)
+|\i\m=$E;[)\1\2]
+|\i\m+=$E;[S\j(\1\2+\4)\1\2]
+|\i\m++;\#01[(\1\2+\3)\1\2]
+|\i\m--;\#01[(\1\2-\3)\1\2]
 
 |\i=0;[Z\1]
 |\i=$S+$S;[L\2+\3S\1]
@@ -459,6 +479,8 @@ R=getchar()[K]
 |\i\?\C\[$E\][S\j\[\1\3]
 |\i\?\W\[$E\][S\j(\1\3]
 |\i\[$E\][S\j\[\1\3]
+# p.f p->f: word k   captures: 1=p 2=k
+|\i\m[(\1\2]
 
 # - Parens
 |($E)
@@ -470,7 +492,7 @@ R=getchar()[K]
 # - Simple Expression: \s = string const, \d = number
 # sizeof: by the type's guard: char 1, int / word / any pointer 2 (\#xx:
 # the result is the const xx); a static array: its size (\$)
-S=\d|sizeof($T\?c)\#01|sizeof($T)\#02|sizeof(\i\$)|sizeof(\i\?c)\#01|sizeof(\i)\#02|\s|\i
+S=\d|sizeof(struct \i\$)|sizeof($T\?c)\#01|sizeof($T)\#02|sizeof(\i\$)|sizeof(\i\?c)\#01|sizeof(\i)\#02|\s|\i
 
 # - List of expressions (limited, TODO: get rid of?)
 # TODO: think it'll parse E twice?
@@ -535,7 +557,9 @@ Tokens:
   \+  declare ident -> slot
   \f  declare function ident: name = ret-value cell of a new frame
       (base+0 ret addr, +1 ret value, +2 prev fp, +3 last param) + vector index
-  \p  declare parameter: slot base+4+n
+  \p  declare parameter: slot base+4+n (a struct: field n)
+  \q  end of a struct (\f \{ params): instead of \}, see rule d
+  \m  .f ->f: member f of the struct of the last \i: const k
 -- TODO: conflict with \r set mark on REGISTER var
   \r  end of params (no input): last param moves to base+3 (JSR stores ACC there)
 

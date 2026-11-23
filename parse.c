@@ -60,6 +60,8 @@
 //   \f         declare function: name = ret-value cell of a new frame + vector
 //   \p         declare parameter (frame cell base+4+n); \r ends the list
 //   \r         end of param list OR flag REGISTER after literal "register"
+//   \q         end of a struct: "struct \f\{ { params } \q" (instead of \})
+//   \m         member: .f or ->f of the struct of the last \i: const k
 //   \b         flag REGISTER after literal "register" (use this, not \r)
 //   \d         number / char literal
 //   \s         string const "..." → data pool + reloc pointer (capture)
@@ -1456,6 +1458,8 @@ static void note_undef(uchar is_func, word pos) {
   undef_pos_abs = pos;
 }
 
+static word last_sym = 0xffff;   // the symbol \i matched last (\$)
+
 // type word of a symbol (for MAKE_CAP): uppercase high byte if pointer
 static word sym_type(Symbol *s) {
 #if 1
@@ -1474,6 +1478,7 @@ static void set_decl_type(Symbol *s) {
   uchar t = (uchar)(cur_type >> 8);
   s->is_ptr = isupper(t) ? 1 : 0; // haha: yes isupper can return any
   s->vtype = (uchar)tolower(t);
+  s->ret_slot = (uchar)last_sym;   // struct \i: its struct (for \m)
 }
 
 // \1..\9 — like \i, but slot must equal capture n (same variable).
@@ -1501,7 +1506,6 @@ static uchar match_ident_same(uchar n) {
   return 1;
 }
 
-static word last_sym = 0xffff;   // the symbol \i matched last (\$)
 // Predefined names (#define'd consts), made when first seen: no const
 // slot otherwise. __MC65__: the .ivm version, __TARGET_6502__: 1
 static uchar predef(void) {
@@ -1545,20 +1549,19 @@ static uchar match_ident(void) {
   last_sym = i;
   if (s->type == SYM_FUNC) {
 
-    // It's a function name?
-    last_func_vec = s->address;
+    // It's a function name? (in the frame: later \i matches, the call
+    // arguments, must not change \v. Not last_func_vec: that is the one
+    // being declared, "struct pt *q" in its params is an \i too)
+    cur.func_vec = s->address;
     slot = s->ret_slot;
 
   } else {
 
     // It's a variable name?
-    last_func_vec = 0xff;
+    cur.func_vec = 0xff;
     slot = s->address;
   }
   record_capture(MAKE_CAP(slot, sym_type(s)));
-
-  // kept in the frame: later \i matches (call arguments) must not change \v
-  cur.func_vec = last_func_vec;
 
   return 1;
 }
@@ -1624,9 +1627,15 @@ static uchar array_sym(word cnt, uchar k) {
 // element size of the last declared ident
 #define ESIZE() (syms[nsym - 1].vtype == 'c' ? 1 : 2)
 
+// the element count: capture 2 ("\+\[N\]"), else 1 ("struct \i \+")
+static uchar cap_count(void) {
+  uchar n = CAP_SLOT(cap_val(2));
+  return is_lit(n) ? n : CAP_SLOT(cap_val(1));
+}
+
 // \@: a static array of capture 2 elements: zeroed (bss)
 static uchar make_array(void) {
-  uchar n = CAP_SLOT(cap_val(2));
+  uchar n = cap_count();
   word cnt;
 
   if (!nsym || !is_lit(n)) return 0;
@@ -1640,7 +1649,7 @@ static uchar make_array(void) {
 static word ia_start, ia_n;
 
 static uchar init_start(void) {
-  uchar n = CAP_SLOT(cap_val(2));
+  uchar n = cap_count();
   ia_n = (cur.prod_n >= 2 && is_lit(n)) ? (word)lit_val(n) : 0;
   ia_start = data_string_start();
   return nsym != 0;
@@ -1719,6 +1728,47 @@ static uchar match_param_decl(void) {
        id_buf, (unsigned)(s->pidx - 1), (unsigned)s->address,
        (char)(CAP_TYPE(cur_type) >> 8), CAP_IS_PTR(cur_type) ? "*" : "");
   return 1;
+}
+
+
+// \q — the \f just declared is a struct, a prototype: its params are the
+//   fields (k: param k). No code, no vector, no frame: given back. Its
+//   name (the ret value variable) becomes a const, the field count (\@
+//   \: its size, \$ sizeof). Leaves the scope, the params stay (\m)
+static void struct_end(void) {
+  uchar v = --nvector, b = frame_base[v], n = (uchar)(next_slot - b - 4);
+  Symbol *s = syms + func_sym;
+
+  s->type = SYM_STRUCT;                  // no calls
+  ++s;
+  s->nelem = n;
+  s->address = const_slot(n);
+  s->is_const = 1;
+  s->scope = s[-1].scope;                // visible outside
+  pending_func_entry = 0xff;
+  next_slot = b;
+  scope_leave();
+}
+
+// \m — member: .f or ->f, f a param of the struct (stub) of the last \i
+//   (ret_slot: its name), searched as if in its scope: the params right
+//   after it. Result = const k (the word index for the ( ) ops)
+static uchar match_member(void) {
+  Symbol *s, *e = syms + nsym;
+  uchar t;
+
+  skip_ws();
+  if (!got('.') && !(got('-') && got('>'))) return 0;
+  if (!read_ident()) return 0;
+  t = syms[last_sym].ret_slot;
+  s = syms + t;
+  if (!t || s >= e || s[-1].type == SYM_VAR) return 0;
+  while (++s < e && s->pidx)
+    if (!strcmp(s->name, id_buf)) {
+      record_capture(const_slot(s->pidx - 1));
+      return 1;
+    }
+  return 0;
 }
 
 
@@ -1904,7 +1954,7 @@ static void free_rules(void) {
 // note: '>' is load-time only (not stored)
 //       '<' becomes HIBIT('<') + ALT_JUMP + alt (1..31, 0: restart)
 static uchar is_dir(uchar e) {
-  return isdigit(e) || strchr("insfdprlxywmzkcahvgetoubj+{}#='?*@$:,.!%", e) != NULL;
+  return isdigit(e) || strchr("insfdprlxywmzkcahvgetoubjq+{}#='?*@$:,.!%", e) != NULL;
 }
 
 static void build_one_rule(uchar r, char *rhs) {
@@ -2470,6 +2520,8 @@ int run() {
   else if (c == HIBIT('+')) ok = match_ident_decl();
   else if (c == HIDIR('f')) ok = match_ident_func_decl();
   else if (c == HIDIR('p')) ok = match_param_decl();
+  else if (c == HIDIR('q')) struct_end();
+  else if (c == HIDIR('m')) ok = match_member();
   else if (c == HIDIR('r')) {
     // end of params: params_end() (ivm-gen.c) moves the last to fp+3
     if (last_func_vec != 0xff) {
