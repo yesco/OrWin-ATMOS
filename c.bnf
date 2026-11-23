@@ -205,8 +205,6 @@ K=$Y
 |free(\i);
 # TODO: expression usage?
 |\i=malloc($E);[M\1]
-# p.f = malloc(..): into a temp, then word k   captures: 1=p 2=k 3=E 4=temp
-|\i\m=malloc($E);[M\t)\1\2]
 
 # - Statement can be a Block, or lastly Assignments
 |$B|;
@@ -427,6 +425,11 @@ H=\i=\i\?\W\[\i\]; \2\[\3\]=\2\[\i\]; \2\[\7\]=\1;[A\2\3\7S\1]
 |\i\m+=$E;[S\j(\1\2+\4)\1\2]
 |\i\m++;\#01[(\1\2+\3)\1\2]
 |\i\m--;\#01[(\1\2-\3)\1\2]
+# a chain: the pointer in ACC, then $c   (a.next->v = ps[i]->x = mk()->x =)
+|\i\m[(\1\2]$c
+|\i\?\W\[$S\][(\1\2]$c
+|\i\?\W\[$E[S\j]\][(\1\3]$c
+|\i($Z)[\v]$c
 
 |\i=0;[Z\1]
 |\i=$S+$S;[L\2+\3S\1]
@@ -443,6 +446,14 @@ H=\i=\i\?\W\[\i\]; \2\[\3\]=\2\[\i\]; \2\[\7\]=\1;[A\2\3\7S\1]
 # - PrintF support (ingore formatting, lol)
 W=,$J\<|
 J="%u\\\\n"|"%d\\\\n"|"%s\\\\n"|"%s"|"%u "|"%d "|"%u"|"%d"|"["]\u|$E[.]
+
+# - Chains: ->f after a pointer in ACC (p.f p->f, an int* / struct* array
+#   element, a call), as often as it comes; the struct from rec (\m)
+#   x: loads   captures: 1=k 2=temp: ( t k. Else [] (ACC, its result)
+#   c: a store: the last ->f = E (tried first), else one more load
+#      captures: 1=k 2=temp 3=E
+x=\m[S\t(\2\1]\<|[]
+c=\m=[S\t]$E;[)\2\1]|\m[S\t(\2\1]\<
 
 # - Expressions
 E=\i+=\i [U\1\2]
@@ -462,7 +473,8 @@ E=\i+=\i [U\1\2]
 
 # - Function call
 R=getchar()[K]
-|\i($Z)[\v]
+|malloc($E)[M\t]
+|\i($Z)[\v]$x
 
 # - Dereferencing points
 #   *charptr++ (TODO: block for intptr, put guard/other gen)
@@ -473,14 +485,14 @@ R=getchar()[K]
 |* \i[@\1]
 
 |\i\?\C\[$S\][\[\1\2]
-|\i\?\W\[$S\][(\1\2]
+|\i\?\W\[$S\][(\1\2]$x
 |\i\[$S\][\[\1\2]
 # p[expr]   captures: 1=p 2=index 3=temp
 |\i\?\C\[$E\][S\j\[\1\3]
-|\i\?\W\[$E\][S\j(\1\3]
+|\i\?\W\[$E\][S\j(\1\3]$x
 |\i\[$E\][S\j\[\1\3]
 # p.f p->f: word k   captures: 1=p 2=k
-|\i\m[(\1\2]
+|\i\m[(\1\2]$x
 
 # - Parens
 |($E)
@@ -492,7 +504,7 @@ R=getchar()[K]
 # - Simple Expression: \s = string const, \d = number
 # sizeof: by the type's guard: char 1, int / word / any pointer 2 (\#xx:
 # the result is the const xx); a static array: its size (\$)
-S=\d|sizeof(struct \i\$)|sizeof($T\?c)\#01|sizeof($T)\#02|sizeof(\i\$)|sizeof(\i\?c)\#01|sizeof(\i)\#02|\s|\i
+S=\d|&\i\$\=1|sizeof(struct \i\$)|sizeof($T\?c)\#01|sizeof($T)\#02|sizeof(\i\$)|sizeof(\i\?c)\#01|sizeof(\i)\#02|\s|\i
 
 # - List of expressions (limited, TODO: get rid of?)
 # TODO: think it'll parse E twice?

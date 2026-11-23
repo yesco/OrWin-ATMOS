@@ -11,6 +11,9 @@
 //   = { consts }: data), p.f and p->f are both word k of the memory
 // - the fields are words: a char field would hold the whole value
 // - sizeof(struct pt) is 4 bytes here, 8 on gcc: the test prints it in ints
+// - &s: a static struct is its address already (s alone works too)
+// - chains: ->f after any pointer: a field (a.next->v), an array element
+//   (ps[i]->x), a call (mk(6)->x), as often as it comes; loads and stores
 // Values stay below 32768 (gcc int is 32 bit, ours 16).
 
 #include <stdio.h>
@@ -28,6 +31,15 @@ void move(struct pt *q, int d) {
   q->y = q->y + d;
 }
 
+// returns a struct pointer: a new one (malloc in an expression)
+struct pt *mk(int x) {
+  struct pt *r;
+  r = malloc(sizeof(struct pt));
+  r->x = x;
+  r->y = x + 1;
+  return r;
+}
+
 int sum(struct pt *q) {
   return q->x + q->y;
 }
@@ -39,6 +51,8 @@ int main(void) {
   struct pt *q;
   struct node a;
   struct node *n;
+  struct pt *ps[4];
+  int i;
 
   // --- a struct variable: its fields ---------------------------------------
   printf("fields .:\t3 4 7\n\t\t");
@@ -110,6 +124,65 @@ int main(void) {
   n->v = 2;
   printf("%d ", a.v);
   printf("%d ", n->v);
+  printf("\n");
+
+  // --- &, returned pointers, arrays of pointers, chains --------------------
+  printf("&s:\t\t4 9\n\t\t");
+  p.x = 1;
+  move(&p, 3);
+  printf("%d ", p.x);
+  q = &p;
+  q->y = 9;
+  printf("%d ", p.y);
+  printf("\n");
+
+  printf("returned:\t6 7 13\n\t\t");
+  q = mk(6);
+  printf("%d ", q->x);
+  printf("%d ", q->y);
+  printf("%d ", sum(q));
+  printf("\n");
+
+  printf("mk()->f:\t20 0 2\n\t\t");
+  printf("%d ", mk(20)->x);
+  printf("%d ", mk(0)->x);
+  printf("%d ", mk(1)->y);
+  printf("\n");
+
+  // an array of struct pointers: filled in a loop, indexed by var / const
+  printf("ps[i]->f:\t0 30 31 25\n\t\t");
+  for (i = 0; i < 4; i++) ps[i] = mk(i * 10);
+  printf("%d ", ps[0]->x);
+  i = 3;
+  printf("%d ", ps[i]->x);
+  printf("%d ", ps[i]->y);
+  ps[i - 1]->y = 25;
+  printf("%d ", ps[2]->y);
+  printf("\n");
+
+  printf("ps[i]->f +:\t40 70\n\t\t");
+  printf("%d ", ps[1]->x + ps[3]->x);
+  printf("%d ", ps[i]->x + sum(ps[1]) + 19);
+  printf("\n");
+
+  // chains through a pointer field: a.next->v, q->next->next->v
+  printf("chains:\t\t7 7 4 4\n\t\t");
+  a.next = n;
+  a.next->v = 7;
+  printf("%d ", n->v);
+  printf("%d ", a.next->v);
+  n->next = n;
+  n->next->next->v = 4;
+  printf("%d ", n->v);
+  printf("%d ", a.next->next->next->v);
+  printf("\n");
+
+  // in conditions and loops
+  printf("if while:\ty 13\n\t\t");
+  q = mk(3);
+  if (q->x == 3) printf("y ");
+  while (q->x < 13) q->x++;
+  printf("%d ", q->x);
   printf("\n");
 
   printf("sizeof:\t\t2 4\n\t\t");

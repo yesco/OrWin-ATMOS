@@ -479,6 +479,8 @@ typedef struct {
   uchar reg_save;
   uchar func_vec;     // vector of the function matched by \i in THIS frame (for \v)
   uchar arg_i;        // call args stored so far (rule Z, for \k)
+  uchar rec;          // struct of what \i / \m matched here (its name's
+                      // symbol, 0xff none): \m's start (here or parent)
   uchar npatch;       // pending forward jumps (\x pushes, \y pops)
   word patch[4];
   word mark;          // \m loop start (for \z)
@@ -516,6 +518,7 @@ static uchar undef_kind;           // sticky: 0 none, 1 undefined var, 2 functio
 static word  nerr;                 // \! errors reported (no .ivm then)
 static word  err_at;               // the last one's position (+1): reported
 static void  err_statement(word s0);
+static void  check_consts(word from);
 static void  err_skip(void);
 static void  pp_skip(void);
 
@@ -814,18 +817,6 @@ static word cap_val(uchar n) {
 
 static uchar pending_register; // set by \r after literal "register" in BNF
 static uchar pending_const;    // set by \c after literal "const"
-
-// Reject stores to const / #define symbols
-void check_store(uchar slot) {
-  word i;
-  Symbol *s = syms;
-
-  for (i = 0; i < nsym; i++, s++)
-    if (s->type == SYM_VAR && s->address == slot && s->is_const) {
-      printf("\nconst variable: %s\n", s->name);
-      FAIL("const cannot be modified");
-    }
-}
 
 // 3 functions doing the same thing? 
 // TODO: one code, array of 3?
@@ -1345,9 +1336,14 @@ static uchar match_at(const char *s, uchar len) {
 }
 
 // Another one?
+// the last run of white space / comments skipped: [ws_at, ws_end[
+// (an error at a statement's end: before the gap after it)
+static word ws_at, ws_end;
+
 static void skip_ws(void) {
   uchar ci, n;
   CommentStyle *cs;
+  word a = abs_pos();
 
   for (;;) {
 
@@ -1355,7 +1351,7 @@ static void skip_ws(void) {
     while (is_ws(nextc))
       skip();
     note_progress();
-    if (!nextc) return;
+    if (!nextc) break;
 
     // try each configured comment style
     for (ci = 0; ci < ncomments; ci++) {
@@ -1386,8 +1382,9 @@ static void skip_ws(void) {
     }
 
     // nothing matched
-    if (ci >= ncomments) return;
+    if (ci >= ncomments) break;
   }
+  if (abs_pos() != a) { ws_at = a; ws_end = abs_pos(); }
 }
 
 
@@ -1553,12 +1550,14 @@ static uchar match_ident(void) {
     // arguments, must not change \v. Not last_func_vec: that is the one
     // being declared, "struct pt *q" in its params is an \i too)
     cur.func_vec = s->address;
+    cur.rec = s[1].ret_slot;          // the ret value's struct (mk()->x)
     slot = s->ret_slot;
 
   } else {
 
     // It's a variable name?
     cur.func_vec = 0xff;
+    cur.rec = s->ret_slot;
     slot = s->address;
   }
   record_capture(MAKE_CAP(slot, sym_type(s)));
@@ -1698,6 +1697,7 @@ static uchar match_ident_func_decl(void) {
   if (!read_ident()) return 0;
   vec = func_begin(id_buf);
   if (vec == 0xff) return 0;   // declared twice
+  syms[nsym - 1].ret_slot = (uchar)last_sym;   // struct pt *f(): its struct
 
   #ifdef SYMS
     frame_sz[vec] = 4; // ret/val/prev/ACC at minimum
@@ -1750,22 +1750,25 @@ static void struct_end(void) {
   scope_leave();
 }
 
-// \m — member: .f or ->f, f a param of the struct (stub) of the last \i
-//   (ret_slot: its name), searched as if in its scope: the params right
-//   after it. Result = const k (the word index for the ( ) ops)
+// \m — member: .f or ->f, f a param of the struct (stub) of what \i or
+//   \m matched last in this frame, else in the parent (a chain rule):
+//   rec, its name. Searched as if in its scope: the params right after
+//   it. Result = const k (the word index for the ( ) ops); rec = f's
+//   struct (a pointer field: the next ->)
 static uchar match_member(void) {
   Symbol *s, *e = syms + nsym;
-  uchar t;
+  uchar t = cur.rec;
 
+  if (t == 0xff && sp) t = stack[sp - 1].rec;
   skip_ws();
   if (!got('.') && !(got('-') && got('>'))) return 0;
   if (!read_ident()) return 0;
-  t = syms[last_sym].ret_slot;
   s = syms + t;
   if (!t || s >= e || s[-1].type == SYM_VAR) return 0;
   while (++s < e && s->pidx)
     if (!strcmp(s->name, id_buf)) {
       record_capture(const_slot(s->pidx - 1));
+      cur.rec = s->ret_slot;
       return 1;
     }
   return 0;
@@ -2251,6 +2254,7 @@ static void push(uchar r) {
 
   cur.rule = r;
   cur.func_vec = 0xff;
+  cur.rec = 0xff;
   cur.arg_i = 0;
   cur.npatch = 0;
   cur.mark = 0;
@@ -2356,6 +2360,7 @@ int run() {
   // end of alt → accept (pop), parent advances past the call
   if (!c) {
     rch = 'A' + cur.rule;
+    if (rch == 'K') check_consts(cur.code_save);
     vlog("ok %c alt %u -> @%u\n", rch, (unsigned)(cur.alts - rule[cur.rule]), abs_pos());
 
     #ifdef VERBOSE
@@ -2505,6 +2510,8 @@ int run() {
       if (t == '^') t = (uchar)toupper((uchar)(cur.result >> 8));
       cur.result = (cur.result & 0xff) | ((word)t << 8);
       cur_type = (word)t << 8;
+      last_sym = 0xffff;       // no struct: "int i" is not linked to one
+                               // (struct\'W \i: \i links it again)
     }
     adv = 2;
   }
@@ -2653,8 +2660,19 @@ static word show_line(word line, word i) {
 // caret where parsing got furthest in it (if on that line). Once per
 // statement: backtracking comes back here (err_at). s0: before its white
 // space (an undefined name in it: noted from there)
+// the line of position pos (in line_buf): its number, *start: where it
+// starts in line_buf
+static word err_line(word pos, word *start) {
+  word i, line = line_no_base;
+
+  *start = 0;
+  for (i = 0; i < pos; i++)
+    if (line_buf[i] == '\n') { line++; *start = (word)(i + 1); }
+  return line;
+}
+
 static void err_statement(word s0) {
-  word at = abs_pos(), i, start = 0, line = line_no_base, col;
+  word at = abs_pos(), i, start, line, col;
 
   // once
   if (at < err_at) return;
@@ -2662,8 +2680,7 @@ static void err_statement(word s0) {
   nerr++;
 
   // its line in the buffer
-  for (i = 0; i < line_pos; i++)
-    if (line_buf[i] == '\n') { line++; start = (word)(i + 1); }
+  line = err_line(line_pos, &start);
   err_prefix(line);
   eprintf("error: cannot parse");
   if (undef_kind && undef_pos_abs >= s0)
@@ -2679,6 +2696,36 @@ static void err_statement(word s0) {
     err_prefix(line);
     for (i = start; i < col; i++) eputc(line_buf[i] == '\t' ? '\t' : ' ');
     eprintf("^\n");
+  }
+}
+
+// A statement (K) accepted: no op of its code [from, bin_ptr[ may write a
+// const slot: a #define / const, an array's or a static struct's address
+// ("a = b"). By the slot, not the symbol: also what the grammar emits
+// itself ([S\1]), and the locals' symbols are gone at the end (a const
+// slot has many names: none printed, the line is). Each write once
+// (err_code: a block's K sees its statements' code again)
+static word err_code;
+
+static void check_consts(word from) {
+  word n, start, line, at = abs_pos();
+  uchar *p;
+
+  // the line its last token is on (not after the gap: "$K [n..]")
+  if (at == ws_end) at = ws_at;
+  at = at > line_abs ? (word)(at - line_abs) : 0;
+
+  for (; from < (word)bin_ptr; from += n) {
+    p = bin + from;
+    if (!(n = ivm_oplen(p))) return;
+    if (n < 2 || !WRITES_VAR(*p) || !is_lit(p[1]) || from < err_code)
+      continue;
+    err_code = (word)(from + 1);
+    nerr++;
+    line = err_line(at, &start);
+    err_prefix(line);
+    eprintf("error: const modified\n");
+    show_line(line, start);
   }
 }
 

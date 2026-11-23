@@ -66,14 +66,9 @@
 void note_load(uchar addr);
 void note_store(uchar addr);
 
-// Called for every op that WRITES its variable operand (see WRITES_VAR
-// below). Defined by parse.c / tpi.c: must report an error (IVM_GEN_FAIL /
-// FAIL) if slot ix belongs to a `const int foo = 42;` symbol.
-void check_store(uchar ix);
-
 // A `const int foo = 42;` is an alias of the const-pool slot (no storage of
-// its own, nothing to initialise), so every write op naming it is an error.
-// Define IVM_STORE_CHECK 0 before include to switch the check off.
+// its own, nothing to initialise), so every write op naming it is an error:
+// parse.c checks each statement's code (WRITES_VAR below, check_consts)
 
 // ---------------------------------------------------------------------------
 // Vectors / main
@@ -182,28 +177,16 @@ void emitop(uchar op) {
 //   U  mem[v1] += mem[v2]    (only v1, the 1st operand, is written)
 //   M  mem[v] = alloc(acc)   F  free(mem[v]); mem[v] = 0
 //   s  mem[v] = acc & 0xff
-//   {  mem[v] <<= acc        }  mem[v] >>= acc
 //   '  *mem[v]++ read        ,  *mem[v]++ = acc   (pointer var is advanced)
-// Loop ops i/n/j/m also modify their loop variable (n: ++, m: --), but they
-// are emitted with emit()/emitop() by parse.c, so parse.c must call
-// check_store() on the loop variable itself.
-// NOT writes to the variable: + - * / % & | ^ [ ] < = > L l @ r W  (read it),
-// and ! w ) (write THROUGH the pointer in the var, var itself unchanged).
-#define WRITES_VAR(op) \
-  ((op) == 'S' || (op) == 'Z' || (op) == 'C' || (op) == 'I' || (op) == 'J' || \
-   (op) == 'U' || (op) == 'M' || (op) == 'F' || (op) == 's' || \
-   (op) == '{' || (op) == '}' || (op) == '\''|| (op) == ',' || \
-   (op) == 'i' || (op) == 'j' || (op) == 'H' || \
-   (op) == 't' || (op) == 'u' || (op) == 'k' \
-  )
+//   i j H  ++ -- += 2 (byte, byte, word)
+// The loop op n increments the variable of its t / u (no slot operand of
+// its own: its init, C / Z / S, is the write the checks see).
+// NOT writes to the variable: + - * / % & | ^ { } [ ] < = > L l @ r W
+// t u (read it: ACC op mem[v], { } too), and ! w ) (write THROUGH the
+// pointer in the var, var itself unchanged).
+#define WRITES_VAR(op) ((op) && strchr("SZCIJUMFs',ijHk", (op)))
 
 void emitop2(uchar op, uchar arg) {
-  // const variable guard: refuse to emit a write to a const slot
-#if IVM_STORE_CHECK
-  if (WRITES_VAR(op))
-    check_store(arg);
-#endif
-
   // !optimize: short L for slots 0..31; optimize: always long (phase-1 "stupid")
   if (op == 'L' && arg < 32 && !optimize)
     emit(arg); // one byte short-code
@@ -1354,9 +1337,6 @@ uchar *build_blob(int *out_len) {
         if (map[op] != op) *a = map[op];
         continue;
       }
-
-      // Enforce that constants cannot be modified
-      if (WRITES_VAR(op)) check_store(a[1]);
 
       IVM_EACH_SLOT(a, q, *q = map[*q]);
     }
