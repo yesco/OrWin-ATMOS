@@ -68,6 +68,8 @@
 //   \{ \}      enter / leave scope (\} drops names added in scope)
 //   \1..\9     match same ident as capture N (match_ident_same)
 //   \=n        result := capture n (no new capture)
+//   \!         a statement that does not parse: report it, skip it (to its
+//              ;, over a { } block), go on; fails at a } or the end
 //   \#xx       result := hex const xx
 //   \'X        set type high-byte of result to X ('c'/'w'/'C'/'W'; \'^ = uppercase)
 //   \?X        fail unless result type high-byte is X
@@ -495,6 +497,10 @@ static char  id_buf[NAME_LEN];
 static char  last_undef[NAME_LEN]; // furthest undefined ident (for reject msg)
 
 static uchar undef_kind;           // sticky: 0 none, 1 undefined var, 2 function
+static word  nerr;                 // \! errors reported (no .ivm then)
+static word  err_at;               // the last one's position (+1): reported
+static void  err_statement(word s0);
+static void  err_skip(void);
 
 static word  undef_pos_abs;        // sticky: position of that ident
 
@@ -1866,7 +1872,7 @@ static void free_rules(void) {
 // note: '>' is load-time only (not stored)
 //       '<' becomes HIBIT(x), x=1..31 (alt jump) or HIBIT('<')
 static uchar is_dir(uchar e) {
-  return isdigit(e) || strchr("insfdprlxywmzkcahvgetoubj+{}#='?*@$:,.", e) != NULL;
+  return isdigit(e) || strchr("insfdprlxywmzkcahvgetoubj+{}#='?*@$:,.!", e) != NULL;
 }
 
 static void build_one_rule(uchar r, char *rhs) {
@@ -2450,6 +2456,16 @@ int run() {
   // NEWLINE
   else if (c == HIBIT('n')) ok = match_newline();
 
+  // \!: a statement that does not parse (not a } / the end: no statement)
+  else if (c == HIBIT('!')) {
+    word s0 = abs_pos();                  // (an undefined name: from here)
+    skip_ws();
+    if ((ok = nextc && nextc != '}')) {
+      err_statement(s0);
+      err_skip();
+    }
+  }
+
   // \*c: skip input up to and including the next c (Kleene ".*c")
   //   \*\n: to end of line   \*>: through '>'   (\*\[ \*\| for [ |)
   else if (c == HIBIT('*')) {
@@ -2524,6 +2540,7 @@ static void err_prefix(word line) {
   eprintf("%s:%u: ", src_name ? src_name : "?", line + 1); // line is 0-based
 }
 
+
 // print buffered source line starting at i; returns index after its '\n'
 static word show_line(word line, word i) {
   uchar c;
@@ -2536,6 +2553,84 @@ static word show_line(word line, word i) {
   eputc('\n');
   if (i < line_len) i++;
   return i;
+}
+
+// \!: the statement at the current position does not parse. Its line, a
+// caret where parsing got furthest in it (if on that line). Once per
+// statement: backtracking comes back here (err_at). s0: before its white
+// space (an undefined name in it: noted from there)
+static void err_statement(word s0) {
+  word at = abs_pos(), i, start = 0, line = line_no_base, col;
+
+  // once
+  if (at < err_at) return;
+  err_at = (word)(at + 1);
+  nerr++;
+
+  // its line in the buffer
+  for (i = 0; i < line_pos; i++)
+    if (line_buf[i] == '\n') { line++; start = (word)(i + 1); }
+  err_prefix(line);
+  eprintf("error: cannot parse");
+  if (undef_kind && undef_pos_abs >= s0)
+    eprintf(" (%s not defined: %s)", undef_kind == 2 ? "function" :
+      "identifier", last_undef);
+  eputc('\n');
+  show_line(line, start);
+
+  // caret: the furthest point, if still on this line
+  col = (word)(max_pos_abs - line_abs);
+  for (i = start; i < col && i < line_len && line_buf[i] != '\n'; i++) ;
+  if (i == col) {
+    err_prefix(line);
+    for (i = start; i < col; i++) eputc(line_buf[i] == '\t' ? '\t' : ' ');
+    eprintf("^\n");
+  }
+}
+
+// \!: skip the statement after its error: to its ; or over a { } block,
+// not over the } of the block it is in. Strings, chars, comments: not
+// looked into. After a block: an "else" goes on, a ; on the same line
+// ends it too (struct { } x;  do { } while (x);)
+static void err_skip(void) {
+  uchar depth = 0, q;
+  word save;
+
+  for (;;) {
+    skip_ws();
+    if (!nextc) return;
+
+    // "..." '...': to the closing one (\ escapes)
+    if (nextc == '"' || nextc == '\'') {
+      q = nextc;
+      skip();
+      while (nextc && nextc != q) {
+        if (nextc == '\\') skip();
+        skip();
+      }
+      skip();
+      continue;
+    }
+
+    // ; ends it, a { } block too (the rest of its line: up to a ;)
+    if (nextc == ';' && !depth) { skip(); return; }
+    if (nextc == '{') depth++;
+    if (nextc == '}') {
+      if (!depth) return;                       // the enclosing block's
+      skip();
+      if (--depth) continue;
+      skip_hspace();
+      if (match_at("else", 4)) continue;
+      save = line_pos;
+      while (nextc && nextc != '\n' && nextc != ';' && nextc != '{' &&
+             nextc != '}')
+        skip();
+      if (nextc == ';') skip();
+      else { line_pos = save; load_nextc(); }
+      return;
+    }
+    skip();
+  }
 }
 
 static void report_reject(void) {
@@ -2834,6 +2929,13 @@ int main(int argc, char **argv) {
   // OK
   skip_ws();
   if (nextc) FAIL("trailing input");
+
+  // statements \! skipped: no .ivm
+  if (nerr) {
+    eprintf("--- %u error%s ---\n", nerr, nerr > 1 ? "s" : "");
+    shutdown();
+    return 1;
+  }
 
   eprintf("--- ACCEPT ---\n");
 

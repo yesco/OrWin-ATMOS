@@ -15,7 +15,8 @@
 # - label: goto label;
 # - actual include (ignored for now!)
 # - const arrays (initilized)
-# - operands have no priorites; left-to-right
+# - operators: left to right, a tighter one after a looser one does not
+#   parse (rule O): a + b * c needs parentheses
 # - printf very limited; putchar putz puts putn putnl nl
 
 
@@ -33,7 +34,7 @@ P=D
 D=#define \+ \d\c[\g]\n\o\<
 |#define \+ \s\c[\g]\n\o\<
 |#\*\n\o\<
-|V\o\<|F\o\<|
+|V\o\<|F\o\<|\!\o\<|
 
 # - Declarations: optional register\b -> REGISTER slot 0..31
 # -O: REGISTER 0..31, other globals 32..95, frames at 96+
@@ -62,8 +63,11 @@ A=void|T \pQ|
 Q=,A|
 
 # - Block
+# a statement that does not parse: reported, skipped (\!: to its ;, over
+#   a { } block), the next one is tried: all the errors of a file in one
+#   run, no .ivm. The same for declarations / functions (rule D)
 B={ \{ C } \}
-C=V\<|K\<|
+C=V\<|K\<|\!\<|
 
 # - Statements — keywords / specific forms first
 # if (l OP r), l simple (S), r simple or an R (into a temp): t / u as
@@ -438,8 +442,9 @@ R=\i(Z)[\v]
 # - Parens
 |(E)
 
-# - Not
-|! E[?]
+# - Not: binds tight (!a + b is (!a) + b): an operand, not an E
+|! R[?]
+|! S[\l1?]
 
 # - Simple Expression: \s = string const, \d = number
 # sizeof: by the type's guard: char 1, int / word / any pointer 2 (\#xx:
@@ -450,41 +455,49 @@ S=\d|sizeof(T\?c)\#01|sizeof(T)\#02|sizeof(\i\$)|sizeof(\i\?c)\#01|sizeof(\i)\#0
 # TODO: think it'll parse E twice?
 Z=E,[S\k]\<|E|
 
+# Binary operators, left to right (no temps for precedence): an operator
+#   may only be followed by one of the same or a looser level, C's
+#   precedence then holds. \> starts a level, \< goes back to it. A tighter
+#   one after it does not parse: a + b * c needs a + (b * c) (a * b + c is
+#   fine). The levels, tightest first: * / %, + -, << >>, < <= > >=,
+#   == !=, &, ^, | (C's & ^ | are below ==: a & b == c does not parse)
+# With an R right operand: the left one spilled (\j), R in ACC; - / % <<
+#   >>: R into a temp, the left loaded
 O=
-|<<[S\j] R [[\a1]\<
-|>>[S\j] R\a1]\<
-|!=[S\j] R[=\a1?]\<
-|==[S\j] R[=\a1]\<
-|+ [S\j] R[+\a1]\<
-|- [S\j] R[S\tL\a1-\a3]\<
-|* [S\j] R[*\a1]\<
+|\>* [S\j] R[*\a1]\<
 |/ [S\j] R[S\tL\a1/\a3]\<
 |% [S\j] R[S\tL\a1%\a3]\<
-|& [S\j] R[&\a1]\<
-|\|[S\j] R[|\a1]\<
-|^ [S\j] R[^\a1]\<
-# compare with an R: left spilled, R in ACC, compare swapped (no 2nd temp):
-#   l <= r  =  !(r < l)    l >= r  =  !(r > l)    l < r  =  r > l
-|<=[S\j] R[<\a1?]\<
-|>=[S\j] R[>\a1?]\<
-|< [S\j] R[>\a1]\<
-|> [S\j] R[<\a1]\<
-|<<S[\{\a1]\<
-|>>S[\}\a1]\<
-|!=S[=\a1?]\<
-|==S[=\a1]\<
-|+ S[+\a1]\<
-|- S[-\a1]\<
 |* S[*\a1]\<
 |/ S[/\a1]\<
 |% S[%\a1]\<
-|& S[&\a1]\<
-|\|S[|\a1]\<
-|^ S[^\a1]\<
+|\>+ [S\j] R[+\a1]\<
+|- [S\j] R[S\tL\a1-\a3]\<
+|+ S[+\a1]\<
+|- S[-\a1]\<
+|\><<[S\j] R[S\tL\a1\{\a3]\<
+|>>[S\j] R[S\tL\a1\}\a3]\<
+|<<S[\{\a1]\<
+|>>S[\}\a1]\<
+# compare with an R: left spilled, R in ACC, compare swapped (no 2nd temp):
+#   l <= r  =  !(r < l)    l >= r  =  !(r > l)    l < r  =  r > l
+|\><=[S\j] R[<\a1?]\<
+|>=[S\j] R[>\a1?]\<
+|< [S\j] R[>\a1]\<
+|> [S\j] R[<\a1]\<
 |<=S[>\a1?]\<
 |>=S[<\a1?]\<
 |< S[<\a1]\<
 |> S[>\a1]\<
+|\>!=[S\j] R[=\a1?]\<
+|==[S\j] R[=\a1]\<
+|!=S[=\a1?]\<
+|==S[=\a1]\<
+|\>& [S\j] R[&\a1]\<
+|& S[&\a1]\<
+|\>^ [S\j] R[^\a1]\<
+|^ S[^\a1]\<
+|\>\|[S\j] R[|\a1]\<
+|\|S[|\a1]\<
 |
 .
 

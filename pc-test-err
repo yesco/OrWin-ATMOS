@@ -1,0 +1,18 @@
+#!/bin/sh
+# run-err.sh : te/*.c must NOT compile: the lines marked "// ERR" are the
+# errors the parser must report ("file:N: error"), no others, and no .ivm.
+# Prints per file the expected and the reported line numbers.
+fails=0
+for c in te/*.c; do
+  n=$(basename $c .c)
+  d=$(mktemp -d)
+  cp $c $d/
+  ( cd $d && "$OLDPWD/parse" "$OLDPWD/c.bnf" $n.c > out 2>&1 )
+  want=$(grep -n '// ERR' $c | cut -d: -f1 | tr '\n' ' ')
+  got=$(grep -o "^$n.c:[0-9]*: error" $d/out | cut -d: -f2 | tr '\n' ' ')
+  if [ "$want" = "$got" ] && [ ! -f $d/$n.ivm ]; then r=ok; else r=DIFF; fails=$((fails+1)); fi
+  printf "%-24s %s\n  want: %s\n  got:  %s\n" $n $r "$want" "$got"
+  [ $r = ok ] || sed 's/^/  | /' $d/out
+  rm -rf $d
+done
+echo "fails: $fails"
