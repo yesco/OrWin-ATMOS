@@ -1,0 +1,119 @@
+PARSE.INSTRUCTIONS - handoff for a new Claude session (paste this file as
+the first message, attach the current source files)
+===========================================================================
+
+WHO / WHAT
+  Jonas's IVM: a bytecode VM + a 6502 JIT + a grammar-driven C compiler.
+  Targets: sim65 (sim6502) and Oric Atmos; cc65 device builds (ivm-jit.sim,
+  parse.sim). Goals: SMALL code (cc65 binary size), then speed. Prefer
+  rules / templates / grammar (data) over C code: remove C where possible.
+
+MY RULES (always)
+  - Deliver FULL files (Claude edits with small replacements, sending a
+    full file costs nothing extra). Keep my formatting; don't touch
+    unrelated lines.
+  - Every code "paragraph" gets a 1-2 word comment (like naming a
+    subroutine), blank lines between groups. Keep spacious comments.
+  - No magic numbers: named constants.
+  - Asm comments: whole line ;;;  inline ;;
+  - cc65 C89: declarations before statements; no ?: in case labels
+    (cc65: "constant integer expression expected"). Check with gcc:
+      gcc -fsyntax-only -Wall -Wno-unused -Wdeclaration-after-statement \
+        -Ix2/stub -DJIT -DNOHOSTSIM -DMEMMAP [-D__SIM6502__|-D__ATMOS__] \
+        -D_heapmaxavail\(\)=1000 -D'__asm__(...)=' ivm.c
+      (x2/stub/disasm.c is an empty file; plain -DJIT on gcc = HOSTSIM)
+  - Save code BYTES: no clever packing / conversion macros (an index is
+    letter - 'A', a name is 'A' + r); prefer isalpha() etc. over chains
+    of compares. Measure cc65 sizes (I do, on Termux).
+  - Be concise. Tests in the descriptive format (see TESTS).
+  - zj naming in ivm-print.c stays. The grammar file is c.bnf (C), p.bnf
+    (Pascal).
+  - Work only in Claude's own workspace (fresh mktemp dirs), never on my
+    device; no destructive commands.
+
+FILES
+  ivm.c         VM + JIT driver (layout, -o image writer, in-place loader,
+                MEMMAP). JIT_6502 build drops the VM (NOIVM-like block).
+  ivm-jit.c     6502 JIT: rule tables (op, guard, post state, template),
+                emit_tpl, init folding, host simulator path (HOSTSIM).
+  ivm-lib.asm   runtime lib (ca65), tiers + cuts, startup parts.
+  ivm-vm.asm    6502 VM (asm).
+  cpu6502.c drv.c  host 6502 sim + JIT test driver (gcc -O2 -DHOSTSIM).
+  parse.c       grammar engine + C/Pascal front end (gcc -O2 -o parse;
+                -DSYMS writes NAME.sym).
+  c.bnf p.bnf   grammars.  ivm-gen.c  emitter / consts / symbols / blob.
+  ivm-walk.c    opcode table.  ivm-print.c  .ivm listing.  parse-syms.c
+  bnfconv.py    one-off: old grammars (A..Z rule calls) -> $X syntax.
+
+GRAMMAR ENCODING (parse.c, current)
+  Rule calls are $A..$Z, $a..$z (minor helpers, same letter as the rule
+  they help); defined as X= / x= at a line start. Plain letters in a
+  pattern are literals (literals match case-insensitively: ignore_case 1).
+  Rule index = letter - 'A' (NRULES 'z'-'A'+1, a few unused slots).
+  Bytes: plain ASCII literal; $81-$9A letter directives \a..\z (HIDIR);
+  $A0-$C0 ws gap + punct/digit directives (HIBIT); $C1-$DA / $E1-$FA rule
+  calls (HIBIT(letter), IS_RULE); $DB $DD production [ ]; $FB $FD \{ \}.
+  \< = 2 bytes: HIBIT('<'), $20 + alt (1..31; $20 = whole rule again).
+  \> marks the jump target alt. \! statement error recovery. \% skip a
+  false #if branch. \j no temp after a plain load. \xHH exact byte.
+  \@ \$ \: \, \. arrays (make, sizeof, init). \c const, \g init.
+
+C FRONT END STATE (c.bnf)
+  - Precedence: left to right, an operator may only be followed by the
+    same or a looser level (\> \<): * / %, + -, << >>, < <= > >=, == !=,
+    &, ^, |. a + b * c is an ERROR (needs parens). ! binds tight.
+  - Error recovery: a statement / declaration / function that fails is
+    reported (file:line, caret, undefined name), skipped (to ; or over a
+    {} block, with else), parsing goes on; at the end "--- N errors ---",
+    no .ivm, exit 1.
+  - Preprocessor (rule Q, top level and blocks): #define N number|"str",
+    #ifdef/#ifndef NAME, #if 0 / #if N, #else, #endif; other # lines
+    skipped. Predefined (made when first used): __MC65__ = .ivm version
+    (mark bytes 2,3: 'M',0 = 19712), __TARGET_6502__ = 1. _ starts names.
+  - static/extern prefixes, fflush(stdout), getchar() (op K; JIT rule
+    calls lib getchar, last lib tier).
+  - Static arrays (bss, zeroed at startup / by sim65), initialized arrays
+    (data). Unused plain consts are dropped from the .ivm.
+
+JIT / IMAGE STATE
+  - Lib tiers, cut after the highest JSR target (lc_libtop; re-layout if
+    more needed): startup | cut0 | memset | cut1 | putchar printstr putnum
+    puts | cut2 | mul/div/mod | cut3 | malloc/free | cut4 | getchar | end.
+  - Startup parts, image starts at the first needed: _ivmlib_init (bss
+    zero via memset), _ivmlib_zpinit (-z: copy mem[] to zp), _ivmlib_start
+    (ldx #$FF/txs, jsr entry, jmp exit). Operands patched by ivm.c.
+  - Image: consts not in mem[] (immediates; lc_kread re-layout if read).
+    -z: mem[] image after the code, only up to its last non-0 byte on a
+    sim65 file (memory starts zeroed; also no bss zeroing then).
+  - Lib zp (sim65): CSP (cc65 sp address, sim65 header byte 7) + own
+    ZP_LIB $02..$07 (ptr1 ptr2 tmp3/4, aliases). Atmos keeps zeropage.inc.
+    pvio: static arg frame, no C stack.
+  - Results: test-empty.ivm.sim 33 B (cl65 191, Oscar 137), test-const
+    63 B, byte-sieve-array 437 B.
+
+TESTS
+  ./run.sh OUT   : every t/*.c, plain and -O, VM (ivmh) vs JIT (drv) and
+                   drv -z; "fails: 0" expected; compare .ivm bytes and
+                   jit B / cycles against the previous run (no regressions).
+  ./te/run-err.sh: te/*.c must NOT compile; lines marked "// ERR" must be
+                   exactly the reported error lines; no .ivm.
+  Test file format (like t/test-incdec.c): a header explaining what is
+  tested, why, the expected results; each case
+     printf("name:\texpected\n\t\t");  then the actual values, printf("\n")
+  gcc on the same file is the reference where possible.
+
+OPEN / NEXT (imacs.c port; easiest first)
+  - Grammar-only: do K while (E); *(E) *--p *p--; unary minus; ?:;
+    && || (short circuit); assignment in expressions (c = getch());
+    T name[] params; puts(E); #define NAME (expr).
+  - Small C: break/continue (patch stack per loop); printf format split at
+    compile time (%d %u %s %c, widths ignored); real static locals.
+  - Bigger: signed compares (x < 0 hi bit; int vs unsigned type), structs
+    (fields as consts in their own namespace, p->f = word index;
+    constructor = call-like store of args, last in ACC), #include, a small
+    libc in our C (strlen memmove memcpy strncpy isalnum isspace atoi).
+  - Offered earlier: X-macro rule table (~220 B), rule hit counter, loop
+    alignment (qsort), char loop vars as byte index, int array types,
+    skip frame header cells (slot map), FR_ACC store only with params,
+    entry straight to main (skip JMP _start trampoline), drop ldx/txs if
+    sim65 starts SP=$FF, error messages naming "if" as undefined.

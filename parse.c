@@ -231,7 +231,7 @@ static uchar max_sp;    // deepest the stack got (frames)
 // call right AFTER sp was incremented
 static void anim_push(uchar r) {
   if (sp > max_sp) max_sp = sp;
-  eputc(RULE_CH(r));
+  eputc('A' + r);
   fflush(ERROUT);
 }
 
@@ -368,7 +368,7 @@ static void *xrealloc(void *p, word n) {
 // ------------------------------------------------------------
 
 // A-Z
-#define NRULES      52     // $A..$Z $a..$z
+#define NRULES      ('z' - 'A' + 1)   // $A..$Z $a..$z (index: letter - 'A')
 
 #define MAX_STACK   64
 #define MAX_ALTS    64
@@ -382,12 +382,9 @@ static void *xrealloc(void *p, word n) {
 //   $C1-$DA  rule calls $A..$Z, $E1-$FA $a..$z: HIBIT(letter)
 //   $DB $DD  production [ ], $FB $FD \{ \}
 // \< is 2 bytes: HIBIT('<'), ALT_JUMP + alt (1-based; 0: the rule again)
+// A rule's index: its letter - 'A' (a..z: 32.., a few unused slots)
 #define HIDIR(c)    (0x80 | ((c) & 31))  // a..z only (a case label: no ?:)
-#define DIR_CH(c)   ((c) < 0xA0 ? (c) - 0x80 + 'a' - 1 : (c) & 0x7f)
-#define IS_RULE(c)  (((c) >= HIBIT('A') && (c) <= HIBIT('Z')) || \
-                     ((c) >= HIBIT('a') && (c) <= HIBIT('z')))
-#define RULE_IX(ch) ((ch) >= 'a' ? (ch) - 'a' + 26 : (ch) - 'A')   // a letter
-#define RULE_CH(r)  ((r) < 26 ? 'A' + (r) : 'a' + (r) - 26)
+#define IS_RULE(c)  ((uchar)(((c) | 32) - HIBIT('a')) < 26)   // c: hibit
 #define ALT_JUMP    0x20         // printable, not | [ ] \ \n: scans keep working
 #define MAX_JUMP    31           // \< to alt 1..31
 
@@ -586,8 +583,9 @@ static void eputc(uchar c) {
 #else
 static void show_alt(uchar *a) {
   for (; *a; a++)
-    if (IS_RULE(*a)) eprintf(INVERSE "$%c" NORMAL, *a & 0x7f);
-    else if (*a & 0x80) eprintf(INVERSE "%c" NORMAL, DIR_CH(*a));
+    if (*a & 0x80)
+      eprintf(INVERSE "%s%c" NORMAL, IS_RULE(*a) ? "$" : "\\",
+        *a < 0xA0 ? *a - 0x80 + 'a' - 1 : *a & 0x7f);
     else eputc(*a);
 }
 #endif // !CC65
@@ -749,11 +747,11 @@ static void note_progress(void) {
   n = sp;
   if (n > MAX_STACK - 1) n = MAX_STACK - 1;
   for (i = 0; i < n; i++) {
-    far_stack[i] = RULE_CH(stack[i].rule);
+    far_stack[i] = 'A' + stack[i].rule;
     far_alt[i] = (uchar)(stack[i].alts - rule[stack[i].rule]);
   }
   if (n < MAX_STACK) {
-    far_stack[n] = RULE_CH(cur.rule);
+    far_stack[n] = 'A' + cur.rule;
     far_alt[n] = (uchar)(cur.alts - rule[cur.rule]);
     n++;
   }
@@ -1205,7 +1203,7 @@ static uchar *run_production(uchar *p) {
         //   build_one_rule (is_dir), so emit the plain letter. Plain
         //   letters in [ ] have no hibit and go to emit(e) below.
         // emit quoted \[ and /] basically
-        emit(DIR_CH(e));
+        emit(e & 0x7f);
       }
 
       p += adv;
@@ -1962,7 +1960,7 @@ static void build_one_rule(uchar r, char *rhs) {
         // \< : HIBIT('<'), then the \> target alt (1..31), else 0: the
         //   whole rule again
         if (taildest > MAX_JUMP) {
-          eprintf("\nrule %c: ", RULE_CH(r));
+          eprintf("\nrule %c: ", 'A' + r);
           FAIL("\\< to an alt past 31");
         }
         blob[bi++] = HIBIT('<');
@@ -1970,7 +1968,7 @@ static void build_one_rule(uchar r, char *rhs) {
 
       } else {
 
-        if (is_dir(e)) e = (e >= 'a' && e <= 'z') ? HIDIR(e) : HIBIT(e);
+        if (is_dir(e)) e = isalpha(e) ? HIDIR(e) : HIBIT(e);  // (a..z)
       }
 
     } else if (e == '|' && !inprod) {
@@ -1985,7 +1983,7 @@ static void build_one_rule(uchar r, char *rhs) {
       if (na >= MAX_ALTS) {
         // TODO: don't repeat message
         // A: done: the rule letter here, the rest in the FAIL message
-        eprintf("\nrule %c: ", RULE_CH(r));
+        eprintf("\nrule %c: ", 'A' + r);
         FAIL("too many alts (MAX_ALTS)");
       }
       alt_starts[na++] = bi;
@@ -2104,12 +2102,12 @@ static void load_bnf(const char *path) {
         build_one_rule(cr, acc);
       have_cur = 0;
 
-      if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'))) continue;
+      if (!isalpha(c)) continue;
 
       eq = strchr(line, '=');
       if (!eq) continue;
 
-      cr = RULE_IX(c);
+      cr = c - 'A';
       have_cur = 1;
       p = eq + 1;
       acc_len = 0;
@@ -2169,7 +2167,7 @@ static void push(uchar r) {
   // the STACK in the report is the furthest-position snapshot, not this
   // one: so say which rule is missing, and who called it
   if (!rule[r]) {
-    eprintf("\nrule %c (called from %c): ", RULE_CH(r), sp ? RULE_CH(cur.rule) : '-');
+    eprintf("\nrule %c (called from %c): ", 'A' + r, sp ? 'A' + cur.rule : '-');
     FAIL("rule not defined");
   }
   if (sp >= MAX_STACK) FAIL("stack overflow");
@@ -2193,7 +2191,7 @@ static void push(uchar r) {
   //   straight from rule P, so its start is main's entry (main_offset).
   //   C doesn't get here: its main is a \f function (main_vec).
 
-  if (r == RULE_IX('B') && sp > 0 && cur.rule == RULE_IX('P'))
+  if (r == 'B' - 'A' && sp > 0 && cur.rule == 'P' - 'A')
     main_offset = bin_ptr;
 
   // suspend active frame (memcpy via struct assignment), open a new cur
@@ -2307,7 +2305,7 @@ int run() {
 
   // end of alt → accept (pop), parent advances past the call
   if (!c) {
-    rch = RULE_CH(cur.rule);
+    rch = 'A' + cur.rule;
     vlog("ok %c alt %u -> @%u\n", rch, (unsigned)(cur.alts - rule[cur.rule]), abs_pos());
 
     #ifdef VERBOSE
@@ -2374,8 +2372,8 @@ int run() {
 
   // RULE
   if (IS_RULE(c)) {
-    uchar r = RULE_IX(c & 0x7f);
-    vlog("  call %c from %c @%u\n", c & 0x7f, RULE_CH(cur.rule), abs_pos());
+    uchar r = (c & 0x7f) - 'A';
+    vlog("  call %c from %c @%u\n", c & 0x7f, 'A' + cur.rule, abs_pos());
     push(r);
     return 1;
   }
@@ -2394,7 +2392,7 @@ int run() {
   if (c == HIBIT('<')) {
     e = a[1] > ALT_JUMP ? (uchar)(a[1] - ALT_JUMP - 1) : 0;
     goto_alt(e);
-    vlog("  tail>%u %c @%u\n", (unsigned)e, RULE_CH(cur.rule), abs_pos());
+    vlog("  tail>%u %c @%u\n", (unsigned)e, 'A' + cur.rule, abs_pos());
     return 1;
   }
 
@@ -2423,7 +2421,7 @@ int run() {
   //   bytes (sizeof), else fail
   else if (c == HIBIT('$')) {
     Symbol *sy = last_sym < nsym ? &syms[last_sym] : 0;
-    ok = sy && sy->nelem;
+    ok = sy ? sy->nelem != 0 : 0;
     if (ok)
       record_capture(const_slot(sy->vtype == 'c' ? sy->nelem : sy->nelem * 2));
   }
@@ -2513,8 +2511,7 @@ int run() {
   // \*c: skip input up to and including the next c (Kleene ".*c")
   //   \*\n: to end of line   \*>: through '>'   (\*\[ \*\| for [ |)
   else if (c == HIBIT('*')) {
-    uchar stop = a[1] == HIDIR('n') ? '\n' :
-      (uchar)(a[1] & 0x80 ? DIR_CH(a[1]) : a[1]);
+    uchar stop = a[1] == HIDIR('n') ? '\n' : (uchar)(a[1] & 0x7f);
     if (!a[1]) FAIL("bad \\* in grammar");
     while (nextc && nextc != stop) skip();
     ok = got(stop);
@@ -2539,7 +2536,7 @@ int run() {
   //   we're OK, so not need the flag, just goto OK: ???
 
   if (ok) {
-    vlog("  ok \\%c @%u\n", DIR_CH(c), abs_pos());
+    vlog("  ok \\%c @%u\n", c & 0x7f, abs_pos());
     cur.rip += adv;
     return 1;
   }
@@ -2550,7 +2547,7 @@ int run() {
   // A: the failing ones only set ok = 0 and fall to here, which is the
   //   jump. The "if (!ok)" was redundant (ok is 0 here) and is gone.
   
-  vlog("  fail \\%c @%u\n", DIR_CH(c), abs_pos());
+  vlog("  fail \\%c @%u\n", c & 0x7f, abs_pos());
 
 fail_alt:
   // next alt, or pop if none left / mark committed away
@@ -2566,7 +2563,7 @@ fail_alt:
   }
 
   // rule failed — pop to parent and fail that element's alt
-  vlog("fail %c (no alt) @%u\n", RULE_CH(cur.rule), abs_pos());
+  vlog("fail %c (no alt) @%u\n", 'A' + cur.rule, abs_pos());
   anim_pop();
   if (sp == 0 || !stack[sp - 1].alts) return 0;   // the root rule failed
   sp--;
@@ -2721,7 +2718,7 @@ static void report_reject(void) {
     uchar a = far_alt[far_sp - 1];
 
     eprintf("EXPECTED: rule %c", r);
-    r = RULE_IX(r);
+    r -= 'A';
     {
       uchar **alts = rule[r], k;
       for (k = 0; alts && k < a && alts[k]; k++)
@@ -2872,7 +2869,7 @@ static void init(char *bnf_path, char *src_path) {
   sym_reset();
 
   // get started with rule P
-  push(RULE_IX('P'));
+  push('P' - 'A');
 }
 
 static void shutdown(void) {
@@ -2972,7 +2969,7 @@ int main(int argc, char **argv) {
       for (i = 0; i < NRULES; i++)
   
         if (rule[i]) {
-          eprintf("%c =", RULE_CH((int)i));
+          eprintf("%c =", 'A' + (int)i);
           for (a = 0; rule[i][a]; a++) {
             if (a) eprintf("|");
             show_alt(rule[i][a]);
