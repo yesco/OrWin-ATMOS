@@ -1871,11 +1871,11 @@ static word    jit_heapend;             // the heap's end (the bss below it)
 // the cut after lib address top (the highest routine called)
 static uchar *jit_cut(word top) {
   static uchar *const cut[] = { ivmlib_cut0, ivmlib_cut1, ivmlib_cut2,
-    ivmlib_cut3, ivmlib_cut4 };
+    ivmlib_cut3, ivmlib_cut4, ivmlib_end };
   uchar k;
 
   if (top < jit_libfloor) top = jit_libfloor;
-  for (k = 0; k < 4 && top >= (word)(unsigned)cut[k]; k++) ;
+  for (k = 0; k < 5 && top >= (word)(unsigned)cut[k]; k++) ;
   return cut[k];
 }
 

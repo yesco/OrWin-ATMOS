@@ -712,6 +712,7 @@ static word  lc_tdest;
 #define LIB_MOD     7
 #define LIB_PRINTSTR 8
 #define LIB_MEMSET  10
+#define LIB_GETCHAR 11
 #define LIB_TIMED   9
 #define LIB_MULDIV  0xFF                  // MUL / DIV / MOD by the op
 #define L_PUTCHAR   "\x00"
@@ -722,6 +723,7 @@ static word  lc_tdest;
 #define L_MUL       "\x05"
 #define L_PRINTSTR  "\x08"
 #define L_MEMSET    "\x0A"
+#define L_GETCHAR   "\x0B"
 #define L_TIMED     "\x09"
 #define L_MULDIV    "\xFF"
 
@@ -1562,6 +1564,8 @@ static const JitRule jit_rules[] = {
   RULE('E', 0, R_NEED, _JSR L_PUTCHAR),
   RULE('.', 0, R_NEED, _JSR L_PUTNUM),
   RULE('P', 0, R_NEED, _JSR L_PUTS),
+  // K: ACC = getchar() ($FFFF: EOF)
+  RULE('K', 0, R_DROP | R_AX, _JSR L_GETCHAR),
   // l: ACC = lo(mem[s]): LDX #0; LDA lo
   RULE('l', 0, R_DROP | R_AXBZ, _LDXN "\0" _LDA RLO1),
   // s: mem[s] = lo(ACC), hi 0. Pending: from where it is (stays pending)
@@ -1737,6 +1741,7 @@ static word rule_ref(uchar n) {
   case LIB_DIV:     return REF(opdiv);
   case LIB_MOD:     return REF(opmod);
   case LIB_MEMSET:  return REF(opmemset);
+  case LIB_GETCHAR: return REF(opgetchar);
   #ifdef HOSTSIM
   case LIB_TIMED:   return REF(optimed);
   #endif

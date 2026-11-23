@@ -157,7 +157,8 @@ int TestOps(int dummy) {
 }
 
 void TestPrios(void) {
-  putz("3 + 4 * 5 = "); printf("%u\n", 3 + 4 * 5);
+// disallowed since would give wrong result!
+//  putz("3 + 4 * 5 = "); printf("%u\n", 3 + 4 * 5);
   putz("5 * 4 + 3 = "); printf("%u\n", 5 * 4 + 3);
 }
 

@@ -18,6 +18,11 @@
 // opcode table: operand bytes / slots / jumps (all bytecode walkers)
 #include "ivm-walk.c"
 
+// .ivm mark: "IV" + 2 bytes, the version (also C's __MC65__: hi lo)
+#define IVM_MARK2     'M'
+#define IVM_MARK3     0
+#define IVM_VERSION   ((IVM_MARK2 << 8) | IVM_MARK3)
+
 // --- limits (override before include if needed) ---
 #ifndef MAX_BIN_LEN
   #define MAX_BIN_LEN   2048
@@ -1237,6 +1242,8 @@ uchar *build_blob(int *out_len) {
   {
     uchar *map; // old_slot -> new_slot
     uchar nn = 0, n0 = nconst, os;
+    uchar used[32];   // const slots the code reads: a plain number nobody
+                      // reads (an unused #define, __MC65__) is left out
     int k;
     word pc, w;
     uchar op;
@@ -1246,12 +1253,24 @@ uchar *build_blob(int *out_len) {
       IVM_GEN_FAIL("out of memory (const pack)");
     for (i = 0; i < 256; i++) map[i] = (uchar)i;
 
-    // count packed length first (strings + zero + other ints)
+    // used: the slot operands (short loads: vars only)
+    memset(used, 0, sizeof(used));
+    for (pc = 0; pc < (word)bin_ptr; pc += w) {
+      uchar *a = bin + pc, *q;
+
+      if (!(w = ivm_oplen(a))) break;           // (the remap below fails)
+      if (*a < 32) continue;
+      IVM_EACH_SLOT(a, q, used[*q >> 3] |= (uchar)(1 << (*q & 7)));
+    }
+    #define CONST_USED(i) \
+      (used[(uchar)(CONST_TOP - (i)) >> 3] & (1 << ((CONST_TOP - (i)) & 7)))
+
+    // count packed length first (strings + zero + other used ints)
     for (i = 0; i < (int)n0; i++)
       if (const_is_reloc[i]) nn++;
     nn++; // zero
     for (i = 0; i < (int)n0; i++)
-      if (!const_is_reloc[i] && const_pool[i] != 0) nn++;
+      if (!const_is_reloc[i] && const_pool[i] != 0 && CONST_USED(i)) nn++;
 
     // vars: -O closes the gaps (gen_pack), consts right after (no gap)
     constidx = optimize ? gen_pack(map) : next_slot;
@@ -1283,9 +1302,9 @@ uchar *build_blob(int *out_len) {
     p[1] = 0;
     p += 2;
     k++;
-    // 3) other integer consts
+    // 3) other integer consts (read by the code)
     for (i = 0; i < (int)n0; i++) {
-      if (const_is_reloc[i] || const_pool[i] == 0) continue;
+      if (const_is_reloc[i] || const_pool[i] == 0 || !CONST_USED(i)) continue;
       os = (uchar)(CONST_TOP - i);
       map[os] = (uchar)(constidx + k);
       v = const_pool[i];
@@ -1385,8 +1404,8 @@ uchar *build_blob(int *out_len) {
   // magic header put first
   h.magic[0] = 'I';
   h.magic[1] = 'V';
-  h.magic[2] = 'M';
-  h.magic[3] = 0;
+  h.magic[2] = IVM_MARK2;
+  h.magic[3] = IVM_MARK3;
   h.len = p - body;
 
   // set call vectors offset telative to blob start?

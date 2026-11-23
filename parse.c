@@ -70,6 +70,8 @@
 //   \=n        result := capture n (no new capture)
 //   \!         a statement that does not parse: report it, skip it (to its
 //              ;, over a { } block), go on; fails at a } or the end
+//   \%         a false #if: skip lines to its #else / #endif (nested ones
+//              whole)
 //   \#xx       result := hex const xx
 //   \'X        set type high-byte of result to X ('c'/'w'/'C'/'W'; \'^ = uppercase)
 //   \?X        fail unless result type high-byte is X
@@ -501,6 +503,7 @@ static word  nerr;                 // \! errors reported (no .ivm then)
 static word  err_at;               // the last one's position (+1): reported
 static void  err_statement(word s0);
 static void  err_skip(void);
+static void  pp_skip(void);
 
 static word  undef_pos_abs;        // sticky: position of that ident
 
@@ -1397,7 +1400,7 @@ static uchar read_ident(void) {
   word n;
 
   skip_ws();
-  if (!isalpha(nextc))
+  if (!isalpha(nextc) && nextc != '_')    // C: _ starts one too (__MC65__)
     return 0;
 
   // letter, digit, or underscore
@@ -1485,6 +1488,20 @@ static uchar match_ident_same(uchar n) {
 }
 
 static word last_sym = 0xffff;   // the symbol \i matched last (\$)
+// Predefined names (#define'd consts), made when first seen: no const
+// slot otherwise. __MC65__: the .ivm version, __TARGET_6502__: 1
+static uchar predef(void) {
+  word v;
+  Symbol *s;
+
+  if (!strcmp(id_buf, "__MC65__")) v = IVM_VERSION;
+  else if (!strcmp(id_buf, "__TARGET_6502__")) v = 1;
+  else return 0;
+  s = sym_add(id_buf, SYM_VAR, add_const(v));
+  s->is_const = 1;
+  return 1;
+}
+
 static uchar match_ident(void) {
   uchar c, slot;
   word start_abs, i;
@@ -1502,6 +1519,7 @@ static uchar match_ident(void) {
   // TODO: we're doing many sym_find( SYM_VAR ) make it a function,
   //  saves passing an argument, I think? 
   i = sym_find(id_buf, (c == '(') ? SYM_FUNC : SYM_VAR, 0);
+  if (i == SYM_NONE && c != '(' && predef()) i = (word)(nsym - 1);
 
   if (i == SYM_NONE) {
     note_undef(c == '(', start_abs);
@@ -1872,7 +1890,7 @@ static void free_rules(void) {
 // note: '>' is load-time only (not stored)
 //       '<' becomes HIBIT(x), x=1..31 (alt jump) or HIBIT('<')
 static uchar is_dir(uchar e) {
-  return isdigit(e) || strchr("insfdprlxywmzkcahvgetoubj+{}#='?*@$:,.!", e) != NULL;
+  return isdigit(e) || strchr("insfdprlxywmzkcahvgetoubj+{}#='?*@$:,.!%", e) != NULL;
 }
 
 static void build_one_rule(uchar r, char *rhs) {
@@ -2466,6 +2484,9 @@ int run() {
     }
   }
 
+  // \%: a false #if branch: skipped
+  else if (c == HIBIT('%')) pp_skip();
+
   // \*c: skip input up to and including the next c (Kleene ".*c")
   //   \*\n: to end of line   \*>: through '>'   (\*\[ \*\| for [ |)
   else if (c == HIBIT('*')) {
@@ -2633,6 +2654,29 @@ static void err_skip(void) {
   }
 }
 
+// \%: skip the lines of a false #if branch (at a line start): up to its
+// #else (the rest is parsed) or #endif, both consumed; a nested #if..
+// #endif inside: skipped whole
+static void pp_skip(void) {
+  uchar nest = 0, done = 0;
+
+  while (nextc && !done) {
+    // a # line: #if.. opens, #else / #endif ends ours
+    skip_hspace();
+    if (nextc == '#') {
+      skip();
+      skip_hspace();
+      if (match_at("if", 2)) nest++;
+      else if (match_at("endif", 5)) { if (nest) nest--; else done = 1; }
+      else if (!nest && match_at("else", 4)) done = 1;
+    }
+
+    // the rest of the line
+    while (nextc && nextc != '\n') skip();
+    if (nextc) skip();
+  }
+}
+
 static void report_reject(void) {
   word i;
 
@@ -2776,6 +2820,7 @@ static void init(char *bnf_path, char *src_path) {
   line_len = 0;
   line_pos = 0;
   line_abs = 0;
+
   load_nextc();     // prime nextc (reads the first source char)
   max_pos_abs = 0;
   far_sp = 0;

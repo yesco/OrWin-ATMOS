@@ -556,11 +556,12 @@ _ivmlib_heapend: .word 0                ;; first byte after heap
 
 
 
-;;; ---- cut 4: ... not getchar (the JIT never calls it) ----
+;;; ---- cut 4: ... no getchar (the image's end then: _ivmlib_end) ----
 _ivmlib_cut4:
 
 ;;; ===========================================================================
-;;; Not used by JIT code (after the last cut)
+;;; getchar: the last tier (an image with it ends at _ivmlib_end). Uses
+;;; pvio / pcbuf (cut 2: below, so in such an image)
 ;;; ===========================================================================
 
 ;;; SIM 22 B, ATMOS 10 B

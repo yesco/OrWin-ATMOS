@@ -2,7 +2,7 @@
 # Arguments Block Cscopedeclstatements Declare Expr Func
 # Gswitch Hassign Intcharetc Jprintone Kstatements
 # Massvardecl L(oop-for) Oexpr Program 
-# Q,arguments RstartvalueofE Simpleval
+# Q#lines RstartvalueofE Simpleval
 # Type Uvardecl Var WprintitemJ Z H
 #
 # -- letters free: N
@@ -29,12 +29,29 @@
 # - Program starts with P
 P=D
 
-# - #define NAME number|"string" -> const; any other # line is skipped
-#   (\c only after a full match: a failed alt must not leave it set)
-D=#define \+ \d\c[\g]\n\o\<
-|#define \+ \s\c[\g]\n\o\<
-|#\*\n\o\<
+# - Top level: declarations, functions, # lines (Q)
+D=static \<|extern \<
+|Q\o\<
 |V\o\<|F\o\<|\!\o\<|
+
+# - # lines, at the top and in blocks (C)
+#   #define NAME number|"string" -> const (\c only after a full match: a
+#   failed alt must not leave it set). Predefined (parse.c predef, made
+#   when first used): __MC65__ the version (the .ivm mark's last 2 bytes,
+#   hi lo), __TARGET_6502__ 1
+#   #ifdef / #ifndef NAME, #if 0 / #if N: a false one skips lines (\%) to
+#   its #else / #endif; an #else reached is the end of a true one: skips
+#   to #endif. #endif, any other # line: skipped
+Q=#define \+ \d\c[\g]\n
+|#define \+ \s\c[\g]\n
+|#ifdef \i\*\n
+|#ifdef \*\n\%
+|#ifndef \i\*\n\%
+|#ifndef \*\n
+|#if 0\n\%|#if 0 \*\n\%
+|#if \d\*\n
+|#else\*\n\%
+|#\*\n
 
 # - Declarations: optional register\b -> REGISTER slot 0..31
 # -O: REGISTER 0..31, other globals 32..95, frames at 96+
@@ -59,15 +76,14 @@ I=int\'w|word\'w|void\'w|char\'c|unsigned int\'w|unsigned char\'c
 
 # - Function/Args definition
 F=\oT \f\{(A)\r B \}[X]\o
-A=void|T \pQ|
-Q=,A|
+A=void|T \p,A|T \p|
 
 # - Block
 # a statement that does not parse: reported, skipped (\!: to its ;, over
 #   a { } block), the next one is tried: all the errors of a file in one
 #   run, no .ivm. The same for declarations / functions (rule D)
 B={ \{ C } \}
-C=V\<|K\<|\!\<|
+C=V\<|K\<|Q\<|\!\<|
 
 # - Statements — keywords / specific forms first
 # if (l OP r), l simple (S), r simple or an R (into a temp): t / u as
@@ -109,6 +125,7 @@ K=Y
 |puts("["]\u);[N]
 |puts(\i);[L\1PN]
 
+|fflush(stdout);
 |fputs("["]\u,stdout);
 |fputs(\i,stdout);[L\1P]
 
@@ -171,6 +188,7 @@ K=Y
 # - Memory
 #|free(\i);[F\1]
 |free(\i);
+# TODO: expression usage?
 |\i=malloc(E);[M\1]
 
 # - Statement can be a Block, or lastly Assignments
@@ -421,7 +439,8 @@ E=\i+=\i [U\1\2]
 |S[\l1]O
 
 # - Function call
-R=\i(Z)[\v]
+R=getchar()[K]
+|\i(Z)[\v]
 
 # - Dereferencing points
 #   *charptr++ (TODO: block for intptr, put guard/other gen)
