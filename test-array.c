@@ -11,6 +11,10 @@
 //
 //   int array:    the AI pointer, a's address as immediates
 //
+//   const index:  int w[k]: LDA w+2k / STA w+2k (no pointer); int *q:
+//                 LDY #2k; LDA (q),Y: q itself (in zp with -z, else a
+//                 copy), no add. k < 128: Y = 2k + 1 must fit
+//
 // Each case: name and the values C gives, (indented) what we got:
 //
 //   char idx:       12 27
@@ -19,7 +23,13 @@
 // - char idx:   a[i] = i * 3, i a char: a[4] a[9]
 // - word idx:   big[k] (k = 300, 1000, 2047): written, read back
 // - zeroed:     big[500], w[3]: never written, 0 (bss is zeroed)
-// - int array:  w[i] = i * 100: w[7] w[0]
+// - int array:  w[i] = i * 100: w[7] w[0]. With -z this also checks a
+//               JIT guard: it must not ask for w's (a const) slot
+//               address, that put all consts into mem[]: overran zp
+// - int const:  w[2] = 7 (a const), w[4] = k (ACC pending), w[6] = k + 1
+//               (ACC in AX): w[2] w[4] w[6]
+// - int* const: q = iw; q[1] q[2] q[127] (Y = 254, the last one) q[128]
+//               (the general way), then iw[127] iw[128]: the same cells
 // - const idx:  a[2] = 5: a[2]
 // - sizeof:     char a[20], int w[10]: 20 20
 // - pointer:    p = a; p[4]
@@ -35,6 +45,8 @@ char big[BIGSIZE];
 const int ten = 10;
 int w[ten];
 
+int iw[130];
+
 // Cannot:
 // #define ADD 2048+1
 // int add[ADD];
@@ -49,6 +61,7 @@ int main() {
   char i;
   int k, n;
   char *p;
+  int *q;
 
   printf("char idx:\t12 27\n\t\t");
   for (i = 0; i < 10; i++) a[i] = i * 3;
@@ -71,6 +84,29 @@ int main() {
   for (k = 0; k < 10; k++) w[k] = k * 100;
   n = w[7]; printf("%u ", n);
   n = w[0]; printf("%u\n", n);
+
+  printf("int const:\t7 301 302\n\t\t");
+  w[2] = 7;
+  k = 301;
+  w[4] = k;
+  w[6] = k + 1;
+  n = w[2]; printf("%u ", n);
+  n = w[4]; printf("%u ", n);
+  n = w[6]; printf("%u\n", n);
+
+  printf("int* const:\t5 6 8 9 8 9\n\t\t");
+  q = iw;
+  q[1] = 5;
+  k = 6;
+  q[2] = k;
+  q[127] = k + 2;
+  q[128] = k + 3;
+  n = q[1]; printf("%u ", n);
+  n = q[2]; printf("%u ", n);
+  n = q[127]; printf("%u ", n);
+  n = q[128]; printf("%u ", n);
+  n = iw[127]; printf("%u ", n);
+  n = iw[128]; printf("%u\n", n);
 
   printf("const idx:\t5\n\t\t");
   a[2] = 5;

@@ -700,6 +700,9 @@ static word  lc_tdest;
 #define RKA1    "\x06"                    // (abs,Y) address: slot 1's const
 #define RKK     "\x07"                    // abs address: slot 1 + slot 2,
 #define RS_KK   7                         // both consts (a[k])
+#define RKW     "\x08"                    // ... slot 1 + 2 * slot 2 (word
+#define RKWH    "\x18"                    // a[k], a static struct's s.f)
+#define RS_KW   8
 
 // library routines (JSR n, rule_ref)
 #define LIB_PUTCHAR 0
@@ -1428,6 +1431,7 @@ static void loop_align_check(word ibc) {
 //                  of the next abs,Y (self-modifying): base + index with
 //                  no pointer
 //   abs,Y op spec  RKA1: slot 1's const as the address (+ an R_ELBK's hi)
+//   abs op RKW     RKWH: slot 1's const + 2 * slot 2's (a word a[k])
 //   R_INC1         mem[slot 1]++ (emit_inc)
 //   R_NOW          acc_need() here (a pending const / slot into AX)
 //   R_LD1 / R_LD2  AX = mem[slot 1 / 2] (const: LDA #lo, TAX if hi == lo)
@@ -1481,6 +1485,8 @@ static void loop_align_check(word ibc) {
 #define G_K1_K2    GC(17)         // slot 1 and 2 consts (a[k])
 #define G_AI_WORD  GC(15)         // &slot1[slot2] (word) in AI already
 #define G_AI_BYTE  GC(16)         // the same, uchar
+#define G_ZP_K2    GC(18)         // slot 1 in zp, slot 2 a const < 128
+                                  // (p->f: (zp),Y with Y = 2k)
 #define R_NEED  0x01
 #define R_DROP  0x02
 #define R_WRITE 0x04
@@ -1592,13 +1598,21 @@ static const JitRule jit_rules[] = {
     R_PTR _LDYN "\x01" R_PEND1 _STAIY _DEY R_PEND0 _STAIY),
   RULE('!', 0, R_NEED,
     _PHA R_PTR _TXA _LDYN "\x01" _STAIY _PLA _DEY _STAIY),
-  // ( bb ii: ACC = ((word*)base)[idx]: hi first, then lo
+  // ( bb ii: ACC = ((word*)base)[idx]: hi first, then lo. A static
+  // array / struct at a const index: absolute
+  RULE('(', G_K1_K2, R_DROP | R_AX, _LDA RKW _LDX RKWH),
   RULE('(', 0, R_DROP | R_AX, R_ELW R_YK1 _LDAIY _TAX _DEY _LDAIY),
-  // ) bb ii: ((word*)base)[idx] = ACC. Pending: from where it is; AI
-  // there already: AX kept as is; else: AX saved over the AI setup
+  // ) bb ii: ((word*)base)[idx] = ACC. A static one at a const index:
+  // absolute. Pending: from where it is; AI there already, or the
+  // pointer in zp at a const index: AX kept as is; else: AX saved over
+  // the AI setup
+  RULE(')', G_ACC_PEND | G_K1_K2, 0,      R_PEND0 _STA RKW R_PEND1 _STA RKWH),
+  RULE(')', G_K1_K2,              R_NEED, _STA RKW _STX RKWH),
   RULE(')', G_ACC_PEND, 0,
     R_ELW R_YK1 R_PEND1 _STAIY _DEY R_PEND0 _STAIY),
   RULE(')', G_AI_WORD, R_NEED,
+    R_ELW R_YK0 _STAIY _PHA _TXA _INY _STAIY _PLA),
+  RULE(')', G_ZP_K2, R_NEED,
     R_ELW R_YK0 _STAIY _PHA _TXA _INY _STAIY _PLA),
   RULE(')', 0, R_NEED,
     _PHA _TXA _PHA R_ELW _PLA R_YK1 _STAIY _TAX _PLA _DEY _STAIY),
@@ -1790,6 +1804,8 @@ static int rule_guard(word g, const uchar *p) {
   case G_DEAD >> 10:     return acc_dead(nb);
   case G_K1_B2 >> 10:   return is_const(s) && hi0(p[1]);
   case G_K1_K2 >> 10:   return is_const(s) && is_const(p[1]);
+  case G_ZP_K2 >> 10:    return is_const(p[1]) && const_val(p[1]) < 128 &&
+                                !is_const(s) && slotlo(s) < 0xff;
   case G_AI_WORD >> 10:  return ai_hit('w', s, p[1]) != 0xff;
   case G_AI_BYTE >> 10:  return ai_hit('b', s, p[1]) != 0xff;
   }
@@ -1881,6 +1897,8 @@ static void emit_tpl(const uchar *t, uchar len, const uchar *p, uchar op) {
 
       // a static array's element at a const index: absolute
       else if (a == RS_KK) ema(b, (word)(const_val(p[0]) + const_val(p[1])));
+      else if (a == RS_KW)
+        ema(b, (word)(const_val(p[0]) + (const_val(p[1]) << 1) + (c ? 1 : 0)));
 
       // a slot
       else {
@@ -1901,7 +1919,16 @@ static void emit_tpl(const uchar *t, uchar len, const uchar *p, uchar op) {
         top = fx[(nfx - 1) & 3]; fx[(nfx - 1) & 3] = fx[nfx & 3];
         empatch(top);
         break;
-      case A_ELW:   lc_ty0 = ai_word(p[0], p[1]); zp = AI; break;
+      // a const index < 128 (p->f): the pointer itself, Y = 2k, no add
+      case A_ELW:
+        if (is_const(p[1]) && const_val(p[1]) < 128 && !is_const(p[0])) {
+          zp = emit_ptr(p[0]);
+          lc_ty0 = (uchar)(const_val(p[1]) << 1);
+        } else {
+          lc_ty0 = ai_word(p[0], p[1]);
+          zp = AI;
+        }
+        break;
       case A_ELB:   ai_byte(p[0], p[1]); zp = AI; break;
       case A_YK0:   em2(LDYN, lc_ty0); break;
       case A_YK1:   em2(LDYN, (uchar)(lc_ty0 + 1)); break;
