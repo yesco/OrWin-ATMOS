@@ -1,4 +1,4 @@
-# Usage: ./pc [test-char]   # defaults to test(.c)
+# Usage: ./pc [test-char] [-c]   # defaults to test(.c); -c: don't run it
 
 if [ -z "$1" ]; then
     name="test"
@@ -15,7 +15,8 @@ if stale parse.x $PARSE_SRC pc; then
   clang -DSYMS -DRUN -DVERBOSE -O3 parse.c -o parse.x || exit 1
 fi
 
-time ./parse.x -O -v c.bnf $name.c
+shift 2>/dev/null   # the rest: parse.x options, e.g. -c: don't run it
+time ./parse.x -O -v "$@" c.bnf $name.c
 
 echo
 echo "=== $name.c: `./wcode $name.c` LOC ==="

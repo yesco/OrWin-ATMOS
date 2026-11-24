@@ -117,6 +117,7 @@ uchar ginit_acc;   // const slot the init code leaves in ACC, 0xff none
 void gen_func_entry(uchar v);
 #ifndef IVM_NO_VN
 word vn_label;   // last label (jump target) position: value numbering
+uchar vn_alias;  // the source has &x: stores through pointers may hit mem[]
 #endif
 uchar *build_blob(int *out_len);
 
@@ -980,7 +981,8 @@ uchar vn_temp(word from, uchar t) {
     w = WRITES_VAR(op) ? bin[pc + 1] : 0xffff;
     if (w == vn_t[k].t || (w != 0xffff && vn_reads(e, len, (uchar)w, 0)))
       ok = 0;
-    if (strchr(")]!w,Amb", op) && vn_reads(e, len, 0xff, 1)) ok = 0;
+    if (strchr(")]!w,Amb", op) && (vn_alias || vn_reads(e, len, 0xff, 1)))
+      ok = 0;                 // (& of a variable: a slot may be the target)
   }
   if (ok && pc == st) {
     bin_ptr = st;

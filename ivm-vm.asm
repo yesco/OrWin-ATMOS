@@ -1823,8 +1823,7 @@ op_dot: USEY
 op_K:	USEY
 	jsr    	_getchar
 	sta     _ivm_acc
-	lda     #0
-	sta     _ivm_acc+1
+	stx     _ivm_acc+1		;; EOF: $FFFF (not $00FF, a char)
 	
 	jmp     ynext
 	

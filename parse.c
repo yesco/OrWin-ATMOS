@@ -370,6 +370,7 @@ static void *xrealloc(void *p, word n) {
 // Save bytes for poor on-device 6502 cc65
 #ifdef RUN
   #include "ivm.c"
+  static uchar compile_only;  // -c: write the .ivm, don't run it
 #endif
 
 // ------------------------------------------------------------
@@ -3056,6 +3057,21 @@ static void init(char *bnf_path, char *src_path) {
 
   if (!src_fp) FAIL("cannot open source");
 
+  // & of a variable anywhere (&x, not && &=): stores through pointers may
+  // hit mem[], value numbering then keeps no slot over them (vn_alias).
+  // The whole source first: the & may come after the code it affects
+  {
+    int c, last = 0;
+    uchar amp = 0;                         // after a lone & (and spaces)
+    while ((c = fgetc(src_fp)) != EOF) {
+      if (c == '&') amp = last != '&';      // && : no
+      else if (amp && (isalpha(c) || c == '_')) vn_alias = 1;
+      else if (c != ' ') amp = 0;           // &= &( &1 ...
+      last = c;
+    }
+    rewind(src_fp);
+  }
+
   fail_file = NULL;
 
 
@@ -3147,6 +3163,9 @@ int main(int argc, char **argv) {
   verbose = 0;
   ignore_case = 1;
   optimize = 0;
+#ifdef RUN
+  compile_only = 0;
+#endif
 
   // parse arguments
   for (i = 1; i < argc; i++) {
@@ -3158,6 +3177,9 @@ int main(int argc, char **argv) {
       case 'O': optimize = 1;    continue;
       case 'S': stripe = 1;      continue;
       case 'i': ignore_case = 1; continue; // LOL
+#ifdef RUN
+      case 'c': compile_only = 1; continue;  // just the .ivm, don't run it
+#endif
       default: ;// TODO: give error
       }
 
@@ -3167,7 +3189,7 @@ int main(int argc, char **argv) {
   }
 
   if (!bnf || !srcpath) {
-    eprintf("usage: %s [-v ...] [-O] [-S] [-i] c.bnf src.c\n", argv[0]);
+    eprintf("usage: %s [-v ...] [-O] [-S] [-i] [-c] c.bnf src.c\n", argv[0]);
     return 1;
   }
 
@@ -3297,7 +3319,7 @@ int main(int argc, char **argv) {
       }
 
       #ifdef RUN
-      {
+      if (!compile_only) {
         Process *proc;
         ivmvar ret;
 

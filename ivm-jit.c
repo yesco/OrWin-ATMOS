@@ -1127,8 +1127,9 @@ static void emit_belem_ptr(uchar base, uchar idx) {
 // Labels (jump targets, function entries): acc_label() emits a pending load
 // BEFORE the label (so only fall-through runs it), then ACC is in AX with
 // nothing known. lc_lbl[] has every label (prescan, ivm-walk.c ivm_jump).
-// Stores through pointers ( ! , w ) ] m ) are assumed never to hit mem[]
-// (no & of a variable), so they keep what is known about ACC.
+// Stores through pointers ( ! , w ) ] m ) keep what is known about ACC:
+// they store ACC itself. With & of a variable (` in the code: lc_alias)
+// they may hit mem[]: the element cache goes (its idx), m A forget ACC.
 // An op that calls none of these is reported ("ACC not declared").
 enum { ACC_AX, ACC_PEND, ACC_LOST };
 static uchar acc_at, acc_hk, acc_s;
@@ -1155,6 +1156,7 @@ static word  lc_yah_at = 0xffff;
 
 // ---- element cache (AI) -------------------------------------------------
 static void ai_drop(void) { lc_ai_kind = 0; lc_rel_t = 0xff; }
+static uchar lc_alias;      // ` in the code: & of a variable (prescan)
 // AI == &base[idx] already? -> its Y offset (0 or, via lc_rel, 2*c), else
 // 0xff
 static uchar ai_hit(uchar kind, uchar base, uchar idx) {
@@ -2140,6 +2142,7 @@ static word ivm_jit1(const uchar *code, word code_len,
       uchar f = frame_base[i], k;
       for (k = 0; k <= FR_ACC; k++) wword((uchar)(f + k));
     }
+  lc_alias = 0;
   lc_lbl = (uchar *)calloc((code_len >> 3) + 1, 1);
   if (lc_lbl) {
     word t, n;
@@ -2147,6 +2150,7 @@ static word ivm_jit1(const uchar *code, word code_len,
     for (i = 0; i < code_len; i += n) {
       n = ivm_oplen(code + i);
       if (!n) n = 1;
+      if (code[i] == '`') lc_alias = 1;            // & of a variable
       if (strchr("SIJUCMH',tu", code[i]) && i + 1 < code_len)
         wword(code[i + 1]);                        // word write (byte slots)
       if (IS_LOOP(code[i]) && is_loop_head(i)) {
@@ -2268,6 +2272,11 @@ static word ivm_jit1(const uchar *code, word code_len,
 
     // a write of slot w: drops the cache if w is its base or idx, the
     // a[j+c] relation if w is t or src
+    // & of a variable: a store through a pointer may write any slot
+    else if (lc_alias && op >= 32 && strchr("!,w)]mA", op)) {
+      ai_drop();
+      if (op == 'm' || op == 'A') acc_s = 0xff;
+    }
     else if (op >= 32 && strchr("SIJUCMH',sijZYF", op)) {
       uchar w = *p;
       if (lc_ai_kind && (w == lc_ai_base || w == lc_ai_idx)) lc_ai_kind = 0;
@@ -2686,6 +2695,13 @@ static word ivm_jit1(const uchar *code, word code_len,
     }
 
     // U: mem[a] += mem[b]; ACC = result. Two slot operands.
+    // `: ACC = &mem[s], a const here (zp with -z)        -, NEW
+    case '`': {
+      uchar s = PAR;
+      acc_pk(slotlo(s));
+      break;
+    }
+
     case 'U': {                                    // -, SLOT (a)
       uchar a = PAR;
       p++;                                         // b: slot operand 2

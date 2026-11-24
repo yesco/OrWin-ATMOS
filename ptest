@@ -20,7 +20,7 @@
 #   cc65   cl65 -Cl -Os                     size: .sim
 #   oscar  oscar64 -Os -ep                  size: .prg
 
-import collections, difflib, glob, os, pty, re, shlex, subprocess, sys, threading
+import collections, difflib, glob, os, pty, re, shlex, signal, subprocess, sys, threading
 
 TIMEOUT = 600
 OSCAR64 = os.environ.get("OSCAR64",
@@ -44,10 +44,12 @@ def run(cmd, log):
     sys.stderr.flush()
     out.write("\n$ %s    > %s\n" % (" ".join(cmd), log))
     master, slave = pty.openpty()
+    # its own process group: the timeout kills it all (bash ./ivm-asm: its
+    # sim65 too, it would keep the pty open)
     p = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=slave,
-                         stderr=slave, close_fds=True)
+                         stderr=slave, close_fds=True, start_new_session=True)
     os.close(slave)
-    timer = threading.Timer(TIMEOUT, p.kill)
+    timer = threading.Timer(TIMEOUT, lambda: os.killpg(p.pid, signal.SIGKILL))
     timer.start()
     buf, lines = b"", []
     with open(log, "w") as f:

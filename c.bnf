@@ -528,11 +528,20 @@ E=\i+=\i [U\1\2]
 |(char)$R\#ff[&\2]$O
 |(char)$S\#ff[\l1&\2]$O
 
-|$R$O
-|$S[\l1]$O
+|$R$O$q
+|$S[\l1]$O$q
+
+# - c ? a : b, after all the operators (C: the loosest but =, ","). Both
+#   values into one temp: the jump over the else (0?G) needs ACC
+#   captures: 1=a 2=temp 3=b
+q=? [?G\x] $E[S\t0?G\x\w\y] : $E[S\2\yL\2]|
 
 # - Function call
 R=getchar()[K]
+# - &x: the address of a variable (` op; the VM / JIT know mem[]'s). A
+#   static array: its address is the slot's value (also rule S)
+|&\i\$\=1[\l1]
+|&\i[`\1]
 |malloc($E)[M\t]
 |\i($Z)[\v]$x
 

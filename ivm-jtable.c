@@ -25,6 +25,7 @@
 //      t['{'] = &&op_shlm; t['}'] = &&op_shrm;
 
       t['L'] = &&op_L;    t['S'] = &&op_S;   t['Z'] = &&op_Z;
+      t['`'] = &&op_addr;
       t['C'] = &&op_C;
       t['l'] = &&op_l;    t['s'] = &&op_s;
 

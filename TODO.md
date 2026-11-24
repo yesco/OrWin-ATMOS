@@ -2,14 +2,20 @@
 
 # MeteoriC-65 (parse.c c.bnf): next, after the manual (MeteoriC-man.md)
 
+- && and || and ^^ lol
+
 - ivm-lib.asm: add memcpy, for <= 256 generate simple inline code
   otherwise call a library routine
-- fo ? a : b - expressions
+
+- assignement expressions
+
+- ++n ... as expression
 
 - #define META (ESC+'A'-1)    // can we evaluate/reduce constant expr?
 - #define CTRL -64            // negative unare numbers and vars 
 - #define ESC 96 // haha! ESC A or M-A! gives error on:
   if (c == 27) return ESC + toupper(getch_());
+
 - typedef struct imacsbuffer xyz;
 
 - better error message when pririoty goes wrong:
@@ -20,11 +26,7 @@ imacs.c:64:                     ^                                         imacs.
 imacs.c:65:     return p < end ? p                                        imacs.c:65:                    ^                                          imacs.c:71: error: cannot parse (function not defined: while)             imacs.c:71:     while (*p && p < b->end) if (*p++ == '\n') c++;
 imacs.c:71:                   ^                                           imacs.c:81: error: cannot parse (function not defined: while)             imacs.c:81:     while (*p != '\n' && *p && p < b->end) p++;
 
-- &arr, maybe slot vars too
-- ++n ... as expression
-- assignement expressions
-
-- strlen, strcpy, strcat, is..., toupper, tolower, strncpy
+- atoi, strlen, strcpy, strcmp, strcat, is..., toupper, tolower, strncpy
 
 
 ** tests failing **:

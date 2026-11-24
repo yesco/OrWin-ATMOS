@@ -8,6 +8,13 @@
 #   ./oric --live-fast ...      the same, as fast as it goes
 #   ./oric game.tap             any .tap as it is: no build, just run it
 #
+# --live on a terminal: what you type goes to the Oric (keys, Return,
+# Esc, Del/Backspace, arrows; Ctrl-x: CTRL-x and Alt-x: FUNCT-x if the
+# emulator has keys-mod; Ctrl-C too: BASIC's break). Ctrl-] quits.
+# keys-mod: Phosphoric's `keys` with \C<c> \F<c>. If ../Phosphoric has its
+# source but not that, --live offers to patch it (patch_phosphoric: asks
+# first; ORIC_NOPATCH=1: never) and rebuild it (make).
+#
 # A .tap not from the host compiler (its tape name isn't IVM) has no
 # _ivmlib_exit: it runs until ORIC_CYCLES (default 100000000 for those)
 # or Ctrl-C, then its screen is shown. Ctrl-C works in all modes.
@@ -27,7 +34,7 @@
 #   ORIC_ROM     the BASIC 1.1 ROM (default: Phosphoric's or the OSDK's)
 #   ORIC_CYCLES  give up after (default 2000000000; other .tap: 100000000)
 
-import os, re, select, struct, subprocess, sys, time
+import os, re, select, struct, subprocess, sys, termios, time
 
 here = os.path.dirname(os.path.abspath(sys.argv[0]))
 up = os.path.dirname(here)
@@ -61,8 +68,8 @@ def lib_sym(name):
 
 def sh(cmd, log):
     with open(log, "w") as f:
-        return subprocess.run(cmd, shell=True, stdout=f, stderr=subprocess.STDOUT
-                              ).returncode
+        return subprocess.run(cmd, shell=True, stdout=f, stderr=subprocess.STDOUT,
+                              stdin=subprocess.DEVNULL).returncode   # (./pc runs it)
 
 
 def norm(lines):
@@ -96,7 +103,7 @@ class Emu:
 
     def send(self, c):
         self.log.write("> %s\n" % c)
-        self.p.stdin.write((c + "\n").encode())
+        self.p.stdin.write((c + "\n").encode("latin-1"))   # keys: $80-$84
         self.p.stdin.flush()
 
     def line(self, timeout=None):
@@ -177,6 +184,128 @@ def render(scr, color):
     return show, plain
 
 
+# terminal bytes -> the emulator's `keys` text. Arrows and DEL: its codes
+# $80-$84; space and \\ escaped (keys skips leading blanks). mod: the
+# emulator knows \C<c> \F<c> (CTRL, FUNCT; Phosphoric's keys-mod)
+ARROW = {b"A": "\x80", b"B": "\x81", b"D": "\x82", b"C": "\x83"}
+QUIT = 0x1d                                     # Ctrl-]
+
+
+def to_keys(b, mod):
+    out, i = "", 0
+    while i < len(b):
+        c = b[i]
+        i += 1
+        if c == 0x1b:                           # ESC [ A.., ESC O A.., Alt-x
+            if b[i:i + 1] in (b"[", b"O") and b[i + 1:i + 2] in ARROW:
+                out += ARROW[b[i + 1:i + 2]]
+                i += 2
+            elif b[i:i + 3] == b"[3~":          # Delete
+                out += "\x84"
+                i += 3
+            elif i < len(b) and 0x20 < b[i] < 0x7f:
+                if mod:
+                    out += "\\F" + chr(b[i])
+                i += 1
+            else:
+                out += "\\e"
+        elif c in (10, 13):
+            out += "\\n"
+        elif c in (8, 127):
+            out += "\x84"                      # DEL (backspace)
+        elif c == 9:
+            out += "\\t"
+        elif c < 32:
+            if mod:
+                out += "\\C" + chr(c + 96)    # Ctrl-a: 1 -> a
+        elif c == 32:
+            out += "\\ "
+        elif c == 92:
+            out += "\\\\"
+        elif c < 127:
+            out += chr(c)
+    return out
+
+
+# keys-mod for Phosphoric: `keys` takes \C<c> \F<c> (<c> + CTRL / FUNCT),
+# queued as a marker byte ($85 / $86) before <c>; the feeder holds the
+# modifier with it. Each edit: (file, old, new), old must be there once
+PHOS_PATCH = [
+    ("src/control.c",
+     "        char c = *p;\n",
+     "        char c = *p, pre = 0;   /* oric keys-mod: CTRL / FUNCT marker */\n"),
+    ("src/control.c",
+     "                case '\\\\': c = '\\\\'; break;\n",
+     "                case '\\\\': c = '\\\\'; break;\n"
+     "                case 'C': case 'F':   /* oric keys-mod: \\C<c> \\F<c>, <c> + CTRL / FUNCT */\n"
+     "                    if (p[1] && (unsigned char)p[1] > 0x20 && (unsigned char)p[1] < 0x80) {\n"
+     "                        pre = *p == 'C' ? (char)0x85 : (char)0x86;\n"
+     "                        p++; c = *p; break;\n"
+     "                    }\n"
+     "                    c = *p; break;\n"),
+    ("src/control.c",
+     "        if (emu->kbd_inject_len + 1 > emu->kbd_inject_cap) {\n",
+     "        if (emu->kbd_inject_len + 2 > emu->kbd_inject_cap) {   /* oric keys-mod: + pre */\n"),
+    ("src/control.c",
+     "        emu->kbd_inject_buf[emu->kbd_inject_len++] = c;\n",
+     "        if (pre) emu->kbd_inject_buf[emu->kbd_inject_len++] = pre;   /* oric keys-mod */\n"
+     "        emu->kbd_inject_buf[emu->kbd_inject_len++] = c;\n"),
+    ("src/control.c",
+     ",sym-group,stuck-bits\"",
+     ",sym-group,stuck-bits,keys-mod\""),
+    ("src/main.c",
+     "            unsigned char ic = (unsigned char)emu->kbd_inject_buf[emu->kbd_inject_pos];\n",
+     "            unsigned char ic = (unsigned char)emu->kbd_inject_buf[emu->kbd_inject_pos];\n"
+     "            unsigned char mod = 0;   /* oric keys-mod: $85 CTRL / $86 FUNCT + the next */\n"
+     "            if ((ic == 0x85 || ic == 0x86) && emu->kbd_inject_pos + 1 < emu->kbd_inject_len) {\n"
+     "                mod = ic;\n"
+     "                ic = (unsigned char)emu->kbd_inject_buf[++emu->kbd_inject_pos];\n"
+     "            }\n"),
+    ("src/main.c",
+     "                oric_keyboard_press_char(&emu->keyboard, (char)ic);\n",
+     "                oric_keyboard_press_char(&emu->keyboard, (char)ic);\n"
+     "            if (mod == 0x85) oric_keyboard_press_ctrl(&emu->keyboard);    /* oric keys-mod */\n"
+     "            if (mod == 0x86) oric_keyboard_press_funct(&emu->keyboard);\n"),
+]
+
+
+def patch_phosphoric(emu):
+    """Phosphoric next to us, its source there, no keys-mod in it: ask, then
+    patch it and make. Patched but the binary older: make. 1: rebuilt"""
+    d = os.path.dirname(emu)
+    srcs = sorted(set(f for f, _, _ in PHOS_PATCH))
+    if os.environ.get("ORIC_NOPATCH") or \
+       not all(os.path.exists(os.path.join(d, f)) for f in srcs):
+        return 0
+    text = {f: open(os.path.join(d, f)).read() for f in srcs}
+    if all("oric keys-mod" in t for t in text.values()):
+        if os.path.getmtime(emu) >= max(os.path.getmtime(os.path.join(d, f))
+                                        for f in srcs):
+            return 0
+    else:
+        for f, old, _ in PHOS_PATCH:            # all there, once: else nothing
+            if text[f].count(old) != 1:
+                print("oric: can't patch %s for CTRL/FUNCT keys (not the "
+                      "Phosphoric it knows)" % os.path.join(d, f))
+                return 0
+        print("Phosphoric's `keys` can't send CTRL-x / FUNCT-x. Patch its "
+              "source for that\n  (%s: %s, ~20 lines, marked \"oric keys-mod\")"
+              " and rebuild it with make? [y/N] " % (d, " ".join(srcs)),
+              end="", flush=True)
+        if sys.stdin.readline().strip().lower() not in ("y", "yes"):
+            print("(not patched; ORIC_NOPATCH=1 stops this question)")
+            return 0
+        for f, old, new in PHOS_PATCH:
+            text[f] = text[f].replace(old, new)
+        for f in srcs:
+            open(os.path.join(d, f), "w").write(text[f])
+    log = os.path.join(here, "phosphoric-make.log")
+    print("$ make -C %s > %s" % (d, log), flush=True)
+    if sh("make -C %s" % d, log):
+        die("make failed (see %s)" % log)
+    return 1
+
+
 def tap_info(b):
     """an Oric .tap header: (type, start, name). Sync bytes $16.., $24,
     2 bytes, type ($80 machine code, 0 BASIC), autorun, end, start (big
@@ -236,7 +365,7 @@ def build_tap(name, extra):
     build = ". ./deps; "
     if not os.path.exists(name + ".ivm") or \
        os.path.getmtime(name + ".c") > os.path.getmtime(name + ".ivm"):
-        build += "bash ./pc %s >/dev/null || exit 1; " % name
+        build += "bash ./pc %s -c >/dev/null || exit 1; " % name
     build += ("if stale ivm-jit.x $IVM_SRC jit; then clang -DMEMMAP -DVERBOSE"
               " -DJIT -g ivm.c -o ivm-jit.x || exit 1; fi; "
               "if stale ivm-lib-atmos.bin ivm-lib.asm mklib; then ./mklib"
@@ -256,6 +385,8 @@ def run_tap(name, tapf, tap, ttype, start, exit_, limit, emu, rom, live, fast):
     # (and without an exit: to see the limit): pause, read the screen,
     # draw it, go on
     scr = name + ".oric.scr"
+    if live and sys.stdout.isatty() and sys.stdin.isatty():
+        patch_phosphoric(emu)
     cmd = [emu, "--control", "-n", "-f", "-m", "atmos", "-r", rom,
            "-t", tapf, "-c", str(limit * 2)]
     if live and not fast:
@@ -266,13 +397,34 @@ def run_tap(name, tapf, tap, ttype, start, exit_, limit, emu, rom, live, fast):
     e = Emu(cmd, log)
     while not (e.event() or "EVT stopped").startswith("EVT stopped"):
         pass                                    # ready, then stopped at reset
+    mod = "keys-mod" in e.cmd("hello client=oric proto=1")
+    # --live on a terminal: keys to the Oric (no echo, no line editing, no
+    # ^C signal: it is the Oric's; the output as it was)
+    tin = sys.stdin.fileno() if live and color and sys.stdin.isatty() else None
+    if tin is not None:
+        told = termios.tcgetattr(tin)
+        t = termios.tcgetattr(tin)
+        t[0] &= ~(termios.IXON | termios.ICRNL)
+        t[3] &= ~(termios.ECHO | termios.ICANON | termios.ISIG | termios.IEXTEN)
+        termios.tcsetattr(tin, termios.TCSANOW, t)
     if ttype & 0x80:
         e.cmd("break %04X" % start)
     if exit_:
         e.cmd("break %04X" % exit_)
     e.cmd("continue")
     cyc, done, frame, t0, why = [], 0, 0, time.time(), ""
-    poll = 0.1 if live else None if exit_ else 0.5
+    poll = 0.1 if live else 0.5
+    # not live, stdin not a terminal: what it gives, typed once the program
+    # runs, as it comes (printf 'hi\x1b' | ./oric test-getchar; /dev/null:
+    # nothing). Never waited for: a pipe nobody writes to is just empty
+    fin = None if tin is not None or sys.stdin.isatty() else sys.stdin.fileno()
+    feed = b"" if fin is not None else None
+    last, idle, fed = b"", 0, 0.0
+    # where it waits for a key: the ROM ($0238.. its page 2 vectors), ours:
+    # ivm-lib's getchar (to the lib's end)
+    wait = [(0xC000, 0x10000), (0x0238, 0x0240)]
+    if exit_:
+        wait.append((lib_sym("_opgetchar"), lib_sym("_ivmlib_end")))
 
     def screen():
         r = e.cmd("read BB80 460")
@@ -309,6 +461,41 @@ def run_tap(name, tapf, tap, ttype, start, exit_, limit, emu, rom, live, fast):
                     if now >= limit:            # (stopped: the screen is there)
                         why = "the limit, %s cycles" % "{:,}".format(limit)
                         break
+                    if feed is not None and cyc:   # it runs: the input
+                        new = b""
+                        while fin is not None and \
+                                select.select([fin], [], [], 0)[0]:
+                            d = os.read(fin, 1024)
+                            if not d:
+                                fin = None          # its end
+                                break
+                            new += d
+                        k = to_keys(new, mod)
+                        if k:
+                            e.cmd("keys " + k)
+                            fed = max(fed, time.time()) + 0.1 * len(new)  # 5 frames a key
+                        fed = fed or time.time()
+                        # waiting for a key that won't come: in getchar / the
+                        # ROM, the screen as it was, all input typed (10 s)
+                        scr_now = bytes(c & 0x7f for c in screen())   # (the
+                        # cursor blinks: its bit 7)
+                        pc = int(evt(l, "pc") or "0", 16)
+                        idle = idle + 1 if scr_now == last and \
+                            any(a <= pc < b for a, b in wait) and \
+                            time.time() > fed else 0
+                        last = scr_now
+                        if idle >= 20:
+                            why = "waiting for a key (no more input)"
+                            break
+                    typed = b""                 # what was typed since
+                    while tin is not None and select.select([tin], [], [], 0)[0]:
+                        typed += os.read(tin, 1024)
+                    if QUIT in typed:
+                        why = "Ctrl-]"
+                        break
+                    k = to_keys(typed, mod)
+                    if k:
+                        e.cmd("keys " + k)
                     e.cmd("continue")
                     continue
             if l is None or l.startswith("EVT halt"):
@@ -324,6 +511,9 @@ def run_tap(name, tapf, tap, ttype, start, exit_, limit, emu, rom, live, fast):
         why = "Ctrl-C"
         e.cmd("pause")
         e.event(1)
+    finally:
+        if tin is not None:
+            termios.tcsetattr(tin, termios.TCSANOW, told)
     raw = screen() if e.p.poll() is None else b""
     rows, plain = render(raw, color)
     try:
@@ -349,6 +539,9 @@ def run_tap(name, tapf, tap, ttype, start, exit_, limit, emu, rom, live, fast):
     if not exit_:                               # not ours: no exit, no .out
         print("= %s: stopped by %s" % (os.path.basename(tapf), why))
         return 0
+    if not done and why in ("Ctrl-]", "Ctrl-C") or why.startswith("waiting"):
+        print("= %s: stopped by %s" % (os.path.basename(name), why))
+        return 1
     if not done:
         print("%%Error: oric: %s never reached _ivmlib_exit $%04X (see %s.oric.log)"
               % (name, exit_, name))

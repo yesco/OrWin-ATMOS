@@ -134,7 +134,7 @@
 //  ' - read next char using pointer++ "'vv": ACC= *vv++;
 //  ( - load from indexed array "(aaii" to ACC
 //  ) - store to indexed array ACC to ")aaii"
-// *+ - mul, add
+//  *+- mul, add
 //  , - write char: inc ptr ",vv": *vv++= ACC;
 //  - - subtract
 //  . - print number
@@ -236,7 +236,7 @@
 //  ^ - xor "^vv"
 //? _ - load ACC by name _cc (cc - const char* ptr)
 
-//" ` - TODO: eval/superquote literal datastructure?
+//  ` - address of a variable "`vv": ACC = &mem[vv] (C: &x)
 //  { - shift ACC left fixed steps "{nn}
 //  | - or w var "|vv"
 //  } - shift ACC right "}nn"
@@ -435,6 +435,7 @@ void REPORT_COUNTS() {
   uchar soft_heap[SOFT_HEAP_MAX];
   word soft_top;
   #define IVM_PTR(addr) ((ivmvar *)(soft_heap + (unsigned)(addr)))
+  #define IVM_ADR(p)    ((ivmvar)((uchar *)(p) - soft_heap))   // the reverse
 
   // Host range check: n bytes at soft-heap offset a. Only [SOFT_BASE, soft_top)
   // is valid: the blob's strings plus what M handed out. On failure remember
@@ -484,6 +485,7 @@ void ivm_free(ivmvar p) {
 #else
 
   #define IVM_PTR(addr) ((ivmvar *)(unsigned)(addr))
+  #define IVM_ADR(p)    ((ivmvar)(unsigned)(p))
   #define CHKP(a, n) ((void)0)
 
 ivmvar ivm_zalloc(word n) {
@@ -650,8 +652,8 @@ static int ivm_check(Process *proc, const uchar *ipc) {
     why = "ipc is outside the code section";
   else if ((uchar)zp.fp != (uchar)FP_MAIN && (unsigned)(uchar)zp.fp + FR_ACC >= h->memsz)
     why = "fp is beyond mem[] (FP_MAIN excepted; plain char is unsigned on arm64)";
-  else if (zp.mem != proc->mem)
-    why = "zp.mem != proc->mem";
+  else if (zp.mem != proc->h.mem)
+    why = "zp.mem != proc->h.mem";
   else if (memcmp(&zp.hdr, h, sizeof(*h)) != 0)
     why = "zp.hdr was overwritten (differs from proc->h.hdr)";
   else if (soft_top < SOFT_BASE || soft_top > SOFT_HEAP_MAX)
@@ -710,7 +712,7 @@ void trace(Process *proc, uchar *ipc) {
   // output of actual variable values!
   putchar('\t');
   for(int j = 1; j < i; ++j) 
-    printf(" %5d ", proc->mem[ipc[j]]);
+    printf(" %5d ", proc->h.mem[ipc[j]]);
 
   putchar('\n');
 }
@@ -803,6 +805,15 @@ Process* Nevm(uchar *loaded) {
     memcpy(soft_heap + SOFT_BASE, loaded + bh->data, n);
     soft_top = (word)((SOFT_BASE + n + 1) & ~1);   // keep 16-bit alignment
   }
+  // mem[] in the soft heap too (not p->mem): ` (&x) is a pointer then
+  if (soft_top + cells * sizeof(ivmvar) > SOFT_HEAP_MAX) {
+    printf("\n[IVM] mem[]: out of soft heap\n");
+    free(p);
+    return NULL;
+  }
+  p->h.mem = (ivmvar *)(soft_heap + soft_top);
+  memset(p->h.mem, 0, cells * sizeof(ivmvar));
+  soft_top = (word)(soft_top + cells * sizeof(ivmvar));
 #endif
 
 
@@ -1211,7 +1222,7 @@ ivmvar run_ivm(Process *p) {
   cells = p->h.hdr.memsz;
   if (!cells) cells = MAX_SLOTS;
 
-  pivot(p->mem, cells);
+  pivot(p->h.mem, cells);
   ivm_ipc = p->h.ipc;
   ivm_fp  = p->h.fp;
   ivm_acc = p->h.acc;
@@ -1255,7 +1266,7 @@ ivmvar run_ivm(Process *p) {
   
   // load process head → ZP global
   memcpy(&zp, &p->h, sizeof(zp));
-  zp.mem = p->mem;
+  zp.mem = p->h.mem;   // (host: in the soft heap, not p->mem)
 
   #ifdef IVM_ABS
     // pool only used if needed elsewhere
@@ -1375,6 +1386,7 @@ ZL(op_shr, '}')  zp.acc >>= PAR; goto pnext;
 
 // Memory ops - slots
 ZL(op_L,   'L')  zp.acc = PAR;             goto pnext;
+ZL(op_addr,'`')  zp.acc = IVM_ADR(zp.mem + *zp.ipc); goto pnext;
 ZL(op_S,   'S')  zp.mem[*zp.ipc] = zp.acc; goto pnext;
 ZL(op_Z,   'Z')  zp.mem[*zp.ipc] = 0;      goto pnext;
 ZL(op_Y,   'Y')  zp.mem[*zp.ipc] = 1;      goto pnext;

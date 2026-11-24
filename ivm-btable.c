@@ -118,7 +118,8 @@
     }
     if (op < 'b') {
       if (op < '_') goto op_xor;
-      if (op < 'a') goto op_unk;
+      if (op < '`') goto op_unk;
+      if (op < 'a') goto op_addr;
       goto op_sidxl;
     }
     if (op < 'c') goto op_sidxs;
