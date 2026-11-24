@@ -1,0 +1,124 @@
+#!/usr/bin/env python3
+# sizes - binary sizes over the commits, newest first:
+#
+#   ./sizes          the last 30 commits
+#   ./sizes 100      the last 100
+#   ./sizes all      all of them
+#
+#   date-time         parse.sim   ivm.sim  ivm-asm.sim  ivm-jit.sim  # commit
+#   2026-11-24 04:58     61,234    15,729       12,300       44,773  # 0213c27 MC: ...
+#
+# Each commit is built from git archive in a temp dir (not the work tree),
+# the 4 binaries in parallel, with today's commands (ivm-jit.sim: else with
+# -DNOIVM, else the commit's own cafix). -: its sources aren't there yet,
+# FAIL: didn't build. Results are cached in .sizes-cache by the sources'
+# blob hashes, so a commit that changed no source costs nothing, and a
+# rerun is instant.
+
+import concurrent.futures, json, os, shutil, subprocess, sys, tempfile
+
+CACHE = ".sizes-cache"
+
+# name, files it needs, the build (sim6502.cfg: if the commit has it)
+TARGETS = [
+    ("parse.sim",   ["parse.c"],
+     "cl65 -t sim6502 -Oirs -o parse.sim parse.c"),
+    ("ivm.sim",     ["ivm.c"],
+     "cl65 -Oirs {cfg} -t sim6502 -o ivm.sim ivm.c"),
+    ("ivm-asm.sim", ["ivm.c", "ivm-vm.asm"],
+     "cl65 -DIVMASM -Oirs {cfg} -t sim6502 -o ivm-asm.sim ivm-vm.asm ivm.c"),
+    # as cafix: the lib first
+    ("ivm-jit.sim", ["ivm.c"],
+     "cl65 -DVERBOSE -DJIT -Oirs {cfg} -t sim6502 -o ivm-jit.sim {lib} ivm.c"),
+]
+
+
+def git(*a):
+    return subprocess.run(["git"] + list(a), stdout=subprocess.PIPE,
+                          check=True).stdout.decode()
+
+
+def srckey(c):
+    """Commit c's sources (top level .c .h .asm .cfg, no tests): a hash."""
+    ls = git("ls-tree", c).splitlines()
+    src = sorted(l.split()[2] + " " + l.split("\t")[-1] for l in ls
+                 if l.split("\t")[-1].endswith((".c", ".h", ".asm", ".cfg"))
+                 and not l.split("\t")[-1].startswith(("test", "man-")))
+    return subprocess.run(["git", "hash-object", "--stdin"],
+                          input="\n".join(src).encode(),
+                          stdout=subprocess.PIPE).stdout.decode().strip()
+
+
+def build1(src, name, need, cmd):
+    if not all(os.path.exists(os.path.join(src, f)) for f in need):
+        return "-"
+    d = tempfile.mkdtemp(prefix="sizes-")
+    try:
+        shutil.copytree(src, d, dirs_exist_ok=True)   # own dir: own ivm.o
+        cfg = "-C sim6502.cfg" if os.path.exists(d + "/sim6502.cfg") else ""
+        lib = "ivm-lib.asm" if os.path.exists(d + "/ivm-lib.asm") else ""
+        p = subprocess.run(cmd.format(cfg=cfg, lib=lib), shell=True, cwd=d,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        f = os.path.join(d, name)
+        ok = p.returncode == 0 and os.path.exists(f)
+        if not ok and name == "ivm-jit.sim":
+            # older commits: built with -DNOIVM, or by their own cafix (its
+            # later steps may fail: the .sim is what counts)
+            for alt in (cmd.replace("-DJIT", "-DNOIVM -DJIT"), "sh cafix"):
+                if alt == "sh cafix" and not os.path.exists(d + "/cafix"):
+                    continue
+                if os.path.exists(f): os.remove(f)
+                p = subprocess.run(alt.format(cfg=cfg, lib=lib), shell=True,
+                                   cwd=d, stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.DEVNULL)
+                ok = os.path.exists(f) and (p.returncode == 0 or
+                                            alt == "sh cafix")
+                if ok: break
+        return os.path.getsize(f) if ok else "FAIL"
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def build(c):
+    src = tempfile.mkdtemp(prefix="sizes-src-")
+    try:
+        tar = subprocess.run(["git", "archive", c], stdout=subprocess.PIPE,
+                             check=True).stdout
+        subprocess.run(["tar", "-x", "-C", src], input=tar, check=True)
+        with concurrent.futures.ThreadPoolExecutor(len(TARGETS)) as ex:
+            return list(ex.map(lambda t: build1(src, *t), TARGETS))
+    finally:
+        shutil.rmtree(src, ignore_errors=True)
+
+
+def cell(v):
+    return "{:,}".format(v) if isinstance(v, int) else v
+
+
+def main():
+    n = sys.argv[1] if len(sys.argv) > 1 else "30"
+    log = git("log", "--format=%H\t%h\t%ad\t%s",
+              "--date=format:%Y-%m-%d %H:%M",
+              *([] if n == "all" else ["-n", n]))
+    try:
+        cache = json.load(open(CACHE))
+    except (OSError, ValueError):
+        cache = {}
+
+    w = [max(12, len(t[0]) + 2) for t in TARGETS]
+    print("%-16s " % "date-time" +
+          "".join("%*s" % (wi, t[0]) for wi, t in zip(w, TARGETS)) +
+          "  # commit", flush=True)
+    for line in log.splitlines():
+        full, short, date, subj = line.split("\t", 3)
+        k = srckey(full)
+        if k not in cache:
+            cache[k] = build(full)
+            with open(CACHE, "w") as f:
+                json.dump(cache, f)
+        print("%-16s " % date +
+              "".join("%*s" % (wi, cell(v)) for wi, v in zip(w, cache[k])) +
+              "  # %s %s" % (short, subj), flush=True)
+
+
+main()

@@ -1,0 +1,914 @@
+date-time           parse.sim     ivm.sim  ivm-asm.sim  ivm-jit.sim  # commit
+2026-11-24 06:20       38,858      15,776       12,556       44,823  # 25725f6 ./ptest byte-sieve-* fixed" "
+2026-11-24 05:52       38,858      15,776       12,556       44,823  # a30b179 ptest: add .out files
+2026-11-24 05:43       38,858      15,776       12,556       44,823  # a28c51b ptest and small fixes for jit zero memsz
+2026-11-24 04:17       38,858      15,729       12,300       44,773  # b25b038 ivm: runners more nice
+2026-11-24 04:13       38,858      15,729       12,300       44,773  # 0213c27 MC: update manual and some fixes liek octal
+2026-11-23 23:55       38,696      15,729       12,300       44,773  # 1122adf MC compiler manual embryo with Tests/Compiler/man- files
+2026-11-23 23:45       38,586      15,729       12,300       44,773  # 1fabec9 jit: command for host'
+2026-11-23 21:49       38,586      15,729       12,300       44,773  # 43656a1 parse: __striped structs, and speical opcode, biggest winner is jit
+2026-11-23 20:58       38,304      15,481       12,300       44,566  # 3c875c2 ivm: array of structs
+2026-11-23 20:44       37,863      15,481       12,300       44,566  # 9792ce6 ivm: arrays: bugs fixed, constant overwrites detected etc
+2026-11-23 20:08       37,560      15,481       12,300       44,566  # be70a2e jit: better codegen for structs and pointers, fixed bug
+2026-11-23 19:56       37,560      15,481       12,300       44,214  # 0cd0e15 parse: structs
+2026-11-23 17:44       36,820      15,481       12,300       44,214  # 2f34937 parse: simplify rules storage and PARSE.INSTRUCTIONS for handover
+2026-11-23 17:13       37,203      15,481       12,300       44,214  # 0a7c343 parse: rename rules to $R and minor rules: $r added, \< different encoding etc"
+2026-11-23 16:19       36,575      15,481       12,300       44,214  # 09a0935 parse: #ifdef somewhat recognized
+2026-11-23 15:39       35,694      15,481       12,300       44,191  # 1266b96 parse: recover and report more errors; c.bnf: handle precedence where it's cheap, otherwise err
+2026-11-23 08:23       34,740      15,481       12,300       44,191  # 6793780 jit: reduced even further by removing sstack and vars not init (those that are all zero) - empty: 33 bytes
+2026-11-23 08:17       34,740      15,481       12,300       43,649  # 130eb41 jit: remove const from jit mem
+2026-11-23 07:50       34,740      15,481       12,300       43,511  # b5069d2 jit: minimize fil for test-empty.c - 55 bytes
+2026-11-23 06:58       34,740      15,481       12,300       43,285  # 3f7055a jit: extract all inits and put in MEM in -o image.sim
+2026-11-23 06:17       34,740      15,481       12,300       41,996  # f3dcf70 jit: array not in file
+2026-11-23 06:06       34,740      15,481       12,300       42,101  # a9a1a6b jit: asm -O fixes and cut library not needed
+2026-11-23 05:55       34,740      15,481       12,300       41,726  # b15197c jit: memmap and fully functional sim65 binary
+2026-11-23 05:29       34,740      15,481       12,300       41,726  # 6720c35 jit: -DMEMMAP great
+2026-11-23 04:41       34,740      15,481       12,300       41,700  # cbc0219 jit: it can write out the file and run under sim65
+2026-11-23 04:23       34,740      15,454       12,300       41,669  # f62c854 ivm: arrays w init
+2026-11-23 03:54       33,984      15,454       12,300       41,669  # 63d5dfe ivm: static array support
+2026-11-22 18:19       33,209      14,944       11,788         FAIL  # 0d115fc parse: removing type size of magic
+2026-11-22 18:16       33,306      14,944       11,788         FAIL  # 27fc3f4 parse: binary match \xHH
+2026-11-22 17:58       33,074      14,944       11,788         FAIL  # ec47371 c.bnf/parse.c: commutative ops reorer args
+2026-11-22 16:57       32,824      14,944       11,788         FAIL  # 1de64f0 jit: arith rules
+2026-11-22 16:37       32,824      14,944       11,788         FAIL  # 9da5656 jit: remove specific 'm'emset rules
+2026-11-22 16:12       32,824      14,944       11,788       46,769  # 48a90cd jit: save 85 bytes
+2026-11-22 08:36       32,824      14,944       11,788       46,857  # 1adf510 jit: 852 bytes saved by template codgen from C
+2026-11-22 08:32       32,824      14,944       11,788       47,709  # 3e16033 jit: saved 486 bytes by better codegen
+2026-11-22 08:30       32,824      14,944       11,788       48,195  # 1253c29 jit: save bytes indexing[]. structs
+2026-11-22 08:11       32,824      14,944       11,788       48,675  # eb35734 jit: shifters
+2026-11-22 07:29       32,824      14,944       11,788       48,498  # 286f995 jit: more comments
+2026-11-22 07:20       32,824      14,944       11,788       48,478  # 209e4cb jit: moving on saving bytes by more rules
+2026-11-22 06:43       32,824      14,944       11,788       48,821  # 0c8084e jit: saving 400 bytes now - RULES paying off
+2026-11-22 06:31       32,824      14,944       11,788       49,538  # 00381d0 jit: by rules
+2026-11-22 05:24       32,824      14,944       11,788       49,232  # 04b87f2 jit: CSR done with hashing
+2026-11-22 04:28       30,600      14,944       11,788       49,184  # d0412b2 parse: opt common sub expression CSR identification on non cc65 lol, - adds 7KB code
+2026-11-22 03:50       30,600      14,944       11,788       48,996  # d644975 ivm: Arraywap op
+2026-11-22 02:48       30,600      14,661       11,788       48,343  # 40c22e8 c.bnf: some rulees are worth it, lol
+2026-11-22 02:43       30,600      14,661       11,788       48,343  # 3486a0f bubble: fixes slow
+2026-11-22 02:35       30,600      14,661       11,788       47,496  # d1e3409 c.bnf: if and while with many rules... LOL
+2026-11-22 01:49       30,600      14,661       11,788       46,695  # 6ebb870 c: <= and < reverse > saves tmp
+2026-11-22 01:25       30,600      14,661       11,788       46,695  # ec6a7f7 ivm: new op 't' does <IF
+2026-11-22 00:15       30,600      14,553       11,532       46,231  # fe9b551 bubble: indexptr cache
+2026-11-22 00:02       30,600      14,553       11,532       45,416  # b4dc5ee bubble: analyse
+2026-11-21 23:45       30,600      14,553       11,532       45,416  # 4ae8c45 c: opt shifts, bubble.c qsort.c
+2026-11-21 22:44       30,600      14,553       11,532       44,211  # dddd647 jit: heap and run reordering, move to pretend load etc...
+2026-11-21 21:59       30,600      14,553       11,532       43,240  # 1004cfd jit: sieve: comments
+2026-11-21 21:39       30,600      14,553       11,532       43,240  # ad475a2 jit: +byte +vvSdd
+2026-11-21 17:01       30,600      14,553       11,532       42,744  # 43cda2f ivm: inc dec better ops and rename etc
+2026-11-21 16:24       30,308      14,248       11,532       42,214  # b4efd29 c: inc dec tests and fixes for types
+2026-11-20 20:49       30,273      14,248       11,532       42,214  # e7de40f parse: for loops end value fixes; memset optimial loop conversion with scocpe
+2026-11-20 01:47       30,273      14,248       11,532       42,214  # 54c3de7 jit: flexible choice of efficient code test for <= in loop
+2026-11-19 18:56       30,273      14,248       11,532       41,918  # 72d7ad8 jit: use AX for ivm-lib and tmp1
+2026-11-19 18:18       30,273      14,248       11,532       41,876  # 07107a9 jit: ivm-lib.asm call copying AX needlessly
+2026-11-19 15:45       30,273      14,248       11,532       41,876  # 54ff310 jit: #TIMED  to reset, and formatting
+2026-11-19 15:23       30,273      14,248       11,532       41,876  # a077875 jit: sim #TIMED and test-memset.c
+2026-11-19 14:48       30,254      14,226       11,532       41,735  # 506d1b2 jit: 'm'emset JSR for big, inline for small, -5B
+2026-11-19 13:59       30,254      14,226       11,532       41,627  # 452db01 jit: 'm'emset opt -5B
+2026-11-19 04:09       30,254      14,226       11,532       40,821  # 989753a sieve: bench tables updated
+2026-11-19 03:56       30,254      14,226       11,532       40,821  # 11ef5ee jit: stride loop opt and ON PAR with oscar64.... 14.4 and disable VERBOSE
+2026-11-19 03:07       30,254      14,274       11,532       39,041  # bfb3da0 jit: a=...; b=3+a; reused a form AX, save 4 bytes
+2026-11-19 02:32       30,254      14,274       11,532       38,976  # 7c73c3d jit: 'rotate i test'
+2026-11-19 02:13       30,254      14,274       11,532       39,065  # 0c5eaa2 JIT: AX 2nd chance, 3 percent units faster
+2026-11-19 02:02       30,254      14,274       11,532       38,977  # 76a0ade jit: i+i save 3 bytes
+2026-11-19 00:55       30,254      14,274       11,532       38,551  # e17e129 jit: kreeping closer ... 1.175
+2026-11-18 20:01       30,254      14,274       11,532       37,658  # af7621a parse: while(<=) use 'i' give very nice boost, everyone got much faster
+2026-11-18 19:18       30,254      14,274       11,532       36,822  # 4a5a82a jit: adjust B for while loop ACC opt
+2026-11-18 19:16       30,254      14,274       11,532       36,515  # b0c474d jit: < jump to label load ACC opt
+2026-11-18 18:46       30,254      14,274       11,532       35,723  # d73ea8f jit: 'n' fix, ld AX then throw away, lol
+2026-11-18 18:42       30,254      14,274       11,532       35,732  # 664aeb0 jit: fix U AX
+2026-11-18 18:35       30,254      14,274       11,532       35,344  # 7217cbe jit: cleanup and sipmlify zp acc
+2026-11-18 18:16       30,254      14,274       11,532       36,018  # a465fc7 jit: delay loading and use AX/mem slot in alt code-gen, save 3 percent or so...
+2026-11-18 17:39       30,254      14,274       11,532       33,162  # 5d32eaa jit: fix disasm lost code issue, I J operators now do lazy load at end
+2026-11-18 16:41       30,254      14,274       11,532       33,175  # 4f8cb3a jit: host sim 6502
+2026-11-18 16:33       30,254      14,271       11,532       33,172  # 20b11e2 jit: cpu6502.c integration, bypassed on cc65
+2026-11-18 16:08       30,254      14,271       11,532       33,172  # 886bb7a jit: 'i' 'n' no longer duplicate condition, saves bytes
+2026-11-18 15:46       30,254      14,271       11,532       32,043  # cf6f04c parse: for wasn't using var directly
+2026-11-17 18:19       30,254      14,271       11,532       32,043  # ebc13a7 parse: moved out SYMS to parse-syms.c and simplified frames/functions touching stuff to ivm-gen.c
+2026-11-17 16:40       30,379      14,271       11,532       32,043  # 11f89cb parse: save 1100 bytes by addressing my TODOs
+2026-11-17 04:13       31,459      14,271       11,532       32,043  # 3ccf60e parse.c: code review and added TODOs and quesitons for clarification
+2026-11-17 02:20       31,511      14,783       12,044       32,714  # 59f6bcf parse.md
+2026-11-17 02:15       31,511      14,783       12,044       32,714  # 37ad19c sieve.md: cleanup and assess
+2026-11-17 01:44       31,511      14,783       12,044       32,714  # 1681d3f ivm: BTABLE test-dispatch.c updates
+2026-11-17 01:30       31,511      14,783       12,044       32,714  # 27c5d01 ivm: jtable dispatch and btable - dispatch == default - stable dispatch time ~100 c
+2026-11-16 23:52       31,511        FAIL       12,044         FAIL  # ac08226 ivm: generate .lst
+2026-11-16 22:31       31,511        FAIL       12,044         FAIL  # 06dbfa1 ivm: oscar64 bad on ++ lol
+2026-11-16 22:12       31,511      14,508       12,044       32,439  # d079a76 ivm-oscar works for oscar
+2026-11-16 21:43       31,511      14,446       12,044       32,377  # df75f78 ivm-oscar: works for simpel stuff
+2026-11-16 21:11       31,511      14,153       11,788       32,091  # b42d5c4 ivm-oscar
+2026-11-16 20:04       31,511      14,002       11,788       31,940  # e1b2a7c ivm: headers and more options and run many times -r
+2026-11-16 19:38       31,511      12,083        9,740       31,569  # b81af13 sieve: analyzis
+2026-11-16 18:59       31,511      12,083        9,740       31,569  # ddde931 jit: looked like regression but was missing -z zero page jit codegen and run
+2026-11-16 16:59       31,511      12,083        9,740       31,569  # 34859c3 opt: save 81 bytes code
+2026-11-16 16:55       31,592      12,083        9,740       31,569  # f8b4f36 opt: peephole vas save 368 bytes
+2026-11-16 16:36       31,960      12,083        9,740       31,569  # d43acbc opt: remove inner loop
+2026-11-16 16:34       32,006      12,083        9,740       31,569  # f576946 opt parss: dead code elim
+2026-11-16 16:03       31,503      12,083        9,740       31,569  # 19f9d2c parse: fixed missing
+2026-11-16 16:02       31,503      12,083        9,740       31,569  # c0d5b83 parse: added some opt that were removed peephole, and optimized code size
+2026-11-16 15:41       31,951      12,083        9,740       31,569  # e33d804 parse: simplify error reporting, 51 bytes saved
+2026-11-16 15:35       32,009      12,083        9,740       31,569  # a388b6d parse: better contextual error message
+2026-11-16 15:28       31,473      12,083        9,740       31,569  # 993e95a parse: new operator \*c skip till match c
+2026-11-16 05:44       31,243      12,083        9,740       31,569  # 56efa21 parse: peephole optimization
+2026-11-16 04:03       27,796      12,083        9,740       31,468  # c6a5392 ivm-walk.c: capture walking the byte code used in 3 places and will add 4th
+2026-11-16 03:06       28,358      12,083        9,740       31,468  # 03941eb parse: make SYM count L and S only, L can save 1 byte per call if promoted to REGISTER
+2026-11-16 02:50       28,358      12,083        9,740       31,468  # 97f8d0d parse: packing regs+globs+params+const
+2026-11-16 02:14       28,227      12,083        9,740       31,468  # c8c9657 parse: packed call frames
+2026-11-16 00:46       27,139      12,083        9,740       31,468  # 35b698c ivm-jit: cafix script?
+2026-11-15 19:50       27,139      12,083        9,740       31,468  # 9ff8729 ivm-lib.asm: comments and TODO updates
+2026-11-15 16:59       27,139      12,083        9,740       31,468  # 4bfdf1b ivm-jit: new directives -z -a -t -o to generate an output file - to test
+2026-11-15 07:31       27,139      12,083        9,740       26,441  # 8709151 sieve: updated table
+2026-11-15 06:45       27,139      12,083        9,740       26,441  # 0395abf ivm: new byte indexing ops on [] rename shifters etc, 3.69x we're getting closer to oscar64!
+2026-11-15 05:18       27,125      12,001        9,740       25,871  # 76b28e1 vm asm: ALTCODE works for sieve and byte-sieve-primes
+2026-11-15 03:51       27,125      12,001        9,740       25,871  # 3eb0f69 ivm asm: optimized 1.5 percent i n
+2026-11-15 02:57       27,125      12,001        9,484       25,871  # f7c8e24 vm asm: cleanup
+2026-11-15 01:57       27,125      12,001        9,484       25,871  # df299c9 jit/asm: fixed the memset
+2026-11-15 00:43       27,125      12,001        9,484       25,828  # 6e23467 ivm.c: fixed 'm' pointer on host; ivm-vm.asm: 'm' parameter mistake stx instead of sta
+2026-11-15 00:00       27,125      12,001        9,484       25,828  # e7b5d31 - memset function - for(i=0; i<size; i++) p[i]=CONST;  replace by call to memset! - c.bnf: for extracted make faster matching less rules in S - sieve: wow byte-sieve: 10% faster ivm using memset - sieve: 8% faster and smaller code 111 -> 101 ! - meanwhile: with loop stuff - dispatch has improved
+2026-11-13 22:12       27,190      12,030        9,484       25,781  # 1be3d74 ivm: adding m memset
+2026-11-13 21:51       27,190      11,983        9,484       25,591  # 339015b jit: m - memset
+2026-11-13 21:47       27,190      11,983        9,484       25,591  # 0051824 jit: asm ideas by Gemini
+2026-11-13 21:41       27,190      11,983        9,484       25,591  # 70f3747 jit: gemini guess and feedback
+2026-11-13 21:34       27,190      11,983        9,484       25,591  # bb2b8e0 sieve 4th estimate
+2026-11-13 20:26       27,190      11,983        9,484       25,577  # db0617f jit: 2-3 percent better
+2026-11-13 20:04       27,190      11,983        9,484       25,155  # c84a28e jit: 10 percent, we're getting gooder, lol
+2026-11-13 19:49       27,190      11,983        9,484       24,779  # 22b8365 jit: 10 percent step improve, size 71 of orig jit
+2026-11-13 19:13       27,190      11,983        9,484       24,666  # 06c3993 fix
+2026-11-13 19:10       27,190      11,983        9,484         FAIL  # b7247b3 jit: some improvements that need refinements
+2026-11-13 03:48       27,190      11,983        9,484       24,559  # 067e8e5 jit: some betterment for = and < possibly
+2026-11-13 02:49       27,190      11,983        9,484       24,556  # c88401b jit: > better
+2026-11-13 02:32       27,190      11,983        9,484       24,586  # 5d8a56b jit: better <
+2026-11-13 01:56       27,190      11,983        9,484       24,596  # 97df722 jit: I for count = count + 1;
+2026-11-13 01:47       27,190      11,983        9,484       24,596  # 2177920 jit: 9% faster with better i ( )"
+2026-11-13 01:33       27,190      11,983        9,484       24,460  # dd7a0a6 jit: add print asm during compilation after printing op
+2026-11-13 00:40       27,190      11,983        9,484       24,223  # f204a6f ivm-jit: hack to can generate zp code
+2026-11-12 23:10       27,190      11,983        9,484       24,137  # 5b8ed22 c.bnf: - added unsigned types - simple casting - embryo for switch case break
+2026-11-12 01:33       27,190      11,614        9,740       23,768  # 6b5e9e4 parse: committing and review
+2026-11-12 00:20       27,260      11,614        9,740       23,768  # f6777ee parse: const var and define cannot be modified
+2026-11-12 00:00       27,244      11,614        9,740       23,768  # 4479a80 jit: dissalow some ops on some ops
+2026-11-11 23:46       27,194      11,614        9,740       23,768  # be6f5a6 parse: const
+2026-11-11 22:57       26,697      11,614        9,740       23,768  # 5cfaf81 jit: const type added to parser
+2026-11-11 22:42       26,502      11,614        9,740       23,768  # 1053b19 jit: constant ops for arith
+2026-11-11 22:31       26,502      11,614        9,740       23,515  # f8d4ecf jit: zp opt
+2026-11-11 19:10       26,502      11,614        9,740       22,974  # 3b8c7c9 jit: jit only -j otherwise jitandrun, lol
+2026-11-11 18:26       26,502      11,614        9,740       22,812  # 2281c2c jit: mul was wrong
+2026-11-11 18:24       26,502      11,614        9,740       22,745  # 5a572de jit: byte-sieve... get's furteher
+2026-11-11 18:17       26,502      11,614        9,740       22,465  # 7b5ecae jit: loop and function calls
+2026-11-11 17:41       26,502      11,614        9,740       22,845  # 212ab38 jit: calls main by patching in the middle by Grok
+2026-11-11 17:28       26,502      11,614        9,740       22,387  # 7941b69 jit: use short rel if can otherwise longer
+2026-11-11 17:26       26,502      11,614        9,740       22,490  # c080a43 jit: long jmp
+2026-11-11 17:23       26,502      11,614        9,740       22,500  # db47ff7 jit: trying to find main, lol
+2026-11-11 17:08       26,502      11,614        9,740       22,221  # 7a61770 jit: 'P' code
+2026-11-11 17:00       26,502      11,614        9,740       22,175  # 94128ca jit: disasm
+2026-11-11 16:49       26,502      11,614        9,740       20,212  # 12fe044 jit: add 6502 disasm.c
+2026-11-11 16:45       26,502      11,614        9,740       20,212  # 569949d jit: loops
+2026-11-11 16:44       26,502      11,614        9,740       20,192  # c84edfb jit: inlineprint
+2026-11-11 16:41       26,502      11,614        9,740       20,192  # c1dadbf jit: inlinestringprint
+2026-11-11 16:35       26,502      11,614        9,740       20,152  # e2e9295 t.c added
+2026-11-11 16:34       26,502      11,614        9,740       20,152  # 0cb0fc2 jit: loop har not word and miss mark
+2026-11-11 16:32       26,502      11,614        9,740       20,168  # d15dda2 jit: loop first attempt by grok
+2026-11-11 16:31       26,502      11,614        9,740       19,761  # bc0d680 jit: t.c straight through wo loops works
+2026-11-11 16:28       26,502      11,614        9,740       19,992  # 1d9934c jit: i n cursory impl
+2026-11-11 16:26       26,502      11,614        9,740       19,730  # 3607988 jit: fix
+2026-11-11 16:23       26,502      11,614        9,740       19,730  # e3b5f4b jit: nums working
+2026-11-11 16:18       26,502      11,614        9,740       19,706  # a2fda9e jit: test-nums.c runs but wrong nubmers
+2026-11-11 16:04       26,502      11,614        9,740       19,693  # 40f2b2f jit: missing i n j slots
+2026-11-11 16:01       26,502      11,614        9,740       19,473  # 9a82b29 jit: identify not-a-call
+2026-11-11 15:48       26,502      11,614        9,740       19,029  # e2b9106 jit: moving calls around
+2026-11-11 15:43       26,502      11,614        9,740       18,583  # a93b648 jit: restructure
+2026-11-11 15:40       26,502      11,614        9,740       18,586  # b1c486c jit: compiles and does something, but errs
+2026-11-11 15:20       26,502      11,619        9,740         FAIL  # 4b5140b jit: fixing for cc65
+2026-11-11 15:05       26,502      11,619        9,740         FAIL  # c47d703 jit: restructure w instructions
+2026-11-11 14:37       26,502      11,614        9,740         FAIL  # 7fd0758 jit: rename 2
+2026-11-11 14:33       26,502      11,614        9,740         FAIL  # 6fa03c3 jit: rename 1
+2026-11-11 02:31       26,502      11,614        9,484       11,614  # 310105a vm asm: FASTCODE default cleanup some variants
+2026-11-11 01:37       26,502      11,614        9,740       11,614  # 53bd02c asm: loop n counting up but not stop
+2026-11-11 01:17       26,502      11,614        9,740       11,614  # 5986d40 vm asm: i and n better by the day
+2026-11-11 01:02       26,502      11,614        9,740       11,614  # d43a016 vm asm: i and n better by the day
+2026-11-11 00:47       26,502      11,614        9,740       11,614  # 66be876 vm asm: i and n
+2026-11-10 22:49       26,502      11,614        9,484       11,614  # 946640c nextloop: ALTCODE opt
+2026-11-10 21:16       26,502      11,614        9,484       11,614  # 3899e73 byte sieve: updates w compare info, sketch of optimized op_n for loop in ALTCODE
+2026-11-10 19:24       26,502      11,614        9,484       11,614  # 9e9b4a9 asm vm: FASTDISPATCH using page aligned table
+2026-11-10 19:07       26,502      11,614         FAIL       11,614  # 5f63cb8 ivm asm: page align table w config file
+2026-11-10 07:27       26,502      11,614        9,410       11,614  # a7c2328 c.bnf: formatting and some docs and byte-sieve tests
+2026-11-10 06:08       26,502      11,614        9,410       11,614  # f26874c vm asm: new i+n saved 34 B and is 2.4% faster
+2026-11-10 06:01       26,502      11,614        9,410       11,614  # 775b7a4 cleanup: i + next
+2026-11-10 05:32       26,502      11,614        9,419       11,614  # b356023 parse: i+n variants
+2026-11-10 05:18       26,502      11,614        9,420       11,614  # 460a298 parse: loop n
+2026-11-10 05:10       26,502      11,614        9,416       11,614  # a085913 parse: anext simplify
+2026-11-10 05:08       26,502      11,614        9,416       11,614  # 49e84c6 parse: anext
+2026-11-10 05:07       26,502      11,614        9,424       11,614  # 343d2b7 parse: anext
+2026-11-10 05:04       26,502      11,614        9,424       11,614  # 754b72e parse: i+n anext
+2026-11-10 04:58       26,502      11,614        9,431       11,614  # 4248c16 pares: i+n less code
+2026-11-10 00:20       26,502      11,614        9,451       11,614  # 093acb7 vm asm: fiddle w i n
+2026-11-09 22:49       26,502      11,614        9,444       11,614  # 9808646 parse: remove special code for I T rule and use directives, save 50B code
+2026-11-09 22:41       26,584      11,614        9,444       11,614  # 7573e81 parse: types
+2026-11-09 22:29       26,618      11,614        9,444       11,614  # e97db5c parse: w type stuff
+2026-11-09 22:09       26,426      11,614        9,444       11,614  # c357aa5 parse: docs
+2026-11-09 21:52       26,426      11,614        9,444       11,614  # b981921 parse: save 188 bytes by simplify
+2026-11-09 20:52       26,614      11,614        9,444       11,614  # 828552b parse: 3x faster, less lookup every step
+2026-11-09 20:03       26,344      11,614        9,444       11,614  # 138178a parse: nicer step() no stupid statemachine
+2026-11-09 19:34       26,397      11,614        9,444       11,614  # 4d4b6a1 parse: \o commit now linits backtrack and saves buffer space
+2026-11-09 19:18       26,754      11,614        9,444       11,614  # 12c4444 parse: \o working
+2026-11-09 19:00       26,582      11,614        9,444       11,614  # 70677f5 parrse: line_cap etc...
+2026-11-09 18:53       26,393      11,614        9,444       11,614  # 146916a parse: fix strings \u etc
+2026-11-09 18:33       26,297      11,614        9,444       11,614  # 8cb7318 parse: comments regarding hibit
+2026-11-09 18:01       26,318      11,614        9,444       11,614  # 5955990 parse: simplfy reading char
+2026-11-09 17:42       26,341      11,614        9,444       11,614  # c38131a parse: simplify away useless abstractions
+2026-11-09 17:17       26,497      11,614        9,444       11,614  # c8a1365 parse: removed complicated func arg abstraction
+2026-11-09 16:23       26,750      11,614        9,444       11,614  # fb4ba30 parse: no cur-> but cur. save nearly 1KB, slightly slower
+2026-11-09 16:10       27,789      11,614        9,444       11,614  # 0b5de58 parse: 945 bytes lighter and 17% faster as cacche *p
+2026-11-09 15:44       28,734      11,614        9,444       11,614  # 04e05d2 FIXIPC overhead
+2026-11-09 15:41       28,734      11,614        9,444       11,614  # 03b4fac c.bnf: void function calls, test-dispach-fun.c
+2026-11-09 06:00       28,734      11,614        9,444       11,614  # 6bff288 parse: HIBIT for control, ASCII is literal
+2026-11-08 23:43       28,812      11,614        9,444       11,614  # f2a6a0d parse: -O preprations, generate stupid code, lol, ready for second phase that can save bytes
+2026-11-08 22:10       28,426      11,614        9,444       11,614  # 5d2a41f ivm: dispatch benchmarking cycle cost
+2026-11-08 21:29       28,426      11,614        9,444       11,614  # 92d7e61 test-dispatch.c: 67c ivm and 44c ivm-asm
+2026-11-07 19:49       28,426      11,607        9,444       11,607  # ee81c21 fixes for string, reduce verbosity output, and ivm-print prints bytecode pretty
+2026-11-07 18:24       27,250      11,607        9,444       11,607  # 420821e ivm-gen: review
+2026-11-07 17:02       27,237      11,607        9,444       11,607  # cf4adc2 parse.md: meta data design discussions and TODOs
+2026-11-07 16:51       27,237      11,607        9,444       11,607  # 3a2a540 cc65 parse ivm: reloc string now works on 6502
+2026-11-07 16:23       27,156      11,709        9,546       11,709  # c0f871e ivm: make string pointers first constants followed by zero
+2026-11-07 03:54       25,959      11,782        9,619       11,782  # 9aed048 c.bnf: for loops w C op
+2026-11-07 02:28       25,959      11,782        9,619       11,782  # d0f05ac ivm: C copy
+2026-11-07 01:53       25,959      11,663        9,579       11,663  # 7c3bb78 fix pretty print bytecode
+2026-11-07 01:24       25,959      11,663        9,579       11,663  # 5e4dadb print Bytecode bug i j
+2026-11-07 00:52       25,959      11,663        9,579       11,663  # 2a882c5 fix
+2026-11-07 00:44       25,959      11,663        9,579       11,663  # fd9c602 fix
+2026-11-06 23:58       25,959      11,663        9,579       11,663  # 68fb11d ivm-gen: removed not needed scopes
+2026-11-06 23:28       26,011      11,663        9,579       11,663  # edf295f parse: got() skip()
+2026-11-06 22:21       26,795      11,663        9,579       11,663  # 94e7040 parse, sym: fixed init bug
+2026-11-06 22:17       26,795      11,663        9,579       11,663  # b80754e parse: .sym generation
+2026-11-06 18:27       26,795      11,663        9,579       11,663  # f0d330e test.c: putchar char, not string, lol
+2026-11-06 18:22       26,795      11,663        9,579       11,663  # f33bb63 ivm-loadcompile: cleanup JSR patching no need no forward/recursion
+2026-11-06 18:21       26,795      11,663        9,579       11,663  # 818320a MAIN around
+2026-11-06 07:06       27,664        FAIL         FAIL         FAIL  # 416ef86 jit
+2026-11-06 06:56       27,664        FAIL         FAIL         FAIL  # 399c6bf jit: vectors
+2026-11-06 06:33       27,664        FAIL         FAIL         FAIL  # 07feb6b jit
+2026-11-06 06:03       27,664        FAIL         FAIL         FAIL  # 530ecf7 jit vm
+2026-11-06 05:52       27,664        FAIL         FAIL         FAIL  # ea29fc3 vm jit
+2026-11-06 05:23       27,664        FAIL         FAIL         FAIL  # b2d673f ivm loadcompile: change structure to indicate how to do it'
+2026-11-06 04:06       27,664      20,096       18,102       20,096  # 4cf54e6 asm vm: added Malloc and Free sieve runs in 2.3x slower than cc65
+2026-11-06 01:50       27,664      11,664        9,535       11,664  # c9fc4c6 ivm-print slots strings const realloc
+2026-11-06 00:38       27,644      11,846        9,763       11,846  # 31112a2 ivm-print: relocation list against my order, lol
+2026-11-06 00:14       27,644      11,846        9,763       11,846  # f00f3e4 ivm-print: align format
+2026-11-06 00:02       27,644      11,846        9,763       11,846  # b2c8ff6 ivm-print: to dump it
+2026-11-05 23:51       27,644      11,846        9,763       11,846  # 087eb68 orwin: 1241 bytes saved by cleanup
+2026-11-05 14:57       27,644      11,846        9,763       11,846  # bdf9ffa relocate string constants and store them directly after jump vectors
+2026-11-05 01:01       27,382      11,479        9,396       11,479  # 1ae1d78 parse: adding different base 0x 0b etc parsing - test-nums.c, gives incorrect values
+2026-11-04 20:47       27,178      11,479        9,396       11,479  # cd5199e ivm-oscar
+2026-11-04 20:00       27,178      11,479        9,396       11,479  # 3758ec1 ivm-trace: better memalloc better code find error, and script to compile ivm-oscar
+2026-11-04 18:38       27,178      11,591        9,295       11,591  # a6d1f8d ivm: added ivm_check consistency and trap when 'gone wrong' - still need to make it more beautiful and not ineline IFDEF
+2026-11-04 08:10       27,178      11,589        9,295       11,589  # 043ab15 ivm-trace: show value
+2026-11-04 07:13       27,178      11,589        9,295       11,589  # 33fe5d2 ivm-trace: added trace for host
+2026-11-04 03:03       27,178      11,589        9,295       11,589  # 1f0c999 sieve: compiles but error 'h' opcode
+2026-11-04 02:57       27,178      11,589        9,295       11,589  # bfb9f4d sieve.c: update
+2026-11-04 02:41       27,178      11,589        9,295       11,589  # 30b54c0 sieve: for testing, still not compiling sieve.c
+2026-11-04 02:01       27,178      11,589        9,295       11,589  # 0693928 ivm: moved COUNT up
+2026-11-04 01:55       27,178      11,589        9,295       11,589  # 57a94d8 parse: +ANIM_STACK
+2026-11-04 01:52       27,178      11,589        9,295       11,589  # 15af898 ./ivm-count: performnance
+2026-11-04 00:09       27,178      11,759        9,345       11,759  # 5e75c0b parse: grok position statement
+2026-11-03 23:57       27,178      11,759        9,345       11,759  # dd3478c c.bnf: speicalization for-loops countiung down
+2026-11-03 23:46       27,178      11,759        9,345       11,759  # 32c5c0b parse: ivm: FOR-ops c: 27% faster, asm: 17%"
+2026-11-03 22:37       27,178      11,759        9,355       11,759  # b3772d8 vm asm: i n for loop, prints first lol
+2026-11-03 21:50       27,178      11,759        9,201       11,759  # 41bd375 parse: c.bnf: new for -6 bytes code per loop
+2026-11-03 21:35       27,178      11,747        9,201       11,747  # 42991c1 ivm: for ...
+2026-11-03 21:19       27,178      11,742        9,201       11,742  # 5e0be2c ivm: fix errors
+2026-11-03 21:10       27,178      11,728        9,201       11,728  # 7d01dbc ivm: fix curly bug
+2026-11-03 20:27       27,178      11,670        9,201       11,670  # f02e733 c.bnf: optimize
+2026-11-03 20:27       27,178      11,670        9,201       11,670  # 8091a90 c.bnf: document and comment grammar
+2026-11-03 19:57       27,178      11,670        9,201       11,670  # 88e497d parse: ij mn for next loop opts
+2026-11-03 01:32       27,178      11,196        9,201       11,196  # 816e4ce parse: prito and backtail limit but not working correctly
+2026-11-03 01:25       27,029      11,196        9,201       11,196  # 0e06ff2 parse: set tail-recursive start
+2026-11-02 23:15       26,871      11,196        9,201       11,196  # 9388eb8 parse: make comple on ./parse-oscar and added upfront description
+2026-11-02 17:57       26,002      11,196        9,201       11,196  # d5e94aa darr: fixed for z=1
+2026-11-02 17:50       26,002      11,196        9,201       11,196  # ff1ee36 darr: fixes
+2026-11-02 17:42       26,002      11,196        9,201       11,196  # 8c14510 darr: first code
+2026-11-02 10:11       26,002      11,196        9,201       11,196  # 5b16737 darena: test
+2026-11-02 10:00       26,002      11,196        9,201       11,196  # bf9a75e darena: readded sliding
+2026-11-02 09:57       26,002      11,196        9,201       11,196  # ad232f1 darena: some hints
+2026-11-02 09:51       26,002      11,196        9,201       11,196  # 3468ba7 darena: optimized
+2026-11-02 09:23       26,002      11,196        9,201       11,196  # a84177f darena: fixed stuff
+2026-11-02 08:42       26,002      11,196        9,201       11,196  # bb37165 darena.c
+2026-11-02 06:56       26,002      11,196        9,201       11,196  # dbb1bd7 parse: simplify VERBOSE and ERROUT save memory
+2026-11-02 06:04       32,005      11,196        9,201       11,196  # 3edd02d parse: NOCAPTURE to shrink size
+2026-11-02 03:25       32,005      11,196        9,201       11,196  # ba1eadd parse: entry vector 0 used for main,_startup trampoline
+2026-11-02 02:59       31,832      11,208        9,211       11,208  # 3ddb7ee vm asm: fixed for op_E op_O op_P and not hang
+2026-11-02 01:58       31,832      11,208        9,022       11,208  # ea2cb25 parse: fixed data space, works for ivm but not ivm-asm
+2026-10-31 21:15       31,789      11,113        8,927       11,113  # 60ca47d parse.c: saves the .ivm
+2026-10-31 19:43       31,029      11,113        8,927       11,113  # f1a9337 c.bnf: added more cmp <= != >= ...
+2026-10-31 19:31       31,109      11,113        8,927       11,113  # 9cf7770 parse: using FAIL longjmp and early exit saves 1408 bytes on cc65
+2026-10-31 19:00       32,517      11,113        8,927       11,113  # 40c9d46 parse.c: claude tightened it up: 32517 from 36806
+2026-10-31 18:24       36,806      11,113        8,927       11,113  # 91a185c parse: printf spaces
+2026-10-31 17:33       36,357      11,113        8,927       11,113  # 622022c parse, c: +while ++i *++i i++; can implement strlen w pointer stuff
+2026-10-31 17:24       36,357      11,113        8,927       11,113  # c483659 ivm: Y for-loop op-code, prototype
+2026-10-31 17:13       36,357      10,953        8,927       10,953  # e69b46b test.md: capture vm sizes
+2026-10-31 17:01       36,357      10,953        8,927       10,953  # edd77ee test.md: update stats
+2026-10-31 16:24       36,357      10,785        8,877       10,785  # 98bbd14 vm asm: linear store when call and restore/return - 1.4% faster
+2026-10-31 16:06       36,357      10,785        8,889       10,785  # b45729c vm asm: 0.74% faster call, copy linearly
+2026-10-31 08:55       36,357      10,785        8,901       10,785  # 85d4923 c compile strlen
+2026-10-31 08:45       36,357      10,785        8,901       10,785  # 8df6b80 parse: global vars, and comments in c.bnf
+2026-10-31 08:26       35,997      10,785        8,901       10,785  # dfa03a8 ivm:global vars issue
+2026-10-31 08:12       35,997      10,785        8,901       10,785  # e9ac46e parse: \d read 'x'
+2026-10-31 08:00       35,796      10,785        8,901       10,785  # 30fec5d parse: fiddingling with code gen for char constant
+2026-10-31 07:35       35,737      10,808        8,901       10,808  # c89638d test-char.c works but some issues with char
+2026-10-31 07:05       35,670      10,808        8,901       10,808  # 4bdf7f1 c.bnf: fixded strings
+2026-10-31 06:38       35,670      10,808        8,901       10,808  # 3e2a2ac parse: add char type
+2026-10-31 06:13       34,347      10,808        8,901       10,808  # 8b5fec3 c.bnf: fixing newline issues, and backslash in S string copy
+2026-10-31 06:07       33,822      10,808        8,901       10,808  # b659df6 test.md: summary stats and factsO
+2026-10-31 05:29       33,822      10,808        8,901       10,808  # 7abffbd test.c compiled
+2026-10-31 05:25       33,734      10,808        8,901       10,808  # 3689ca5 c.bnf test.c: compiled, but redunt
+2026-10-31 05:07       33,287      10,808        8,901       10,808  # 521ae2f small fix
+2026-10-31 05:05       33,287      10,808        8,901       10,808  # 49c0102 parse: comments rules
+2026-10-31 04:58       32,663      10,808        8,901       10,808  # 3c8e4b6 c.bnf improved
+2026-10-31 04:36       32,663      10,808        8,901       10,808  # abdd7d5 vm asm: added implementation of ! @ ( ) l s r w ' ,
+2026-10-31 04:22       32,663      10,808         FAIL       10,808  # f6e2f1b ivm: added labels for ls rw ',
+2026-10-31 03:54       32,663      10,808        8,571       10,808  # 20498b0 tpi: update script to run and diff if have program.c too
+2026-10-30 21:53         FAIL      13,039       10,812       13,039  # f283269 parse: c.bnf initial - hang, handle C style comments
+2026-10-30 21:27         FAIL      13,039       10,812       13,039  # f97863f test.c: same as test.p
+2026-10-30 21:14         FAIL      13,039       10,812       13,039  # 8215792 ivm-gen.c: removed stupid IFDEF
+2026-10-30 21:10         FAIL      13,039       10,812       13,039  # 01e76bc warning notices in tpi.c and tpi-new.c
+2026-10-30 20:37         FAIL      13,039       10,812       13,039  # 8faf303 parse: formatting
+2026-10-30 20:17         FAIL      13,039       10,812       13,039  # 6545311 parse: updated with new ivm-gen.c, tpi.c not using it yet, lol
+2026-10-30 18:20         FAIL      13,039       10,812       13,039  # b324f1b parse: fixed error reporting no longer using rewind and fseek
+2026-10-30 17:13         FAIL      13,039       10,812       13,039  # d0bf3b8 parse: code cleaning, found rewind and seek, lol
+2026-10-30 17:06         FAIL      13,039       10,812       13,039  # 7a99a0e parse: various unused vars cleanup
+2026-10-30 16:51         FAIL      13,039       10,812       13,039  # 5ad023c parse: less locals
+2026-10-30 16:49         FAIL      13,039       10,812       13,039  # 14741d1 parse: remvoe static big vars in locals
+2026-10-30 16:08         FAIL      13,039       10,812       13,039  # cd60c12 spell
+2026-10-30 16:07         FAIL      13,039       10,812       13,039  # 6feebe7 ivm: byte ops l s r w , '
+2026-10-30 15:14         FAIL      12,683       10,812       12,683  # a3bf6dc parse: fixed NOT to take Expression
+2026-10-30 15:00         FAIL      12,683       10,812       12,683  # f4dd981 parse: use emitop when right...
+2026-10-30 14:45         FAIL      12,683       10,812       12,683  # e477fd9 parse: claude added function parameters and calls, working
+2026-10-30 13:47         FAIL      12,683       10,812       12,683  # 97c3a5d parse: fixing the inline string print outputing quotes, grok keeps removing them,, clause fixed | inside [] problem, I think
+2026-10-30 02:23         FAIL      12,683       10,812       12,683  # c3457c7 parse: adding funcs to compilation
+2026-10-29 21:22         FAIL      12,661       10,790       12,661  # 552f03d parse: generate function calls
+2026-10-29 20:52         FAIL      12,661       10,790       12,661  # 89a4003 ivm-gen.c: shared between tpi.c and parse.c
+2026-10-29 20:19         FAIL      12,661       10,790       12,661  # a14f013 parse/ivm/tpi: extract ivm-print.c use by them
+2026-10-29 19:10         FAIL      12,661       10,790       12,661  # 3ee20ec parse: formatting
+2026-10-29 18:59         FAIL      12,661       10,790       12,661  # 43d6d73 parse: improved readabilty, green code
+2026-10-29 18:38         FAIL      12,661       10,790       12,661  # 7d2df5e parse: some improve in formatting
+2026-10-29 18:15         FAIL      12,661       10,790       12,661  # 6f2c429 parse: added specific writeln rules, and fixed J
+2026-10-29 17:29         FAIL      12,661       10,790       12,661  # f97f727 parse: t.p - minimal test
+2026-10-29 17:29         FAIL      12,661       10,790       12,661  # 8472e36 parse: String copy
+2026-10-29 17:18         FAIL      12,661       10,790       12,661  # 89e052d parse: better rules
+2026-10-29 15:44         FAIL      12,661       10,790       12,661  # b223bcd ivm: library api support with n-arg dispatch!
+2026-10-28 23:46         FAIL       9,678        7,932        9,678  # d431b7e ivm: P added to ivm.c and ivm-vm.asm P acc as string
+2026-10-28 21:29         FAIL       9,675        7,912        9,675  # 64c7f2f parse: added formatting and recongizion of single byte values, and expression return value
+2026-10-28 20:37         FAIL       9,675        7,912        9,675  # b50c75f parse: add generative logic, however, SHL broke?
+2026-10-28 20:09         FAIL       9,675        7,912        9,675  # c1fdb50 parse: isupper isalnum etc
+2026-10-28 20:02         FAIL       9,675        7,912        9,675  # 95bd904 parse, tpi: various cleanup comments, and TODOs
+2026-10-28 19:21         FAIL       9,675        7,912        9,675  # a725496 parse: make scopes and define vaas and give error if not in scope
+2026-10-28 18:59         FAIL       9,675        7,912        9,675  # eb05111 parse
+2026-10-28 18:47         FAIL       9,675        7,912        9,675  # 1924aa7 parse: added back instructions, added arch overview, dynmamic code changes accepted
+2026-10-28 18:29         FAIL       9,675        7,912        9,675  # 987036b test.p: include the removed t.p simple stuff build up
+2026-10-28 18:22         FAIL       9,675        7,952        9,675  # 1bf12d5 parse: updated with editing instructions
+2026-10-28 04:55         FAIL       9,675        7,952        9,675  # 03c3e18 parse: error messages
+2026-10-28 04:46         FAIL       9,675        7,952        9,675  # cd08e5d parse: clearer trace -v
+2026-10-28 04:37         FAIL       9,675        7,952        9,675  # e61ec2d parse: trace
+2026-10-28 04:32         FAIL       9,675        7,952        9,675  # 28f18da parse: new version
+2026-10-28 04:20         FAIL       9,675        7,952        9,675  # e4953ab parse.c: first commit
+2026-10-28 04:06            -       9,675        7,952        9,675  # 497627e tip.bnf: for pascal
+2026-10-28 03:40            -       9,675        7,952        9,675  # b187077 vm asm: non-altcode fixed, op_str, lol
+2026-10-28 03:29            -       9,675        7,913        9,675  # 4b0dfcf vm asm: altcode works, but messed up normal, lol
+2026-10-28 03:16            -       9,675        7,952        9,675  # 56c9ad0 ivm-vm.asm: fixed, working for test.p
+2026-10-28 03:04            -       9,675        7,954        9,675  # 89e7202 t.p: debug test, and fix for Ussaa; indicating loops G/B are broken
+2026-10-28 02:40            -       9,675        7,960        9,675  # 44e36ff vm asm: fix op_str savey
+2026-10-27 20:53            -       9,675        7,959        9,675  # 5d4641d vm asm: half ass, lol
+2026-10-27 20:29            -       9,675        7,969        9,675  # f405e39 vm asm: little better, runs more but looses some stuff, opo_G is confusing with single exit
+2026-10-27 20:05            -       9,675        7,992        9,675  # 57552af asm vm alt: fixes for alt, running all but sum no value
+2026-10-27 19:22            -       9,675        7,982        9,675  # 84d7165 vm asm: trace info added
+2026-10-27 18:35            -       9,675        7,961        9,675  # 214ad7a vm asm: describe change
+2026-10-27 18:24            -       9,675        7,907        9,675  # dbdfc24 vm asm: fixed normal
+2026-10-27 18:07            -       9,675        7,907        9,675  # 63f87fd ivm asm: optimized alt, but modified should still work without the alt
+2026-10-27 04:42            -       9,675        7,918        9,675  # 3a931d3 vm asm: 2.75x faster 55 percent of the size
+2026-10-27 04:14            -       9,675        7,915        9,675  # 3f8083a vm asm: more ops, but <=> are borken
+2026-10-27 03:40            -       9,675        7,696        9,675  # 965bdcb ivm-vm.asm: almost working fully
+2026-10-27 03:31            -       9,675        7,709        9,675  # e0e8ea4 ivm-vm.asm: IJU impl, but many missing
+2026-10-27 03:24            -       9,675        7,615        9,675  # 40f5379 ivm-vm.asm: op trace w newline, subvec impl but ends up loop on G
+2026-10-27 03:03            -       9,675        7,543        9,675  # 420fde8 ivm-vm.asm: small renames and comments
+2026-10-27 02:41            -       9,675         FAIL        9,675  # 459e204 ivm-vm.asm: various comments and code inspectsion
+2026-10-27 01:40            -        FAIL         FAIL         FAIL  # cbb9c4e ivm-vm.asm: first integration attempt from grok
+2026-10-27 00:08            -       9,675            -        9,675  # c784a13 make blob not static anymore
+2026-10-26 19:21            -       9,396            -        9,396  # 4e6aa31 ivm-noivm: to measure size of vm overhead
+2026-10-26 19:14            -       9,396            -        9,396  # 0fe5ba9 tpi: New/Dispose/SetLength/^/SizeOf simple memory management
+2026-10-26 17:59            -       8,970            -        8,970  # 51e0a9b tpi, ivm: cleaner
+2026-10-26 17:54            -       8,970            -        8,970  # b1b821a tpi, ivm: cleaner
+2026-10-26 17:01            -        FAIL            -         FAIL  # c7f1f6e tpi: comments and thinkign about the static blob
+2026-10-26 06:30            -        FAIL            -         FAIL  # 6fe450f tpi: comments
+2026-10-26 06:13            -        FAIL            -         FAIL  # 567d75f tpi: relocate at right place
+2026-10-26 06:08            -        FAIL            -         FAIL  # 2286411 ivm.c: moved out of tpi.c
+2026-10-26 05:44            -           -            -            -  # c318174 ivm.c rename
+2026-10-26 05:43            -        FAIL            -         FAIL  # 2e1f533 tpi: ivm docs
+2026-10-26 05:31            -        FAIL            -         FAIL  # 509f9bf tpi: labels - get rid of warnings
+2026-10-26 05:18            -        FAIL            -         FAIL  # c65882d tpi: labels - fixes, comemnts
+2026-10-26 05:04            -        FAIL            -         FAIL  # c349cb9 tpi: labels, goto, not used yet
+2026-10-26 01:11            -        FAIL            -         FAIL  # 4ff6de3 tpi: docs for ivm
+2026-10-25 23:08            -        FAIL            -         FAIL  # 6025ae6 tpi: increase consts
+2026-10-25 23:00            -        FAIL            -         FAIL  # 03c86c6 tpi: oscar
+2026-10-25 22:51            -        FAIL            -         FAIL  # 7c40240 tpi: decreased temp usage for LHS op RHS, where RHS=is constant/var
+2026-10-25 22:07            -        FAIL            -         FAIL  # 35059ae tpi: better BLOB memsz printout
+2026-10-25 21:39            -        FAIL            -         FAIL  # d59c8de tpi: test framework, if file has .out it's ivm output is compared
+2026-10-25 21:25            -        FAIL            -         FAIL  # 77b7486 tpi: fixed tests, and saved accum in function call automatically
+2026-10-24 22:26            -        FAIL            -         FAIL  # 227d75d tpi: back to working with lots of strange code added...
+2026-10-24 19:58            -        FAIL            -         FAIL  # 2f4d05e tpi: fixed string reader and dumper
+2026-10-24 19:12            -        FAIL            -         FAIL  # 25065b6 tpi: reduce memory usage
+2026-10-24 18:47            -        FAIL            -         FAIL  # b7910f0 tpi: compacting range
+2026-10-24 17:56            -        FAIL            -         FAIL  # bfe48fa tpi: count L S separate, optimize and find potential REGISTER
+2026-10-24 17:05            -        FAIL            -         FAIL  # ff3bff9 tpi: uchar everywhere
+2026-10-24 16:57            -        FAIL            -         FAIL  # 8a65293 tpi: 0-31 load low address in one byte op, saved like 40 bytes of tp-test. eXit for return w acc. 1-8 for local param.
+2026-10-23 08:12            -        FAIL            -         FAIL  # 536ae32 tpi: opt -O saves slots, and in futrure code bytes
+2026-10-23 07:53            -        FAIL            -         FAIL  # 40695b5 tpi: func dependeincies
+2026-10-23 06:52            -        FAIL            -         FAIL  # 1c28bfc tpi: write/writeln w several parameters
+2026-10-23 06:33            -        FAIL            -         FAIL  # ceaa73e tpi: correct IF
+2026-10-23 06:22            -        FAIL            -         FAIL  # 045d242 tpi: local vars in functions
+2026-10-23 06:10            -        FAIL            -         FAIL  # 85a0011 tpi: loader fixed memsz
+2026-10-23 06:00            -        FAIL            -         FAIL  # 8d99155 tpi: detect src overflow
+2026-10-23 05:41            -        FAIL            -         FAIL  # 1894273 fixed the fixes, redid fixes 2nd time, and merged w shl shr < = > NOT
+2026-10-23 05:22            -        FAIL            -         FAIL  # 1cad198 tpi: Malloc Free
+2026-10-23 05:08            -        FAIL            -         FAIL  # f1c1e39 tpi: small fixes
+2026-10-23 04:47            -        FAIL            -         FAIL  # 75ff5f7 tpi: integrate compile generates name.ivm and runs, if given name.ivm then it runs it
+2026-10-23 04:10            -        FAIL            -         FAIL  # 4756aba tpi: finaliser+loader+Nevm+run_ivm seems to be working
+2026-10-23 02:49            -        FAIL            -         FAIL  # c7e2a03 tpi: removed warning
+2026-10-23 02:47            -        FAIL            -         FAIL  # 3119627 tpi: better byte dump
+2026-10-23 01:55            -        FAIL            -         FAIL  # a4fa6d0 tpi: implemented some 1 byte vector jumps
+2026-10-22 22:17            -        FAIL            -         FAIL  # f915ab2 tpi: some Z opts?
+2026-10-22 21:25            -        FAIL            -         FAIL  # 61e50a1 tp-test
+2026-10-22 19:55            -        FAIL            -         FAIL  # 8bd5658 tpi: Wvv write nuermic variable
+2026-10-22 19:18            -        FAIL            -         FAIL  # ca501b5 tpivm.asm: SUPEROPT dispatch loop
+2026-10-21 22:00            -        FAIL            -         FAIL  # bd3697a tpivm.asm: added nextpage and possible SUPEROPT code
+2026-10-21 20:37            -        FAIL            -         FAIL  # c4e36ea tpivm.asm: make smaller comments
+2026-10-21 20:34            -        FAIL            -         FAIL  # 2c8cd66 tpivm.asm: review code and put hints
+2026-10-21 19:28            -        FAIL            -         FAIL  # 5c0ab62 tpivm.asm: use mem indirection
+2026-10-21 19:20            -        FAIL            -         FAIL  # 8729128 tpivm.asm: cleanup
+2026-10-21 19:15            -        FAIL            -         FAIL  # 1533364 tpivm.asm: fixed indent
+2026-10-21 08:55            -        FAIL            -         FAIL  # 4372a9e tpi: nicer dump
+2026-10-21 08:47            -        FAIL            -         FAIL  # e16b1f0 tpi: a blob vector dumper
+2026-10-21 08:33            -        FAIL            -         FAIL  # ac12c70 tpi: slimmer packer, saved 160 bytes
+2026-10-21 08:27            -        FAIL            -         FAIL  # feba478 tpi: loader newvm etc... almost there
+2026-10-21 07:25            -        FAIL            -         FAIL  # 4aa0042 tpi: define data blobl structures for process and loader etc
+2026-10-21 07:03            -        FAIL            -         FAIL  # 5db5263 tpi: getting rid of intermediate vectors
+2026-10-21 06:32            -        FAIL            -         FAIL  # a9d0ed2 tpi: step 1 by remote 8 byte stack
+2026-10-21 05:59            -        FAIL            -         FAIL  # a268cdb tpiL saved 200 bytes
+2026-10-21 05:39            -        FAIL            -         FAIL  # 9598111 simplify and save 150 bytes more by simplier var/fun lookup
+2026-10-21 05:21            -        FAIL            -         FAIL  # 156b03b tpi: save 300 bytes on FAIL messages and cleanup
+2026-10-21 04:18            -        FAIL            -         FAIL  # cb9ac33 tpi: simplify error msgs
+2026-10-21 04:06            -        FAIL            -         FAIL  # d0b443d tpi: FAIL for errors and shortcut no return 0
+2026-10-21 03:53            -        FAIL            -         FAIL  # 709d3fb tpi: simplify type of maddr
+2026-10-21 03:30            -        FAIL            -         FAIL  # 1e8c8ff tpi: simplifying to char for addr
+2026-10-21 03:06            -        FAIL            -         FAIL  # ef209c3 tpi: removed abstraction bullshit
+2026-10-21 02:56            -        FAIL            -         FAIL  # 6e9ef6d tpi: removing redundant ops
+2026-10-21 02:46            -        FAIL            -         FAIL  # 0c180ad tpi: commutative opt
+2026-10-21 02:37            -        FAIL            -         FAIL  # 1fc2908 tpi: commutative, +20lines +300 bytes lol
+2026-10-21 02:19            -        FAIL            -         FAIL  # a235d68 tpi: make it compile on oscar, found two bugs
+2026-10-21 00:52            -        FAIL            -         FAIL  # 8c2b101 tpi: compare operators
+2026-10-20 03:28            -        FAIL            -         FAIL  # 7caa08b ivm: added sound stuff
+2026-10-20 03:15            -        FAIL            -         FAIL  # 376a225 tpi: IF THEN ELSE ... BEGIN END function
+2026-10-20 02:09            -        FAIL            -         FAIL  # 9f5ba56 tpi: adding more tests for math
+2026-10-20 01:28            -        FAIL            -         FAIL  # 56b1126 tpi: more math
+2026-10-19 23:52            -        FAIL            -         FAIL  # 509905f tpi: compare with C compilers
+2026-10-19 20:44            -        FAIL            -         FAIL  # 5a44b75 tpi: optimized Iss Ussdd ops for loop, poop-hole opt
+2026-10-19 18:45            -        FAIL            -         FAIL  # b68cf55 tpc: communantive + saves ops and speed, like 70c per loc
+2026-10-19 18:10            -        FAIL            -         FAIL  # d37b263 tpi: massage output
+2026-10-19 17:59            -        FAIL            -         FAIL  # b7ec4a3 tpi: pass last arg in ACC during function call, function first save parameter always, saves 2 bytes per call!
+2026-10-19 17:47            -        FAIL            -         FAIL  # 790fca0 generic *names* added to tokentable for print
+2026-10-19 17:30            -        FAIL            -         FAIL  # 0b0023f tpi: tail call poophole opt
+2026-10-19 16:59            -        FAIL            -         FAIL  # 1f53eba tp-test.p: funsum
+2026-10-19 16:48            -        FAIL            -         FAIL  # 1480a1b tpi: use char for tokens
+2026-10-19 16:33            -        FAIL            -         FAIL  # bce26f6 tpi: comments
+2026-10-19 16:29            -        FAIL            -         FAIL  # fe76878 emitop/emitop2/emit
+2026-10-19 02:35            -        FAIL            -         FAIL  # 2f00bd6 tpi: added subtraction
+2026-10-19 01:41            -        FAIL            -         FAIL  # c6acca7 tpi: memory layout reminder comment added
+2026-10-19 01:35            -        FAIL            -         FAIL  # 9f83a9a tpi: comment regarding constant pool, not to be separate
+2026-10-19 01:13            -        FAIL            -         FAIL  # 871407c tpi: saved 95 bytes using two parameters instead
+2026-10-19 00:44            -        FAIL            -         FAIL  # f299519 tpi: operator apply improve and bug fix
+2026-10-18 23:38            -        FAIL            -         FAIL  # 1aa6886 tpi: data saved 239->225 bytes
+2026-10-18 23:27            -        FAIL            -         FAIL  # 25e1ace tpi: lol, grok just introduced a call stack, lol, LOL, WTF
+2026-10-18 22:44            -        FAIL            -         FAIL  # b291d14 tpi: simplier caller
+2026-10-18 22:34            -        FAIL            -         FAIL  # eab01c8 tpi: accept
+2026-10-18 21:54            -        FAIL            -         FAIL  # bd56dbd tpi: 'b' 'g' for jumps instead of two levels
+2026-10-18 21:46            -        FAIL            -         FAIL  # 14dccb0 tpi: moved prints out of run_ivm
+2026-10-18 20:51            -        FAIL            -         FAIL  # 27fd619 tpi: revert to my improved switch vm - 3x faster
+2026-10-18 20:21            -        FAIL            -         FAIL  # ee64b3e tpi: more parameters
+2026-10-18 20:03            -        FAIL            -         FAIL  # b50e3a9 tpi: RETURN from function
+2026-10-18 19:48            -        FAIL            -         FAIL  # c9f5bd8 tpi: added function calling, improved byte printer
+2026-10-18 18:18            -        FAIL            -         FAIL  # da9bb86 tpi.c: interpreter
+2026-10-18 15:52            -        FAIL            -         FAIL  # 0a4d06c tpi.c: bytecode VM w for, but not fully functions yet
+2026-10-18 15:31            -        FAIL            -         FAIL  # 1bac9ae ivm: refined program layout
+2026-10-18 15:26            -        FAIL            -         FAIL  # 348e20a ipv: info about program layout block
+2026-10-18 15:04            -        FAIL            -         FAIL  # d5a3f47 tp: loop comment update
+2026-10-18 14:59            -        FAIL            -         FAIL  # 400e307 tp: for loop added and tests for benchmarking to compare with ivm.c
+2026-10-18 14:39            -        FAIL            -         FAIL  # 53738df ivm: clarified jumps and conditions
+2026-10-18 14:16            -        FAIL            -         FAIL  # 65945c4 ivm.c: defined OS and refined alpha codes
+2026-10-18 03:02            -        FAIL            -         FAIL  # 386ec22 ivm.c: new virtual machine
+2026-10-17 18:42            -           -            -            -  # dc36d45 tp: update script
+2026-10-17 18:36            -           -            -            -  # cc41789 tp: print error line
+2026-10-17 18:31            -           -            -            -  # 23b5fc5 tp: somewhat meaningful error message and print line and position
+2026-10-17 17:55            -           -            -            -  # df98d7b tp: adjust bin sizes
+2026-10-17 17:53            -           -            -            -  # 97a5865 tp: save 300 bytes using longjmp fail
+2026-10-17 17:42            -           -            -            -  # a4a4024 tp: NEXT C saved 960 bytes
+2026-10-17 16:53            -           -            -            -  # 4691516 tp: update savings
+2026-10-17 16:43            -           -            -            -  # 773b4e1 tp: B() W() WZERO() LDAX() STAX() - save 498 Bytes
+2026-10-17 15:45            -           -            -            -  # 07dfefe tp: renames
+2026-10-17 07:11            -           -            -            -  # 2433f40 tp: simplify, rename, comment
+2026-10-17 06:21            -           -            -            -  # f3aa956 nested function calls, non-recursive = fine!
+2026-10-17 06:18            -           -            -            -  # 438152a tp: single param fun
+2026-10-17 05:46            -           -            -            -  # 9215bd4 tp: fun - ok 47 on sim?
+2026-10-17 05:25            -           -            -            -  # 56654f1 tp: fun call and + working
+2026-10-17 04:53            -           -            -            -  # 98fbe49 tp: with dump
+2026-10-17 04:39            -           -            -            -  # 767da3e tp: fun - nested + is wrong, still
+2026-10-17 04:26            -           -            -            -  # eef18e8 tp: fun - nested + is wrong
+2026-10-17 04:17            -           -            -            -  # 1beaa5b tp: fun, not crash but wrong
+2026-10-17 04:15            -           -            -            -  # 5938f6d tp: fun - bs
+2026-10-17 04:06            -           -            -            -  # 5688557 tp: fun - not working, goign in loop I think...
+2026-10-17 03:25            -           -            -            -  # f710b79 tp: functioncalls parsed, but not correct
+2026-10-17 03:09            -           -            -            -  # 10ea74f tp: compile and run!
+2026-10-17 03:06            -           -            -            -  # e881733 tp: generate code in memory
+2026-10-17 02:47            -           -            -            -  # 54cafcc tp: handle comments better output
+2026-10-17 02:43            -           -            -            -  # 0be8548 tp: better error messages
+2026-10-17 02:31            -           -            -            -  # 898a585 tp: testing, and fixes
+2026-10-17 02:20            -           -            -            -  # 423212e tp: updated w strings
+2026-10-17 02:18            -           -            -            -  # 9f5e0bb turbo pascal: first commit, lol
+2026-10-16 18:02            -           -            -            -  # eafa5f4 - make ./orwin-oscar work generating .dsk and boot! - moved include to after crt init for oscar64l
+2026-10-15 14:00            -           -            -            -  # 3094f01 Not use defines but symbols
+2026-10-14 01:45            -           -            -            -  # c567e04 orwin-disk: bootdisk.asm fixed by Gemini, commands were missing, only loaded track 1 sectors correctly....
+2026-10-13 23:42            -           -            -            -  # ecda0c8 trying to get disk working, and 'himem' test... lol
+2026-10-07 00:07            -           -            -            -  # 96262e4 orwin-disk: builds but hangs on heap allocations
+2026-10-06 22:13            -           -            -            -  # 40890fa livm: comments update
+2026-10-06 05:36            -           -            -            -  # daae891 bootdisk: OrWin-ATMOS:
+2026-10-06 04:46            -           -            -            -  # 06ea2e7 orwin-oscar: build .bin for disk, but not boot, ROM dependent?
+2026-10-06 04:31            -           -            -            -  # bc9a1a8 orwin-oscar: compile a gain
+2026-10-06 04:06            -           -            -            -  # b5454d8 bootdisk: comment the asm
+2026-10-05 16:28            -           -            -            -  # a0db13f reorg files
+2026-10-05 16:15            -           -            -            -  # b27cbaa bootdisk: ROMDIS=0 already, just update comment
+2026-10-05 16:05            -           -            -            -  # 239babd bootdisk: now works, thanks to grok, gemini totally failed to implement it, but gave good structure, grok needed to go slow route but came through
+2026-10-05 15:53            -           -            -            -  # 20e9838 bootdisk: grok maybe works, lol P
+2026-10-05 15:15            -           -            -            -  # b52655f bootdisk: somewhat working but all python binary artifacts
+2026-10-05 15:07            -           -            -            -  # e517e4f bootdisk: grok made an artifact creator, not reproducable
+2026-10-04 23:31            -           -            -            -  # b15bd15 restore
+2026-10-04 23:19            -           -            -            -  # b28683d bootdisk: gemini BS
+2026-10-04 23:11            -           -            -            -  # d46d6ba bootdisk: haha
+2026-10-04 22:54            -           -            -            -  # 2a6a3f8 bootdisk: use disk convertsion tool
+2026-10-04 22:40            -           -            -            -  # 4ee24cc bootdisk: bs continues
+2026-10-04 22:35            -           -            -            -  # 2ffb635 bootdisk: again
+2026-10-04 22:24            -           -            -            -  # cef47a2 bootdisk: bigger, still not boot
+2026-10-04 22:20            -           -            -            -  # 3f9f239 bootdisk: first gemini variant
+2026-10-02 22:01            -           -            -            -  # 9f5c58c oscar-oric-tap: compiles given arg, oscar-tap.c example to a tap file using oscar64
+2026-10-02 04:49            -           -            -            -  # 38dc786 app atmos
+2026-10-02 04:25            -           -            -            -  # 96c36ae orwin: app_sh ++runprocs to get more accurate statistics!
+2026-10-02 04:18            -           -            -            -  # 49fbee2 orwin:shell: init saved another 256 bytes by defaults
+2026-10-02 02:54            -           -            -            -  # d9f66bc orwin:shell: saved 329 bytes by simplier allocs
+2026-10-02 02:25            -           -            -            -  # 39ce55a shell: saved almost total 800 bytes, last 128 byte using nextStr/nextInt w default zptr=zline
+2026-10-02 02:11            -           -            -            -  # 23f6eb4 orwin: shell: save 108 bytes by simplier init
+2026-10-02 02:02            -           -            -            -  # 4cc5aed cc65: saving about 500 bytes by implicit zapp and zline?
+2026-10-02 01:31            -           -            -            -  # bd6bede shell: zapp instead of arg
+2026-10-01 00:16            -           -            -            -  # a99b9db optimization needed improvments
+2026-09-30 23:51            -           -            -            -  # 5bb4b00 shell: update readme
+2026-09-30 23:03            -           -            -            -  # a6d901c shell: optimized wsysparse
+2026-09-30 21:44            -           -            -            -  # 444495d shell: comment intro hint at implementation
+2026-09-29 21:42            -           -            -            -  # 802ed39 orwin: sh: didn't print if had space before bar terminal
+2026-09-29 17:48            -           -            -            -  # 68dc7a3 orwin: fix for new ENVVAR
+2026-09-29 17:43            -           -            -            -  # ac6647b shell: env: iota changed to preinc, vptr now working!
+2026-09-29 06:05            -           -            -            -  # f45bc0f qr: oscar wrong!
+2026-09-29 05:54            -           -            -            -  # be69cfa qr: reformat code
+2026-09-29 05:14            -           -            -            -  # d33fe62 shell: env: vars: vptr can read the varnames strings
+2026-09-29 04:13            -           -            -            -  # 58d5cbd qr: correct and much faster than qrtiny!
+2026-09-29 03:24            -           -            -            -  # 985ccf7 qr: grok fixed it, at least lens can read the YESCO.ORG lol
+2026-09-29 02:46            -           -            -            -  # 6fa72a8 qr: sim65 takes 3s! is it correct
+2026-09-29 02:42            -           -            -            -  # b6dd182 qr: grok says format register wrong...
+2026-09-29 02:26            -           -            -            -  # 404b163 qr: gemini keeps flipping logic
+2026-09-29 02:14            -           -            -            -  # 6321b41 qr: GF code
+2026-09-29 02:04            -           -            -            -  # 030ff03 qr: still not scan  right
+2026-09-29 01:45            -           -            -            -  # 167a549 qr: structurally better
+2026-09-29 01:28            -           -            -            -  # b5bee70 qr: keep lying?
+2026-09-29 01:20            -           -            -            -  # 009e010 qr: gemini lying
+2026-09-29 00:55            -           -            -            -  # 81993b3 qr: still lens says github.com lol
+2026-09-29 00:48            -           -            -            -  # af94cd8 qr: lens says github.com lol
+2026-09-29 00:38            -           -            -            -  # 796212f qr: inverted for some reason
+2026-09-29 00:30            -           -            -            -  # ea4b5e6 qr: fullblock
+2026-09-29 00:27            -           -            -            -  # ad9873f qr: some data maybe
+2026-09-29 00:23            -           -            -            -  # 71e63b4 qr: dummy data
+2026-09-29 00:20            -           -            -            -  # d3c4b7c qr: three squares structure
+2026-09-29 00:17            -           -            -            -  # 9b690e3 qr: intial dummy
+2026-09-27 23:22            -           -            -            -  # 2b3b0cf orwin zptr compile on oscar
+2026-09-27 23:14            -           -            -            -  # 209df79 livm instructions thinking
+2026-09-27 22:45            -           -            -            -  # 4271793 shell: command list update
+2026-09-27 22:25            -           -            -            -  # eeb531b shell compiles using misc.c
+2026-09-27 22:14            -           -            -            -  # eeed1f4 orwin: zptr usage saved 193 bytes for parsing code
+2026-09-27 21:22            -           -            -            -  # 698df09 orwin: zptr usage
+2026-09-26 18:12            -           -            -            -  # 2a5957d orwin: saved 60ish bytes by skipspc()
+2026-09-26 17:44            -           -            -            -  # a35d67d orwin-oscar: make it compile
+2026-09-26 17:35            -           -            -            -  # 9e0780f orwin: shell: ps smaller more relevant output
+2026-09-26 17:04            -           -            -            -  # 26da20c no savings
+2026-09-26 16:34            -           -            -            -  # 770610b orwin, tty: +FLSHLN
+2026-09-25 23:51            -           -            -            -  # 1fbc240 www: define pre and post actions
+2026-09-25 16:52            -           -            -            -  # 2eb2283 www: app initial encoding
+2026-09-25 16:13            -           -            -            -  # 7b0ddc2 gloat-bcd: stuff borken because gemeni keeps making shit
+2026-09-23 21:22            -           -            -            -  # a27db9a gloat: bcd table mixing, and using 64 byte array becausee GEMINI can't code, lol
+2026-09-23 17:26            -           -            -            -  # 7c69343 bcd: inc dec bcd fix
+2026-09-23 17:20            -           -            -            -  # 47783df bcd: clear formatting
+2026-09-23 17:13            -           -            -            -  # 1df2cac gloat-bcd.asm: finally working
+2026-09-23 16:42            -           -            -            -  # a4f472e bcd: added some printing but nothing happens
+2026-09-23 16:39            -           -            -            -  # 5e719c9 bcd: formatting
+2026-09-23 16:39            -           -            -            -  # 6eb2ede bcd: reformatted
+2026-09-23 16:30            -           -            -            -  # 11aef1c gloat-bcd: nonsense?
+2026-09-23 05:18            -           -            -            -  # d251084 gloat: fast bcd printing routine
+2026-09-23 04:10            -           -            -            -  # 1950447 gloat: gprint simple
+2026-09-23 03:08            -           -            -            -  # 467e70b gloat: anlyze and problem of 100, not sure why
+2026-09-23 02:02            -           -            -            -  # 0a84da2 gloat: small update
+2026-09-23 01:57            -           -            -            -  # 8df0b87 gloat: two headed version, good at different parts
+2026-09-23 01:06            -           -            -            -  # b7f384e gloat: sub better match
+2026-09-23 00:54            -           -            -            -  # 4c00dbd gfloat: sub improved stupid geneated duplicated AI code
+2026-09-23 00:40            -           -            -            -  # 32ab0d6 gloat: sub better
+2026-09-22 21:05            -           -            -            -  # e9146b6 gloat: add sub got want CAN
+2026-09-22 20:49            -           -            -            -  # 1a6942b working add and SUB
+2026-09-22 20:18            -           -            -            -  # 600f28f gloat: add sub tests
+2026-09-22 19:54            -           -            -            -  # d2a7e8c gloat: gadd for gsub, lol
+2026-09-22 19:18            -           -            -            -  # 020df2b gloat: add(a, -a) is now 0
+2026-09-22 19:11            -           -            -            -  # 9ebeaf7 gloat: add negative stuff
+2026-09-22 17:09            -           -            -            -  # 7cceced gloat: testing generic routine
+2026-09-22 06:17            -           -            -            -  # aa861de gloat16: improved gpow glog
+2026-09-22 05:53            -           -            -            -  # 5903b26 gloat: fixed gmul test
+2026-09-22 05:29            -           -            -            -  # ce1d02c gloat: some more tests reporting
+2026-09-22 05:23            -           -            -            -  # 4a12df1 gloat: autotesting...
+2026-09-22 05:01            -           -            -            -  # 7d69616 gloat16: add tests for longer precision PI and it breaks down
+2026-09-22 04:25            -           -            -            -  # 2e2075c mandelbrot: back to work for FIXPOINT
+2026-09-22 03:50            -           -            -            -  # ad1fbdf mandelbrot trying to fix
+2026-09-22 03:30            -           -            -            -  # 441ec13 mandelbrot: to use gloat16..., macros but something wrong
+2026-09-22 01:56            -           -            -            -  # 237e15f float16: better match, but not yet perfect
+2026-09-22 01:46            -           -            -            -  # fa3aa41 gfloat16: better by the day, no mul...
+2026-09-22 01:34            -           -            -            -  # e3bede4 gfloat16: better by the day...
+2026-09-22 01:22            -           -            -            -  # e82c027 gfloat16: better encoding
+2026-09-22 01:08            -           -            -            -  # 785d26c gfloat16: better match during conversion
+2026-09-22 01:01            -           -            -            -  # a4099a3 atog: 0 issue
+2026-09-22 00:51            -           -            -            -  # 1315cc3 gfloat: better encoding for itog
+2026-09-22 00:50            -           -            -            -  # beeef6a gfloat: better encoding for itog
+2026-09-22 00:41            -           -            -            -  # 727d493 gfloat: better encoding
+2026-09-22 00:38            -           -            -            -  # 267d1bd gfloat, small stuff
+2026-09-22 00:27            -           -            -            -  # 393de96 mandelbrot: had to cast to long multiply to get it to work
+2026-09-22 00:04            -           -            -            -  # ef380aa mandelbrot: gemini generated
+2026-09-21 18:16            -           -            -            -  # d9f2cbf gfloat: testing 0-256, buggy
+2026-09-21 17:48            -           -            -            -  # 0c15463 gloat16: no inline var in cc65
+2026-09-21 17:05            -           -            -            -  # 34b400b gloat16: initial C code, spec in google docs
+2026-09-19 23:40            -           -            -            -  # 402f1d5 - sh: auto add "|terminal" - app_sh: make the window title be the commands - editline loop command - just type the command if not recognized call "sh" on it!
+2026-09-19 21:45            -           -            -            -  # 3f098a3 shell: move things around
+2026-09-19 21:28            -           -            -            -  # f602ce1 qsort: oscar64 doesn't have in library
+2026-09-19 21:14            -           -            -            -  # 62868be - app_heap: key to redraw, new window will trigger draw. - orwin: juggle status line: more clean up to 9999 bytes, lol - lfree: no (big) leak for iota - VARENV with bindings: 4KB, lol - 880 bytes free cc65 - binding: ls stats ps
+2026-09-19 04:26            -           -            -            -  # 2eb3816 shell: varlist
+2026-09-19 03:32            -           -            -            -  # a159d6c shell: ps/ls: added bindings
+2026-09-18 18:09            -           -            -            -  # 2c75c4a shell:stats: impl median
+2026-09-17 17:26            -           -            -            -  # eed5e03 shell: stats: fixed step function, did wrong! now GOOD
+2026-09-17 13:37            -           -            -            -  # 5014d98 shell: stats command
+2026-09-17 12:45            -           -            -            -  # afe6329 shell: control structures thinking and formatting
+2026-09-17 12:15            -           -            -            -  # 8563bc1 print ^caret concat and $* for seval and $++, LOL"
+2026-09-17 09:47            -           -            -            -  # 3eff119 isliteral() fun, lol
+2026-09-17 01:14            -           -            -            -  # ca2477b oafs: clarify comments, rename to buffer
+2026-09-17 01:03            -           -            -            -  # 2dfae92 oafs: reconstitute key
+2026-09-17 00:38            -           -            -            -  # edc3924 oafs: cleanup a bit
+2026-09-16 18:01            -           -            -            -  # a7c804a orwin: -sim -oscar crash
+2026-09-16 17:51            -           -            -            -  # 1454ac9 orwin: heapfree but low value...
+2026-09-16 16:44            -           -            -            -  # ccfd37b shell: move vdump around
+2026-09-16 16:20            -           -            -            -  # 9276400 ENV: save few bytes
+2026-09-16 16:15            -           -            -            -  # 6e32604 ENVVAR stats cost update
+2026-09-16 16:08            -           -            -            -  # 266e0ba ENV: various optimizations, dummyfun #define, LFREE
+2026-09-16 03:45            -           -            -            -  # 39cb081 update README with some shell stuff
+2026-09-16 03:26            -           -            -            -  # a20fd96 shell: ENVVARS addes like 4K cl65 or 2K for oscar64 -- TOO HIGH!
+2026-09-16 02:38            -           -            -            -  # 9422600 shell: let/set, todo: test
+2026-09-16 01:44            -           -            -            -  # 62eaa0f shell.env: percent underscore and dollar vars, all setters/getters compatible
+2026-09-15 23:30            -           -            -            -  # 3937d9d shell.vars: new almost, lol, int
+2026-09-14 23:12            -           -            -            -  # 9efe68c shell: vars 'simple' impl
+2026-09-14 19:01            -           -            -            -  # 23b3353 StrOAQ encoding
+2026-09-13 20:57            -           -            -            -  # 1dfc75c update comment
+2026-09-13 20:49            -           -            -            -  # 1ec798a LiVM: updated, docs, errors more clear, chop newline
+2026-09-13 05:23            -           -            -            -  # b6054ef timestamp: 1970- correct date! but goes back to year-mont 1842
+2026-09-13 03:27            -           -            -            -  # 8b9dcce OAQ: fixed U32/Long encoding of larger prefix
+2026-09-13 02:08            -           -            -            -  # 7e3b04d timestamp: 1 year step, fixed year
+2026-09-13 01:57            -           -            -            -  # 29232c9 timestamp: leading 11111s compress better, fixed LOAQ, I think
+2026-09-13 00:47            -           -            -            -  # 887bab3 timestamp: base and range 16 bits
+2026-09-12 22:54            -           -            -            -  # 603b352 timestamps refined
+2026-09-12 17:59            -           -            -            -  # 756e728 various variant, optimized oscar64
+2026-09-11 05:44            -           -            -            -  # fdf40c8 timestamp: human
+2026-09-10 23:55            -           -            -            -  # 9bbd269 oafs: packpage, maybe correct, lol
+2026-09-10 19:24            -           -            -            -  # 989910d oafs: starting fixing parsepageparseentry dlen wrong lol
+2026-09-10 18:30            -           -            -            -  # 97e3588 mostly indent - get rid of tab
+2026-09-10 18:08            -           -            -            -  # 6f9f239 orwin-oscar: compiles again, and runs with some artifacts, but much faster!
+2026-09-10 17:57            -           -            -            -  # efb8f57 make sim work with simulated ORWINs! - fillins using vt_fg vt_bg and inversion hibit - vt_putc - cursor off - shell.c: ls/ps - disabled w dummies on cc65
+2026-09-10 01:43            -           -            -            -  # cd857b0 OAFS-README
+2026-09-10 01:37            -           -            -            -  # ca9fcd7 oafs: thinking about ./oafs-levels
+2026-09-09 17:10            -           -            -            -  # e9f3797 orwin-sim: littler bit further, write issue resolved
+2026-09-09 17:00            -           -            -            -  # fb61c64 shell.c: make it compile idependently again, and on sim65 target
+2026-09-09 15:57            -           -            -            -  # 354a4c6 oscar: add oafs by default because have space
+2026-09-08 18:57            -           -            -            -  # bca570a oafs + orwin= trying to glue them together
+2026-09-08 16:12            -           -            -            -  # 94610f9 oafs: mostly works on oscar, lol
+2026-09-08 15:56            -           -            -            -  # 411ca08 oscar64: compiler bug fprintf with percent c crashes  emulation
+2026-09-08 14:44            -           -            -            -  # d27ee00 oafs: getline issues fixed, count pages
+2026-09-08 00:09            -           -            -            -  # b80b491 indexer: stats for very page input processed... shows less density increase in same file later slowing down
+2026-09-07 23:18            -           -            -            -  # c50a710 OAQ: signed long was missing
+2026-09-05 03:25            -           -            -            -  # 0dd1326 orwin: starts print screen and loops ASCII, quits for some reason, lol
+2026-09-05 02:50            -           -            -            -  # 51d101b orwin-oscar: compiled, made fake screen using fillins.c
+2026-09-05 01:30            -           -            -            -  # 458c08f orwin: moved out to platform specific files, and now it compiles for ATMOS
+2026-09-04 23:03            -           -            -            -  # 59e06e4 orwin: compiles on oscar64 lol but not run; becomes 21K instead of 33K 2/3 size
+2026-09-04 22:13            -           -            -            -  # 502ca78 orwin: type harmonization for oscar74, now make it work for cc65 again lol
+2026-09-04 21:10            -           -            -            -  # a9d8c5b oscar - ./oscar - assertptr() - NULL - strdup - getline using fgetc instead of fgets - different main
+2026-09-04 06:28            -           -            -            -  # 0a8afdd OAFS optional, adds 10KB, lol
+2026-09-04 05:43            -           -            -            -  # 6b69ce5 oafs: simulate using directory of many sector files, lol
+2026-09-04 05:30            -           -            -            -  # 075d0b8 OAFS: compiles and runs w cc65 but no fseek
+2026-09-04 01:56            -           -            -            -  # 33ad7cd oafs: various links, thinking about sub directory path encoding
+2026-09-04 00:26            -           -            -            -  # 6dd9305 notice on ai usage
+2026-09-04 00:22            -           -            -            -  # f963e0b OAFS-README.md
+2026-09-03 23:08            -           -            -            -  # 576d485 ./words removed 's make it fit on a max disk
+2026-09-03 22:56            -           -            -            -  # e4ac174 OAFS: - word defined - FSnewsector(cur) - simplified OAFSentry to entry and parseentry - removed header struct - better ENTRY DOCS - simplified packpage, more info
+2026-09-03 19:32            -           -            -            -  # 3b535b5 OAFS: ts ordering, TODO
+2026-09-03 19:28            -           -            -            -  # d42533a OAFS: minimal record size (prefix and smaller then prev) is now 3 BYTES
+2026-09-03 17:07            -           -            -            -  # 2f00eb7 experiment with bigger buffer MAX_KEYS hha
+2026-09-03 15:32            -           -            -            -  # aae9091 OAFS: packer print LAST key of page, TODO: add to index
+2026-09-03 15:19            -           -            -            -  # 4335111 OAFS insertfile, read from stdin or given  filename
+2026-09-03 14:58            -           -            -            -  # 18daea3 OAFS: flush buffers writing to page when doing FSinsert
+2026-09-03 13:33            -           -            -            -  # e319a4f OAFSpackpage compiles, not tested
+2026-09-03 05:00            -           -            -            -  # 69bc0ab OAFS: parse page
+2026-09-03 03:24            -           -            -            -  # 3ff7718 thinking
+2026-09-03 01:48            -           -            -            -  # d09b305 OAQ: harding code
+2026-09-02 23:44            -           -            -            -  # 1d22e05 signed values encoding, updated 0xf0 range
+2026-09-02 19:02            -           -            -            -  # 0b567db fixed fputqsnw, lol
+2026-09-02 18:53            -           -            -            -  # 9621e7c qputsnf, lol
+2026-09-02 18:50            -           -            -            -  # 1defb2e oafs: insert into memory, pageprinter
+2026-09-01 04:29            -           -            -            -  # 2197b58 OAQ: clamp to 16-bit and simulated cencoding/compression
+2026-09-01 03:47            -           -            -            -  # 7503a8e add genint.py enq-stats.py ...
+2026-09-01 01:32            -           -            -            -  # 7789eb1 OAQ: orderablity fixe for uint16_t
+2026-09-01 01:21            -           -            -            -  # f4831fc OAQ: add failing tests of ORDERABLITY
+2026-09-01 00:22            -           -            -            -  # 037fcab OAQ: it's own file, OAFS: cleanedup
+2026-08-31 23:15            -           -            -            -  # b768bbc OAQ: fixed to stdint types and fixed check
+2026-08-31 22:19            -           -            -            -  # 70773be OAQ: 0 upto 65535, neg not ok, long not ok, haha
+2026-08-31 21:55            -           -            -            -  # 81dff31 OAQ: initial, ok upto 30720, LOL
+2026-08-31 14:22            -           -            -            -  # d1f7d46 OAFS: embryo for 'linux' simulate using a file
+2026-08-31 03:11            -           -            -            -  # 6c167ca window status, fixed overflow window number character display bug
+2026-08-31 02:48            -           -            -            -  # 58c4e63 - sh: identify memory leak - capture args in ps and Window structure - sh: rerun -c argument at each keystroke! lol ("top" almost) - EOS = 0x500 and EVENTS = 0x500 lol
+2026-08-31 00:48            -           -            -            -  # 36486a5 rename shell to sh, add args to ps listing and win structure
+2026-08-30 02:52            -           -            -            -  # 046564d shell: multitasking trains
+2026-08-30 02:29            -           -            -            -  # a46659f app_shell halfway there
+2026-08-30 02:06            -           -            -            -  # d6053c9 shell: wstepsys
+2026-08-30 01:53            -           -            -            -  # 4f5aefe shell.c: splitting up functions
+2026-08-30 01:31            -           -            -            -  # 8b70e10 - app_shell.c - IOTA ... grep 7   various optimizations lfree/lstrdup seemed promising 14s->10s   -- but in practice not much savings (wsystem 14s -> 13s ???)   -- print is 2s   -- but allocations seemed to be 4s but only saved 1 in the end! - shell.c - cleaned it up to use lstrdup
+2026-08-29 21:06            -           -            -            -  # cb69dfb Play stuff
+2026-08-29 15:45            -           -            -            -  # bb354ea init (shell) is now part of cpu runtime
+2026-08-29 15:35            -           -            -            -  # 71634c1 GRAB memory now 8491 B free, cannot do graphics, lol
+2026-08-29 15:14            -           -            -            -  # 9a6451c save 1 loc for running tasks upper right, show mem used in percent and avail, fixed ps to show cpus spent on task runs (not initial)
+2026-08-29 15:01            -           -            -            -  # ff8f896 - bigger window for heap - rename win to wins because we have bug win->p lol!
+2026-08-29 14:09            -           -            -            -  # 033999d - working "ps" - shell takes argument - fixed default window placment, loooks more like exec? - removed options STATS just do it - removed old INFO, call ps instead - moved Window etc into orwin.h (for ps) - removed jmpbuf - wname(void* fun) - wrapped malloc/calloc/realloc/free - counting - wdecoration better, lol - loop problem w setfocus maybe fixed - simplified status line in scheduler
+2026-08-28 05:06            -           -            -            -  # 7faa8ec - echo: fixed memory leak - heap: list all items, free and allocated - shell: fixed leaks   - shellcleanup() - scheduler: adjusted process run indicator
+2026-08-28 04:16            -           -            -            -  # 73791d2 more clever update, if no var change then don't
+2026-08-28 03:54            -           -            -            -  # 9673700 heap app list free list
+2026-08-27 22:17            -           -            -            -  # 4ed683a update MOWIN limits
+2026-08-27 22:12            -           -            -            -  # b8a790d sparks command idea, reuse chars from sparks
+2026-08-27 20:57            -           -            -            -  # bde1063 sparks command idea, reuse chars from sparks
+2026-08-27 20:10            -           -            -            -  # fae7197 charset: sparklines reordering
+2026-08-27 18:36            -           -            -            -  # 65ad2dd fixed moving windows, overlap  back to gray. update status w count of jobs per second
+2026-08-27 00:18            -           -            -            -  # 314756a fixed in some sense, but more code, possibly not needed
+2026-08-26 23:09            -           -            -            -  # 5eccd7b stuff TODO
+2026-08-26 18:41            -           -            -            -  # 1547f89 - charedit: use keys, draw and update pixels - mygetc fixes all CTRL-ARRAY ALT/FUNCT-ARROW ARROW etc
+2026-08-26 16:59            -           -            -            -  # 1210738 fixed PAPER INK sequence to save chars, and opotimized CharEdit
+2026-08-26 16:22            -           -            -            -  # 16da289 some fixes to WRITE but still buggy for seq of special chars?
+2026-08-26 07:41            -           -            -            -  # bc720b8 more about idle detection
+2026-08-26 05:59            -           -            -            -  # f1b484f OPT: focus win WAITKEY only called when have key
+2026-08-26 05:31            -           -            -            -  # da50f34 WAITKEY: optimization - app no need to poll
+2026-08-26 05:08            -           -            -            -  # afe552a removed app-*.c - saved 2KB?
+2026-08-26 05:06            -           -            -            -  # 79eb9a7 spawn stack stuff mostly removed
+2026-08-25 23:28            -           -            -            -  # 798a847 shell app colors
+2026-08-25 23:17            -           -            -            -  # 1eff511 terminal/shell app works, styled: maximized for 4 windows, todo: multitasking
+2026-08-25 22:55            -           -            -            -  # 92c4542 shell app: more or less working, but blocking
+2026-08-25 22:10            -           -            -            -  # 89fee62 charset: fixed last wraparound line clear first, lol
+2026-08-25 22:06            -           -            -            -  # 5a17faf char editor
+2026-08-25 21:35            -           -            -            -  # f3f68e2 sparklines, graphticks, and Charset Editor, CharEdit
+2026-08-25 16:18            -           -            -            -  # 6be4f1e new window many changes, default window size if created in init, etc
+2026-08-25 15:16            -           -            -            -  # f9c955e remap BLACK so not conflict w C end string
+2026-08-25 06:11            -           -            -            -  # d13a7f8 11 windows
+2026-08-25 05:50            -           -            -            -  # a91f641 window placement: less waste
+2026-08-25 05:32            -           -            -            -  # fad6238 window placement
+2026-08-25 04:20            -           -            -            -  # 6a55a6e save and restore launcher FUNCT escapes
+2026-08-25 04:00            -           -            -            -  # eb87d59 launch new task, opt window
+2026-08-25 00:29            -           -            -            -  # 8fb7c37 LIVM: instructions layout
+2026-08-24 22:17            -           -            -            -  # eec82b9 LiVM: allocate on heap
+2026-08-24 22:11            -           -            -            -  # f83ebb0 LiVM: last bug found!
+2026-08-24 21:54            -           -            -            -  # 191893f LiVM: initial BS: ByteStorage
+2026-08-24 20:42            -           -            -            -  # 24099a8 smooth update search by keystroke; nl() nlpure(); clnl();
+2026-08-24 15:02            -           -            -            -  # 1c5d09f optimize: write, list apps 78cs->7cs
+2026-08-23 21:47            -           -            -            -  # 4310d57 add shell.c to build - 28K tap file, lol 14 KB free, mayby
+2026-08-23 21:13            -           -            -            -  # 5677a1e show applist using tasks
+2026-08-23 20:24            -           -            -            -  # 24ddc64 extact cc65 cost from .map
+2026-08-23 15:35            -           -            -            -  # 391379f calculate sizes from .map
+2026-08-23 14:26            -           -            -            -  # cd12074 make menu program list, capture write to capture printf, but some yield conflicts...
+2026-08-23 03:15            -           -            -            -  # 9ad4ef1 renamed, and make FUNCT-R list?
+2026-08-22 02:58            -           -            -            -  # b27e42e screensaveer process snow, and task starter
+2026-08-21 19:03            -           -            -            -  # a9c13b3 arrow key remappings
+2026-08-20 15:34            -           -            -            -  # 2a4d52b added a app-vi, it compiles
+2026-08-20 14:40            -           -            -            -  # b899af6 newwin: more safety margin, congruent with movement limitations:
+2026-08-20 02:05            -           -            -            -  # 2ea85d1 orwin: more windows and lightweight tasks
+2026-08-20 00:25            -           -            -            -  # a3ab7c6 orwin compiles again
+2026-08-19 18:28            -           -            -            -  # 01545a1 TAIL -3 working fine, found memory bug crash?
+2026-08-19 04:02            -           -            -            -  # 23eb7b9 initial tail
+2026-08-19 03:21            -           -            -            -  # e5676dc nextStr nextInt iota?
+2026-08-19 02:31            -           -            -            -  # b890b29 cleanup and free states
+2026-08-19 02:26            -           -            -            -  # 62dc29b CLEANUP w simplier lfree, safe
+2026-08-19 02:11            -           -            -            -  # 9eabfdf move cleanup bits around a bit
+2026-08-19 02:04            -           -            -            -  # 50b5117 shell: CLEANUP
+2026-08-19 01:33            -           -            -            -  # c6162b0 shell head
+2026-08-19 01:06            -           -            -            -  # 9963936 shell head works but sometimes segs
+2026-08-19 00:13            -           -            -            -  # a98ecad shell.c ls fileglobs
+2026-08-18 22:06            -           -            -            -  # 40d170f shell: simple path ls
+2026-08-18 21:48            -           -            -            -  # 476ae14 small bugs fix in shell?
+2026-08-18 21:20            -           -            -            -  # c79c6ce shell.c: cat fil now works w fopen
+2026-08-18 20:45            -           -            -            -  # ff51a03 better search script and results
+2026-08-18 00:59            -           -            -            -  # 722eaed Removed duplicated logic loop
+2026-08-18 00:53            -           -            -            -  # 402fdc6 simplified
+2026-08-18 00:40            -           -            -            -  # 88761b5 a word isn't there if it's trigrams isn't...
+2026-08-18 00:12            -           -            -            -  # 6b8f2ef Weight factors
+2026-08-18 00:00            -           -            -            -  # 6380e09 handle not found word in sequence correctly
+2026-08-17 23:44            -           -            -            -  # 109c226 Simplify by recreating search string first
+2026-08-17 23:34            -           -            -            -  # 1061053 small formatting changes
+2026-08-17 23:14            -           -            -            -  # 8bbb550 simplified stuipid AI logic loop
+2026-08-17 22:51            -           -            -            -  # d887a8c search now working pretty well
+2026-08-17 22:42            -           -            -            -  # 9514bd4 fixed and works
+2026-08-17 19:03            -           -            -            -  # 185189d write index and intial search.c, not working...
+2026-08-17 17:52            -           -            -            -  # af70a30 optimzie for alnum words indexing only
+2026-08-17 17:18            -           -            -            -  # 8aa1e84 indexer indexes
+2026-08-17 16:52            -           -            -            -  # 4fff09e Initial indexer.c
+2026-08-16 01:06            -           -            -            -  # 504909c handle arg, and multi value return
+2026-08-16 00:42            -           -            -            -  # 27dffff shell: compile a simple pwd+terminal
+2026-08-15 22:31            -           -            -            -  # f801d21 system: looking up functions
+2026-08-15 20:45            -           -            -            -  # f6fdada shell: pwd+terminal worked
+2026-08-15 14:23            -           -            -            -  # a5e7150 a compiling version of shell.c, not tested
+2026-08-15 02:09            -           -            -            -  # 71767d1 untested shell impls
+2026-08-15 00:25            -           -            -            -  # e0ffcac shell: first list of commands
+2026-08-12 21:44            -           -            -            -  # 41afc39 reassign keys, again
+2026-08-12 21:26            -           -            -            -  # a90f047 comments
+2026-08-12 21:24            -           -            -            -  # a2e04fd non-overlap move
+2026-08-12 20:59            -           -            -            -  # e62590d simplify yield
+2026-08-12 14:13            -           -            -            -  # 31672a8 adjust keyboard repeat rate, ascii window moves smoothly and fast
+2026-08-12 14:03            -           -            -            -  # bd9e0a4 Make the moving opt code optional
+2026-08-12 02:53            -           -            -            -  # 2d189b0 limit all directions movement for correctness
+2026-08-12 02:43            -           -            -            -  # 2f2f77b mowin: horiz boudnaries kept
+2026-08-12 02:24            -           -            -            -  # 09a81ff winmov horiz better
+2026-08-12 02:07            -           -            -            -  # 7572571 OPTMOV right direction but garbage
+2026-08-12 00:48            -           -            -            -  # 617a791 calc: got rid of cursor when waiting key
+2026-08-12 00:41            -           -            -            -  # aaa0b77 working calc
+2026-08-12 00:15            -           -            -            -  # 5cb5bc3 app-calc, double height, identify bug w bleed, use location to get CTRL-ARROW for resize
+2026-08-11 17:56            -           -            -            -  # 42bed34 putz opt and yield for interactivety with README.md docs
+2026-08-11 16:01            -           -            -            -  # 498e76b optputz bug fixed
+2026-08-11 02:07            -           -            -            -  # 16e6539 optpugz
+2026-08-11 02:05            -           -            -            -  # d31ea8c fast putz but buggy
+2026-08-11 01:32            -           -            -            -  # a5db443 wputz OPT fast but little buggy
+2026-08-10 23:40            -           -            -            -  # 2b13c55 FUNCT-List calc process R and D stack usage
+2026-08-10 20:01            -           -            -            -  # 7862424 printing bytes of stack for debug purposes
+2026-08-10 19:32            -           -            -            -  # 921e9fb save some bytes
+2026-08-10 19:25            -           -            -            -  # 8af363d save some bytes
+2026-08-10 19:11            -           -            -            -  # e4b61cd info only takes 256 bytes++
+2026-08-10 19:09            -           -            -            -  # 1eb69fe FUNCT-List w 24 rec doesnt crash, fixed ascii wraparound neg issue
+2026-08-10 03:02            -           -            -            -  # 4b1af8d info
+2026-08-10 00:56            -           -            -            -  # 51c8c70 SAFE 54FE marker in recursio of stak allocation; default CFG file
+2026-08-09 19:55            -           -            -            -  # eba6b3e yield at newline for putchar, but cannot do timely, crash
+2026-08-09 19:25            -           -            -            -  # 9dfad14 using main args
+2026-08-09 18:44            -           -            -            -  # 4815bc2 mowin size update
+2026-08-08 23:41            -           -            -            -  # 4515ab8 mowin: improved color handling
+2026-08-08 21:11            -           -            -            -  # 862ff7f moving windows better boundaries, but something funny, colors messedup
+2026-08-08 20:56            -           -            -            -  # 2e83f68 comments regarding mowin
+2026-08-08 20:51            -           -            -            -  # b411c8b nongoal achieved: lol - movable, only move where cannot overlap...
+2026-08-08 19:16            -           -            -            -  # 8d33edf random placement
+2026-08-08 06:02            -           -            -            -  # 9e41539 newwin random
+2026-08-08 05:35            -           -            -            -  # 89888bc newwin random placaement, crash
+2026-08-08 04:48            -           -            -            -  # 3c828b9 fixed apprun
+2026-08-08 04:43            -           -            -            -  # fb7691b changes
+2026-08-08 04:32            -           -            -            -  # 25d5f53 autolibbing apps
+2026-08-08 04:04            -           -            -            -  # f74f238 initial appwrap
+2026-08-08 01:29            -           -            -            -  # 546c442 FUNCT-help
+2026-08-08 00:45            -           -            -            -  # bec1740 FUNC and window number as shown in right hand corner
+2026-08-08 00:29            -           -            -            -  # 5124f14 just FUNC-RETURN
+2026-08-08 00:20            -           -            -            -  # 1996b62 move to next ok window if next isnt
+2026-08-08 00:03            -           -            -            -  # c0dc18f window kill, and check keyboard for commands when no more terminal apps kbhit and getc running
+2026-08-07 23:44            -           -            -            -  # b72f5ea more commands prev, next, kill
+2026-08-07 21:07            -           -            -            -  # 01dc8f7 kbhit and getc working with window system and several terminals
+2026-08-07 20:39            -           -            -            -  # c4d0225 wkbhit wgetc - one step
+2026-08-07 20:21            -           -            -            -  # 268c79a fixed BS bug, swapped echo w ASCII
+2026-08-07 20:06            -           -            -            -  # 484b22b simplified app, puts does yield
+2026-08-07 19:53            -           -            -            -  # c201e15 fixed cursor for echo
+2026-08-07 19:49            -           -            -            -  # db3ef31 META FUNC space to switch widnow
+2026-08-07 19:38            -           -            -            -  # a11a3f4 window focus
+2026-08-07 17:47            -           -            -            -  # 8a0fd9b app-ascii.c: make it not use globals
+2026-08-07 17:37            -           -            -            -  # 028633b cleanup and move windows
+2026-08-07 17:09            -           -            -            -  # 0a3a1ec simplified spawniing
+2026-08-07 16:50            -           -            -            -  # 0efe014 winp->cont used dirextly, no indirection of jmp_buf, works for a while, lol
+2026-08-07 06:55            -           -            -            -  # b3ab399 messed up win nums, but still only one runs, but all counting
+2026-08-07 06:42            -           -            -            -  # 6638f5c a bit closer, crASH LATER
+2026-08-07 06:26            -           -            -            -  # 66a1118 yield almost working, at least for one but in wrong window, lol
+2026-08-07 04:36            -           -            -            -  # 708232f separate apps
+2026-08-07 04:28            -           -            -            -  # d5096f5 separate apps
+2026-08-07 03:53            -           -            -            -  # c7a4a20 better look, color change permanent
+2026-08-07 03:16            -           -            -            -  # 23d9c1c fiddle with tab, add logo, more terminal codes
+2026-08-07 01:50            -           -            -            -  # 33f8d27 Add README file
+2026-08-07 00:46            -           -            -            -  # 844d879 headers
+2026-08-07 00:42            -           -            -            -  # 1622934 wstatus line
+2026-08-07 00:14            -           -            -            -  # 97c2eec works: oric style 2 reserved cols
+2026-08-06 23:53            -           -            -            -  # 64dd714 works: clreol correctly
+2026-08-06 23:52            -           -            -            -  # a9bbfcd works: clreol correctly
+2026-08-06 23:46            -           -            -            -  # e4baffc works: with header and shadow
+2026-08-06 23:44            -           -            -            -  # 58b255c works: with header and shadow
+2026-08-06 01:14            -           -            -            -  # 375e449 windows
+2026-08-05 20:31            -           -            -            -  # a54716d add some ai commands
+2026-08-05 20:16            -           -            -            -  # 760b94e add some ai commands

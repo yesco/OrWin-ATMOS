@@ -48,3 +48,6 @@ ptest*.log
 *.cc65.log
 *.cc65-build.log
 *.oscar.log
+
+# ./sizes cache
+.sizes-cache
