@@ -528,8 +528,21 @@ E=\i+=\i [U\1\2]
 |(char)$R\#ff[&\2]$O
 |(char)$S\#ff[\l1&\2]$O
 
-|$R$O$q
-|$S[\l1]$O$q
+|$R$O$k$j$o$q
+|$S[\l1]$O$k$j$o$q
+
+# - Logical operators, after O's (C: below |), each level a rule: && (k)
+#   ^^ (j, not C: logical xor) || (o), left to right; the right side: an
+#   n (O's operators) and the tighter levels after it, so a || b && c is
+#   a || (b && c). && ||: short-circuit, the result 0 / 1, no temp:
+#     a && b:  a ?G>j  b ?  j: ?     (a false: ACC = !a = 1; the ? makes 0)
+#     a || b:  a ??G>j b ??  j:      (a true: ACC = !!a = 1)
+#     a ^^ b:  a ? S t  b ? ^t       (both sides)
+#   captures (^^): 1=t 2=n 3=k
+k=\>&&[?G\x] $n[?\y?]\<|
+j=\>^^[?S\t] $n$k[?^\1]\<|
+o=\>\|\|[??G\x] $n$k$j[??\y]\<|
+n=$R$O|$S[\l1]$O
 
 # - c ? a : b, after all the operators (C: the loosest but =, ","). Both
 #   values into one temp: the jump over the else (0?G) needs ACC
@@ -597,6 +610,7 @@ Z=$E,[S\k]\<|$E|
 #   one after it does not parse: a + b * c needs a + (b * c) (a * b + c is
 #   fine). The levels, tightest first: * / %, + -, << >>, < <= > >=,
 #   == !=, &, ^, | (C's & ^ | are below ==: a & b == c does not parse)
+#   & \;&: not && (the logical one, rule k)
 # With an R right operand: the left one spilled (\j), R in ACC; - / % <<
 #   >>: R into a temp, the left loaded
 O=
@@ -628,8 +642,8 @@ O=
 |==[S\j] $R[=\a1]\<
 |!=$S[=\a1?]\<
 |==$S[=\a1]\<
-|\>& [S\j] $R[&\a1]\<
-|& $S[&\a1]\<
+|\>&\;& [S\j] $R[&\a1]\<
+|&\;& $S[&\a1]\<
 |\>^ [S\j] $R[^\a1]\<
 |^ $S[^\a1]\<
 |\>\|[S\j] $R[|\a1]\<

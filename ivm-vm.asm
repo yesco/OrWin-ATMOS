@@ -2020,8 +2020,6 @@ op_W:
 
 op_bslash:
 op__:
-op_tick:
-
 ;;; TODO: single opcode save local
 op_c:
 op_d:
@@ -2045,6 +2043,20 @@ op_y:
 op_z:
 
 op_del:
+
+;;; ` vv: &x. Here mem[] is two byte planes (slice_lo, slice_hi: the fast
+;;; way, but a slot has no word address): a runtime error, stops
+op_tick:
+        lda     #0
+        sta     tmp_lo
+@msg:   ldy     tmp_lo
+        lda     tick_msg,y
+        beq     done
+        jsr     _putchar
+        inc     tmp_lo
+        bne     @msg
+tick_msg:
+        .byte   10, "%Error: ivm-asm: no & of a variable (` op): mem[] is byte planes", 10, 0
 
 op_bad:
 	stx     tmp_lo      	; save op code

@@ -76,13 +76,13 @@ int main(void) {
     }
 
     // capitals: the same words
-    if (c >= 'A') if (c <= 'Z') c = c + 32; 
+    if (c >= 'A' && c <= 'Z') c = c + 32; 
 
     // letter
-    if (c >= 'a') if (c <= 'z') { word(c); continue; }
+    if (c >= 'a' && c <= 'z') { word(c); continue; }
 
     // printable
-    if (c >= ' ') if (c <= 126) { putchar(c); continue; }
+    if (c >= ' ' && c <= 126) { putchar(c); continue; }
 
     // just print code
     putchar('[');

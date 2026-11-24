@@ -78,6 +78,7 @@
 //   \%         a false #if: skip lines to its #else / #endif (nested ones
 //              whole)
 //   \#xx       result := hex const xx
+//   \;c        fail if the next char is c (reads nothing: & not &&)
 //   \'X        set type high-byte of result to X ('c'/'w'/'C'/'W'; \'^ = uppercase)
 //   \?X        fail unless result type high-byte is X
 //   \| \. etc  literal escaped char (not a directive)
@@ -103,11 +104,11 @@
 //   [] alone   no code, result is ACC
 //
 // Directive chars used (ASCII order, match + production):
-//   ! # $ % & ' ( ) * + , - . / 0-9 : < = > ? @ ^ a-z (all) { } ~
+//   ! # $ % & ' ( ) * + , - . / 0-9 : ; < = > ? @ ^ a-z (all) { } ~
 //   (A-Z are rule names; space is the ws-gap directive)
 //
 // Free (not directives; ok as \X literal or future ops):
-//   " ; _ `
+//   " _ `
 //
 // Explicit stack — no recursive match.
 //
@@ -2066,7 +2067,7 @@ static void free_rules(void) {
 // note: '>' is load-time only (not stored)
 //       '<' becomes HIBIT('<') + ALT_JUMP + alt (1..31, 0: restart)
 static uchar is_dir(uchar e) {
-  return isdigit(e) || strchr("insfdprlxywmzkcahvgetoubjq+{}#='?*@$:,.!%&^()-/~", e) != NULL;
+  return isdigit(e) || strchr("insfdprlxywmzkcahvgetoubjq+{}#='?*@$:,.!%&^()-/~;", e) != NULL;
 }
 
 static void build_one_rule(uchar r, char *rhs) {
@@ -2647,6 +2648,12 @@ int run() {
   else if (c == HIBIT('?')) {
     // \?X: fail unless result type high-byte is X
     if (!a[1] || (cur.result >> 8) != a[1]) ok = 0;
+    adv = 2;
+  }
+
+  // \;c: fail if the next char is c, read nothing (& but not &&)
+  else if (c == HIBIT(';')) {
+    if (a[1] && nextc == a[1]) ok = 0;
     adv = 2;
   }
 

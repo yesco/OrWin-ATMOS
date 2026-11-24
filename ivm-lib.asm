@@ -588,7 +588,7 @@ _ivmlib_cut4:
 ;;; pvio / pcbuf (cut 2: below, so in such an image)
 ;;; ===========================================================================
 
-;;; SIM 22 B, ATMOS 10 B
+;;; SIM 22 B, ATMOS 17 B
 _opgetchar:
 .ifdef SIM
         ldx     #0                      ;; stdin
@@ -603,10 +603,14 @@ _opgetchar:
         tax
         rts
 .else
-@wait:  jsr     ROM_GETKEY              ;; UNTESTED: N=1 when key valid?
+@wait:  jsr     ROM_GETKEY              ;; N=1: a key, its code in the low 7
         bpl     @wait
         and     #$7F
-        ldx     #0
+        ldx     $0209                   ;; ROM: $A5 while FUNCT is held
+        cpx     #$A5
+        bne     @key
+        ora     #$80                    ;; FUNCT-x: hi bit (as cc65's getchar)
+@key:   ldx     #0
         rts
 .endif
 

@@ -729,7 +729,9 @@ static word gen_memadd(uchar *base, uchar **pp, const void *src, word n) {
 // byte is fine): tgt[] bitmap of all jump targets.
 //
 //   L xx        -> xx            one-byte load (xx < 32, final slots)
-//   ? G rr      -> zjp+rr        jump if ACC == 0 (rr < 64)
+//   ? G rr      -> zjp+rr        jump if ACC == 0 (rr < 64); ACC there:
+//                                0, not 1: only if it is dead there
+//                                (&& ||: their result, gen_acc_dead)
 //   ? ? ?       -> ?             !!!x == !x
 //   cmp ? ? G   -> cmp G         a compare (< = >) leaves 0 / 1: !!x == x
 //   S xx L xx   -> S xx          ACC already holds mem[xx]
@@ -755,6 +757,24 @@ static uchar *gen_tgt, *gen_del;
 static void DEL(word x) {
   bin[x] = OP_DEL;
   SETBIT(gen_del, x);
+}
+
+// ACC dead at pc? Ops on from it: one that sets ACC (not reading it): yes,
+// one that reads it (or a conditional jump, a call): no. Those that do
+// neither go on (ivm-walk.c's contract: KEEP without "in"), B: to where
+static int gen_acc_dead(word pc) {
+  word n;
+  uchar op, k;
+
+  for (k = 0; k < 64 && pc < (word)bin_ptr; k++) {   // (B loops: give up)
+    op = bin[pc];
+    if (op < 32 || strchr("LCUIJijH09Q@r'l([aKA`tuvnF", op)) return 1;
+    if (op == 'B') { pc = ivm_jump(bin + pc, pc); continue; }
+    if (!strchr(" \x7fONWYZ#\"", op)) return 0;
+    if (!(n = ivm_oplen(bin + pc))) return 0;
+    pc += n;
+  }
+  return pc >= (word)bin_ptr;
 }
 
 static void gen_peephole(void) {
@@ -810,7 +830,8 @@ static void gen_peephole(void) {
       DEL(pc);
       n = 1;          // visit the one-byte load next (constant tracking)
     }
-    else if (a0 == '?' && a1 == 'G' && a2 < 64 && t1) {
+    else if (a0 == '?' && a1 == 'G' && a2 < 64 && t1 &&
+             gen_acc_dead((word)(pc + 3 + a2))) {
       DEL(pc); DEL(pc + 1);
       a[2] = OP_ZJP + a[2];
     }
