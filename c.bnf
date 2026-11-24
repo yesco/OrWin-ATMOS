@@ -75,15 +75,17 @@ Q=#define \+ \d\c[\g]\n
 
 # - Declarations: optional register\b -> REGISTER slot 0..31
 # -O: REGISTER 0..31, other globals 32..95, frames at 96+
-V=const\c $T $M|register\b $T $M|static $T $M
+V=const\c $T $M|register\b $T $M|static\_ $T $M
 |struct\'s \i \+={\:$N}\.;|struct\'s \i \+\[$S\]\@;|struct\'s \i \+\@;
 |__striped struct\'z \i \+\[$S\]\@;
 |$T $M
 # name[N]: a static array of N (a number or const) elements: zeroed (\@),
 #   also = {0}; initialized: = "text" / = {1, 2, 'c', ...} (\: \, \.),
 #   [] its size from the initializer, [N] zeros after it. Arrays are
-#   static: initialized once (locals too: C wants "static" there)
-M=\+\[$S\]={0}\@$U
+#   static: initialized once, so in a function an initializer (\:) needs
+#   "static" (C would set it on every call). static (\_): a global with
+#   the name local: its initializer a const, once at the start (\g)
+M=\+\[$S\]={0}\:\@$U
 |\+\[$S\]=\:\s\.$U|\+\[\]=\:\s\.$U
 |\+\[$S\]={\:$N}\.$U|\+\[\]={\:$N}\.$U
 |\+\[$S\]\@$U|\+=$S[\g]$U|\+=$E[S\1]$U|\+$U

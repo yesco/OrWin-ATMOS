@@ -2,6 +2,14 @@
 
 # MeteoriC-65 (parse.c c.bnf): next, after the manual (MeteoriC-man.md)
 
+- I'm assuming that a[i]=a[i]+1; becomes quite efficient code? Adress
+  calc only once and reused. Particular for small fixed char arrays one
+  can use INC $addr,X
+  
+- realloc; maybe user code Mnnzz Vnnppoo Cppnn - 10 bytes
+  curiously if pp always is guaranteed to be 0, then Mppzz could 
+  just see pp= 0 => malloc, if !0 ==> realloc!
+
 - if a function is never called remove it and all under not used!
 
 - do we support:  a?:b; - never seen but nice shortcut opt!

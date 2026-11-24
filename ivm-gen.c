@@ -97,6 +97,9 @@ uchar next_slot; // frames/locals bump (and all slots when !optimize)
 uchar optimize;
 uchar next_reg;   // next REGISTER global (0..31)
 uchar next_glob;  // next normal global when optimize (32..95)
+// statics' slots (global, their names gone with their scope): gen_pack
+// keeps them as it keeps the globals a symbol names
+uchar static_slot[FRAME_BASE / 8];
 word main_offset;
 uchar main_vec;           // vector index of function "main", 0xff = none
 
@@ -1140,7 +1143,8 @@ static uchar gen_pack(uchar *map) {
   f0 = 0;
   for (s = 0; s < FRAME_BASE; s++)
     for (i = 0, y = syms; i < nsym; i++, y++)
-      if (y->type == SYM_VAR && y->address == s) {
+      if ((y->type == SYM_VAR && y->address == s) ||
+          (static_slot[s >> 3] & (1 << (s & 7)))) {
         map[s] = f0++;
         break;
       }

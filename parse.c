@@ -79,6 +79,7 @@
 //              whole)
 //   \#xx       result := hex const xx
 //   \;c        fail if the next char is c (reads nothing: & not &&)
+//   \_         a static declaration: as a global, the name local
 //   \'X        set type high-byte of result to X ('c'/'w'/'C'/'W'; \'^ = uppercase)
 //   \?X        fail unless result type high-byte is X
 //   \| \. etc  literal escaped char (not a directive)
@@ -104,11 +105,11 @@
 //   [] alone   no code, result is ACC
 //
 // Directive chars used (ASCII order, match + production):
-//   ! # $ % & ' ( ) * + , - . / 0-9 : ; < = > ? @ ^ a-z (all) { } ~
+//   ! # $ % & ' ( ) * + , - . / 0-9 : ; < = > ? @ ^ _ a-z (all) { } ~
 //   (A-Z are rule names; space is the ws-gap directive)
 //
 // Free (not directives; ok as \X literal or future ops):
-//   " _ `
+//   " `
 //
 // Explicit stack — no recursive match.
 //
@@ -495,6 +496,7 @@ typedef struct {
   word mark;          // \m loop start (for \z)
   uchar loop_save;    // nloop, nbrk at alt entry (break / continue)
   uchar brk_save;
+  uchar is_static;    // \_ in this alt: a static declaration (rule V)
 } Frame;
 
 // break / continue: not per frame like \x \y, the break is in the body,
@@ -514,6 +516,7 @@ static Frame *stack;
 static uchar stack_cap;
 static uchar sp;     // number of saved parents
 static Frame cur;    // working frame — access as cur.field (absolute on 6502)
+static uchar in_static(void);   // in a static declaration (\_)
 
 // Symbols and scopes (\+ \f \p \i \{ \}) live in ivm-gen.c, allocated on demand:
 //   sym_add / sym_find / sym_func / sym_truncate, scope_enter / scope_leave
@@ -1231,7 +1234,10 @@ static uchar *run_production(uchar *p) {
         // has no code to go into: nothing runs at scope 0. So it's
         // recorded in ginit_*, and gen_func_entry() emits Z/C stores
         // at the start of main. Inside a function it's a plain L+S.
-        if (scope_depth == 0) {
+        if (scope_depth == 0 || in_static()) {
+          // (a static: main's prologue, if main is still to come)
+          if (scope_depth && main_vec != 0xff)
+            FAIL("static: initialized after main (move the function up)");
           gen_ginit(dest, src);    // code now, into main's prologue
           vlog("  ginit slot %u <- const %u\n", dest, src);
         } else {
@@ -1630,6 +1636,14 @@ static uchar match_ident(void) {
 }
 
 // \+ — read and declare ident into current scope; result = new slot
+// in a static declaration: \_ in an enclosing rule V's frame
+static uchar in_static(void) {
+  uchar i = sp;
+  if (cur.is_static) return 1;
+  while (i--) if (stack[i].is_static) return 1;
+  return 0;
+}
+
 static uchar match_ident_decl(void) {
   uchar slot;
   word i;
@@ -1642,7 +1656,7 @@ static uchar match_ident_decl(void) {
   if (i != SYM_NONE)
     slot = syms[i].address;
   else {
-    if (scope_depth == 0) {
+    if (scope_depth == 0 || in_static()) {   // static: as a global
       if (is_reg)
         slot = alloc_register_slot();
       else
@@ -1650,6 +1664,8 @@ static uchar match_ident_decl(void) {
     } else
       slot = alloc_slot();
     set_decl_type(sym_add(id_buf, SYM_VAR, slot));
+    if (scope_depth && in_static() && slot < FRAME_BASE)   // (-O)
+      static_slot[slot >> 3] |= (uchar)(1 << (slot & 7));  // gen_pack
   }
   record_capture(MAKE_CAP(slot, cur_type));
 
@@ -1674,8 +1690,10 @@ static uchar array_sym(word cnt, uchar k) {
   s = &syms[nsym - 1];
   slot = s->address;
   if (s->type != SYM_VAR || !cnt) return 0;
-  if (scope_depth == 0 && optimize) {
+  if ((scope_depth == 0 || in_static()) && optimize) {
     if (next_glob == slot + 1) next_glob--;
+    if (slot < FRAME_BASE)                     // (a static: not kept)
+      static_slot[slot >> 3] &= (uchar)~(1 << (slot & 7));
   } else if (next_slot == slot + 1) next_slot--;
 
   s->nelem = cnt;
@@ -1724,6 +1742,9 @@ static uchar make_array(void) {
 static word ia_start, ia_n;
 
 static uchar init_start(void) {
+  // set once (data): in a function C would set it on every call
+  if (scope_depth && !in_static())
+    FAIL("an initialized array in a function needs static (set once)");
   ia_n = cap_count();
   ia_start = data_string_start();
   return nsym != 0;
@@ -2067,7 +2088,7 @@ static void free_rules(void) {
 // note: '>' is load-time only (not stored)
 //       '<' becomes HIBIT('<') + ALT_JUMP + alt (1..31, 0: restart)
 static uchar is_dir(uchar e) {
-  return isdigit(e) || strchr("insfdprlxywmzkcahvgetoubjq+{}#='?*@$:,.!%&^()-/~;", e) != NULL;
+  return isdigit(e) || strchr("insfdprlxywmzkcahvgetoubjq+{}#='?*@$:,.!%&^()-/~;_", e) != NULL;
 }
 
 static void build_one_rule(uchar r, char *rhs) {
@@ -2315,6 +2336,7 @@ static void alt_mark(void) {
   cur.rec_save = cur.rec;
   cur.loop_save = nloop;
   cur.brk_save = nbrk;
+  cur.is_static = 0;
   cur.prod_n = 0;
 }
 
@@ -2485,9 +2507,10 @@ int run() {
 
     // a global declaration made code: nothing runs it ("int g = 2 + 3;":
     // only consts, \g, at the top)
-    if (rch == 'V' && !scope_depth && bin_ptr > cur.code_save) {
+    if (rch == 'V' && (!scope_depth || cur.is_static) &&
+        bin_ptr > cur.code_save) {
       bin_ptr = cur.code_save;
-      err_here("global initializer: a constant only");
+      err_here("global / static initializer: a constant only");
     }
     vlog("ok %c alt %u -> @%u\n", rch, (unsigned)(cur.alts - rule[cur.rule]), abs_pos());
 
@@ -2650,6 +2673,10 @@ int run() {
     if (!a[1] || (cur.result >> 8) != a[1]) ok = 0;
     adv = 2;
   }
+
+  // \_: a static declaration (rule V): as a global (\+ \g, V's end),
+  //   the name local
+  else if (c == HIBIT('_')) cur.is_static = 1;
 
   // \;c: fail if the next char is c, read nothing (& but not &&)
   else if (c == HIBIT(';')) {

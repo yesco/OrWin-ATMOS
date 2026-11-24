@@ -15,8 +15,9 @@
 # Variants:
 #   ivm    ./ivm       cc65 C VM            size: .ivm
 #   asm    ./ivm-asm   asm VM               size: .ivm
-#   jit    ./ivm-jit   JIT -> .ivm.sim      size: .ivm.sim (cycles: SIM)
-#   hjit   ./jit       JIT on host cpu sim  size: emitted code
+#   jit    the host compiler's image (ivm-jit.x -z -o .jit.sim), sim65
+#                                           size: .jit.sim
+#   hjit   ivm-jit.x   JIT on host cpu sim  size: emitted code
 #   cc65   cl65 -Cl -Os                     size: .sim
 #   oscar  oscar64 -Os -ep                  size: .prg
 
@@ -129,8 +130,8 @@ def repro(name, t):
         "pc":    "./pc {t}",
         "ivm":   "./ivm {t}",
         "asm":   "./ivm-asm {t}",
-        "jit":   "./ivm-jit {t}",
-        "hjit":  "./jit {t}",
+        "jit":   "./ivm-jit.x -z -tsim6502 -o{t}.jit.sim {t}.ivm && sim65 -c {t}.jit.sim",
+        "hjit":  "./ivm-jit.x {t}.ivm",
         "cc65":  "cl65 -Dputz=printf -t sim6502 -Cl -Os -o {t}.sim {t}.c && sim65 -c {t}.sim",
         "oscar": "./oscar -Dputz=printf -Os -ep {t}.c",
     }[name].format(t=t)
@@ -159,15 +160,19 @@ def test(t):
         res.append(("asm", last_int(r"^(\d+) cycles$", s),
                     fsize(t + ".ivm"), t + ".ivm", ivm_out(s), t + ".asm.log"))
 
-        rm(t + ".ivm.sim", t + ".sim.log")
-        s = run(["bash", "./ivm-jit", t], t + ".jit.log")
-        o = None
-        if os.path.exists(t + ".sim.log"):
-            o = sim_out(open(t + ".sim.log", encoding="latin-1").read())
-        res.append(("jit", last_int(r"^SIM\s*:\s*(\d+)", s),
-                    fsize(t + ".ivm.sim"), t + ".ivm.sim", o, t + ".jit.log"))
+        # jit: the host compiler writes the image, sim65 runs it
+        rm(t + ".jit.sim")
+        run(["./ivm-jit.x", "-z", "-tsim6502", "-o" + t + ".jit.sim",
+             t + ".ivm"], t + ".jit-build.log")
+        s, o = "", None
+        if os.path.exists(t + ".jit.sim"):
+            s = run(["sim65", "-c", t + ".jit.sim"], t + ".jit.log")
+            o = sim_out(s)
+        res.append(("jit", last_int(r"^(\d+) cycles$", s),
+                    fsize(t + ".jit.sim"), t + ".jit.sim", o, t + ".jit.log"))
 
-        s = run(["bash", "./jit", t], t + ".hjit.log")
+        # hjit: the same JIT run in cpu6502.c on the host
+        s = run(["./ivm-jit.x", t + ".ivm"], t + ".hjit.log")
         m = re.search(r"code \$\w+-\$\w+ \((\d+) B\)", s)
         res.append(("hjit", last_int(r"^--- SIM: (\d+) cycles", s),
                     int(m.group(1)) if m else None, "code",
@@ -285,6 +290,13 @@ def main():
     spec = spec.replace("*", "ALL").replace("?", "_").replace("/", "_")
     logname = "ptest-%s.log" % spec if spec else "ptest.log"
     out = open(logname, "w")
+
+    # the host compiler and its lib (jit, hjit): when a source changed
+    run(["bash", "-c", ". ./deps; "
+         "if stale ivm-jit.x $IVM_SRC jit; then "
+         "clang -DMEMMAP -DVERBOSE -DJIT -g ivm.c -o ivm-jit.x || exit 1; fi; "
+         "if stale ivm-lib-sim6502.bin ivm-lib.asm mklib; then ./mklib; fi"],
+        "ptest-build.log")
 
     allres = [(t, test(t)) for t in tests]
 
