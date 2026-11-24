@@ -1847,17 +1847,7 @@ char save_blob(const char *path, uchar *img, int len) {
   return 1;
 }
 
-#ifdef JIT_6502
-
-// ---- -t -z -a -o support -------------------------------------------------
-//
-// -o image (all at fixed addresses, loads at jit_libbeg):
-//   [hdr][ivm-lib: jit_libbeg..a cut[][mem[] image][strings][0 gap][JIT code]
-//   -z: [hdr][ivm-lib][strings][0 gap][JIT code][mem[] image: zp copy source]
-// Entry is jit_libbeg: the startup parts it needs (bss zeroed, -z copy of
-// mem[] to zp), JSR the JIT code (ivmlib_entry), exit (sim65) / RTS (atmos).
-// Heap (opmalloc) bumps from the end of the image up to the target's heapend.
-
+#ifdef JIT
 #if defined(__SIM6502__) || defined(__SIM65C02__)
   #define JIT_DEFAULT_TARGET "sim6502"
 #elif defined(__ATMOS__)
@@ -1874,6 +1864,23 @@ static const JitTarget jit_targets[3] = {
   { "atmos",   2, 0xE2, 0x9800 },   // cc65 atmos ZP is $E2-$FB; HIRES at $9800
   { "raw",     0, 0xFA, 0x9800 },
 };
+#endif
+
+#ifdef HOSTSIM
+  #include "ivm-image.c"   // -o: an image for a target
+#endif
+
+#ifdef JIT_6502
+
+// ---- -t -z -a -o support -------------------------------------------------
+//
+// -o image (all at fixed addresses, loads at jit_libbeg):
+//   [hdr][ivm-lib: jit_libbeg..a cut[][mem[] image][strings][0 gap][JIT code]
+//   -z: [hdr][ivm-lib][strings][0 gap][JIT code][mem[] image: zp copy source]
+// Entry is jit_libbeg: the startup parts it needs (bss zeroed, -z copy of
+// mem[] to zp), JSR the JIT code (ivmlib_entry), exit (sim65) / RTS (atmos).
+// Heap (opmalloc) bumps from the end of the image up to the target's heapend.
+
 static const JitTarget *jit_tg;
 
 static ivmvar *jit_memimg;          // -o: copy of mem[], strings relocated
@@ -2343,6 +2350,13 @@ static int run_loaded_blob(uchar *img, int len) {
   #ifdef HOSTSIM
     // host: JIT + run in cpu6502.c (sim_run_blob in ivm-jit.c). img is still
     // blob-relative here: relocate() only patches on 6502 (IVM_ABS)
+    // -o: an image for the target (ivm-image.c), not run here
+    if (jit_outfile) {
+      printf("--- JIT compiling IVM (blob %d) for %s ---\n", len,
+        jit_target ? jit_target : "sim6502");
+      return host_image(img, jit_target, (uchar)jit_force_zp, (uchar)jit_zp,
+                        jit_org, jit_outfile) ? 0 : 1;
+    }
     printf("--- JIT (SIM) compiling IVM (blob %d) ---\n", len);
     while (runs) {
       runs--;
@@ -2489,9 +2503,6 @@ int main(int argc, char** argv) {
   #ifdef JIT_6502
     // code built for another address/file can't run here
     if (jit_org || jit_outfile) runs = 0;
-  #endif
-  #ifdef HOSTSIM
-    if (jit_outfile) { printf("%%SIM: -o needs the 6502 build\n"); runs = 0; }
   #endif
 
   if (file) return run_file(file);

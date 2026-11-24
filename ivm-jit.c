@@ -400,7 +400,11 @@ extern void   ivm_free(ivmvar p);
   // $FE00, below the traps. Same bytes as _opmemset in ivm-lib.asm.
   #define SIM_opmemset     0xFE00
   #define SIM_opmemset_adr 0xFE06
-  #define REF(f) ((word)SIM_##f)
+  // writing an image (ivm-image.c, -o): the lib's real addresses, from
+  // ivm-lib-TARGET.bin; else the traps
+  static uchar *hl_lib;
+  static word hl_sym(const char *name);
+  #define REF(f) (hl_lib ? hl_sym("_" #f) : (word)SIM_##f)
   char *disasm(char *mc, char *end, char indent);   // HOSTSIM: cpu6502.c
 #else
   #define REF(f) ((word)(unsigned long)(void *)(f))
@@ -1492,6 +1496,7 @@ static void loop_align_check(word ibc) {
 #define G_AI_WORD  GC(15)         // &slot1[slot2] (word) in AI already
 #define G_AI_BYTE  GC(16)         // the same, uchar
 #define G_ZP_K2    GC(18)         // slot 1 in zp, slot 2 a const < 128
+#define G_SIM      GC(19)         // HOSTSIM, running in cpu6502.c (no image)
                                   // (p->f: (zp),Y with Y = 2k)
 #define R_NEED  0x01
 #define R_DROP  0x02
@@ -1680,10 +1685,9 @@ static const JitRule jit_rules[] = {
   // # name 0: #TIMED. Host sim: JSR to a trap that prints the cycles
   // since the last one (A X Y kept), else nothing at all
 #ifdef HOSTSIM
-  RULE('#', 0, 0, _JSR L_TIMED R_STR),
-#else
-  RULE('#', 0, 0, ""),
+  RULE('#', G_SIM, 0, _JSR L_TIMED R_STR),
 #endif
+  RULE('#', 0, 0, ""),
   // m ptr val: memset(mem[ptr], val, ACC). A pending count stays pending.
   // 1..256: inline (LDY #n: 256 is 0, DEY wraps); else opmemset: its STA
   // operand = ptr + X * 256 (the last page), Y = count lo, X = count hi
@@ -1825,6 +1829,9 @@ static int rule_guard(word g, const uchar *p) {
   case G_ZP_K2 >> 10:    return is_const(p[1]) && const_val(p[1]) < 128 &&
                                 !is_const(s) && slotlo(s) < 0xff;
   case G_AI_WORD >> 10:  return ai_hit('w', s, p[1]) != 0xff;
+#ifdef HOSTSIM
+  case G_SIM >> 10:      return !hl_lib;
+#endif
   case G_AI_BYTE >> 10:  return ai_hit('b', s, p[1]) != 0xff;
   }
   return 1;
@@ -2929,7 +2936,7 @@ static void mm_print(uchar n) {
   mm_memsz = n;                        // (kept off the C stack)
   mm_syms();
   memsz = mm_memsz;
-  printf("\n--- MEMMAP %s ---\n", mm_ivm ? mm_ivm : (const char *)"");
+  printf("\n\n======== MEMMAP %s ========\n", mm_ivm ? mm_ivm : (const char *)"");
   while (done != (1 << MM_N) - 1) {
 
     // the next area by address
