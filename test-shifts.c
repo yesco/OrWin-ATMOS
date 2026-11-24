@@ -16,6 +16,11 @@
 // "y = x << 3;" (incl. its load and store); the VMs skip it, gcc too.
 // x = 37429 ($9235): bits in both bytes. Values are 16 bit unsigned.
 
+// CC65 gives errors on...
+#pragma warn (unknown-pragma, push, off)
+
+#include <stdio.h>
+
 int main() {
   int x, y, n;
 

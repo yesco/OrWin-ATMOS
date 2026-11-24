@@ -1,12 +1,22 @@
 #!/usr/bin/env python3
 # sizes - binary sizes over the commits, newest first:
 #
-#   ./sizes          the last 30 commits
-#   ./sizes 100      the last 100
-#   ./sizes all      all of them
+#   ./psizes                 the last 30 commits
+#   ./psizes 100             the last 100
+#   ./psizes all             all of them
+#   ./psizes 50 swap expr    also run test-swap.c and test-expr.c
 #
 #   date-time         parse.sim   ivm.sim  ivm-asm.sim  ivm-jit.sim  # commit
 #   2026-11-24 04:58     61,234    15,729       12,300       44,773  # 0213c27 MC: ...
+#
+# A program (PROG, PROG.c, or NAME for test-NAME.c; today's version from
+# the work tree) is compiled by each commit's parse.c (as ./pc) and run on
+# its ivm-asm.sim and ivm-jit.sim, two columns each, right after the date:
+#
+#   swap asm: 378,136 (403)    cycles (bytecode bytes, the .ivm)
+#   swap jit:  33,479 (1,606)  cycles (bytes of the -tsim6502 .ivm.sim), as
+#                              ./ivm-jit's SIM. Commits without -t: ~ the
+#                              in place run (JIT&RUN - JIT; emitted bytes)
 #
 # Each commit is built from git archive in a temp dir (not the work tree),
 # the 4 binaries in parallel, with today's commands (ivm-jit.sim: else with
@@ -15,7 +25,7 @@
 # blob hashes, so a commit that changed no source costs nothing, and a
 # rerun is instant.
 
-import concurrent.futures, json, os, shutil, subprocess, sys, tempfile
+import concurrent.futures, json, os, re, shutil, subprocess, sys, tempfile
 
 CACHE = ".sizes-cache"
 
@@ -49,9 +59,48 @@ def srckey(c):
                           stdout=subprocess.PIPE).stdout.decode().strip()
 
 
-def build1(src, name, need, cmd):
+def sh(cmd, d, timeout=600):
+    """cmd's output (stdout and stderr), "" if it timed out."""
+    try:
+        return subprocess.run(cmd, shell=True, cwd=d, timeout=timeout,
+                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT
+                              ).stdout.decode(errors="replace")
+    except subprocess.TimeoutExpired:
+        return ""
+
+
+def cycles(out):
+    m = re.findall(r"^(\d+) cycles$", out, re.M)
+    return int(m[-1]) if m else None
+
+
+def run_asm(d, p):
+    ivm = p + ".ivm"
+    c = cycles(sh("sim65 -c ivm-asm.sim " + ivm, d))
+    return [c, os.path.getsize(os.path.join(d, ivm))] if c else "FAIL"
+
+
+def run_jit(d, p):
+    ivm, img = p + ".ivm", p + ".ivm.sim"
+    sh("sim65 -c ivm-jit.sim -j -z -tsim6502 %s -o%s" % (ivm, img), d)
+    if os.path.exists(os.path.join(d, img)):
+        c = cycles(sh("sim65 -c " + img, d))
+        return [c, os.path.getsize(os.path.join(d, img))] if c else "FAIL"
+    # no -t yet: the in place run, less the JIT itself
+    j = cycles(sh("sim65 -c ivm-jit.sim -z -j " + ivm, d))
+    out = sh("sim65 -c ivm-jit.sim -z " + ivm, d)
+    a, b = cycles(out), re.findall(r"emitted (\d+) bytes", out)
+    return [a - j, int(b[-1]), "~"] if a and j and b else "FAIL"
+
+
+RUNS = {"ivm-asm.sim": run_asm, "ivm-jit.sim": run_jit}
+
+
+def build1(src, name, need, cmd, progs):
+    """name's size, and [(cycles, bytes) per prog] if it runs them."""
+    runs = [p for p in progs if name in RUNS]
     if not all(os.path.exists(os.path.join(src, f)) for f in need):
-        return "-"
+        return "-", ["-"] * len(runs)
     d = tempfile.mkdtemp(prefix="sizes-")
     try:
         shutil.copytree(src, d, dirs_exist_ok=True)   # own dir: own ivm.o
@@ -74,29 +123,76 @@ def build1(src, name, need, cmd):
                 ok = os.path.exists(f) and (p.returncode == 0 or
                                             alt == "sh cafix")
                 if ok: break
-        return os.path.getsize(f) if ok else "FAIL"
+        if not ok:
+            return "FAIL", ["FAIL"] * len(runs)
+        return os.path.getsize(f), [
+            RUNS[name](d, p)
+            if os.path.exists(os.path.join(d, p + ".ivm")) else "FAIL"
+            for p in runs]
     finally:
         shutil.rmtree(d, ignore_errors=True)
 
 
-def build(c):
+def compile_progs(src, progs):
+    """The progs (copied in) to .ivm, by the commit's parse.c as ./pc."""
+    if not progs or not os.path.exists(src + "/parse.c"):
+        return
+    for p in progs:
+        shutil.copy(p, os.path.join(src, os.path.basename(p)))
+    sh("clang -DSYMS -DRUN -DVERBOSE -O3 parse.c -o parse.x", src)
+    for p in progs:
+        b = os.path.basename(p)[:-2]
+        for opt in ("-O ", ""):      # older ones: no -O
+            sh("./parse.x %s-v c.bnf %s.c" % (opt, b), src, 300)
+            if os.path.exists(os.path.join(src, b + ".ivm")):
+                break
+
+
+def build(c, progs):
+    """[sizes per target], {prog: [asm, jit]}"""
     src = tempfile.mkdtemp(prefix="sizes-src-")
     try:
         tar = subprocess.run(["git", "archive", c], stdout=subprocess.PIPE,
                              check=True).stdout
         subprocess.run(["tar", "-x", "-C", src], input=tar, check=True)
+        compile_progs(src, progs)
+        names = [os.path.basename(p)[:-2] for p in progs]
         with concurrent.futures.ThreadPoolExecutor(len(TARGETS)) as ex:
-            return list(ex.map(lambda t: build1(src, *t), TARGETS))
+            r = list(ex.map(lambda t: build1(src, *t, names), TARGETS))
+        res = {p: [None, None] for p in progs}
+        for t, (size, runs) in zip(TARGETS, r):
+            for p, v in zip(progs, runs):
+                res[p][t[0] == "ivm-jit.sim"] = v
+        return [size for size, _ in r], res
     finally:
         shutil.rmtree(src, ignore_errors=True)
 
 
 def cell(v):
+    if isinstance(v, list):    # [cycles, bytes] or [cycles, bytes, "~"]
+        return "{:,} ({:,}){}".format(v[0], v[1], "".join(v[2:]) or " ")
     return "{:,}".format(v) if isinstance(v, int) else v
 
 
+def blob(f):
+    return subprocess.run(["git", "hash-object", f], stdout=subprocess.PIPE
+                          ).stdout.decode().strip()
+
+
+def prog(a):
+    """PROG, PROG.c, PROG.ivm, or NAME for test-NAME.c (as ./ptest)"""
+    b = re.sub(r"\.[^./]*$", "", a)
+    for f in ("test-%s.c" % b, b + ".c"):
+        if os.path.exists(f):
+            return f
+    sys.exit("%%Error: psizes: no %s.c (or test-%s.c)" % (b, b))
+
+
 def main():
-    n = sys.argv[1] if len(sys.argv) > 1 else "30"
+    args = sys.argv[1:]
+    n = args.pop(0) if args and (args[0] == "all" or args[0].isdigit()) \
+        else "30"
+    progs = [prog(a) for a in args]
     log = git("log", "--format=%H\t%h\t%ad\t%s",
               "--date=format:%Y-%m-%d %H:%M",
               *([] if n == "all" else ["-n", n]))
@@ -105,18 +201,34 @@ def main():
     except (OSError, ValueError):
         cache = {}
 
+    # a prog's results: by the commit's sources, c.bnf and the prog itself
+    pkeys = {p: blob(p) for p in progs}
+    heads = ["%s %s" % (re.sub(r"^test-", "", p[:-2]), m)
+             for p in progs for m in ("asm", "jit")]
+    pw = [max(18, len(h) + 2) for h in heads]
     w = [max(12, len(t[0]) + 2) for t in TARGETS]
     print("%-16s " % "date-time" +
+          "".join("%*s" % (wi, h) for wi, h in zip(pw, heads)) +
           "".join("%*s" % (wi, t[0]) for wi, t in zip(w, TARGETS)) +
           "  # commit", flush=True)
     for line in log.splitlines():
         full, short, date, subj = line.split("\t", 3)
         k = srckey(full)
-        if k not in cache:
-            cache[k] = build(full)
+        bnf = subprocess.run(["git", "rev-parse", "-q", "--verify",
+                              full + ":c.bnf"], stdout=subprocess.PIPE
+                             ).stdout.decode().strip()
+        pk = {p: "%s %s %s" % (k, bnf, pkeys[p]) for p in progs}
+        todo = [p for p in progs if pk[p] not in cache]
+        if k not in cache or todo:
+            sizes, res = build(full, todo)
+            cache[k] = sizes
+            for p in todo:
+                cache[pk[p]] = res[p]
             with open(CACHE, "w") as f:
                 json.dump(cache, f)
         print("%-16s " % date +
+              "".join("%*s" % (wi, cell(v)) for wi, v in
+                      zip(pw, [v for p in progs for v in cache[pk[p]]])) +
               "".join("%*s" % (wi, cell(v)) for wi, v in zip(w, cache[k])) +
               "  # %s %s" % (short, subj), flush=True)
 

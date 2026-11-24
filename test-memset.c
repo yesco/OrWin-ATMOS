@@ -17,6 +17,13 @@
 // #TIMED "name": on the host simulator prints the cycles since the last
 // #TIMED (e.g. --- memset 8191: 81985c (incl 0c page)); the VMs skip it.
 
+// CC65 gives errors on...
+#pragma warn (unknown-pragma, push, off)
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
 #define BUF 8200
 
 char *b;
@@ -54,52 +61,52 @@ int main() {
   b = malloc(BUF);
   p = b + 4;
 
-#TIMED "start"
-#TIMED "zero"
+#pragma TIMED "start"
+#pragma TIMED "zero"
 
   fill(20);  
-#TIMED
+#pragma TIMED
   // const 0: nothing
 memset(p, 9, 0);
-#TIMED "nothing"
+#pragma TIMED "nothing"
   chk(0, 9);
 
   fill(20);  
-#TIMED
+#pragma TIMED
   // const 1..256: inline
 memset(p, 1, 1);
-#TIMED "size 1"
+#pragma TIMED "size 1"
   chk(1, 1);
 
   fill(300);
-#TIMED
+#pragma TIMED
   memset(p, 2, 255);
-#TIMED "size 255"
+#pragma TIMED "size 255"
   chk(255, 2);
 
   fill(300); 
-#TIMED
+#pragma TIMED
   memset(p, 3, 256);
-#TIMED "size 256"
+#pragma TIMED "size 256"
   chk(256, 3);
 
   fill(300);
-#TIMED
+#pragma TIMED
   // const > 256: JSR _opmemset (lo != 0, lo == 0)
    memset(p, 4, 257);
-#TIMED "size 257"
+#pragma TIMED "size 257"
   chk(257, 4);  
   
   fill(600); 
-#TIMED  
+#pragma TIMED  
   memset(p, 5, 512);
-#TIMED "size LARGE: fill+checks"
+#pragma TIMED "size LARGE: fill+checks"
   chk(512, 5);
 
   fill(8195);
-#TIMED
+#pragma TIMED
   memset(p, 6, 8191);
-#TIMED "size 8191 - test 8195"
+#pragma TIMED "size 8191 - test 8195"
   chk(8191, 6);
   
   // variable count: X/Y from the slot
@@ -121,7 +128,7 @@ memset(p, 1, 1);
   w[3] = 1234;
   a = w[3];
   printf("%d\n", a);
-  c = w;
+  c = (char*)w;
   a = c[6];
   printf("%d\n", a);
   a = c[7];

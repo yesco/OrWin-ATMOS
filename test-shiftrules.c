@@ -12,6 +12,8 @@
 //                   18080 36160
 // x = 37429 ($9235), c = 105 ($69). Values are 16 bit unsigned.
 
+#include <stdio.h>
+
 int main() {
   int x, y;
   char c;

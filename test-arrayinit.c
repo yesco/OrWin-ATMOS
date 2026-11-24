@@ -34,7 +34,13 @@ char u[] = "hello";
 int z[4] = {0};
 
 #define N 3
+
+#ifdef __CC65__
+// LOL a constant expression in CC65 isn't a constant lol
+#define two 2 // lol
+#else
 const int two = 2;
+#endif
 int q[N] = {two, N};
 
 int counter() {

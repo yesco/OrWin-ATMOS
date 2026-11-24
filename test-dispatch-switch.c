@@ -2,6 +2,20 @@
 
 // Used for benchmarking switch/case optimizations of
 
+#include <stdio.h>
+
+#ifdef __CC65__
+
+#ifndef putz
+#define putz printf
+#endif
+
+#define putn(x) printf("%d ", (x))
+#define putnl(x) printf("%d\n", (x))
+#define nl() putchar('\n')
+
+#endif
+
 char* code= (char*)0x400;
 
 int disasm() {

@@ -89,6 +89,10 @@
 
 #include <stdio.h>
 
+#ifndef __MC65__
+#define NOP 0
+#endif
+
 int main(void) {
   int i;
   

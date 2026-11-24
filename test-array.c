@@ -42,7 +42,11 @@ char a[20];
 #define BIGSIZE 2048
 char big[BIGSIZE];
 
+#ifdef __CC65__
+#define ten 10
+#else
 const int ten = 10;
+#endif
 int w[ten];
 
 int iw[130];
