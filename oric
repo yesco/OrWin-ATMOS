@@ -3,21 +3,31 @@
 #
 #   ./oric test-swap            PROG, PROG.c, PROG.ivm all ok
 #   ./oric test-swap -z         extra args go to the compiler (ivm-jit.x)
+#   ./oric --live test-swap     at 1 MHz (real time), the screen redrawn
+#                               ~10 times a second while it runs
+#   ./oric --live-fast ...      the same, as fast as it goes
+#   ./oric game.tap             any .tap as it is: no build, just run it
 #
+# A .tap not from the host compiler (its tape name isn't IVM) has no
+# _ivmlib_exit: it runs until ORIC_CYCLES (default 100000000 for those)
+# or Ctrl-C, then its screen is shown. Ctrl-C works in all modes.
 # The host compiler writes PROG.tap (-tatmos, ivm-lib-atmos.bin), the
-# emulator loads it (-f) with BASIC 1.1. Breakpoints at the image's start
-# and at ivm-lib's _ivmlib_exit count the program's cycles (on a real
-# Atmos: the 50 Hz ROM interrupt and the ROM's char printing included).
-# There the emulator quits and dumps its text screen ($BB80, 40x28):
-# PROG.oric.scr, printed framed. The lines after BASIC's "Ready" are the
+# emulator loads it (-f) with BASIC 1.1 and is driven by its --control
+# protocol (stdin/stdout): breakpoints at the image's start and at
+# ivm-lib's _ivmlib_exit count the program's cycles (on a real Atmos: the
+# 50 Hz ROM interrupt and the ROM's char printing included); --live
+# pauses it to read the screen. At the exit its text screen ($BB80,
+# 40x28, raw bytes) is rendered as fillins.c does: serial ink / paper
+# (reset each row), bit 7 inverse, ` as (c), ~ 127 as shades (colors only
+# on a terminal), PROG.oric.scr. The lines after BASIC's "Ready" are the
 # program's output, compared to PROG.out (its last lines: the screen
-# only holds 26). Logs: PROG.oric-build.log, PROG.oric.log.
+# only holds 26). Logs: PROG.oric-build.log, PROG.oric.log (the session).
 #
 #   PHOSPHORIC   the emulator (default ../Phosphoric/oric1-emu)
 #   ORIC_ROM     the BASIC 1.1 ROM (default: Phosphoric's or the OSDK's)
-#   ORIC_CYCLES  give up after (default 2000000000)
+#   ORIC_CYCLES  give up after (default 2000000000; other .tap: 100000000)
 
-import os, re, struct, subprocess, sys
+import os, re, select, struct, subprocess, sys, time
 
 here = os.path.dirname(os.path.abspath(sys.argv[0]))
 up = os.path.dirname(here)
@@ -72,12 +82,131 @@ def unwrap(rows):
     return out + ([cur] if cur else [])
 
 
+class Emu:
+    """Phosphoric --control: commands on its stdin, replies (OK / ERR) and
+    events (EVT) on its stdout. Raw reads, own line buffer (select() can't
+    see lines a file object has buffered already)"""
+
+    def __init__(self, cmd, log):
+        self.p = subprocess.Popen(cmd, stdin=subprocess.PIPE,
+                                  stdout=subprocess.PIPE,
+                                  stderr=subprocess.DEVNULL,
+                                  start_new_session=True)   # no ^C for it
+        self.buf, self.log = b"", log
+
+    def send(self, c):
+        self.log.write("> %s\n" % c)
+        self.p.stdin.write((c + "\n").encode())
+        self.p.stdin.flush()
+
+    def line(self, timeout=None):
+        """the next line, None: none within timeout (or it exited)"""
+        end = None if timeout is None else time.time() + timeout
+        while b"\n" not in self.buf:
+            t = None if end is None else max(0, end - time.time())
+            if not select.select([self.p.stdout], [], [], t)[0]:
+                return None
+            d = os.read(self.p.stdout.fileno(), 65536)
+            if not d:
+                return None
+            self.buf += d
+        l, self.buf = self.buf.split(b"\n", 1)
+        l = l.decode(errors="replace")
+        self.log.write("< %s\n" % (l if len(l) < 200 else l[:200] + " ..."))
+        return l
+
+    def cmd(self, c):
+        """c, its reply (events before it: self.evts)"""
+        self.send(c)
+        while True:
+            l = self.line()
+            if l is None:
+                die("emulator gone (on: %s)" % c)
+            if l.startswith(("OK", "ERR")):
+                return l
+            self.evts.append(l)
+
+    evts = []
+
+    def event(self, timeout=None):
+        """the next EVT (stopped / halt), None: timeout"""
+        while not self.evts:
+            l = self.line(timeout)
+            if l is None:
+                return None
+            if l.startswith("EVT"):
+                self.evts.append(l)
+        return self.evts.pop(0)
+
+
+def evt(l, key):
+    m = re.search(r"\b%s=(\S+)" % key, l or "")
+    return m.group(1) if m else ""
+
+
+# the screen, as fillins.c draws it: ink 0-7 / paper 16-23 attributes
+# (serial: from there to the row's end), bit 7 inverse
+INK = "\x1b[%dm"
+
+
+def render(scr, color):
+    """raw $BB80 bytes -> (rows to show, plain ASCII rows: the output)"""
+    show, plain = [], []
+    for y in range(28):
+        fg, bg, s, a = 7, 0, "", ""
+        if color:
+            s = "\x1b[0m" + INK % 37 + INK % 40
+        for c in scr[40 * y:40 * y + 40]:
+            inv, c = c & 0x80, c & 0x7f
+            if c < 32:
+                if c < 8:
+                    fg = c
+                elif 16 <= c < 24:
+                    bg = c & 7
+                ch, a = " ", a + " "
+            else:
+                ch = {0x60: "\u00a9", 126: "\u2592", 127: "\u2588"}.get(c, chr(c))
+                a += chr(c)
+            if color:
+                f, b = (7 - fg, 7 - bg) if inv else (fg, bg)
+                s += INK % (30 + f) + INK % (40 + b) + ch
+            else:
+                s += ch
+        show.append(s + ("\x1b[0m" if color else ""))
+        plain.append(a)
+    return show, plain
+
+
+def tap_info(b):
+    """an Oric .tap header: (type, start, name). Sync bytes $16.., $24,
+    2 bytes, type ($80 machine code, 0 BASIC), autorun, end, start (big
+    endian), a byte, the name, 0"""
+    i = 0
+    while i < len(b) and b[i] == 0x16:
+        i += 1
+    if i == 0 or i + 10 > len(b) or b[i] != 0x24:
+        die("not an Oric .tap (no sync bytes / $24)")
+    h = b[i + 1:]
+    j = h.index(0, 9) if 0 in h[9:] else len(h)
+    return h[2], h[6] << 8 | h[7], h[9:j].decode(errors="replace")
+
+
 def main():
-    if len(sys.argv) < 2:
-        die("usage: ./oric PROG [compiler args]")
+    opts = [a for a in sys.argv[1:] if a in ("--live", "--live-fast")]
+    args = [a for a in sys.argv[1:] if a not in opts]
+    live, fast = bool(opts), "--live-fast" in opts
+    if not args:
+        die("usage: ./oric [--live|--live-fast] PROG [compiler args] | FILE.tap")
+    sys.argv[1:] = args
+    # a .tap: as it is (its path from here, before the chdir)
+    tapf = None
+    if args[0].endswith(".tap") and os.path.exists(args[0]):
+        tapf = os.path.abspath(args[0])
     os.chdir(here)
     name = sys.argv[1]
-    if re.match(r"^[^/]+\.[^./]+$", os.path.basename(name)):
+    if tapf:
+        name = tapf[:-4]
+    elif re.match(r"^[^/]+\.[^./]+$", os.path.basename(name)):
         name = name.rsplit(".", 1)[0]
     extra = " ".join(sys.argv[2:])
     emu = first(os.environ.get("PHOSPHORIC"), up + "/Phosphoric/oric1-emu")
@@ -90,6 +219,20 @@ def main():
         die("no BASIC 1.1 ROM (set ORIC_ROM)")
 
     # the program, the host compiler, the lib: only what is stale
+    if not tapf:
+        build_tap(name, extra)
+    tapf = tapf or name + ".tap"
+    tap = open(tapf, "rb").read()
+    ttype, start, tname = tap_info(tap)
+    ours = tname == "IVM" and ttype & 0x80
+    exit_ = lib_sym("_ivmlib_exit") if ours else None
+    limit = int(os.environ.get("ORIC_CYCLES",
+                               2000000000 if ours else 100000000))
+    return run_tap(name, tapf, tap, ttype, start, exit_, limit, emu, rom,
+                   live, fast)
+
+
+def build_tap(name, extra):
     build = ". ./deps; "
     if not os.path.exists(name + ".ivm") or \
        os.path.getmtime(name + ".c") > os.path.getmtime(name + ".ivm"):
@@ -106,44 +249,112 @@ def main():
     if sh(build, name + ".oric-build.log") or not os.path.exists(name + ".tap"):
         die("no %s.tap (see %s.oric-build.log)" % (name, name))
 
-    tap = open(name + ".tap", "rb").read()
-    start = tap[10] << 8 | tap[11]            # big endian, as the ROM reads it
-    exit_ = lib_sym("_ivmlib_exit")
 
-    # start: print the cycles, break at the exit, go; exit: cycles; EOF quits
+def run_tap(name, tapf, tap, ttype, start, exit_, limit, emu, rom, live, fast):
+    """run it; ours (exit_): its cycles, its output vs the .out"""
+    # break at the start (machine code) and the exit (ours), go; --live
+    # (and without an exit: to see the limit): pause, read the screen,
+    # draw it, go on
     scr = name + ".oric.scr"
-    if os.path.exists(scr):
-        os.remove(scr)
-    cmd = [emu, "-n", "-f", "-m", "atmos", "-r", rom, "-t", name + ".tap",
-           "-c", os.environ.get("ORIC_CYCLES", "2000000000"),
-           "--break", "%04X" % start, "--screenshot-text", scr]
-    print("$ %s < (r; b %04X; c; r) > %s.oric.log"
-          % (" ".join(cmd[:1] + ["-n", "-f", "-m atmos", "-t", name + ".tap",
-                                 "--break %04X" % start]), exit_, name),
-          file=sys.stderr)
-    p = subprocess.run(cmd, input=("r\nb %04X\nc\nr\n" % exit_).encode(),
-                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    out = p.stdout.decode(errors="replace")
-    open(name + ".oric.log", "w").write(out)
-    cyc = [int(c) for c in re.findall(r"PC:[0-9A-F]{4} CYC:(\d+)", out)]
-    pcs = re.findall(r"PC:([0-9A-F]{4}) CYC:\d+", out)
-    done = len(cyc) >= 2 and pcs[-1] == "%04X" % exit_
+    cmd = [emu, "--control", "-n", "-f", "-m", "atmos", "-r", rom,
+           "-t", tapf, "-c", str(limit * 2)]
+    if live and not fast:
+        cmd.append("--realtime")
+    print("$ %s > %s.oric.log" % (" ".join(cmd), name), file=sys.stderr)
+    color = sys.stdout.isatty()
+    log = open(name + ".oric.log", "w")
+    e = Emu(cmd, log)
+    while not (e.event() or "EVT stopped").startswith("EVT stopped"):
+        pass                                    # ready, then stopped at reset
+    if ttype & 0x80:
+        e.cmd("break %04X" % start)
+    if exit_:
+        e.cmd("break %04X" % exit_)
+    e.cmd("continue")
+    cyc, done, frame, t0, why = [], 0, 0, time.time(), ""
+    poll = 0.1 if live else None if exit_ else 0.5
+
+    def screen():
+        r = e.cmd("read BB80 460")
+        return bytes(int(x, 16) for x in r.split()[1:])
+
+    def draw(rows, status):
+        sys.stdout.write("\x1b[H" + "\n".join(rows) + "\n" + status + "\x1b[K\n")
+        sys.stdout.flush()
+
+    if live and color:
+        sys.stdout.write("\x1b[2J\x1b[?25l")
+    try:
+        while True:
+            l = e.event(poll)
+            if l is None and poll:              # a frame: pause, look, go on
+                e.cmd("pause")
+                l = e.event()
+                # a pause in the same frame as a breakpoint: reason=user,
+                # at its pc. Then it is that breakpoint
+                if ttype & 0x80 and not cyc and evt(l, "pc") == "%04X" % start:
+                    l = l.replace("reason=user", "reason=break")
+                if exit_ and evt(l, "pc") == "%04X" % exit_:
+                    l = l.replace("reason=user", "reason=break")
+                if evt(l, "reason") == "user":
+                    frame += 1
+                    now = int(evt(l, "cycles"))
+                    if live:
+                        draw(render(screen(), color)[0] if color else [""],
+                             "%s: %s %s cycles, %.1f s" % (
+                                 os.path.basename(name),
+                                 "running" if cyc else "booting",
+                                 "{:,}".format(now - (cyc[0] if cyc else 0)),
+                                 time.time() - t0))
+                    if now >= limit:            # (stopped: the screen is there)
+                        why = "the limit, %s cycles" % "{:,}".format(limit)
+                        break
+                    e.cmd("continue")
+                    continue
+            if l is None or l.startswith("EVT halt"):
+                why = why or "the emulator stopped (%s)" % evt(l, "reason")
+                break
+            if evt(l, "reason") == "break":
+                cyc.append(int(evt(l, "cycles")))
+                if exit_ and evt(l, "pc") == "%04X" % exit_:
+                    done = 1
+                    break
+            e.cmd("continue")
+    except KeyboardInterrupt:                   # stop it where it is
+        why = "Ctrl-C"
+        e.cmd("pause")
+        e.event(1)
+    raw = screen() if e.p.poll() is None else b""
+    rows, plain = render(raw, color)
+    try:
+        e.send("quit")
+        e.p.wait(5)
+    except Exception:
+        e.p.kill()
+    log.close()
+    if live and color:
+        sys.stdout.write("\x1b[?25h\x1b[2J\x1b[H")
+    open(scr, "w").write("".join(r.rstrip() + "\n" for r in render(raw, 0)[0]))
 
     # the screen
-    lines = open(scr).read().split("\n") if os.path.exists(scr) else []
+    lines = [r.rstrip() for r in plain]
     while lines and not lines[-1].strip():
         lines.pop()
     print("+" + "-" * 40 + "+")
-    for l in lines:
-        print("|%-40s|" % l[:40])
+    for r in rows[:len(lines)]:
+        print("|%s|" % r)
     print("+" + "-" * 40 + "+")
+    done = done and len(cyc) >= 2
 
+    if not exit_:                               # not ours: no exit, no .out
+        print("= %s: stopped by %s" % (os.path.basename(tapf), why))
+        return 0
     if not done:
         print("%%Error: oric: %s never reached _ivmlib_exit $%04X (see %s.oric.log)"
               % (name, exit_, name))
         return 1
     print("= %s cycles (%5d bytes) - oric  - %s"
-          % ("{:,}".format(cyc[-1] - cyc[0]), len(tap), name))
+          % ("{:,}".format(cyc[-1] - cyc[0]), len(tap), os.path.basename(name)))
 
     # its output: after BASIC's Ready (row 0: the status line), vs the end
     # of the .out. Scrolled away: all rows but the top one (maybe a part)
