@@ -286,9 +286,9 @@ static void anim_pop(void) {
 }
 
 static void anim_report(void) {
-  eprintf("\nstack: max depth %u of %u frames (%u bytes of Frame)\n",
+  eprintf("\nstack: max depth %u of %u states (%u bytes of State)\n",
           (unsigned)max_sp, (unsigned)MAX_STACK,
-          (unsigned)(max_sp * sizeof(Frame)));
+          (unsigned)(max_sp * sizeof(State)));
 }
 
 #else
@@ -488,7 +488,8 @@ static uchar stripe;        // -S: all arrays of structs striped (the JIT)
 static uchar ignore_case;   // default 1
 
 // ------------------------------------------------------------
-// FRAME struct storage
+// STATE struct storage: the parser's, one per rule call (not a function's
+// frame in mem[])
 
 // TODO: too big!
 // A: 49 bytes now The big ones:
@@ -497,7 +498,7 @@ static uchar ignore_case;   // default 1
 //   patch[4] 8 B. rip could be a uchar if no alt gets over 255 bytes.
 //
 // It's per stack level (up to MAX_STACK, grown by STACK_GROW), and push
-// copies the whole Frame: smaller Frame = less RAM and faster push/pop.
+// copies the whole State: smaller State = less RAM and faster push/pop.
 
 typedef struct {
   uchar rule;
@@ -535,7 +536,7 @@ typedef struct {
   word mark;          // \m loop start (for \z)
   uchar loop_save;    // nloop, nbrk at alt entry (break / continue)
   uchar brk_save;
-} Frame;
+} State;
 
 // break / continue: not per frame like \x \y, the break is in the body,
 // a rule (K) below the loop's. Loop k (\( .. \)) owns the pending jumps
@@ -547,13 +548,13 @@ static uchar nloop, loop_brk[MAX_LOOP];
 static uchar nbrk, brk_cont[MAX_BRK];    // 1: continue, 0: break, 2: done
 static word  brk_at[MAX_BRK];
 
-// stack[0..sp-1] = suspended parents; cur = active frame (by value).
-// Push/pop copy the whole Frame (cheaper on cc65 than many cur.field ops).
+// stack[0..sp-1] = suspended parents; cur = active state (by value).
+// Push/pop copy the whole State (cheaper on cc65 than many cur.field ops).
 
-static Frame *stack;
+static State *stack;
 static uchar stack_cap;
 static uchar sp;     // number of saved parents
-static Frame cur;    // working frame — access as cur.field (absolute on 6502)
+static State cur;    // working state — access as cur.field (absolute on 6502)
 
 // Symbols and scopes (\+ \f \p \i \{ \}) live in ivm-gen.c, allocated on demand:
 //   sym_add / sym_find / sym_func / sym_truncate, scope_enter / scope_leave
@@ -1218,7 +1219,7 @@ static uchar *run_production(uchar *p) {
         break;
 
 
-      // \k: param slot for the next call argument; frame above is the caller
+      // \k: param slot for the next call argument; the state above is the caller
       // (the rule that matched \i and called Z)
       case HIDIR('k'):
         cv = (sp >= 1) ? stack[sp - 1].func_vec : 0xff;
@@ -1899,7 +1900,7 @@ static uchar soa_base(Symbol *a, uchar k) {
 }
 
 // \m — member: .f or ->f, f a param of the struct (stub) of what \i or
-//   \m matched last in this frame, else in the parent (a chain rule):
+//   \m matched last in this state, else in the parent (a chain rule):
 //   rec, its symbol, links (ret_slot) the struct's name. Searched as if
 //   in its scope: the params right after it. Result = const k (the word
 //   index for the ( ) ops); rec = f (a pointer field: the next ->). A
@@ -2400,7 +2401,7 @@ static void push(uchar r) {
     //   deepest the parse got, rounded up to 8 frames
     
     if (ncap > MAX_STACK) ncap = MAX_STACK;
-    stack = xrealloc(stack, ncap * sizeof(Frame));
+    stack = xrealloc(stack, ncap * sizeof(State));
     stack_cap = ncap;
   }
 
@@ -2414,7 +2415,7 @@ static void push(uchar r) {
   if (r == 'B' - 'A' && sp > 0 && cur.rule == 'P' - 'A')
     main_offset = bin_ptr;
 
-  // suspend active frame (memcpy via struct assignment), open a new cur
+  // suspend the active state (memcpy via struct assignment), open a new cur
   stack[sp] = cur;
   sp++;
   anim_push(r);
@@ -2430,7 +2431,7 @@ static void push(uchar r) {
   memset(cur.prod_cap, 0, sizeof(cur.prod_cap));
 
   // TODO: init (?) why ehere?
-  // A: the new frame starts at its first alt, and goto_alt() also
+  // A: the new state starts at its first alt, and goto_alt() also
   //   snapshots the undo info (alt_mark) for that alt
   goto_alt(0);
 }
@@ -2445,7 +2446,7 @@ static void restore_scope(void) {
   next_reg = cur.reg_save;
 }
 
-// frame_rewind: Undo the current alt before trying the next one.
+// state_rewind: Undo the current alt before trying the next one.
 // drop its code, captures and patches,
 // rewind the input to where the alt started.
 
@@ -2453,7 +2454,7 @@ static void restore_scope(void) {
 // - input only if not committed away.
 // Returns 0 if save_abs < line_abs (\o dropped that text)
 // — caller fail-fasts.
-static int frame_rewind(void) {
+static int state_rewind(void) {
   bin_ptr = cur.code_save;
   if (pl_end > bin_ptr) pl_end = 0xffff;     // that load is gone
   if (ginit_len != cur.ginit_save) {
@@ -2807,7 +2808,7 @@ int run() {
 
 fail_alt:
   // next alt, or pop if none left / mark committed away
-  if (frame_rewind()) {
+  if (state_rewind()) {
     restore_scope();
     if (cur.alts[1]) {
       goto_alt(255);   // step to next alt and snapshot

@@ -242,7 +242,7 @@ The thing that would actually save hundreds of bytes (but isn't "dedupe")
 
 A few structural wins dwarf the above:
 
-2. Frame is huge (~46 bytes). On a 6502 with 64 frames that's ~3 KB
+2. State is huge (~46 bytes). On a 6502 with 64 frames that's ~3 KB
    of stack allocation — but it's realloc'd on demand in STACK_GROW=8
    chunks, so the resident cost is smaller. Still, prod_cap[10] as
    word = 20 bytes/frame. If captures were uchar (you already noted
@@ -340,11 +340,11 @@ With parse defaults (`MAX_BIN_LEN=4096`, rest ivm-gen defaults, cc65 `STR_MATCH_
 |--------|--------|--------|
 | **BNF** `blobs[r]` + `rule[r][]` | once at load | size of grammar text + pointers |
 | **`line_buf`**      | doubles from 256 | live window after `\C` commits; ≤ remaining file, often ≪ `INPUT_SIZE` |
-| **`stack` (Frame)** | +8 frames to `MAX_STACK` | `NFRAMES * sizeof(Frame)` |
+| **`stack` (State)** | +8 frames to `MAX_STACK` | `NFRAMES * sizeof(State)` |
 | **`syms[]`**        | +16 `Symbol` to `MAX_SYMBOLS` | `NSYMS * sizeof(Symbol)` + Σ `strlen(name)+1` |
 | **blob output**     | `malloc` in `build_blob` | header + vectors + consts + fp + bytecode + data ≈ **O(NBYTECODE + NCONST + NBYTESDATA + NVECTORS)** |
 
-**`sizeof(Frame)`** (6502, `word` = 2): about **50–56 bytes**  
+**`sizeof(State)`** (6502, `word` = 2): about **50–56 bytes**  
 (`prod_cap[10]`, `patch[4]`, saves, marks).
 
 **`sizeof(Symbol)`** without name: about **16–20 bytes** + `malloc(name)`.
@@ -364,7 +364,7 @@ MEM ≈
   + 2*NAME_LEN + 2*MAX_STACK
   + BNF_BYTES
   + LINE_CAP                    // ≤ INPUT_SIZE, usually much less after \C
-  + NFRAMES * sizeof(Frame)     // ≤ MAX_STACK * ~56
+  + NFRAMES * sizeof(State)     // ≤ MAX_STACK * ~56
   + NSYMS * sizeof(Symbol) + NAME_BYTES
   + BLOB_BYTES                  // build_blob malloc (can free after save)
   + O(1)
@@ -405,7 +405,7 @@ BLOB ≈ 22
 1. **`bin[4096]`** — biggest fixed hit; lower `MAX_BIN_LEN` if
    programs are small
 2. **`data_pool[2048]`** + **`const_pool`**  
-3. **Parse `Frame` stack** — depth × ~56 bytes  
+3. **Parse `State` stack** — depth × ~56 bytes  
 4. **Symbols** — light if names are short and `SYM_GROW` is small  
 5. **`line_buf`** — only dangerous if `\C` is rare and the whole file
    sits in RAM
@@ -439,7 +439,7 @@ API today: **`darr` / `dfree` / `dptr`** only. No length field, no `dpush`, no b
 | Region | Good `darr`? | Notes |
 |--------|----------------|--------|
 | **`syms[]`**            | Yes | `z = sizeof(Symbol)`; stable `&syms[i]` matches “pointer until next grow” better than `realloc` |
-| **Parse `Frame` stack** | Yes | `z = sizeof(Frame)`; depth-indexed; no big `MAX_STACK` reserve |
+| **Parse `State` stack** | Yes | `z = sizeof(State)`; depth-indexed; no big `MAX_STACK` reserve |
 | **`bin[]` bytecode**    | Partial | Byte `z=1`; random `bin[i]` → `dptr`; **emit append** needs a cursor + `dptr(n)` |
 | **`const_pool` / `const_is_reloc`** | Yes | Small `z`; or one darr of pairs |
 | **`data_pool` strings** | Awkward | Append-only stream; want contiguous `memcpy` into blob — **chunking hurts** without `dmove` |
@@ -495,7 +495,7 @@ Optional: **`dlen`** or keep external counts only.
 
 ### One-shot replacement strategy (practical)
 
-1. **First:** `syms`, parse **`stack`/`Frame`** — drop
+1. **First:** `syms`, parse **`stack`/`State`** — drop
   `realloc`/`MAX_STACK` reserve; biggest design win, little API pain.
 
 2. **Then:** `bin` as `darr(1)` + `bin_ptr` + cached block for
