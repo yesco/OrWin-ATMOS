@@ -97,15 +97,17 @@
 //   \k         next call-arg param slot
 //   \x \y \w   forward jump placeholder / patch / swap
 //   \m \z      loop mark / relative back
+//   \( \- \)   loop open / continues land here / breaks land here (close)
+//   \/ \~      break / continue: forward jump placeholder (0?G\/)
 //   \[ \]      literal [ ]
 //   [] alone   no code, result is ACC
 //
 // Directive chars used (ASCII order, match + production):
-//   ! # $ % & ' * + , . 0-9 : < = > ? @ ^ a-z (all) { }
+//   ! # $ % & ' ( ) * + , - . / 0-9 : < = > ? @ ^ a-z (all) { } ~
 //   (A-Z are rule names; space is the ws-gap directive)
 //
 // Free (not directives; ok as \X literal or future ops):
-//   " ( ) - / ; _ ` ~
+//   " ; _ `
 //
 // Explicit stack — no recursive match.
 //
@@ -489,7 +491,19 @@ typedef struct {
   uchar npatch;       // pending forward jumps (\x pushes, \y pops)
   word patch[4];
   word mark;          // \m loop start (for \z)
+  uchar loop_save;    // nloop, nbrk at alt entry (break / continue)
+  uchar brk_save;
 } Frame;
+
+// break / continue: not per frame like \x \y, the break is in the body,
+// a rule (K) below the loop's. Loop k (\( .. \)) owns the pending jumps
+// brk_at[loop_brk[k]..nbrk[ (the rel byte of a 0?G): \- patches its
+// continues, \) its breaks. Alt entry saves nloop / nbrk (backtracking).
+#define MAX_LOOP 8
+#define MAX_BRK  16
+static uchar nloop, loop_brk[MAX_LOOP];
+static uchar nbrk, brk_cont[MAX_BRK];    // 1: continue, 0: break, 2: done
+static word  brk_at[MAX_BRK];
 
 // stack[0..sp-1] = suspended parents; cur = active frame (by value).
 // Push/pop copy the whole Frame (cheaper on cc65 than many cur.field ops).
@@ -790,6 +804,18 @@ static uchar const_slot(unsigned int v) {
   return as_addr(lit_addr(v));
 }
 
+// the forward jump placeholder (rel byte) at w: to here (\y \- \))
+static void patch_here(word w) {
+  if (bin_ptr - (w + 1) > 255) FAIL("jump too far");
+  bin[w] = bin_ptr - (w + 1);
+#ifndef IVM_NO_VN
+  vn_label = bin_ptr;                  // a jump lands here
+#endif
+  #ifdef SYMS
+    sym_patch('F', w, (word)bin_ptr, (int)bin[w], last_func_vec);
+  #endif
+}
+
 // the last plain load emitted by \lN: [pl_at, pl_end[ loads slot pl_slot
 static word  pl_at, pl_end = 0xffff;
 static uchar pl_slot;
@@ -1079,18 +1105,41 @@ static uchar *run_production(uchar *p) {
         b = cur.npatch;
         if (b) {
           cur.npatch = --b;
-          w = cur.patch[b];
-          if (bin_ptr - (w + 1) > 255) FAIL("jump too far");
-          bin[w] = bin_ptr - (w + 1);
-#ifndef IVM_NO_VN
-          vn_label = bin_ptr;                  // a jump lands here
-#endif
-
-          #ifdef SYMS
-            sym_patch('F', (word)w, (word)bin_ptr,
-              (int)bin[w], last_func_vec);
-          #endif
+          patch_here(cur.patch[b]);
         }
+        break;
+
+      // \( open a loop: the \/ \~ in its body are its
+      case HIBIT('('):
+        if (nloop == MAX_LOOP) FAIL("loops nested too deep");
+        loop_brk[nloop++] = nbrk;
+        break;
+
+      // \/ break, \~ continue: forward jump placeholder, to the loop's
+      //   \) / \-
+      case HIBIT('/'):
+      case HIBIT('~'):
+        if (!nloop) FAIL(e == HIBIT('/') ? "break outside a loop"
+                                         : "continue outside a loop");
+        if (nbrk == MAX_BRK) FAIL("too many break / continue");
+        emit(0);
+        brk_at[nbrk] = bin_ptr - 1;
+        brk_cont[nbrk++] = e == HIBIT('~');
+        break;
+
+      // \- continues land here; \) breaks land here, the loop is closed
+      case HIBIT('-'):
+      case HIBIT(')'):
+        if (!nloop) FAIL("loop end without \\(");
+        for (b = loop_brk[nloop - 1]; b < nbrk; b++) {
+          if (brk_cont[b] == 1 && e == HIBIT(')'))
+            FAIL("continue: the loop has no \\-");
+          if (brk_cont[b] == (e == HIBIT('-'))) {
+            patch_here(brk_at[b]);
+            brk_cont[b] = 2;
+          }
+        }
+        if (e == HIBIT(')')) nbrk = loop_brk[--nloop];
         break;
 
       // \w: swap the two newest placeholders
@@ -2016,7 +2065,7 @@ static void free_rules(void) {
 // note: '>' is load-time only (not stored)
 //       '<' becomes HIBIT('<') + ALT_JUMP + alt (1..31, 0: restart)
 static uchar is_dir(uchar e) {
-  return isdigit(e) || strchr("insfdprlxywmzkcahvgetoubjq+{}#='?*@$:,.!%&^", e) != NULL;
+  return isdigit(e) || strchr("insfdprlxywmzkcahvgetoubjq+{}#='?*@$:,.!%&^()-/~", e) != NULL;
 }
 
 static void build_one_rule(uchar r, char *rhs) {
@@ -2262,6 +2311,8 @@ static void alt_mark(void) {
   cur.code_save = bin_ptr;
   cur.ginit_save = ginit_len;
   cur.rec_save = cur.rec;
+  cur.loop_save = nloop;
+  cur.brk_save = nbrk;
   cur.prod_n = 0;
 }
 
@@ -2356,6 +2407,8 @@ static int frame_rewind(void) {
   cur.prod_n = 0;
   cur.npatch = 0;
   cur.rec = cur.rec_save;
+  nloop = cur.loop_save;
+  nbrk = cur.brk_save;
 
   // Function entry code (and main's global inits) is emitted lazily,
   // by the first emit after \f (pending_func_entry). If this rewind

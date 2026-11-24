@@ -727,6 +727,7 @@ static word gen_memadd(uchar *base, uchar **pp, const void *src, word n) {
 //   L xx        -> xx            one-byte load (xx < 32, final slots)
 //   ? G rr      -> zjp+rr        jump if ACC == 0 (rr < 64)
 //   ? ? ?       -> ?             !!!x == !x
+//   cmp ? ? G   -> cmp G         a compare (< = >) leaves 0 / 1: !!x == x
 //   S xx L xx   -> S xx          ACC already holds mem[xx]
 //   S xx xx     -> S xx          (xx < 32: one-byte load)
 //   0 X         -> Q             return 0
@@ -755,7 +756,7 @@ static void DEL(word x) {
 static void gen_peephole(void) {
   word pc, n, t, nb = (word)((bin_ptr >> 3) + 1);
   word kv = 0, kpc = 0;     // ACC == kv, loaded by the op at kpc (kn bytes)
-  uchar *a, op, kn = 0, kc = 0, dead = 0;
+  uchar *a, op, kn = 0, kc = 0, dead = 0, pop = 0;   // pop: previous op
   uchar a0, a1, a2, a3, t1, t2;
 
   gen_tgt = (uchar *)calloc(nb, 2);
@@ -781,7 +782,7 @@ static void gen_peephole(void) {
     // a jump lands here: ACC unknown, code alive again. Until then, dead
     // code: every byte becomes a DEL (targets are always op starts)
     n = 1;
-    if (TGT(pc)) dead = kc = 0;
+    if (TGT(pc)) dead = kc = pop = 0;
     if (dead) {
       DEL(pc);
       continue;
@@ -809,6 +810,10 @@ static void gen_peephole(void) {
       DEL(pc); DEL(pc + 1);
       a[2] = OP_ZJP + a[2];
     }
+    else if (a0 == '?' && a1 == '?' && a2 == 'G' && t1 && t2 && pop &&
+             strchr("<=>", pop)) {
+      DEL(pc); DEL(pc + 1);
+    }
     else if (a0 == '?' && a1 == '?' && a2 == '?' && t1 && t2) {
       DEL(pc); DEL(pc + 1);
     }
@@ -825,6 +830,7 @@ static void gen_peephole(void) {
     // what is ACC now? (look at the op as the patterns left it)
     op = *a;
     if (op == OP_DEL || op == ' ') continue;  // NOP: ACC as before
+    pop = op;
 
     // zjp after a known constant: 0 always jumps (rest dead until the
     // target), anything else never jumps (drop zjp and the load)
