@@ -56,6 +56,7 @@
 ;;;     cc65's own scratch (zeropage.inc), the one place known free.
 
 .export _ivmlib_init, _ivmlib_zpclr, _ivmlib_zpinit, _ivmlib_start, _ivmlib_end
+.export _ivmlib_exit
 .export _ivmlib_entry, _ivmlib_heap, _ivmlib_heapend
 .export _ivmlib_zpsrc, _ivmlib_zpdst, _ivmlib_zplen, _ivmlib_spzp
 .export _ivmlib_zpclen, _ivmlib_zpcn, _ivmlib_zpcdst
@@ -236,18 +237,23 @@ _ivmlib_zpdst = * - 1
         dex
         bne     zpcp
 
-;;; JSR the JIT code, then exit (sim65: A = exit code) / back to BASIC
-;;; SIM 9 B, ATMOS 3 B
+;;; JSR the JIT code, then exit (sim65: A = exit code) / back to BASIC.
+;;; _ivmlib_exit: where the program is done (an emulator's breakpoint:
+;;; ./oric counts the cycles from the image's start to it)
+;;; SIM 9 B, ATMOS 4 B
 _ivmlib_start:
 .ifdef SIM
         ldx     #$FF                    ;; no C stack: pvio points CSP
         txs
         jsr     $FFFF                   ;; patched: JIT code start
 _ivmlib_entry = * - 2
+_ivmlib_exit:
         jmp     exit                    ;; A = exit code (lo of result)
 .else
-        jmp     $FFFF                   ;; patched: its RTS returns to BASIC
+        jsr     $FFFF                   ;; patched: JIT code start
 _ivmlib_entry = * - 2
+_ivmlib_exit:
+        rts                             ;; back to BASIC
 .endif
 
 ;;; ---- cut 0: an -o image ends here if it calls nothing ----

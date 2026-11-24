@@ -8,11 +8,14 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <signal.h>
-#include <unistd.h>
-#include <fcntl.h>
 #include <string.h>
 #include <ctype.h>
+
+#ifdef __LINUX__
+  #include <signal.h>
+  #include <unistd.h>
+  #include <fcntl.h>
+#endif
 
 #ifdef OTA
   #include "espressif/esp_common.h"
@@ -36,7 +39,9 @@
 
 // TODO: indented for seveal buffers - possibly ignore!!! LOL
 
-typedef struct {
+//typedef
+
+struct imacsbuffer {
     char* buff;
     char* end;
     int size;
@@ -50,9 +55,9 @@ typedef struct {
     int lines;
     int columns;
     int dirty;
-} imacs_buffer;
+};
 
-char* getpos(imacs_buffer* b, int r, int c) {
+char* getpos(struct imacsbuffer* b, int r, int c) {
     char* p = b->buff;
     char* end = b->end;
     while (r > 0 && *p && p < end) if (*p++ == '\n') r--;
@@ -60,7 +65,7 @@ char* getpos(imacs_buffer* b, int r, int c) {
     return p < end ? p : (char*)end - 1;
 }
 
-static int countLines(imacs_buffer *b) {
+static int countLines(struct imacsbuffer *b) {
     char* p = b->buff;
     int c = 0;
     while (*p && p < b->end) if (*p++ == '\n') c++;
@@ -70,7 +75,7 @@ static int countLines(imacs_buffer *b) {
 // TODO: base on pos passed in walk back to newline then forward?
 // or walk both directions in two loops and add?
 // cols + count to \n!
-static int currentLineLength(imacs_buffer* b) {
+static int currentLineLength(struct imacsbuffer* b) {
     char* start = getpos(b, b->row, 0);
     char* p = start;
     while (*p != '\n' && *p && p < b->end) p++;
@@ -148,21 +153,21 @@ static void restoreTerminalAndExit(int dummy) {
     clear();
     restorescreen();
     printf("imacs bids you farewell!\n");
-#ifndef OTA
+#ifdef __LINUX__
     int ignore = system("stty echo");
     ignore += system("stty sane");
     exit(0);
 #endif
 }
 
-static void error(imacs_buffer* b, char* msg, char* arg) {
+static void error(struct imacsbuffer* b, char* msg, char* arg) {
     gotorc(b->lines-1, 0);
     printf("%s%s\n", msg, arg); f();
     return;
 }
 
 #ifndef NO_MAIN
-static int readfile(imacs_buffer* b, char* filename) {
+static int readfile(struct imacsbuffer* b, char* filename) {
 #ifdef OTA
     strncpy((char*)b->buff, (char*)README_md, sizeof(README_md));
     int len = strlen(b->buff) + 1;
@@ -188,7 +193,7 @@ static int readfile(imacs_buffer* b, char* filename) {
 // - filename or *scratch*
 // - "(mode)"
 // - All/Top/Bot/33%
-static void print_modeline(imacs_buffer* b) {
+static void print_modeline(struct imacsbuffer* b) {
     gotorc(b->lines - 2, 0);
     inverse(1);
     int len = strlen(b->buff) + 1;
@@ -222,7 +227,7 @@ static void print_modeline(imacs_buffer* b) {
   //#define putchar(c) ({ usleep(100); putchar(c); f(); }) 
 #endif
 
-static void redraw(imacs_buffer* b) {
+static void redraw(struct imacsbuffer* b) {
     cursoroff();
     clear();
 
@@ -240,8 +245,8 @@ static void redraw(imacs_buffer* b) {
     f();
 }
 
-static void update(imacs_buffer* b, int why) {
-    static imacs_buffer last;
+static void update(struct imacsbuffer* b, int why) {
+    static struct imacsbuffer last;
     static int last_len = -1;
     
     cursoroff();
@@ -290,7 +295,9 @@ static int getch_() {
         lastr = r; lastc = c;
     }
     printf("==========>[%d : %c]", r, c); f();
+    return c;
 #else
+#ifdef __LINUX__
     struct termios old;
     struct termios tmp;
 
@@ -302,28 +309,36 @@ static int getch_() {
     int c = getchar();
 
     tcsetattr(STDIN_FILENO, TCSANOW, (const struct termios*) &old);
-#endif
     return c;
+#else
+    return getchar();
+#endif
+
+#endif
 }
 
 #define ESC 96 // haha! ESC A or M-A!
+
+// TODO: can we evaluate constant expression by 
 #define META (ESC+'A'-1)
+
 #define CTRL -64
 #define XTRA 256
 
-#define UPCASE(c) ({ int _c = (c); _c >= 'a' ? _c - 32 : _c; })
+//#define UPCASE(c) ({ int _c = (c); _c >= 'a' ? _c - 32 : _c; })
 
 // returns 'a', 'A', CTRL + 'A', ESC + 'V', etc...
 static int getch() {
     int c = getch_();
-    if (c == 27) return ESC + UPCASE(getch_());
-    if (c == CTRL + 'X') return XTRA + UPCASE(getch_());
+    if (c == 27) return ESC + toupper(getch_());
+    if (c == CTRL + 'X') return XTRA + toupper(getch_());
     return c;
 }
 
-#define GETENV(name, default) ({ char* v = getenv(name); v ? atoi(v) : (default); })
+//#define GETENV(name, default) ({ char* v = getenv(name); v ? atoi(v) : (default); })
+int GETENV(char* name, int def) { return def; }
 
-void imacs_init(imacs_buffer* b, char* s, int maxlen) {
+void imacs_init(struct imacsbuffer* b, char* s, int maxlen) {
     memset(b, 0, sizeof(*b));
 
     int len = s ? strlen(s)*130/100 + 1 : 0;
@@ -337,7 +352,7 @@ void imacs_init(imacs_buffer* b, char* s, int maxlen) {
     b->lines = 24;
     b->columns = 80;
 
-#ifndef OTA
+#ifdef __LINUX__
     // system specific
     b->lines = GETENV("LINES", 24);
     b->columns = GETENV("COLUMNS", 80);
@@ -345,7 +360,7 @@ void imacs_init(imacs_buffer* b, char* s, int maxlen) {
 #endif
 }
 
-void fix(imacs_buffer* b, int moved) {
+void fix(struct imacsbuffer* b, int moved) {
     int len = currentLineLength(b);
 
     // fix out of bounds relative to content and screen, loop till no change
@@ -366,7 +381,7 @@ void fix(imacs_buffer* b, int moved) {
     if (b->col > len) { b->col = 0; b->row++; len = -1; } // never get called?
 }
 
-void error_key(imacs_buffer* b, int c) {
+void error_key(struct imacsbuffer* b, int c) {
     char key[2] = {0};
     key[0] = (c < 32) ? c + 64 : c - ESC;
     error(b, (c < 32) ? "Key not implemented: ^" : "Key not implemented: ESC ", key);
@@ -387,7 +402,7 @@ void error_key(imacs_buffer* b, int c) {
   extern void* global_envp;
 #endif 
 
-void eval_last_expr(imacs_buffer* b, char* end) {
+void eval_last_expr(struct imacsbuffer* b, char* end) {
     // if on symbol - move forward to end of symbol
     while (isalnum(*end) && end < b->end) end++;
     end = *end ? end : end-1;
@@ -434,10 +449,10 @@ void eval_last_expr(imacs_buffer* b, char* end) {
 #endif
 
 #ifdef NO_MAIN
-int maineditor(imacs_buffer* b) {
+int maineditor(struct imacsbuffer* b) {
 #else
 int main(int argc, char* argv[]) {
-    imacs_buffer* b = alloca(sizeof(imacs_buffer));
+    struct imacsbuffer* b = alloca(sizeof(struct imacsbuffer));
     imacs_init(b, NULL, 0);
     if (argc > 1)
         readfile(b, argv[1]);

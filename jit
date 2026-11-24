@@ -21,11 +21,13 @@ sim65 -c $name.sim | tee $name.sim.log
 echo "--- ENDRUN ---"
 echo
 
-cat $name.sim.log | grep cycles | sed 's/ cycles//' > $name.sim.cycles
-
-run=$(cat "$name.sim.cycles")
+run=$(cat $name.sim.log | grep cycles | sed 's/ cycles//')
 
 cp $name.tap ~/ORIC/
+
+echo
+echo
+./oric $name
 
 echo
 echo

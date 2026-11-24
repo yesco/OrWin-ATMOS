@@ -186,6 +186,8 @@ def test(t):
 
     rm(t + ".prg")
     s = run([OSCAR64, "-Dputz=printf", "-Os", "-ep", t + ".c"], t + ".oscar.log")
+    if os.path.exists(t + ".asm"):              # its listing (not ours)
+        os.replace(t + ".asm", t + ".oscar.s")
     res.append(("oscar", last_int(r"^Total Cycles (\d+)", s),
                 fsize(t + ".prg"), t + ".prg",
                 between(s, r"Running emulation", r"Emulation result"),

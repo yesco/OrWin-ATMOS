@@ -1,0 +1,84 @@
+#!/usr/bin/env python3
+# mklib - ivm-lib.asm as a binary per target, for the host compiler:
+#
+#   ./mklib              ivm-lib-sim6502.bin ivm-lib-atmos.bin
+#   ./mklib atmos        just that one
+#
+# The lib isn't relocatable: it is linked on its own (no cc65 runtime, the
+# target's lib only for its zp names and the sim65 paravirt hooks) at the
+# address where an image starts: _ivmlib_init at the target's base. An
+# image takes a part of it, from the startup it needs to a cut (ivm.c
+# jit_image), so every part sits where it was linked.
+#
+# The .bin (little endian):
+#   "IVML" 1 target\0 org.w len.w nsym.w { addr.w name\0 }* bytes[len]
+# org: the address of bytes[0]. Symbols: the lib's _ivmlib_* and _op*.
+
+import os, re, struct, subprocess, sys, tempfile
+
+# target: cc65 -t, lib, base (_ivmlib_init), zp area
+TARGETS = {
+    "sim6502": ("sim6502", "sim6502.lib", 0x0200, 0x00, 0x100),
+    "atmos":   ("atmos",   "atmos.lib",   0x0500, 0xE2, 0x1A),
+}
+
+CFG = """MEMORY {
+    ZP:   file = "",   start = $%04X, size = $%04X, type = rw;
+    MAIN: file = %%O,  start = $%04X, size = $%04X;
+}
+SEGMENTS {
+    ZEROPAGE: load = ZP,   type = zp,  optional = yes;
+    CODE:     load = MAIN, type = ro;
+    RODATA:   load = MAIN, type = ro,  optional = yes;
+    DATA:     load = MAIN, type = rw,  optional = yes;
+    BSS:      load = MAIN, type = bss, optional = yes;
+}
+"""
+
+
+def run(cmd):
+    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    if p.returncode:
+        sys.exit("%%Error: mklib: %s\n%s" % (" ".join(cmd), p.stdout.decode()))
+
+
+def link(d, t, lib, org, zp, zpn):
+    cfg = os.path.join(d, "lib.cfg")
+    open(cfg, "w").write(CFG % (zp, zpn, org, 0x10000 - org))
+    out, lbl = os.path.join(d, "lib.bin"), os.path.join(d, "lib.lbl")
+    run(["ld65", "-C", cfg, "-o", out, "-Ln", lbl,
+         os.path.join(d, "ivm-lib.o"), lib])
+    syms = {}
+    for l in open(lbl):
+        m = re.match(r"al ([0-9A-F]+) \.(\S+)", l)
+        if m:
+            syms[m.group(2)] = int(m.group(1), 16)
+    return open(out, "rb").read(), syms
+
+
+def mklib(name):
+    t, lib, base, zp, zpn = TARGETS[name]
+    d = tempfile.mkdtemp(prefix="mklib-")
+    run(["ca65", "-t", t, "-o", os.path.join(d, "ivm-lib.o"), "ivm-lib.asm"])
+    # once anywhere: where is _ivmlib_init in it? then so that it is at base
+    _, syms = link(d, t, lib, 0x1000, zp, zpn)
+    org = base - (syms["_ivmlib_init"] - 0x1000)
+    data, syms = link(d, t, lib, org, zp, zpn)
+    keep = sorted((a, s) for s, a in syms.items()
+                  if s.startswith(("_ivmlib_", "_op")))
+    b = b"IVML" + bytes([1]) + name.encode() + b"\0"
+    b += struct.pack("<HHH", org, len(data), len(keep))
+    for a, s in keep:
+        b += struct.pack("<H", a) + s.encode() + b"\0"
+    b += data
+    f = "ivm-lib-%s.bin" % name
+    open(f, "wb").write(b)
+    print("%s: $%04X-$%04X (%d B), _ivmlib_init $%04X, %d symbols"
+          % (f, org, org + len(data) - 1, len(data), syms["_ivmlib_init"],
+             len(keep)))
+
+
+for n in sys.argv[1:] or TARGETS:
+    if n not in TARGETS:
+        sys.exit("%%Error: mklib: no target %s (%s)" % (n, " ".join(TARGETS)))
+    mklib(n)

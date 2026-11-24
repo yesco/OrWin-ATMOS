@@ -21,6 +21,12 @@ fil
 *.dbj
 *.int
 *.bcs
+*.ivm
+*.jit
+*.sim
+*.tap
+*.log
+*.out
 
 diff
 diff.c
@@ -28,9 +34,15 @@ fish
 *.out
 *.bin
 *.tmp
+*.scr
 foo.*
+*.log
 
 *.dsk
+
+.gs
+.gs-out
+
 
 # expected test output (ptest): checked in, despite *.out above
 !test-*.out
@@ -51,3 +63,7 @@ ptest*.log
 
 # ./sizes cache
 .sizes-cache
+
+# parse: symbols of each program; ./jit: cycle counts
+*.sym
+*.cycles

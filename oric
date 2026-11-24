@@ -1,0 +1,173 @@
+#!/usr/bin/env python3
+# oric - run a program on an emulated Oric Atmos (Phosphoric, headless):
+#
+#   ./oric test-swap            PROG, PROG.c, PROG.ivm all ok
+#   ./oric test-swap -z         extra args go to the compiler (ivm-jit.x)
+#
+# The host compiler writes PROG.tap (-tatmos, ivm-lib-atmos.bin), the
+# emulator loads it (-f) with BASIC 1.1. Breakpoints at the image's start
+# and at ivm-lib's _ivmlib_exit count the program's cycles (on a real
+# Atmos: the 50 Hz ROM interrupt and the ROM's char printing included).
+# There the emulator quits and dumps its text screen ($BB80, 40x28):
+# PROG.oric.scr, printed framed. The lines after BASIC's "Ready" are the
+# program's output, compared to PROG.out (its last lines: the screen
+# only holds 26). Logs: PROG.oric-build.log, PROG.oric.log.
+#
+#   PHOSPHORIC   the emulator (default ../Phosphoric/oric1-emu)
+#   ORIC_ROM     the BASIC 1.1 ROM (default: Phosphoric's or the OSDK's)
+#   ORIC_CYCLES  give up after (default 2000000000)
+
+import os, re, struct, subprocess, sys
+
+here = os.path.dirname(os.path.abspath(sys.argv[0]))
+up = os.path.dirname(here)
+
+
+def die(m):
+    sys.exit("%%Error: oric: %s" % m)
+
+
+def first(*fs):
+    for f in fs:
+        if f and os.path.exists(f):
+            return f
+    return None
+
+
+def lib_sym(name):
+    """an address from ivm-lib-atmos.bin (mklib's symbol table)"""
+    b = open("ivm-lib-atmos.bin", "rb").read()
+    i = b.index(b"\0", 5) + 1
+    _org, _len, n = struct.unpack_from("<HHH", b, i)
+    i += 6
+    for _ in range(n):
+        a, = struct.unpack_from("<H", b, i)
+        j = b.index(b"\0", i + 2)
+        if b[i + 2:j].decode() == name:
+            return a
+        i = j + 1
+    die("ivm-lib-atmos.bin has no %s (./mklib)" % name)
+
+
+def sh(cmd, log):
+    with open(log, "w") as f:
+        return subprocess.run(cmd, shell=True, stdout=f, stderr=subprocess.STDOUT
+                              ).returncode
+
+
+def norm(lines):
+    """no whitespace (the screen's isn't the program's: tabs, the wrap)"""
+    return ["".join(l.split()) for l in lines if l.strip()]
+
+
+def unwrap(rows):
+    """screen rows -> lines: a row that reaches the last columns goes on
+    in the next one (the dump trims trailing spaces: >= 39)"""
+    out, cur = [], ""
+    for r in rows:
+        cur += r
+        if len(r.rstrip()) < 39:
+            out.append(cur)
+            cur = ""
+    return out + ([cur] if cur else [])
+
+
+def main():
+    if len(sys.argv) < 2:
+        die("usage: ./oric PROG [compiler args]")
+    os.chdir(here)
+    name = sys.argv[1]
+    if re.match(r"^[^/]+\.[^./]+$", os.path.basename(name)):
+        name = name.rsplit(".", 1)[0]
+    extra = " ".join(sys.argv[2:])
+    emu = first(os.environ.get("PHOSPHORIC"), up + "/Phosphoric/oric1-emu")
+    rom = first(os.environ.get("ORIC_ROM"),
+                up + "/Phosphoric/roms/basic11b.rom",
+                up + "/osdk/osdk/main/Osdk/_final_/Roms/basic11b.rom")
+    if not emu:
+        die("no Phosphoric (../Phosphoric/oric1-emu, or set PHOSPHORIC)")
+    if not rom:
+        die("no BASIC 1.1 ROM (set ORIC_ROM)")
+
+    # the program, the host compiler, the lib: only what is stale
+    build = ". ./deps; "
+    if not os.path.exists(name + ".ivm") or \
+       os.path.getmtime(name + ".c") > os.path.getmtime(name + ".ivm"):
+        build += "bash ./pc %s >/dev/null || exit 1; " % name
+    build += ("if stale ivm-jit.x $IVM_SRC jit; then clang -DMEMMAP -DVERBOSE"
+              " -DJIT -g ivm.c -o ivm-jit.x || exit 1; fi; "
+              "if stale ivm-lib-atmos.bin ivm-lib.asm mklib; then ./mklib"
+              " || exit 1; fi; "
+              "./ivm-jit.x -tatmos -o%s.tap %s.ivm %s" % (name, name, extra))
+    print("$ ./ivm-jit.x -tatmos -o%s.tap %s.ivm %s > %s.oric-build.log"
+          % (name, name, extra, name), file=sys.stderr)
+    if os.path.exists(name + ".tap"):
+        os.remove(name + ".tap")
+    if sh(build, name + ".oric-build.log") or not os.path.exists(name + ".tap"):
+        die("no %s.tap (see %s.oric-build.log)" % (name, name))
+
+    tap = open(name + ".tap", "rb").read()
+    start = tap[10] << 8 | tap[11]            # big endian, as the ROM reads it
+    exit_ = lib_sym("_ivmlib_exit")
+
+    # start: print the cycles, break at the exit, go; exit: cycles; EOF quits
+    scr = name + ".oric.scr"
+    if os.path.exists(scr):
+        os.remove(scr)
+    cmd = [emu, "-n", "-f", "-m", "atmos", "-r", rom, "-t", name + ".tap",
+           "-c", os.environ.get("ORIC_CYCLES", "2000000000"),
+           "--break", "%04X" % start, "--screenshot-text", scr]
+    print("$ %s < (r; b %04X; c; r) > %s.oric.log"
+          % (" ".join(cmd[:1] + ["-n", "-f", "-m atmos", "-t", name + ".tap",
+                                 "--break %04X" % start]), exit_, name),
+          file=sys.stderr)
+    p = subprocess.run(cmd, input=("r\nb %04X\nc\nr\n" % exit_).encode(),
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    out = p.stdout.decode(errors="replace")
+    open(name + ".oric.log", "w").write(out)
+    cyc = [int(c) for c in re.findall(r"PC:[0-9A-F]{4} CYC:(\d+)", out)]
+    pcs = re.findall(r"PC:([0-9A-F]{4}) CYC:\d+", out)
+    done = len(cyc) >= 2 and pcs[-1] == "%04X" % exit_
+
+    # the screen
+    lines = open(scr).read().split("\n") if os.path.exists(scr) else []
+    while lines and not lines[-1].strip():
+        lines.pop()
+    print("+" + "-" * 40 + "+")
+    for l in lines:
+        print("|%-40s|" % l[:40])
+    print("+" + "-" * 40 + "+")
+
+    if not done:
+        print("%%Error: oric: %s never reached _ivmlib_exit $%04X (see %s.oric.log)"
+              % (name, exit_, name))
+        return 1
+    print("= %s cycles (%5d bytes) - oric  - %s"
+          % ("{:,}".format(cyc[-1] - cyc[0]), len(tap), name))
+
+    # its output: after BASIC's Ready (row 0: the status line), vs the end
+    # of the .out. Scrolled away: all rows but the top one (maybe a part)
+    rows = lines[1:]
+    for i, l in enumerate(lines):
+        if l.strip() == "Ready":
+            rows = lines[i + 1:]
+            break
+    else:
+        rows = rows[1:]
+    got = norm(unwrap(rows))
+    if os.path.exists(name + ".out"):
+        want = norm(open(name + ".out").read().split("\n"))
+        tail = want[-len(got):] if got else []
+        if got == tail and (got or not want):    # (nothing: only if none)
+            print("matches %s.out%s" % (name, " (its last %d lines)" % len(got)
+                                       if len(got) < len(want) else ""))
+        else:
+            print("%%Error: oric DIFFERS from %s.out" % name)
+            for w, g in zip(tail + [""] * len(got), got):
+                if w != g:
+                    print("  - %s\n  + %s" % (w, g))
+            return 1
+    return 0
+
+
+sys.exit(main())
