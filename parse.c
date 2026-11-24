@@ -38,71 +38,108 @@
   
 
 // BNF:
-//   X=body     rule X (A-Z)
-//   a-z/punct  match char (-I case-insensitive, default)
+//   X=body     RULE X (A-Z, a-z)
+//
+//   a-z/punct  match LITERAL char (-I case-insensitive, default)
 //   space      skip whitespace and comments (styles from #= lines)
 //   #= { }     block comment style (start end); multiple #= allowed
 //   #= /* */   e.g. C block comments
 //   #= //      line comment (to newline); no end token
 //              default if no #=: Pascal { }
-//   A-Z        call rule
-//   |          alternative (epsilon allowed)
-//   line '|'   continue previous rule (long alts)
-//   line '.'   end of rules section
-//   [ ... ]    production: after match, emit bytecode
+//   $A-$Z      call rule
+//   $a-$z
+//
+//   |             alternative (epsilon allowed)
+//   newline '|'   continue previous rule (long alts)
+//   newline '.'   end of rules section
+//   [ ... ]       production: after match, emit bytes
 //
 // Match directives (stored with hibit):
-//   \>         (load-time) mark current alt as jump target for \<
-//   \<         tail-recurse: to \> alt if any, else restart whole rule
-//   \o         commit: drop line buffer up to current point
+//
+// IDENTS:
+//   \{ \}      enter / leave scope (\} drops names added in scope)
+//
 //   \i         ident in scope (must be declared by \+)
 //   \+         ident declare (match + add to current scope)
 //   \f         declare function: name = ret-value cell of a new frame + vector
 //   \p         declare parameter (frame cell base+4+n); \r ends the list
 //   \r         end of param list OR flag REGISTER after literal "register"
-//   \q         end of a struct: "struct \f\{ { params } \q" (instead of \})
 //   \m         member: .f or ->f of the struct of the last \i: const k
-//   \^         the next \i may name an array of structs alone (sizeof(a))
+//   \q         end of a struct: "struct \f\{ { params } \q" (instead of \})
+//
 //   \&         a[i].f, an array of structs (SoA): const, f's array (striped:
 //              its lo bytes; its hi bytes: the next const slot)
 //   \b         flag REGISTER after literal "register" (use this, not \r)
-//   \d         number / char literal
+//            (TODO: understand usage:)
+//   \^         the next \i may name an array of structs alone (sizeof(a))
+//
+//   \_         a static declaration: as a global, the name local
+//   \'X        set type high-byte of result to X ('c'/'w'/'C'/'W'; \'^ = uppercase)
+//
+//
+// NUMBERS:
+//   \d         parse number / char literal, sets type for guard
+//
+// STRINGS:
 //   \s         string const "..." → data pool + reloc pointer (capture)
 //   \u         emit string body + 0 into bytecode (opening " already matched)
-//   \n         >=1 newline; eats surrounding horizontal space
-//   \{ \}      enter / leave scope (\} drops names added in scope)
+//
+// MATCH:
+//   \n         match >=1 newlines; eats surrounding horizontal space
 //   \1..\9     match same ident as capture N (match_ident_same)
-//   \=n        result := capture n (no new capture)
+//
+// GUARDS:
+//   \;c        fail if the next char is c (reads nothing: & not &&)
+//   \?X        fail unless result type high-byte is X
+//   \| \. etc  literal escaped char (not a directive)
+//
+// CONTROL:
 //   \!         a statement that does not parse: report it, skip it (to its
 //              ;, over a { } block), go on; fails at a } or the end
 //   \%         a false #if: skip lines to its #else / #endif (nested ones
 //              whole)
-//   \#xx       result := hex const xx
-//   \;c        fail if the next char is c (reads nothing: & not &&)
-//   \_         a static declaration: as a global, the name local
-//   \'X        set type high-byte of result to X ('c'/'w'/'C'/'W'; \'^ = uppercase)
-//   \?X        fail unless result type high-byte is X
-//   \| \. etc  literal escaped char (not a directive)
 //
-// Production only (inside [ ... ]):
+//   \=n        result := capture n (no new capture)
+//   \#xx       result := hex const xx
+//
+//   \o         commit: drop line buffer up to current point
+//
+// (tail-recursive rules, instead of Kleenex!)
+//   \>         (load-time) mark current alt as jump target for \<
+//   \<         tail-recurse: to \> alt if any, else restart whole rule
+//
+// ================================================================
+// Production directives: ONLY used inside [ ... ]:
+//
+//   [] alone   no code, result is ACC
+//   \[ \]      literal [ ]
+//
 //   \1..\9     emit slot/result byte from nth value capture
 //   \aN        force address of capture N
-//   \lN        load capture N if not ACC
 //   \cN \hN    lo / hi byte of const capture N -- \c3 is NOT \3
 //              \3 emits the SLOT of capture 3 (where the value
 //              lives, for "L xx"), \c3 the low byte of the VALUE of a const
 //              capture (e.g. a loop step or a 'k' case byte inline)
-//   \t         temp slot (becomes a slot result)
-//   \e         end/temp helper (see run_production)
+//
+//   \lN        load capture N if not ACC (emit Lnn if not)
+//
+//   \t         create a temp slot (becomes a slot result)
+//   \e  ???    end/temp helper (see run_production)
+//   \j         create a temp "only read"
+//
 //   \g         global init store
-//   \v         call opcode for matched function
+//
+//   \v         creata a CALL opcode for matched function
 //   \k         next call-arg param slot
+//
+// LOOPS / IFS / JUMPS
+//   \( \- \)   loop open / continues land here / breaks land here (close)
+//
 //   \x \y \w   forward jump placeholder / patch / swap
 //   \m \z      loop mark / relative back
-//   \( \- \)   loop open / continues land here / breaks land here (close)
+//
 //   \/ \~      break / continue: forward jump placeholder (0?G\/)
-//   \[ \]      literal [ ]
-//   [] alone   no code, result is ACC
+//
 //
 // Directive chars used (ASCII order, match + production):
 //   ! # $ % & ' ( ) * + , - . / 0-9 : ; < = > ? @ ^ _ a-z (all) { } ~
@@ -111,11 +148,6 @@
 // Free (not directives; ok as \X literal or future ops):
 //   " `
 //
-// Explicit stack — no recursive match.
-//
-// -v (needs -DVERBOSE): SRC: shows the source text as the furthest parse
-//   position advances (see note_progress), GEN: shows the bytecode of a
-//   statement. Nothing is buffered: errors re-show the source from line_buf.
 
 
 // Compiling and Running
@@ -128,6 +160,8 @@
 //
 //   $ ./parse.x -v tpi.bnf test.p            # ./p  test
 //
+//
+//
 // This will compile, show byte code, hexdump and some info.
 // It'll also write out test.ivm and test.sym.
 // 
@@ -135,6 +169,7 @@
 //
 //   $ ./ivm-asm test                 # run using asm interpreter
 //
+//   $ ./ivm-jit test                 # jit code and run simulated
 //
 //   $ ./ivm-print test               # dump context and pp byte code
 //
@@ -387,12 +422,16 @@ static void *xrealloc(void *p, word n) {
 #define HIBIT(c) ((c) | 0x80)
 
 // Rule bytes: plain ASCII is a literal; with the hibit:
+//
 //   $81-$9A  letter directives \a..\z: HIDIR (so $A..$Z $a..$z are free)
 //   $A0-$C0  ws gap, punctuation / digit directives \+ \# \< ..: HIBIT
 //   $C1-$DA  rule calls $A..$Z, $E1-$FA $a..$z: HIBIT(letter)
 //   $DB $DD  production [ ], $FB $FD \{ \}
+//
 // \< is 2 bytes: HIBIT('<'), ALT_JUMP + alt (1-based; 0: the rule again)
+//
 // A rule's index: its letter - 'A' (a..z: 32.., a few unused slots)
+
 #define HIDIR(c)    (0x80 | ((c) & 31))  // a..z only (a case label: no ?:)
 #define IS_RULE(c)  ((uchar)(((c) | 32) - HIBIT('a')) < 26)   // c: hibit
 #define ALT_JUMP    0x20         // printable, not | [ ] \ \n: scans keep working
@@ -496,7 +535,6 @@ typedef struct {
   word mark;          // \m loop start (for \z)
   uchar loop_save;    // nloop, nbrk at alt entry (break / continue)
   uchar brk_save;
-  uchar is_static;    // \_ in this alt: a static declaration (rule V)
 } Frame;
 
 // break / continue: not per frame like \x \y, the break is in the body,
@@ -516,7 +554,6 @@ static Frame *stack;
 static uchar stack_cap;
 static uchar sp;     // number of saved parents
 static Frame cur;    // working frame — access as cur.field (absolute on 6502)
-static uchar in_static(void);   // in a static declaration (\_)
 
 // Symbols and scopes (\+ \f \p \i \{ \}) live in ivm-gen.c, allocated on demand:
 //   sym_add / sym_find / sym_func / sym_truncate, scope_enter / scope_leave
@@ -854,6 +891,8 @@ static word cap_val(uchar n) {
 
 static uchar pending_register; // set by \r after literal "register" in BNF
 static uchar pending_const;    // set by \c after literal "const"
+static uchar static_decl;      // in a static declaration: \_ in rule V,
+                               // cleared when that V ends or fails
 
 // 3 functions doing the same thing? 
 // TODO: one code, array of 3?
@@ -1052,6 +1091,8 @@ static uchar *run_production(uchar *p) {
       case HIDIR('t'): case HIDIR('e'): case HIDIR('j'):
         b = alloc_slot();
 
+// TODO: this reads like gobblegock!
+        
         // \j: a temp only read (O, an index): after a plain load of a var
         // / const (\l) right before the S, its slot has the value: no temp
         // ("x ^ (x << 7)": x itself). The L goes too: what follows \j
@@ -1234,7 +1275,7 @@ static uchar *run_production(uchar *p) {
         // has no code to go into: nothing runs at scope 0. So it's
         // recorded in ginit_*, and gen_func_entry() emits Z/C stores
         // at the start of main. Inside a function it's a plain L+S.
-        if (scope_depth == 0 || in_static()) {
+        if (scope_depth == 0 || static_decl) {
           // (a static: main's prologue, if main is still to come)
           if (scope_depth && main_vec != 0xff)
             FAIL("static: initialized after main (move the function up)");
@@ -1636,14 +1677,6 @@ static uchar match_ident(void) {
 }
 
 // \+ — read and declare ident into current scope; result = new slot
-// in a static declaration: \_ in an enclosing rule V's frame
-static uchar in_static(void) {
-  uchar i = sp;
-  if (cur.is_static) return 1;
-  while (i--) if (stack[i].is_static) return 1;
-  return 0;
-}
-
 static uchar match_ident_decl(void) {
   uchar slot;
   word i;
@@ -1656,7 +1689,7 @@ static uchar match_ident_decl(void) {
   if (i != SYM_NONE)
     slot = syms[i].address;
   else {
-    if (scope_depth == 0 || in_static()) {   // static: as a global
+    if (scope_depth == 0 || static_decl) {   // static: as a global
       if (is_reg)
         slot = alloc_register_slot();
       else
@@ -1664,7 +1697,7 @@ static uchar match_ident_decl(void) {
     } else
       slot = alloc_slot();
     set_decl_type(sym_add(id_buf, SYM_VAR, slot));
-    if (scope_depth && in_static() && slot < FRAME_BASE)   // (-O)
+    if (scope_depth && static_decl && slot < FRAME_BASE)   // (-O)
       static_slot[slot >> 3] |= (uchar)(1 << (slot & 7));  // gen_pack
   }
   record_capture(MAKE_CAP(slot, cur_type));
@@ -1690,7 +1723,7 @@ static uchar array_sym(word cnt, uchar k) {
   s = &syms[nsym - 1];
   slot = s->address;
   if (s->type != SYM_VAR || !cnt) return 0;
-  if ((scope_depth == 0 || in_static()) && optimize) {
+  if ((scope_depth == 0 || static_decl) && optimize) {
     if (next_glob == slot + 1) next_glob--;
     if (slot < FRAME_BASE)                     // (a static: not kept)
       static_slot[slot >> 3] &= (uchar)~(1 << (slot & 7));
@@ -1743,7 +1776,7 @@ static word ia_start, ia_n;
 
 static uchar init_start(void) {
   // set once (data): in a function C would set it on every call
-  if (scope_depth && !in_static())
+  if (scope_depth && !static_decl)
     FAIL("an initialized array in a function needs static (set once)");
   ia_n = cap_count();
   ia_start = data_string_start();
@@ -2336,7 +2369,6 @@ static void alt_mark(void) {
   cur.rec_save = cur.rec;
   cur.loop_save = nloop;
   cur.brk_save = nbrk;
-  cur.is_static = 0;
   cur.prod_n = 0;
 }
 
@@ -2433,6 +2465,7 @@ static int frame_rewind(void) {
   cur.rec = cur.rec_save;
   nloop = cur.loop_save;
   nbrk = cur.brk_save;
+  if (cur.rule == 'V' - 'A') static_decl = 0;   // (a static V failed)
 
   // Function entry code (and main's global inits) is emitted lazily,
   // by the first emit after \f (pending_func_entry). If this rewind
@@ -2507,11 +2540,12 @@ int run() {
 
     // a global declaration made code: nothing runs it ("int g = 2 + 3;":
     // only consts, \g, at the top)
-    if (rch == 'V' && (!scope_depth || cur.is_static) &&
+    if (rch == 'V' && (!scope_depth || static_decl) &&
         bin_ptr > cur.code_save) {
       bin_ptr = cur.code_save;
       err_here("global / static initializer: a constant only");
     }
+    if (rch == 'V') static_decl = 0;
     vlog("ok %c alt %u -> @%u\n", rch, (unsigned)(cur.alts - rule[cur.rule]), abs_pos());
 
     #ifdef VERBOSE
@@ -2676,7 +2710,7 @@ int run() {
 
   // \_: a static declaration (rule V): as a global (\+ \g, V's end),
   //   the name local
-  else if (c == HIBIT('_')) cur.is_static = 1;
+  else if (c == HIBIT('_')) static_decl = 1;
 
   // \;c: fail if the next char is c, read nothing (& but not &&)
   else if (c == HIBIT(';')) {
