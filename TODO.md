@@ -2,13 +2,10 @@
 
 # MeteoriC-65 (parse.c c.bnf): next, after the manual (MeteoriC-man.md)
 
-- && and || and ^^ lol
-
 - ivm-lib.asm: add memcpy, for <= 256 generate simple inline code
   otherwise call a library routine
 
 - assignement expressions
-
 - ++n ... as expression
 
 - #define META (ESC+'A'-1)    // can we evaluate/reduce constant expr?

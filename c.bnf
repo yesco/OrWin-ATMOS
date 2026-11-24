@@ -229,8 +229,8 @@ K=$Y
 
 # - Statement can be a Block, or lastly Assignments
 |$B|;
-|$R;
 |$H
+|$R;
 
 # END STATEMENT
 
@@ -334,11 +334,14 @@ L=$I\{ \+=0; \2<$E; \2++) \i\?\C\[\2\]=\d;\}[m\6\8]
 |\i=$E[\(S\1]; [\m]$E[?G\x] ;\i++) $K[\-I\4B\z\y\)]
 |\i=$E[\(S\1]; [\m]$E[?G\x] ;\i--) $K[\-J\4B\z\y\)]
 
-|$E; [\(\m] $E [?G\x] ;$E) $K[\-B\z\y\)]
-
 |\i=$E[\(S\1]; [\m]$E[?G\x]; \i+=\i) $K[\-U\1\5B\z\y\)]
 
 |\i=$E[\(S\1]; \1<=$E[S\t]; \1++) [\mt\1\5\x] $K [\-n\z\y\)]
+
+# the last resort: E; E; and no step (an init x = .. is an E too, x = E
+#   is one). TODO: E; E; E: the step's code would come BEFORE the body
+#   (emitted where it is parsed): needs a second mark to jump around it
+|$E; [\(\m] $E [?G\x] ;) $K[\-B\z\y\)]
 
 # END FOR
 
@@ -516,7 +519,11 @@ x=\m\?c[S\t\[\2\1]|\m[S\t(\2\1]\<|[]
 c=\m\?c=[S\t]$E;[\]\2\1]|\m=[S\t]$E;[)\2\1]|\m[S\t(\2\1]\<
 
 # - Expressions
-E=\i+=\i [U\1\2]
+# x = E as an expression (C: right to left, the loosest): its value in
+#   ACC (a char: the byte, as C converts it). Not = = (==)
+E=\i\?c=\;=$E[s\1l\1]
+|\i=\;=$E[S\1]
+|\i+=\i [U\1\2]
 
 # - Casting
 #|(I)E  - not work (type annotation require a symbol?
@@ -551,6 +558,17 @@ q=? [?G\x] $E[S\t0?G\x\w\y] : $E[S\2\yL\2]|
 
 # - Function call
 R=getchar()[K]
+# - ++x --x: I J leave the new value. x++ x--: the old one, int: new -1
+#   (+1), char: l before i / j (255 + 1 wraps). (x++; a statement: rule
+#   H first, just I / J.) captures: 1=x 2=const 1 / temp
+|++\i\?c[i\1]
+|--\i\?c[j\1]
+|++\i[I\1]
+|--\i[J\1]
+|\i\?c++[l\1S\ti\1L\2]
+|\i\?c--[l\1S\tj\1L\2]
+|\i++\#01[I\1-\2]
+|\i--\#01[J\1+\2]
 # - &x: the address of a variable (` op; the VM / JIT know mem[]'s). A
 #   static array: its address is the slot's value (also rule S)
 |&\i\$\=1[\l1]
