@@ -768,7 +768,7 @@ static int gen_acc_dead(word pc) {
 
   for (k = 0; k < 64 && pc < (word)bin_ptr; k++) {   // (B loops: give up)
     op = bin[pc];
-    if (op < 32 || strchr("LCUIJijH09Q@r'l([aKA`tuvnF", op)) return 1;
+    if (op < 32 || strchr("LCUIJijH09Q@r'l([aKA`tuvnFV$", op)) return 1;
     if (op == 'B') { pc = ivm_jump(bin + pc, pc); continue; }
     if (!strchr(" \x7fONWYZ#\"", op)) return 0;
     if (!(n = ivm_oplen(bin + pc))) return 0;
@@ -1002,7 +1002,7 @@ uchar vn_temp(word from, uchar t) {
     w = WRITES_VAR(op) ? bin[pc + 1] : 0xffff;
     if (w == vn_t[k].t || (w != 0xffff && vn_reads(e, len, (uchar)w, 0)))
       ok = 0;
-    if (strchr(")]!w,Amb", op) && (vn_alias || vn_reads(e, len, 0xff, 1)))
+    if (strchr(")]!w,AmbVxy", op) && (vn_alias || vn_reads(e, len, 0xff, 1)))
       ok = 0;                 // (& of a variable: a slot may be the target)
   }
   if (ok && pc == st) {

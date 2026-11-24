@@ -32,6 +32,12 @@ static word hl_sym(const char *name) {
 }
 
 #define HL(a) (hl_lib + (word)((a) - hl_org))    // the lib byte at address a
+
+// word i of the lib's table name (_ivmlib_libv: x / y's routines)
+static word hl_vec(const char *name, uchar i) {
+  uchar *p = HL(hl_sym(name) + 2 * i);
+  return (word)(p[0] | p[1] << 8);
+}
 static void hl_b(const char *s, uchar v) { *HL(hl_sym(s)) = v; }
 static void hl_w(const char *s, word v) {
   uchar *p = HL(hl_sym(s));
@@ -80,11 +86,12 @@ static int hl_load(const char *target) {
 // startup's own call)
 static word hl_cut(word top, word floor) {
   static const char *const cut[] = { "_ivmlib_cut0", "_ivmlib_cut1",
-    "_ivmlib_cut2", "_ivmlib_cut3", "_ivmlib_cut4", "_ivmlib_end" };
+    "_ivmlib_cut2", "_ivmlib_cut3", "_ivmlib_cut4", "_ivmlib_cut5",
+    "_ivmlib_end" };
   uchar k;
 
   if (top < floor) top = floor;
-  for (k = 0; k < 5 && top >= hl_sym(cut[k]); k++) ;
+  for (k = 0; k < 6 && top >= hl_sym(cut[k]); k++) ;
   return hl_sym(cut[k]);
 }
 

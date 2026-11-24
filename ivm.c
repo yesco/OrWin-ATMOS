@@ -94,16 +94,16 @@
 // BYTE CODES OVERVIEW
 // ====================
 // 0-31                 - fast var load (load typically 4x more common th store)
-// #$  \  :_  `         - FREE to use
+// $ \ : _              - FREE to use
 // 12345678             - local vars 1-7, 8 ist last var (AX)
-// AD H R T VY          - FREE op vars
-//   possibly usage: cAr Cons cDr, Heap/Here, Recurse, Tail-call, Vector/index? Yndex?
+// D R T V              - FREE op vars
+//   possibly usage: Dlinke/next Recurse  Tail-call V+=accumulator;
 //
-// ? abcdefgh           - lisp?
-// ? m op               - ?index stuff, built in loops iGG GG if zero/non-zero?
-// ? tuv                - ?SSTACK saves, param: 1..7 (ACC is 0th)
+// ? cdefgh             - FREEE (lisp?)
+// ? op                 - ?index stuff, oo 
+// tuv                  - loop optimizers: <=IF =IF K=IF
 // xyz                  - syscall function LN with 1,2,3 byte args indices+acc
-//
+
 
 
 // HIBIT
@@ -128,7 +128,7 @@
 //  ! - store at global address ACC
 //  " - inline print string end with \0
 //  # - #TIMED "name\0": no-op here (JIT on the host sim: cycles)
-//? $ - string ptr at end? $ == \
+//  $ - strlen "$vv": ACC = strlen(vv)
 //  % - mod
 //  & - and
 //  ' - read next char using pointer++ "'vv": ACC= *vv++;
@@ -168,7 +168,7 @@
 //  S - store ACC in variable "Svv"
 //? T - type #ACCc chars from arg (or reverse), or Tailcall: Tvv
 //  U - Unified op: ACC= var2 += var2
-//? V - TODO: same using ACC as value?  Vss == +ssSss (2 not 4 B)
+//  V - moVe "Vddsszz": memmove(dd, ss, zz), ACC = dd (memcpy too)
 //  W - write var as number (unsigned) "Wvv"
 //  X - return ACC; see ';' and Q
 //  Y - yes: variable = 1 "Yvv" (a flag), see Z
@@ -228,7 +228,8 @@
 //  v   - if ==: "v a #k skip": mem[a] == k (a byte) on, else skip (as t u)
 
 //  w   - write byte (c!)
-//  xyz - call library functions w 2..4 args
+//  xy  - library call "x id a", "y id a b": ACC = id(a, [b,] ACC), the
+//        last argument in ACC (as cc65's AX); ids from 16: ivm_libv
 
 //  [ - read index byte array "[ bb ii"  => ACC
 //? '\' possible use instead of 'O'!!! \ is like literal... lol
@@ -277,6 +278,39 @@
 
 static word runs = 1;   // -rN
 
+// x id a / y id a b: the library by vector, id 16 on (0-15 reserved),
+// the C ones (cc65's, the host's libc), called as C does: the arguments
+// in order, the last one ACC (cc65: in AX). ptr: which arguments (bit 0
+// the first) and the result (bit 7) are pointers: m + them (the host's
+// soft heap offsets, the simulator's cpu_mem; m 0: real addresses)
+typedef struct { void *f; uchar n, ptr; } LibFn;
+static const LibFn ivm_libv[] = {
+  { (void *)strcmp,  2, 0x03 },     // 16 strcmp(a, b)
+  { (void *)strncmp, 3, 0x03 },     // 17 strncmp(a, b, n)
+  { (void *)memcmp,  3, 0x03 },     // 18 memcmp(a, b, n)
+  { (void *)strchr,  2, 0x81 },     // 19 strchr(s, c)
+  { (void *)memchr,  3, 0x81 },     // 20 memchr(s, c, n)
+  { (void *)strcpy,  2, 0x83 },     // 21 strcpy(d, s)
+  { (void *)strncpy, 3, 0x83 },     // 22 strncpy(d, s, n)
+};
+#define IVM_NLIB (sizeof(ivm_libv) / sizeof(ivm_libv[0]))
+
+// id(a0, a1[, a2]): its result (0xffff: no such id)
+static word ivm_lib(uchar *m, uchar id, word a0, word a1, word a2) {
+  const LibFn *l;
+  uintptr_t x0, x1, r;
+
+  id -= 16;
+  if (id >= IVM_NLIB) return 0xffff;
+  l = &ivm_libv[id];
+  x0 = l->ptr & 1 ? (uintptr_t)(m + a0) : a0;
+  x1 = l->ptr & 2 ? (uintptr_t)(m + a1) : a1;
+  if (l->n == 2) r = ((uintptr_t (*)(uintptr_t, uintptr_t))l->f)(x0, x1);
+  else r = ((uintptr_t (*)(uintptr_t, uintptr_t, uintptr_t))l->f)(x0, x1, a2);
+  if (l->ptr & 0x80) return r ? (word)((uchar *)r - m) : 0;
+  return (word)(int)r;                     // a compare: an int, its sign
+}
+
 #ifdef JIT
   #include "ivm-jit.c"
   #ifndef HOSTSIM
@@ -300,7 +334,7 @@ static word runs = 1;   // -rN
   // the lib is in tiers: an -o image ends at the cut after the last
   // routine its code calls (jit_lib_more)
   extern uchar ivmlib_cut0[], ivmlib_cut1[], ivmlib_cut2[], ivmlib_cut3[],
-    ivmlib_cut4[];
+    ivmlib_cut4[], ivmlib_cut5[];
   // patched operands (startup), vars (heap)
   extern word  ivmlib_dst;
   extern uchar ivmlib_bssp, ivmlib_bssr;   // bss: pages, rest
@@ -436,6 +470,7 @@ void REPORT_COUNTS() {
   word soft_top;
   #define IVM_PTR(addr) ((ivmvar *)(soft_heap + (unsigned)(addr)))
   #define IVM_ADR(p)    ((ivmvar)((uchar *)(p) - soft_heap))   // the reverse
+  #define IVM_MEM       soft_heap        // + address: its bytes
 
   // Host range check: n bytes at soft-heap offset a. Only [SOFT_BASE, soft_top)
   // is valid: the blob's strings plus what M handed out. On failure remember
@@ -486,6 +521,7 @@ void ivm_free(ivmvar p) {
 
   #define IVM_PTR(addr) ((ivmvar *)(unsigned)(addr))
   #define IVM_ADR(p)    ((ivmvar)(unsigned)(p))
+  #define IVM_MEM       ((uchar *)0)
   #define CHKP(a, n) ((void)0)
 
 ivmvar ivm_zalloc(word n) {
@@ -900,6 +936,21 @@ Process* Nevm(uchar *loaded) {
 ProcessHead zp;
 
 
+// Highest frequency:
+//   memcpy  memset   strlen strcmp
+//   strncmp snprintf memcmp strchr
+//   strcpy  strncpy  strdup memmove
+//   strstr  strrchr  strcat strncat
+//   strtol  atoi     strnlen
+
+// strcmp (falls into) strncmp (falls into) memcmp
+// strchr (falls into) memnchr
+// strcpy (falls into) strncpy
+// strdup
+// strstr (falls into) strnstr
+// strrchr
+// strcat (falls into) strncat
+// atoi strnlen
 
 // Missing: (q)
 //   memove  v
@@ -1213,6 +1264,7 @@ static void unpivot(void) {
 }
 
 extern ivmvar run_ivm_asm(void);
+
 
 // TODO: add a run_ivm-for-a-while
 
@@ -1681,8 +1733,20 @@ ZL(op_k,   'k')  {
 
 // OS API caller "x <lib:4><fun:4> one" (y, z adds +1 and +1 running)
 
-ZL(op_x,   'x')  zp.acc= sys(1, zp.acc, zp.ipc); zp.ipc+= 1; goto xnext;
-ZL(op_y,   'y')  zp.acc= sys(2, zp.acc, zp.ipc); zp.ipc+= 2; goto xnext;
+// library calls (ivm_libv): x id a / y id a b, the last argument in ACC
+ZL(op_x,   'x')  zp.acc = ivm_lib(IVM_MEM, zp.ipc[0], zp.mem[zp.ipc[1]],
+                                  zp.acc, 0);
+                 zp.ipc += 2; goto xnext;
+ZL(op_y,   'y')  zp.acc = ivm_lib(IVM_MEM, zp.ipc[0], zp.mem[zp.ipc[1]],
+                                  zp.mem[zp.ipc[2]], zp.acc);
+                 zp.ipc += 3; goto xnext;
+// V dd ss zz: memmove, ACC = dd.  $ vv: strlen
+ZL(op_V,   'V')  zp.acc = zp.mem[zp.ipc[0]];
+                 memmove(IVM_MEM + zp.acc, IVM_MEM + zp.mem[zp.ipc[1]],
+                         zp.mem[zp.ipc[2]]);
+                 zp.ipc += 3; goto xnext;
+ZL(op_dollar,'$') zp.acc = (word)strlen((char *)IVM_MEM + zp.mem[*zp.ipc]);
+                 goto pnext;
 ZL(op_z,   'z')  zp.acc= sys(3, zp.acc, zp.ipc); zp.ipc+= 3; goto xnext;
 
 ZL(op_DEL,  127) goto xnext;
@@ -1912,11 +1976,11 @@ static word    jit_heapend;             // the heap's end (the bss below it)
 // the cut after lib address top (the highest routine called)
 static uchar *jit_cut(word top) {
   static uchar *const cut[] = { ivmlib_cut0, ivmlib_cut1, ivmlib_cut2,
-    ivmlib_cut3, ivmlib_cut4, ivmlib_end };
+    ivmlib_cut3, ivmlib_cut4, ivmlib_cut5, ivmlib_end };
   uchar k;
 
   if (top < jit_libfloor) top = jit_libfloor;
-  for (k = 0; k < 5 && top >= (word)(unsigned)cut[k]; k++) ;
+  for (k = 0; k < 6 && top >= (word)(unsigned)cut[k]; k++) ;
   return cut[k];
 }
 

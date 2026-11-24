@@ -29,6 +29,8 @@ ALTCODE=1
 
 .importzp       _ivm_ipc, _ivm_fp, _ivm_acc, _ivm_op
 .importzp       _ivm_memlo, _ivm_memhi, _ivm_par
+.import         pushax, _memmove, _strlen
+.import         _strcmp, _strncmp, _memcmp, _strchr, _memchr, _strcpy, _strncpy
 .importzp       _ivm_fptab, _ivm_callv
 
 .import         _opmul, _opdiv, _opmod, _opputnum
@@ -1591,6 +1593,83 @@ v_skip: ldy     #2
         inc     _ivm_ipc+1
 :       jmp     anext
 
+
+;;; ------------------------------------------------------------
+;;; V dd ss zz: memmove(dd, ss, zz), ACC = dd.  $ vv: strlen(vv).
+;;; x id a / y id a b: id(a, [b,] ACC), cc65's (lib_v, id 16 on, as
+;;; ivm.c's ivm_libv). As cc65 calls: the arguments pushed, the last in AX
+;;; (ALTCODE=1 only: savey, anext)
+;;; ------------------------------------------------------------
+;;; AX = mem[the slot operand Y]
+slotax: lda     (_ivm_ipc),y
+        tay
+        lda     (_ivm_memhi),y
+        tax
+        lda     (_ivm_memlo),y
+        rts
+
+op_V:   FIXIPC                          ; ipc -> dd ss zz, Y = 0
+        sty     savey
+        jsr     slotax                  ; dd: ACC, the 1st argument
+        sta     _ivm_acc
+        stx     _ivm_acc+1
+        jsr     pushax
+        ldy     #1
+        jsr     slotax
+        jsr     pushax
+        ldy     #2
+        jsr     slotax
+        jsr     _memmove
+        lda     #3
+        jmp     anext
+
+op_dollar:
+        FIXIPC
+        sty     savey
+        jsr     slotax
+        jsr     _strlen
+        sta     _ivm_acc
+        stx     _ivm_acc+1
+        lda     #1
+        jmp     anext
+
+op_y:   FIXIPC                          ; ipc -> id a b
+        sty     savey
+        iny
+        jsr     slotax                  ; a
+        jsr     pushax
+        ldy     #2                      ; b
+        lda     #3                      ; its bytes
+        bne     xycall                  ; (always)
+op_x:   FIXIPC                          ; ipc -> id a
+        sty     savey
+        iny                             ; a
+        lda     #2
+xycall: sta     tmp_hi                  ; (operand bytes)
+        jsr     slotax                  ; the last slot argument
+        jsr     pushax
+        ldy     #0
+        lda     (_ivm_ipc),y            ; id: its routine
+        sec
+        sbc     #16
+        asl
+        tay
+        lda     lib_v,y
+        sta     libjmp+1
+        lda     lib_v+1,y
+        sta     libjmp+2
+        lda     _ivm_acc                ; ACC: the last argument
+        ldx     _ivm_acc+1
+        jsr     libjmp
+        sta     _ivm_acc
+        stx     _ivm_acc+1
+        lda     tmp_hi
+        jmp     anext
+libjmp: jmp     $FFFF                   ; patched: the routine
+
+lib_v:  .word   _strcmp, _strncmp, _memcmp, _strchr, _memchr
+        .word   _strcpy, _strncpy
+
 .endif ; ALTCODE
 
 
@@ -2005,7 +2084,9 @@ shrm_st:
 ;;; unknown: print % + op + NL, halt
 ;;; op is in X from dispatch (do not use _ivm_op)
 ;;; undefined opcodes — named aliases of op_bad
-op_dollar:
+.if ALTCODE=0
+op_dollar:                              ;; (not done: ALTCODE=1 only)
+.endif
 op_colon:
 
 op_D:
@@ -2014,7 +2095,9 @@ op_D:
 op_R:
 op_T:
 
-op_V:
+.if ALTCODE=0
+op_V:                                   ;; (not done: ALTCODE=1 only)
+.endif
 op_W:
 
 
@@ -2037,9 +2120,10 @@ op_p:
 op_v:                   ;; (not done: ALTCODE=1 only)
 .endif
 
-;;; TODO: call library routine (see ivm.c)
-op_x:
+.if ALTCODE=0
+op_x:                                   ;; (not done: ALTCODE=1 only)
 op_y:
+.endif
 op_z:
 
 op_del:

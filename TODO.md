@@ -2,6 +2,10 @@
 
 # MeteoriC-65 (parse.c c.bnf): next, after the manual (MeteoriC-man.md)
 
+- if a function is never called remove it and all under not used!
+
+- do we support:  a?:b; - never seen but nice shortcut opt!
+
 - ivm-lib.asm: add memcpy, for <= 256 generate simple inline code
   otherwise call a library routine
 

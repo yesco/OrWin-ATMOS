@@ -54,6 +54,7 @@ actual binary 6502 machine code that is executed directly, or can be
 saved as a stand-alone program, effectively making it a native
 compiler. It's now, working for generating .sim files for `sim65`.
 
+
 ### Context and features
 
 - The compiler either runs on the host (gcc / clang), or on the 6502
@@ -67,6 +68,7 @@ compiler. It's now, working for generating .sim files for `sim65`.
   compare-and-branch, array indexing, struct fields) have their own
   ops; the JIT turns them into tight 6502 code (`LDY i / LDA a,Y`).
 
+
 ### Goals
 
 - Small code first (the compiler, the VM, the programs), then speed.
@@ -75,6 +77,8 @@ compiler. It's now, working for generating .sim files for `sim65`.
   pointers, structs, functions, the usual statements.
 - Standard compliant as much as possible. Restricted to be safe.
 - Errors, not silent surprises: what does not compile is reported.
+- Simple optimizations as early as possible. Get's you far!
+
 
 ### Non-goals
 
@@ -102,6 +106,7 @@ gives what gcc gives, what does not is a reported error.
 
 ---
 
+
 ## What MeteoriC-65 supports
 
 | area | |
@@ -120,6 +125,8 @@ gives what gcc gives, what does not is a reported error.
 | tools        | error recovery, `-O` (packing, peephole), `-S` (striping), `-v` (bytecode per statement) |
 
 ---
+
+
 
 ## 1. The compiler
 
@@ -158,6 +165,8 @@ All the `test-*.c` files and [`Tests/Compiler/man-*.c`](Tests/Compiler/) are wri
 way: gcc's output is the reference (except where `int` size shows, see 3).
 
 ---
+
+
 
 ## 2. Program structure
 
@@ -223,6 +232,8 @@ evaluated): use `#ifdef`.  *TODO: evaluate a name.*
 
 ---
 
+
+
 ## 3. Types
 
 | type | size | notes |
@@ -257,6 +268,8 @@ Test the top bit when you need a sign: `if (x & 0x8000)`.
 Examples: [`man-types.c`](Tests/Compiler/man-types.c), errors: [`man-decl-err.c`](Tests/Compiler/man-decl-err.c).
 
 ---
+
+
 
 ## 4. Variables and declarations
 
@@ -301,7 +314,10 @@ Examples: [`man-decl.c`](Tests/Compiler/man-decl.c), errors: [`man-decl-err.c`](
 
 ---
 
+
+
 ## 5. Expressions
+
 
 ### 5.1 Operators
 
@@ -377,6 +393,7 @@ Parentheses make it correct, and we can sometimes reorder calculations
 to avoid using extra temps: `35 + (d * a)`, `(d * a) + 35` and `d * a
 + 35` compile to the same bytecode.
 
+
 ### 5.3 Assignment forms
 
 | works | |
@@ -403,6 +420,7 @@ errors, write `a[i] = a[i] + 2;` (struct fields: see 10).
 Examples: [`man-expr.c`](Tests/Compiler/man-expr.c), errors: [`man-expr-err.c`](Tests/Compiler/man-expr-err.c).
 
 ---
+
 
 ## 6. Statements
 
@@ -436,6 +454,7 @@ Examples: [`man-stmt.c`](Tests/Compiler/man-stmt.c), errors: [`man-stmt-err.c`](
 
 ---
 
+
 ## 7. Functions
 
 ```c
@@ -465,6 +484,7 @@ error; later: tail calls, recursion with frames on a stack.*
 Examples: [`man-func.c`](Tests/Compiler/man-func.c), errors: [`man-stmt-err.c`](Tests/Compiler/man-stmt-err.c).
 
 ---
+
 
 ## 8. Arrays
 
@@ -503,6 +523,7 @@ Examples: [`man-array.c`](Tests/Compiler/man-array.c), errors: [`man-decl-err.c`
 
 ---
 
+
 ## 9. Pointers and strings
 
 ```c
@@ -539,7 +560,9 @@ Examples: [`man-pointer.c`](Tests/Compiler/man-pointer.c), errors: [`man-decl-er
 
 ---
 
+
 ## 10. Structs
+
 
 ### 10.1 Definition and variables
 
@@ -567,6 +590,7 @@ definitions inside a function, struct assignment `a = b` (an error),
 structs by value as parameters / results (pass pointers), nested struct
 values (a pointer field is fine), `union`.
 
+
 ### 10.2 Fields
 
 ```c
@@ -583,6 +607,7 @@ n = q->next->next->v;
 ps[i]->x = 5;            /* struct pt *ps[4]: an array of pointers */
 n = mk(6)->x;            /* a function returning struct pt * */
 ```
+
 
 ### 10.3 Arrays of structs
 
@@ -612,6 +637,7 @@ q = a;  q = &a[1];  n = a.x;  n = a[1];  a[2] = n;    /* errors */
 For a list of structs to pass around, use an array of pointers
 (`struct pt *ps[N]`, each one `malloc`ed): 10.2.
 
+
 ### 10.4 `__striped` and `-S`
 
 ```c
@@ -638,6 +664,7 @@ Examples: [`man-struct.c`](Tests/Compiler/man-struct.c), [`test-struct.c`](test-
 [`test-struct-err.c`](test-struct-err.c).
 
 ---
+
 
 ## 11. Input and output
 
@@ -672,6 +699,7 @@ Examples: [`man-io.c`](Tests/Compiler/man-io.c). The silent cases of this manual
 
 ---
 
+
 ## 12. Errors
 
 - An error in a statement, declaration or function is reported
@@ -688,6 +716,7 @@ Examples: [`man-io.c`](Tests/Compiler/man-io.c). The silent cases of this manual
 
 ---
 
+
 ## 13. Efficiency
 
 Measured with sim65: each statement in a loop of 1000 rounds, the
@@ -698,6 +727,7 @@ ints, locals.
 
 The loop itself: an empty `for (k = 0; k < 1000; k++)` costs 695 / 132 /
 22 cycles per round (`ivm` / `ivm-asm` / JIT).
+
 
 ### 13.1 Increment, assign
 
@@ -717,6 +747,7 @@ The loop itself: an empty `for (k = 0; k < 1000; k++)` costs 695 / 132 /
 - `x = 0` is the cheapest store.
 - A `char` (`unsigned char`) counter is the cheapest on the JIT.
 
+
 ### 13.2 Multiply, divide
 
 | statement | BC | JIT | ivm | asm | jit |
@@ -734,6 +765,7 @@ The loop itself: an empty `for (k = 0; k < 1000; k++)` costs 695 / 132 /
 - The JIT turns `*` `/` `%` by a power of 2 into shifts / ANDs itself; the
   VMs do not: write `<<` `>>` `&` and all backends are fast.
 - Any other multiply is a library call on the JIT (156 cycles).
+
 
 ### 13.3 Arrays, pointers, structs (reads; writes cost about the same)
 
@@ -761,6 +793,7 @@ The loop itself: an empty `for (k = 0; k < 1000; k++)` costs 695 / 132 /
 - `__striped` makes `a[i].f` three times faster on the JIT and slower on
   `ivm` (10.4).
 
+
 ### 13.4 Branches
 
 | statement | BC | JIT | ivm | asm | jit |
@@ -785,6 +818,7 @@ The loop itself: an empty `for (k = 0; k < 1000; k++)` costs 695 / 132 /
 - Avoid `!= 0`: write `if (0 < a)` (unsigned, so it is the same test):
   about half the cost on every backend.
 
+
 ### 13.5 Loops
 
 | loop (body `n++`) | BC | JIT | ivm | asm | jit |
@@ -807,6 +841,7 @@ The loop itself: an empty `for (k = 0; k < 1000; k++)` costs 695 / 132 /
 
   The cheapest loop on every backend: prefer it to `while`, and to
   counting down.
+
 
 ### 13.6 memset loops
 
@@ -833,6 +868,7 @@ larger one calls the library. The cycles for the whole loop:
 Up to 100 times faster on `ivm`: write clearing / filling loops exactly in
 this form.
 
+
 ### 13.7 Calls
 
 | statement | BC | JIT | ivm | asm | jit |
@@ -843,7 +879,34 @@ A call is cheap in bytecode; on the VMs it costs about two loop rounds.
 
 ---
 
-## 14. Not supported: a summary
+
+## 14. Optimizations
+
+**Byte code generation:**
+
+- Peephole: minimize jump sizes from 2-3 bytes to 1 byte
+- Peephole: one byte loading op for registers/most frequent vars
+- Peephole: advanced (LOL) reuse of remaining ACC value of previous
+  operation; may use associativey to reuse.
+- Const eliminiation if they not used
+- Minimize allocated static memory area
+- Call Tree analyzis reuses stack-slots
+- CSR: Common Subexpression Reuse (from temps); subexpressions inside the
+  same function calculating the same thing are reused if they are stored
+  in ACC or in a temp variable slot.
+
+**JIT compilation:**
+
+- Const propagation; all constants are put in code in place instead
+  of loading
+- Const reordering of operations.
+- Loops compile highly efficient
+
+- Array lookup/setting; addopts to size of indexing variable, size of
+  array, constant index, constant pointer/array, setting constant value.
+
+
+## 15. Not supported: a summary
 
 | | instead |
 |---|---|

@@ -24,7 +24,7 @@
           }
           if (op < '#') goto op_str;
           if (op < '$') goto op_time;
-          goto op_unk;
+          goto op_dollar;
         }
         if (op < '\'') {
           if (op < '&') goto op_mod;
@@ -102,7 +102,7 @@
         if (op < 'U') goto op_unk;
         goto op_U;
       }
-      if (op < 'W') goto op_unk;
+      if (op < 'W') goto op_V;
       if (op < 'X') goto op_W;
       goto op_X;
     }

@@ -329,6 +329,12 @@ extern void opmalloc(void);   // AX = bytes -> AX = zeroed ptr (bump)
 extern void opfree(void);     // AX = ptr (no-op)
 extern void opmemset(void);   // A = fill, X = pages, Y = rest; see 'm'
 extern uchar opmemset_adr[];  // its STA $xxxx,Y operand (self-modified)
+// strings / memory (V $ x y): arguments in ivmlib_args (a0 a1 a2), AX out
+extern uchar ivmlib_args[];
+extern word ivmlib_libv[];    // x / y id 16 on: the routines' addresses
+extern void opmove(void), opstrlen(void), opstrcmp(void), opstrncmp(void),
+  opmemcmp(void), opstrchr(void), opmemchr(void), opstrcpy(void),
+  opstrncpy(void);
 #endif
 
 // TODO: word oprandom(void): see my parse.asm in Meteoric C compiler
@@ -394,8 +400,11 @@ extern void   ivm_free(ivmvar p);
   enum {
     SIM_opputnum = 0xFF00, SIM_opmul, SIM_opdiv, SIM_opmod,
     SIM_opputchar, SIM_opgetchar, SIM_opputs, SIM_opprintstr,
-    SIM_opmalloc, SIM_opfree, SIM_optimed, SIM_end
+    SIM_opmalloc, SIM_opfree, SIM_optimed,
+    SIM_opmove, SIM_opstrlen, SIM_opstrcmp, SIM_opstrncmp, SIM_opmemcmp,
+    SIM_opstrchr, SIM_opmemchr, SIM_opstrcpy, SIM_opstrncpy, SIM_end
   };
+  #define SIM_ivmlib_args  0xFDF0        // their arguments (a0 a1 a2)
   // opmemset is real 6502 code (its loop costs cycles): sim_memset[] at
   // $FE00, below the traps. Same bytes as _opmemset in ivm-lib.asm.
   #define SIM_opmemset     0xFE00
@@ -404,6 +413,7 @@ extern void   ivm_free(ivmvar p);
   // ivm-lib-TARGET.bin; else the traps
   static uchar *hl_lib;
   static word hl_sym(const char *name);
+  static word hl_vec(const char *name, uchar i);   // word i of a lib table
   #define REF(f) (hl_lib ? hl_sym("_" #f) : (word)SIM_##f)
   char *disasm(char *mc, char *end, char indent);   // HOSTSIM: cpu6502.c
 #else
@@ -1320,7 +1330,7 @@ static void ksa_check(word bc_target) {
 // a KEEP op needn't save it (ivm-walk.c contract: "- SLOT/NEW/UNDEF")
 static int acc_unread(word bc) {
   uchar op = lc_code[bc];
-  return op < 32 || strchr("09Q12345678@r'l([aKLCUIJijH;tuvn", op);
+  return op < 32 || strchr("09Q12345678@r'l([aKLCUIJijH;tuvnV$", op);
 }
 static int acc_dead(word bc) {
   return bc < lc_len && !is_label(bc) && acc_unread(bc);
@@ -2273,7 +2283,7 @@ static word ivm_jit1(const uchar *code, word code_len,
     // a write of slot w: drops the cache if w is its base or idx, the
     // a[j+c] relation if w is t or src
     // & of a variable: a store through a pointer may write any slot
-    else if (lc_alias && op >= 32 && strchr("!,w)]mA", op)) {
+    else if (lc_alias && op >= 32 && strchr("!,w)]mAVxy", op)) {
       ai_drop();
       if (op == 'm' || op == 'A') acc_s = 0xff;
     }
@@ -2702,6 +2712,54 @@ static word ivm_jit1(const uchar *code, word code_len,
       break;
     }
 
+    // V dd ss zz
+    // $ v 
+    // x id a
+    // y id a b
+    //
+    // Arguments are put into ivmlib_args.
+    // (ACC, x y's last one: first, AX is used after)
+    // JSR the routine (ivm-lib.asm cut 5)
+    // result: in AX
+    case 'V': case '$': case 'x': case 'y': {
+      word args = REF(ivmlib_args), r = 0;
+      uchar xy = op == 'x' || op == 'y', k;
+      uchar ns = op == 'V' ? 3 : op == 'y' ? 2 : 1;      // slot operands
+      const uchar *sl = xy ? p + 1 : p;
+      if (xy) {
+        // the routine: from ivm-lib's vector (the simulator: its traps,
+        // in the same order)
+        uchar i = (uchar)(p[0] - 16);
+        if (i < IVM_NLIB) {
+        #ifdef HOSTSIM
+          r = hl_lib ? hl_vec("_ivmlib_libv", i) : (word)(SIM_opstrcmp + i);
+        #else
+          r = ivmlib_libv[i];
+        #endif
+        } else {
+          printf("%%JIT: no library function %u\n", p[0]);
+          lc_err = 1;
+        }
+        acc_need();
+        ema(STA, (word)(args + 2 * ns));
+        ema(STX, (word)(args + 2 * ns + 1));
+      } else {
+        acc_drop();
+        r = op == 'V' ? REF(opmove) : REF(opstrlen);
+      }
+      for (k = 0; k < ns; k++) {
+        emit_load_slot(sl[k]);
+        ema(STA, (word)(args + 2 * k));
+        ema(STX, (word)(args + 2 * k + 1));
+      }
+      if (r > lc_libtop) lc_libtop = r;          // the lib the image needs
+      ema(JSR, r);
+      acc_ax();
+      p += ivm_oplen(p - 1) - 1;
+      break;
+    }
+
+    // U dd aa     ACC = dd += aa;
     case 'U': {                                    // -, SLOT (a)
       uchar a = PAR;
       p++;                                         // b: slot operand 2
@@ -2722,7 +2780,8 @@ static word ivm_jit1(const uchar *code, word code_len,
       break;
     }
 
-    // { }: ACC <<= / >>= mem[s]. Const: emit_shift; else a loop on Y
+    // { }: ACC <<= / >>= mem[s].
+    // Const: emit_shift; else a loop on Y
     case '{': case '}': {                          // in, NEW
       uchar s = PAR;
       if (is_const(s)) {
@@ -3093,6 +3152,25 @@ static int sim_trap(Cpu6502 *c) {
     SIM_AX(c, t);
     break;
   case SIM_opfree: break;
+  // strings / memory, their arguments at SIM_ivmlib_args (the JIT put
+  // them there): memmove strlen, the x / y ones (ivm.c ivm_lib) on cpu_mem
+  case SIM_opmove:
+    t = (word)SIM_W(SIM_ivmlib_args);
+    memmove(cpu_mem + t, cpu_mem + (word)SIM_W(SIM_ivmlib_args + 2),
+            (word)SIM_W(SIM_ivmlib_args + 4));
+    SIM_AX(c, t);
+    break;
+  case SIM_opstrlen:
+    t = (word)strlen((char *)cpu_mem + (word)SIM_W(SIM_ivmlib_args));
+    SIM_AX(c, t);
+    break;
+  case SIM_opstrcmp: case SIM_opstrncmp: case SIM_opmemcmp: case SIM_opstrchr:
+  case SIM_opmemchr: case SIM_opstrcpy: case SIM_opstrncpy:
+    t = ivm_lib(cpu_mem, (uchar)(16 + c->pc - SIM_opstrcmp),
+                (word)SIM_W(SIM_ivmlib_args), (word)SIM_W(SIM_ivmlib_args + 2),
+                (word)SIM_W(SIM_ivmlib_args + 4));
+    SIM_AX(c, t);
+    break;
   case SIM_optimed: {                                 // JSR + name + 0
     // since the last #TIMED (or the start): cycles without this JSR's 6,
     // code bytes from the end of the last one to this JSR

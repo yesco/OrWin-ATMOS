@@ -48,6 +48,7 @@
 //   in  SLOT   M(acc = mem[s] = alloc(acc))
 //   -   NEW    0 9 Q 1..8 @ r ' l ( [ a K A (old a[i]) ` (&mem[s])
 //   in  NEW    + - * / % & | ^ { } < = > ? ~ x y z call(arg -> result)
+//   -   NEW    V $ (memmove: dd, strlen)
 //   -   UNDEF  t u v n (VM: loop var / mem[a]; JIT: clobbered) F
 //   ;   NEW    ACC = return value cell, then return
 //
@@ -71,12 +72,14 @@
 #define _BK  0x68   // rel back
 #define _I3  0x3b   // slot slot rel-forward
 #define _IB  0x39   // slot byte rel-forward
+#define _X1  0x12   // id byte, slot         (x: a library call)
+#define _X2  0x1e   // id byte, slot slot    (y)
 #define _J2  0x31   // slot rel-forward
 #define _SP  0x80   // special / unknown
 
 static const uchar ivm_optab[96] = {
   // ' '   !    "    #    $    %    &    '
-  _A0, _S1, _SP, _SP, _SP, _S1, _S1, _S1,
+  _A0, _S1, _SP, _SP, _S1, _S1, _S1, _S1,
   //  (    )    *    +    ,    -    .    /
   _S2, _S2, _S1, _S1, _S1, _S1, _A0, _S1,
   //  0    1    2    3    4    5    6    7
@@ -88,7 +91,7 @@ static const uchar ivm_optab[96] = {
   //  H    I    J    K    L    M    N    O
   _S1, _S1, _S1, _A0, _S1, _S1, _A0, _D1,
   //  P    Q    R    S    T    U    V    W
-  _A0, _A0, _SP, _S1, _SP, _S2, _SP, _S1,
+  _A0, _A0, _SP, _S1, _SP, _S2, _S3, _S1,
   //  X    Y    Z    [   bsl   ]    ^    _
   _A0, _S1, _S1, _S2, _SP, _S2, _S1, _SP,
   //  `    a    b    c    d    e    f    g
@@ -98,7 +101,7 @@ static const uchar ivm_optab[96] = {
   //  p    q    r    s    t    u    v    w
   _SP, _A0, _S1, _S1, _I3, _I3, _IB, _S1,
   //  x    y    z    {    |    }    ~   DEL
-  _D1, _D2, _D3, _S1, _S1, _S1, _A0, _A0,
+  _X1, _X2, _D3, _S1, _S1, _S1, _A0, _A0,
 };
 
 // info byte of opcode op (0 outside ' '..DEL)

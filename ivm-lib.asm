@@ -69,6 +69,9 @@
 .export _opputchar, _opgetchar, _opputs, _opprintstr
 .export _opmalloc, _opfree
 .export _opmemset, _opmemset_adr
+.export _ivmlib_cut5, _ivmlib_args, _ivmlib_libv
+.export _opmove, _opstrlen, _opstrcmp, _opstrncmp, _opmemcmp
+.export _opstrchr, _opmemchr, _opstrcpy, _opstrncpy
 
 
 ;;; JIT scratch word (ivm-jit.c tmp1/tmp2): first operand of opmul/opdiv/opmod
@@ -142,6 +145,12 @@ _ivmlib_zplo:                           ;; -z mem[] from here up (lib zp below)
 .else
                  .byte 0
 .endif
+
+;;; x / y id (16 on): their routines, for the JIT to look the address up
+;;; (ivm.c ivm_libv: the same order). Not in images (before _ivmlib_init)
+_ivmlib_libv:
+        .word   _opstrcmp, _opstrncmp, _opmemcmp, _opstrchr, _opmemchr
+        .word   _opstrcpy, _opstrncpy
 
 _ivmlib_load:
         lda     _ivmlib_dst
@@ -613,6 +622,255 @@ _opgetchar:
 @key:   ldx     #0
         rts
 .endif
+
+;;; ---- cut 5: ... no string / memory routines (else: _ivmlib_end) ----
+_ivmlib_cut5:
+
+;;; ===========================================================================
+;;; Strings and memory (ivm.c: V $ x y..
+;;;
+;;; The arguments in _ivmlib_args:
+;;;
+;;;    (a0 a1 a2 last i from ACC???)
+;;; 
+;;;    => the result in AX.
+;;; 
+;;; Families, each falling into the last with default set
+;;; 
+;;; (n: $FFFF, stop at a NUL):
+;;;
+;;;   strcmp > strncmp > memcmp     0, 1 or $FFFF (-1)
+;;;   strchr > memchr               the address, 0: not there
+;;;   strcpy > strncpy              d (strncpy: NULs up to n, as C)
+;;; ===========================================================================
+
+;;; TODO: zeropage? why not use tmp? and the index slot refs?
+;;; TODO: actually instead of copying cheaper to PHA TXA PHA !!!!
+;;;   (same cycles but 3 bytes instead of 4)
+_ivmlib_args:   .res    6               ;; a0 a1 a2
+
+
+sflag:          .byte   0               ;; 1: stop at a NUL (str..)
+spad:           .byte   0               ;; strncpy: past the NUL, NULs
+
+;;; ptr1 = a0, ptr2 = a1, tmp3/tmp4 = a2 (a count), Y = 0
+;;; This to call if you have 3 args?
+;;; TODO: if this was on stacK: PLA sta zp PLA sta azp ...
+sargs:  lda     _ivmlib_args
+        sta     ptr1
+        lda     _ivmlib_args+1
+        sta     ptr1+1
+        lda     _ivmlib_args+2
+        sta     ptr2
+        lda     _ivmlib_args+3
+        sta     ptr2+1
+        lda     _ivmlib_args+4
+        sta     tmp3
+        lda     _ivmlib_args+5
+        sta     tmp4
+        ldy     #0
+        rts
+
+;;; the count - 1; Z = 1: it was 0 (done, left 0)
+ndec:   lda     tmp3
+        bne     @lo
+        lda     tmp4
+        beq     @z
+        dec     tmp4
+@lo:    dec     tmp3
+        lda     #1
+@z:     rts
+
+;;; no limit: a2 = $FFFF
+nmax:   lda     #$FF
+        sta     _ivmlib_args+4
+        sta     _ivmlib_args+5
+        rts
+
+;;; memmove(d, s, n) = memcpy too: from the end if d > s (they may overlap)
+_opmove:
+;;;  massive assembly, comment
+        jsr     sargs
+
+        lda     ptr2
+        cmp     ptr1
+        lda     ptr2+1
+        sbc     ptr1+1
+        bcc     @back                   ;; s < d
+@fwd:   jsr     ndec
+        beq     @done
+        lda     (ptr2),y
+        sta     (ptr1),y
+        inc     ptr1
+        bne     :+
+        inc     ptr1+1
+:       inc     ptr2
+        bne     @fwd
+        inc     ptr2+1
+        bne     @fwd                    ;; (always)
+@back:  clc                             ;; past both ends, then down
+        lda     ptr1
+        adc     tmp3
+        sta     ptr1
+        lda     ptr1+1
+        adc     tmp4
+        sta     ptr1+1
+        clc
+        lda     ptr2
+        adc     tmp3
+        sta     ptr2
+        lda     ptr2+1
+        adc     tmp4
+        sta     ptr2+1
+@bk:    jsr     ndec
+        beq     @done
+        lda     ptr1
+        bne     :+
+        dec     ptr1+1
+:       dec     ptr1
+        lda     ptr2
+        bne     :+
+        dec     ptr2+1
+:       dec     ptr2
+        lda     (ptr2),y
+        sta     (ptr1),y
+        jmp     @bk
+@done:  lda     _ivmlib_args
+        ldx     _ivmlib_args+1
+        rts
+
+;;; strlen(s)
+_opstrlen:
+        lda     _ivmlib_args
+        sta     ptr1
+        lda     _ivmlib_args+1
+        sta     ptr1+1
+
+;;; TODO: this is bad implenmtnation, keep count in X hi and Y low
+
+        ldy     #0
+        sty     tmp3
+        sty     tmp4
+@l:     lda     (ptr1),y
+        beq     @d
+        inc     ptr1
+        bne     :+
+        inc     ptr1+1
+:       inc     tmp3
+        bne     @l
+        inc     tmp4
+        bne     @l                      ;; (always)
+@d:     lda     tmp3
+        ldx     tmp4
+        rts
+
+;;; strcmp(a, b) > strncmp(a, b, n) > memcmp(a, b, n)
+_opstrcmp:
+        jsr     nmax
+
+_opstrncmp:
+        ldx     #1
+        .byte   $2C                     ;; BIT abs: skips the ldx #0
+_opmemcmp:
+        ldx     #0
+        stx     sflag
+
+        jsr     sargs
+
+@l:     jsr     ndec
+        beq     @eq                     ;; n done: equal
+        lda     (ptr1),y
+        cmp     (ptr2),y
+        bne     @ne
+        ldx     sflag
+        beq     :+
+        cmp     #0
+        beq     @eq                     ;; both at their NUL
+:       inc     ptr1
+        bne     :+
+        inc     ptr1+1
+:       inc     ptr2
+        bne     @l
+        inc     ptr2+1
+        bne     @l                      ;; (always)
+@ne:    bcc     @lt                     ;; a < b
+        lda     #1
+        ldx     #0
+        rts
+@lt:    lda     #$FF
+        tax
+        rts
+@eq:    lda     #0
+        tax
+        rts
+
+;;; strchr(s, c) > memchr(s, c, n)
+_opstrchr:
+        jsr     nmax
+
+        ldx     #1
+        .byte   $2C
+_opmemchr:
+        ldx     #0
+        stx     sflag
+        jsr     sargs                   ;; ptr2: c (its lo)
+@l:     jsr     ndec
+        beq     @no
+        lda     (ptr1),y
+        cmp     ptr2
+        beq     @yes                    ;; (c may be the NUL)
+        ldx     sflag
+        beq     :+
+        cmp     #0
+        beq     @no
+:       inc     ptr1
+        bne     @l
+        inc     ptr1+1
+        bne     @l                      ;; (always)
+@yes:   lda     ptr1
+        ldx     ptr1+1
+        rts
+@no:    lda     #0
+        tax
+        rts
+
+;;; strcpy(d, s) > strncpy(d, s, n)
+_opstrcpy:
+        jsr     nmax
+        ldx     #1
+        .byte   $2C
+_opstrncpy:
+        ldx     #0
+        stx     sflag
+
+        jsr     sargs
+
+        sty     spad                    ;; (Y = 0)
+@l:     jsr     ndec
+        beq     @done
+        lda     spad
+        bne     @z                      ;; past the NUL: NULs
+        lda     (ptr2),y
+        sta     (ptr1),y
+        tax                             ;; Z: the NUL?
+        inc     ptr2
+        bne     :+
+        inc     ptr2+1
+:       txa
+        bne     @nx
+        lda     sflag                   ;; the NUL: strcpy stops
+        bne     @done
+        inc     spad
+        bne     @nx                     ;; (always)
+@z:     lda     #0
+        sta     (ptr1),y
+@nx:    inc     ptr1
+        bne     @l
+        inc     ptr1+1
+        bne     @l                      ;; (always)
+@done:  lda     _ivmlib_args
+        ldx     _ivmlib_args+1
+        rts
 
 
 _ivmlib_end:
