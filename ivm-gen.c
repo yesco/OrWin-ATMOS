@@ -63,8 +63,8 @@
 // optional stats-counting hooks
 // (tpi defines real ones; parse can stub)
 
-void note_load(uchar addr);
-void note_store(uchar addr);
+extern void note_load(uchar addr);
+extern void note_store(uchar addr);
 
 // A `const int foo = 42;` is an alias of the const-pool slot (no storage of
 // its own, nothing to initialise), so every write op naming it is an error:

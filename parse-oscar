@@ -1,0 +1,21 @@
+# TODO: problem parse-oscar: cannot load file, lol!
+
+# dadada
+
+name=$1
+case "${name##*/}" in ?*.*) name="${name%.*}";; esac  # PROG, PROG.c, PROG.ivm all ok
+echo "NAME: $name"
+
+. ./deps   # stale: rebuild only when a source changed
+rm -f $name.ivm
+
+time ./oscar -DRUN -DOSCAR64 -ep parse.c
+
+mv parse.asm parse.oscar.s
+
+echo
+
+ls -ugGlf parse.prg parse.sim parse.lst parse-run.sim $name.ivm 2>/dev/null
+echo
+echo "=== parse.c: `./wcode parse.c` LOC ==="
+echo

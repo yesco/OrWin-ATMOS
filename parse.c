@@ -344,8 +344,8 @@ static FILE *sym_fp;
 static uchar sym_r[256];
 static uchar sym_w[256];
 
-static void note_load(uchar addr)  { if (sym_r[addr] < 255) sym_r[addr]++; }
-static void note_store(uchar addr) { if (sym_w[addr] < 255) sym_w[addr]++; }
+void note_load(uchar addr)  { if (sym_r[addr] < 255) sym_r[addr]++; }
+void note_store(uchar addr) { if (sym_w[addr] < 255) sym_w[addr]++; }
 
 #else
 
@@ -353,8 +353,8 @@ static void note_store(uchar addr) { if (sym_w[addr] < 255) sym_w[addr]++; }
 // A: ivm-gen.c declares them as functions ("void note_load(uchar);"), so a
 //   macro here breaks that line. Needs #ifdef SYMS around the prototypes
 //   in ivm-gen.c; then "#define note_load(a)" saves the calls.
-static void note_load(uchar addr) { (void)addr; }
-static void note_store(uchar addr) { (void)addr; }
+void note_load(uchar addr) { (void)addr; }
+void note_store(uchar addr) { (void)addr; }
 
 #endif
 
@@ -3138,7 +3138,8 @@ static void init(char *bnf_path, char *src_path) {
       else if (c != ' ') amp = 0;           // &= &( &1 ...
       last = c;
     }
-    rewind(src_fp);
+    fclose(src_fp);                      // (no fseek on sim65)
+    src_fp = fopen(src_path, "r");
   }
 
   fail_file = NULL;
