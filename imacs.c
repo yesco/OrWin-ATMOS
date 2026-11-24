@@ -168,25 +168,25 @@ static void error(struct imacsbuffer* b, char* msg, char* arg) {
 
 #ifndef NO_MAIN
 static int readfile(struct imacsbuffer* b, char* filename) {
-
+    int len;
 #ifndef __LINUX__
     strncpy((char*)b->buff, (char*)README_md, sizeof(README_md));
-    int len = strlen(b->buff) + 1;
+    len = strlen(b->buff) + 1;
 #else
     if (!filename) return -1;
     FILE *f = fopen(filename, "r");
     if (!f) return error(b, "No such file: ", filename), -1;
     memset(b->buff, 0, b->size);
-    int len = fread(b->buff, b->size - 1, 1, f);
+    len = fread(b->buff, b->size - 1, 1, f);
     fclose(f);
-#endif // !OTA
+#endif // !__LINUX__
 
     b->row = 0;
     b->col = 0;
     b->filename = filename;
     return len;
 }
-#endif
+#endif // NO_MAIN
 
 // http://www2.lib.uchicago.edu/keith/tcl-course/emacs-tutorial.html
 // Modeline shows:
@@ -196,10 +196,12 @@ static int readfile(struct imacsbuffer* b, char* filename) {
 // - "(mode)"
 // - All/Top/Bot/33%
 static void print_modeline(struct imacsbuffer* b) {
+    int len;
+    int chars;
     gotorc(b->lines - 2, 0);
     inverse(1);
-    int len = strlen(b->buff) + 1;
-    int chars = 
+    len = strlen(b->buff) + 1;
+    chars = 
         printf("---%s-- %-20s L%d C%d (text) --%d bytes (%d free)-------",
                (b->dirty ? "**" : "--"),
                b->filename, b->row, b->col,
@@ -249,7 +251,8 @@ static void redraw(struct imacsbuffer* b) {
 
 static void update(struct imacsbuffer* b, int why) {
     static struct imacsbuffer last;
-    static int last_len = -1;
+//    static int last_len = -1;
+    static int last_len = 0xffff;
     
     cursoroff();
     int len = strlen(b->buff);
