@@ -43,6 +43,7 @@
 
       t['t'] = &&op_t;    t['n'] = &&op_n;
       t['u'] = &&op_u;    t['k'] = &&op_k;
+      t['v'] = &&op_v;    t['Y'] = &&op_Y;
 
       t['<'] = &&op_lt;   t['='] = &&op_eq;  t['>'] = &&op_gt;
       t['?'] = &&op_not;  t['~'] = &&op_bnot;

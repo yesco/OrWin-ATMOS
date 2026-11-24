@@ -108,7 +108,8 @@
     }
     if (op < '^') {
       if (op < '[') {
-        if (op < 'Z') goto op_unk;
+        if (op < 'Y') goto op_unk;
+        if (op < 'Z') goto op_Y;
         goto op_Z;
       }
       if (op < 0x5C) goto op_bidxl;
@@ -145,7 +146,7 @@
   if (op < 'z') {
     if (op < 'w') {
       if (op < 'v') goto op_u;
-      goto op_unk;
+      goto op_v;
     }
     if (op < 'x') goto op_w;
     if (op < 'y') goto op_x;

@@ -25,6 +25,7 @@
 //   B  rel           back
 //   t  slot lim rel  FOR (<=): past body when done (forward)
 //   u  slot lim rel  FOR (<):  same
+//   v  slot byte rel if (a == k): past the body if !=  (forward)
 //   n  rel           NEXT: back to its 't' / 'u'
 //
 //   0x80+rel    zjp (rel < 64): jump forward if ACC == 0, see ivm_jump()
@@ -41,13 +42,13 @@
 //   NEW   new value           UNDEF don't rely on it (impls differ)
 //
 //   in  out    ops
-//   -   KEEP   ' ' DEL B O N W Z # (#TIMED: JIT on the host sim only)
+//   -   KEEP   ' ' DEL B O N W Y Z # (#TIMED: JIT on the host sim only)
 //   in  KEEP   S(+SLOT) ! , w s ) ] b m . P E zjp X(returns it)
 //   -   SLOT   L <32 C(dst) U(1st) I J i j H
 //   in  SLOT   M(acc = mem[s] = alloc(acc))
 //   -   NEW    0 9 Q 1..8 @ r ' l ( [ a K A (old a[i])
 //   in  NEW    + - * / % & | ^ { } < = > ? ~ x y z call(arg -> result)
-//   -   UNDEF  t u n (VM: loop var; JIT: clobbered) F
+//   -   UNDEF  t u v n (VM: loop var / mem[a]; JIT: clobbered) F
 //   ;   NEW    ACC = return value cell, then return
 //
 // JIT status (ivm-jit.c) vs this contract, 2026-11:
@@ -69,6 +70,7 @@
 #define _FW  0x28   // rel forward
 #define _BK  0x68   // rel back
 #define _I3  0x3b   // slot slot rel-forward
+#define _IB  0x39   // slot byte rel-forward
 #define _J2  0x31   // slot rel-forward
 #define _SP  0x80   // special / unknown
 
@@ -88,13 +90,13 @@ static const uchar ivm_optab[96] = {
   //  P    Q    R    S    T    U    V    W
   _A0, _A0, _SP, _S1, _SP, _S2, _SP, _S1,
   //  X    Y    Z    [   bsl   ]    ^    _
-  _A0, _SP, _S1, _S2, _SP, _S2, _S1, _SP,
+  _A0, _S1, _S1, _S2, _SP, _S2, _S1, _SP,
   //  `    a    b    c    d    e    f    g
   _SP, _S2, _S2, _SP, _SP, _SP, _SP, _SP,
   //  h    i    j    k    l    m    n    o
   _SP, _S1, _S1, _SP, _S1, _S2, _BK, _SP,
   //  p    q    r    s    t    u    v    w
-  _SP, _A0, _S1, _S1, _I3, _I3, _SP, _S1,
+  _SP, _A0, _S1, _S1, _I3, _I3, _IB, _S1,
   //  x    y    z    {    |    }    ~   DEL
   _D1, _D2, _D3, _S1, _S1, _S1, _A0, _A0,
 };

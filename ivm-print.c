@@ -100,7 +100,7 @@ unsigned ivm_print_code_range(
     unsigned before = i;
     uchar ch = code[i];
 
-    if (wrap && (strchr("tunB", ch) != NULL || (ch ^ 0x80) < 64)) {
+    if (wrap && (strchr("tuvnB", ch) != NULL || (ch ^ 0x80) < 64)) {
       fputc('\n', fp);
       n = 0;
     }
@@ -108,7 +108,7 @@ unsigned ivm_print_code_range(
     ivm_print_one(fp, code, end, &i);
     if (i <= before) i = before + 1;
 
-    if (wrap && ((strchr("tunGBmN;XQ", ch) != NULL) || ++n >= wrap)) {
+    if (wrap && ((strchr("tuvnGBmN;XQ", ch) != NULL) || ++n >= wrap)) {
       fputc('\n', fp);
       n = 0;
     }

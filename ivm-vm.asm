@@ -592,6 +592,17 @@ op_Z:   USEY
 
         jmp     pnext
 
+;;; Y vv — mem[vv] = 1 (yes: a flag)
+op_Y:   USEY
+        PARY
+
+        lda     #0
+        sta     (_ivm_memhi),y
+        lda     #1
+        sta     (_ivm_memlo),y
+
+        jmp     pnext
+
 ;;; C dest src — mem[dest]=mem[src]; ACC=value
 op_C:   lda     (_ivm_ipc),y
         sta     tmp_hi              ; dest
@@ -1554,6 +1565,31 @@ op_n_do_the_math:
 
         jmp     op_t_step
 
+;;; ------------------------------------------------------------
+;;; v a #k oo  — if (mem[a] == k) on (body), else skip oo (as t u),
+;;;   k an inline byte (hi must be 0); acc = mem[a]
+;;; (ALTCODE=1 only: savey, anext)
+;;; ------------------------------------------------------------
+op_v:
+        FIXIPC                  ; ipc -> a, Y = 0
+        sty     savey           ; anext counts from here
+        lda     (_ivm_ipc),y
+        tay
+        LOAD_SLOT_Y             ; _ivm_acc = mem[a], A = lo, X = hi
+        ldy     #1
+        cmp     (_ivm_ipc),y
+        bne     v_skip
+        txa
+        bne     v_skip
+        lda     #3              ; equal: the body
+        jmp     anext
+v_skip: ldy     #2
+        lda     (_ivm_ipc),y    ; oo
+        clc
+        adc     #3
+        bcc     :+
+        inc     _ivm_ipc+1
+:       jmp     anext
 
 .endif ; ALTCODE
 
@@ -1982,7 +2018,6 @@ op_T:
 op_V:
 op_W:
 
-op_Y:
 
 op_bslash:
 op__:
@@ -2001,7 +2036,9 @@ op_k:
 op_o:
 op_p:
 
-op_v:
+.if ALTCODE=0
+op_v:                   ;; (not done: ALTCODE=1 only)
+.endif
 
 ;;; TODO: call library routine (see ivm.c)
 op_x:

@@ -358,7 +358,12 @@ G=$V\<
 # char (unsigned) vars: the value is a byte, s stores the low byte (hi 0)
 #   \?c: plain c, \c would be a directive
 # - if / while (l OP r): rules Y / X (K has too many alts otherwise)
-Y=if ($S<=$S)[t\1\2\x] $K else[0?G\x\w\y] $K[\y]
+# - if (l == k): v l #k skip, k a number < 256 (\?c) as an inline byte,
+#   the same layout as t / u (no 0/1, no G, no const slot). l == r, a
+#   bigger k: the generic if (as small, = is commutative: R stays in ACC)
+Y=if ($S==\d\?c)[v\1\c2\x] $K else[0?G\x\w\y] $K[\y]
+|if ($S==\d\?c)[v\1\c2\x] $K[\y]
+|if ($S<=$S)[t\1\2\x] $K else[0?G\x\w\y] $K[\y]
 |if ($S<=$S)[t\1\2\x] $K[\y]
 |if ($S>=$S)[t\2\1\x] $K else[0?G\x\w\y] $K[\y]
 |if ($S>=$S)[t\2\1\x] $K[\y]
@@ -396,6 +401,7 @@ H=\i=\i\?\W\[\i\]; \2\[\3\]=\2\[\i\]; \2\[\7\]=\1;[A\2\3\7S\1]
 |\i\?c=\1-1;[j\1]
 |\i\?c+=$E;[+\1s\1]
 |\i\?c=0;[Z\1]
+|\i\?c=1;[Y\1]
 |\i\?c=$E;[s\1]
 # int* (word pointer): ++ -- move one element = 2 bytes
 #   captures: 1=p   (+=: 1=p 2=n)
@@ -446,6 +452,7 @@ H=\i=\i\?\W\[\i\]; \2\[\3\]=\2\[\i\]; \2\[\7\]=\1;[A\2\3\7S\1]
 |$h
 
 |\i=0;[Z\1]
+|\i=1;[Y\1]
 |\i=$S+$S;[L\2+\3S\1]
 |\i=$S-$S;[L\2-\3S\1]
 # C dest src — mem[dest]=mem[src]; ACC=value  (var=var, var=const-slot, var=string-slot)

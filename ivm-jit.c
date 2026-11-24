@@ -593,7 +593,7 @@ static word const_val(uchar s) { return lc_constmem[s]; }
 
 // byte slots: hi byte always 0. A slot is a byte slot unless some op
 // writes a word to it (S I J U C M H ' , t), or it is a frame header
-// (call: ret, prev, ACC). Only 's' 'i' 'j' 'Z' 'F' write them. Prescan.
+// (call: ret, prev, ACC). Only 's' 'i' 'j' 'Z' 'Y' 'F' write them. Prescan.
 static uchar lc_wword[32];
 static void wword(uchar s) { lc_wword[s >> 3] |= (uchar)(1 << (s & 7)); }
 static int is_byte(uchar s) {
@@ -1314,7 +1314,7 @@ static void ksa_check(word bc_target) {
 // a KEEP op needn't save it (ivm-walk.c contract: "- SLOT/NEW/UNDEF")
 static int acc_unread(word bc) {
   uchar op = lc_code[bc];
-  return op < 32 || strchr("09Q12345678@r'l([aKLCUIJijH;tun", op);
+  return op < 32 || strchr("09Q12345678@r'l([aKLCUIJijH;tuvn", op);
 }
 static int acc_dead(word bc) {
   return bc < lc_len && !is_label(bc) && acc_unread(bc);
@@ -1566,6 +1566,7 @@ static const JitRule jit_rules[] = {
     _LDA RLO1 _CLC _ADCN "\x02" _STA RLO1 _BCC _INC RHI1 R_PATCH),
   // Z: LDY #0; STY lo; STY hi (AX untouched)
   RULE('Z', 0, R_WRITE, _LDYN "\0" _STY RLO1 _STY RHI1),
+  RULE('Y', 0, R_WRITE, _LDYN "\1" _STY RLO1 _DEY _STY RHI1),
   // F: free(mem[s]); mem[s] = 0
   RULE('F', 0, R_DROP | R_LOST,
     _LDA RLO1 _LDX RHI1 _JSR L_FREE _LDYN "\0" _STY RLO1 _STY RHI1),
@@ -2071,9 +2072,9 @@ static uchar init_fold(const uchar *p) {
     if (op == 'l') lc_ifv &= 0xff;
     lc_ifk = 1;
     if (op != 'C') return 1;
-  } else if (op == 'Z') {
+  } else if (op == 'Z' || op == 'Y') {
     if (d >= k) return 0;
-    lc_initmem[d] = 0;
+    lc_initmem[d] = op == 'Y';
     return 1;
   } else if ((op != 'S' && op != 's') || !lc_ifk) return 0;
 
@@ -2260,7 +2261,7 @@ static word ivm_jit1(const uchar *code, word code_len,
 
     // a write of slot w: drops the cache if w is its base or idx, the
     // a[j+c] relation if w is t or src
-    else if (op >= 32 && strchr("SIJUCMH',sijZF", op)) {
+    else if (op >= 32 && strchr("SIJUCMH',sijZYF", op)) {
       uchar w = *p;
       if (lc_ai_kind && (w == lc_ai_base || w == lc_ai_idx)) lc_ai_kind = 0;
       if (w == lc_rel_t || w == lc_rel_src) lc_rel_t = 0xff;
@@ -2633,6 +2634,21 @@ static word ivm_jit1(const uchar *code, word code_len,
       loop_open(bc_pc, ax);
       em(0); em(0);
       loop_pad(bc_pc);
+      break;
+    }
+
+    // v a #k skip: if (a == k), k a byte: past the body if not. -, UNDEF
+    //   LDA a; CMP #k; BNE ex; LDA a+1; BNE ex   (k 0: no CMP)
+    case 'v': {
+      word ex = ivm_jump(code + bc_pc, bc_pc);
+      acc_drop();
+      TPL(_LDA RLO1, p);
+      if (p[1]) em2(CMPN, p[1]);
+      emjump(BNE, ex);
+      TPL(_LDA RHI1, p);
+      emjump(BNE, ex);
+      p += 3;
+      acc_lost();
       break;
     }
 

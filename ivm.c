@@ -171,7 +171,7 @@
 //? V - TODO: same using ACC as value?  Vss == +ssSss (2 not 4 B)
 //  W - write var as number (unsigned) "Wvv"
 //  X - return ACC; see ';' and Q
-//? Y - TODO: readline?
+//  Y - yes: variable = 1 "Yvv" (a flag), see Z
 //  Z - zero variable Zvv
 //
 //? a-h - save local param (h needed, meaning ACC?)
@@ -225,7 +225,7 @@
 
 //  t   - loop <= with 'n' ('t' var upper skip)
 //  u   - loop <  with 'n' ('u' var upper skip)
-//? v   - 
+//  v   - if ==: "v a #k skip": mem[a] == k (a byte) on, else skip (as t u)
 
 //  w   - write byte (c!)
 //  xyz - call library functions w 2..4 args
@@ -1377,6 +1377,7 @@ ZL(op_shr, '}')  zp.acc >>= PAR; goto pnext;
 ZL(op_L,   'L')  zp.acc = PAR;             goto pnext;
 ZL(op_S,   'S')  zp.mem[*zp.ipc] = zp.acc; goto pnext;
 ZL(op_Z,   'Z')  zp.mem[*zp.ipc] = 0;      goto pnext;
+ZL(op_Y,   'Y')  zp.mem[*zp.ipc] = 1;      goto pnext;
 
 // C dest src: mem[dest] = mem[src]; ACC = value  (simple assign without L+S)
 ZL(op_C,   'C')  {
@@ -1536,9 +1537,9 @@ ZL(op_A,   'A') {
     zp.acc = b[i]; b[i] = b[j]; b[j] = zp.acc;
     zp.ipc += 3; goto xnext; } // 3 args
 
-// TODO: 'v'  ==  "U n' stepper that combines:
-//     "Uiiss B<back> -> v<ss><back>    === 5 b -> 3 b !
-//     "Uiiss n<back> -> v<ss><back>"   === 5 b -> 3 b
+// TODO: a "U n" stepper that combines (needs another letter, 'v' is ==):
+//     "Uiiss B<back> -> ?<ss><back>    === 5 b -> 3 b !
+//     "Uiiss n<back> -> ?<ss><back>"   === 5 b -> 3 b
 
 
 // loop: FOR i u end   (t: i <= u, u: i < u)
@@ -1548,6 +1549,12 @@ ZL(op_t,   't')  zp.acc = zp.mem[zp.ipc[0]];
                  zp.ipc += 2 + zp.ipc[2];     goto pnext; // skip
 ZL(op_u,   'u')  zp.acc = zp.mem[zp.ipc[0]];
                  if (zp.acc < zp.mem[zp.ipc[1]]) {
+                   zp.ipc += 3;               goto xnext; } // 3 args
+                 zp.ipc += 2 + zp.ipc[2];     goto pnext; // skip
+// if (a == k): v a #k skip, k an inline byte, the same layout as t / u
+// (ACC = mem[a])
+ZL(op_v,   'v')  zp.acc = zp.mem[zp.ipc[0]];
+                 if (zp.acc == zp.ipc[1]) {
                    zp.ipc += 3;               goto xnext; } // 3 args
                  zp.ipc += 2 + zp.ipc[2];     goto pnext; // skip
 // NEXT loop ++ (of a t or a u)

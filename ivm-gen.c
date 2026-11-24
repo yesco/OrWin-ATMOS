@@ -184,7 +184,7 @@ void emitop(uchar op) {
 // NOT writes to the variable: + - * / % & | ^ { } [ ] < = > L l @ r W
 // t u (read it: ACC op mem[v], { } too), and ! w ) (write THROUGH the
 // pointer in the var, var itself unchanged).
-#define WRITES_VAR(op) ((op) && strchr("SZCIJUMFs',ijHk", (op)))
+#define WRITES_VAR(op) ((op) && strchr("SZYCIJUMFs',ijHk", (op)))
 
 void emitop2(uchar op, uchar arg) {
   // !optimize: short L for slots 0..31; optimize: always long (phase-1 "stupid")
@@ -639,6 +639,7 @@ uchar arg_slot(uchar v, uchar b) {
 
 // global init "dest = value of const slot src", as code, now:
 //   value 0            Z dest
+//   value 1            Y dest
 //   same src as last   S dest          (C leaves the value in ACC)
 //   else               C dest src
 void gen_ginit(uchar dest, uchar src) {
@@ -646,8 +647,10 @@ void gen_ginit(uchar dest, uchar src) {
 
   if (ginit_len > sizeof(ginit_code) - 3) IVM_GEN_FAIL("too many global inits");
 
-  if (isconst(src) && !const_val(src)) {
-    *p++ = 'Z';
+  // (not a string: its value is a data offset, relocated at load)
+  if (isconst(src) && const_val(src) <= 1 &&
+      !const_is_reloc[CONST_TOP - src]) {
+    *p++ = const_val(src) ? 'Y' : 'Z';
     *p++ = dest;
   } else if (src == ginit_acc) {
     *p++ = 'S';
@@ -972,7 +975,7 @@ uchar vn_temp(word from, uchar t) {
   for (pc = e + len + 2; ok && pc < st; pc += n) {
     uchar op = bin[pc];
     n = ivm_oplen(bin + pc);
-    if (!n || op >= 0xC0 || strchr("tunBkxyzXQ;q", op)) { ok = 0; break; }
+    if (!n || op >= 0xC0 || strchr("tuvnBkxyzXQ;q", op)) { ok = 0; break; }
     if (op < 32 || op >= 0x80) continue;
     w = WRITES_VAR(op) ? bin[pc + 1] : 0xffff;
     if (w == vn_t[k].t || (w != 0xffff && vn_reads(e, len, (uchar)w, 0)))
