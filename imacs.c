@@ -168,17 +168,23 @@ static void error(struct imacsbuffer* b, char* msg, char* arg) {
 
 #ifndef NO_MAIN
 static int readfile(struct imacsbuffer* b, char* filename) {
+
 #ifdef OTA
     strncpy((char*)b->buff, (char*)README_md, sizeof(README_md));
     int len = strlen(b->buff) + 1;
 #else
+
+#ifdef __LINUX__
     if (!filename) return -1;
     FILE *f = fopen(filename, "r");
     if (!f) return error(b, "No such file: ", filename), -1;
     memset(b->buff, 0, b->size);
     int len = fread(b->buff, b->size - 1, 1, f);
     fclose(f);
-#endif
+#endif // __LINUX__
+    
+#endif // !OTA
+
     b->row = 0;
     b->col = 0;
     b->filename = filename;
