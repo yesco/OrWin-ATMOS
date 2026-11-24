@@ -13,7 +13,6 @@ fil
 *.sim
 *.x
 *.bin
-*.out
 *.idx
 *.lbl
 *.prg
@@ -26,12 +25,10 @@ fil
 *.sim
 *.tap
 *.log
-*.out
 
 diff
 diff.c
 fish
-*.out
 *.bin
 *.tmp
 *.scr
