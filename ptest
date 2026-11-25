@@ -7,7 +7,7 @@
 #   ./ptest 'dispatch*'  test-dispatch*.c    (quote it, or the shell globs)
 #   ./ptest byte-sieve-prime   no test-byte-sieve-prime.c: byte-sieve-prime.c
 #
-# Per test, logs: test-NAME.{pc,ivm,asm,jit,hjit,cc65-build,cc65,oscar}.log
+# Per test, logs: test-NAME.{pc,ivm,asm,fix,jit,hjit,cc65-build,cc65,oscar}.log
 #   outputs:      test-NAME.expect (.out or majority), test-NAME.VARIANT.got
 # stdout: = lines are results (./ptest | grep ^=), %Error: lines failures
 # Whole run:      ptest.log (all tests), ptest-SPEC.log (./ptest SPEC)
@@ -15,6 +15,7 @@
 # Variants:
 #   ivm    ./ivm       cc65 C VM            size: .ivm
 #   asm    ./ivm-asm   asm VM               size: .ivm
+#   fix    ./ivm-fix   asm VM, fixed mem[]  size: .ivm
 #   jit    the host compiler's image (ivm-jit.x -z -o .jit.sim), sim65
 #                                           size: .jit.sim
 #   hjit   ivm-jit.x   JIT on host cpu sim  size: emitted code
@@ -130,6 +131,7 @@ def repro(name, t):
         "pc":    "./pc {t}",
         "ivm":   "./ivm {t}",
         "asm":   "./ivm-asm {t}",
+        "fix":   "./ivm-fix {t}",
         "jit":   "./ivm-jit.x -z -tsim6502 -o{t}.jit.sim {t}.ivm && sim65 -c {t}.jit.sim",
         "hjit":  "./ivm-jit.x {t}.ivm",
         "cc65":  "cl65 -Dputz=printf -t sim6502 -Cl -Os -o {t}.sim {t}.c && sim65 -c {t}.sim",
@@ -159,6 +161,10 @@ def test(t):
         s = run(["bash", "./ivm-asm", t], t + ".asm.log")
         res.append(("asm", last_int(r"^(\d+) cycles$", s),
                     fsize(t + ".ivm"), t + ".ivm", ivm_out(s), t + ".asm.log"))
+
+        s = run(["bash", "./ivm-fix", t], t + ".fix.log")
+        res.append(("fix", last_int(r"^(\d+) cycles$", s),
+                    fsize(t + ".ivm"), t + ".ivm", ivm_out(s), t + ".fix.log"))
 
         # jit: the host compiler writes the image, sim65 runs it
         rm(t + ".jit.sim")
@@ -305,7 +311,7 @@ def main():
         say("=== ./ptest %s   (%d tests)" %
             (" ".join(shlex.quote(a) for a in specs), len(tests)))
         say("#" * 60)
-        names = ["ivm", "asm", "jit", "hjit", "cc65", "oscar"]
+        names = ["ivm", "asm", "fix", "jit", "hjit", "cc65", "oscar"]
         say("= %-28s" % "test" + "".join("%15s" % n for n in names))
         for t, (res, status) in allres:
             row = {r[0]: r for r in res}

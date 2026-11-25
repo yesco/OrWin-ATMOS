@@ -3,7 +3,7 @@
 name=$1
 case "${name##*/}" in ?*.*) name="${name%.*}";; esac  # PROG, PROG.c, PROG.ivm all ok
 
-if stale ivm-fixed.sim $IVM_SRC ivm-fixed.asm ivm.c ivm-fixed; then
+if stale ivm-fixed.sim $IVM_SRC ivm-fixed.asm ivm.c ivm-fix; then
   cl65 -DFIXED -Oirs -C sim6502.cfg -t sim6502 -vm -m ivm-fixed.map -o ivm-fixed.sim ivm-fixed.asm ivm.c  || exit 1
 fi
 
