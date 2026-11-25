@@ -70,16 +70,17 @@ _run_ivm_asm:
 anext:
         clc
         adc     savey
-        bcc     pfixnext
-        inc     _ivm_ipc+1
         tay
-	jmp pnext_no_load
+        bcc     pnext_no_load   ; N from tay
+        inc     _ivm_ipc+1
+        tya
+        jmp     pnext_no_load
 
+;;; savey = offset of LAST consumed byte (operand); continue after it
 pnext:
         ldy     savey
         iny
-pfixnext:
-pnext_no_load:                  ; entry: Y already the desired offset
+pnext_no_load:                  ; entry: Y = next opcode offset, N = Y's bit 7
         bpl     xnext
         FIXIPC
         jmp     xnext
@@ -91,8 +92,10 @@ pnext_no_load:                  ; entry: Y already the desired offset
         jmp     pnext_no_load
 .endmacro
 
-ynext:                          ; kept for compatibility, but rarely needed
+;;; savey = offset of the NEXT opcode (after a jsr that clobbered Y)
+ynext:
         ldy     savey
+        jmp     pnext_no_load   ; must check: Y may be >= 128
 
 xnext:
         lda     (_ivm_ipc),y
@@ -261,7 +264,7 @@ op_sub:
         lda     _ivm_acc+1
         sbc     MEM_HI_BASE,x
         sta     _ivm_acc+1
-        jmp     pfixnext        ; or just fall if we adjust
+        PNEXT_HAVEY
 
 ;;; +xx
 op_add:
@@ -637,7 +640,7 @@ op_mul:
         lda     MEM_HI_BASE,x
         sta     _ivm_par+1
         jsr     _opmul
-        jmp     pnext
+        jmp     ynext   ; savey = next op
 
 op_div:
         lda     (_ivm_ipc),y
@@ -649,7 +652,7 @@ op_div:
         lda     MEM_HI_BASE,x
         sta     _ivm_par+1
         jsr     _opdiv
-        jmp     pnext
+        jmp     ynext   ; savey = next op
 
 op_mod:
         lda     (_ivm_ipc),y
@@ -661,7 +664,7 @@ op_mod:
         lda     MEM_HI_BASE,x
         sta     _ivm_par+1
         jsr     _opmod
-        jmp     pnext
+        jmp     ynext   ; savey = next op
 
 ;;; bitwise
 op_and:
@@ -717,12 +720,13 @@ op_shl:
         sty     savey
         lda     MEM_LO_BASE,x
         tax
-        beq     :+
+        beq     :++
 :       asl     _ivm_acc
         rol     _ivm_acc+1
         dex
         bne     :-
-        jmp     pnext
+:
+        jmp     ynext   ; savey = next op
 
 op_shr:
         lda     (_ivm_ipc),y
@@ -731,12 +735,13 @@ op_shr:
         sty     savey
         lda     MEM_LO_BASE,x
         tax
-        beq     :+
+        beq     :++
 :       lsr     _ivm_acc+1
         ror     _ivm_acc
         dex
         bne     :-
-        jmp     pnext
+:
+        jmp     ynext   ; savey = next op
 
 ;;; print / I/O
 op_dot:
@@ -790,17 +795,25 @@ op_s:                           ; mem[xx] = lo(ACC)
         sta     MEM_HI_BASE,x
         PNEXT_HAVEY
 
-op_i:                           ; char ++
+op_i:                           ; char ++  ACC = mem[xx] = (uchar)(mem[xx]+1)
         lda     (_ivm_ipc),y
         tax
+        iny
         inc     MEM_LO_BASE,x
-	PNEXT_HAVEY
+        jmp     bincdec
 
 op_j:                           ; char --
         lda     (_ivm_ipc),y
         tax
-	dec     MEM_LO_BASE,x
-	PNEXT_HAVEY
+        iny
+        dec     MEM_LO_BASE,x
+bincdec:
+        lda     MEM_LO_BASE,x
+        sta     _ivm_acc
+        lda     #0
+        sta     _ivm_acc+1
+        sta     MEM_HI_BASE,x
+        PNEXT_HAVEY
 
 ;;; rxx / wxx  byte pointer via slot
 op_r:
@@ -817,7 +830,7 @@ op_r:
         sta     _ivm_acc
         lda     #0
         sta     _ivm_acc+1
-        jmp     pnext
+        jmp     ynext   ; savey = next op
 
 op_w:
         lda     (_ivm_ipc),y
@@ -831,7 +844,7 @@ op_w:
         ldy     #0
         lda     _ivm_acc
         sta     (tmp_lo),y
-        jmp     pnext
+        jmp     ynext   ; savey = next op
 
 ;;; M / F  malloc / free
 op_M:
@@ -846,9 +859,9 @@ op_M:
         stx     _ivm_acc+1
         ldx     swpb
         sta     MEM_LO_BASE,x
-        txa
+        lda     _ivm_acc+1
         sta     MEM_HI_BASE,x
-        jmp     pnext
+        jmp     ynext   ; savey = next op
 
 op_F:
         lda     (_ivm_ipc),y
@@ -867,7 +880,7 @@ op_F:
         lda     #0
         sta     MEM_LO_BASE,x
         sta     MEM_HI_BASE,x
-        jmp     pnext
+        jmp     ynext   ; savey = next op
 
 ;;; # name\0  skip zero-terminated string
 ;;; # name\0  skip zero-terminated string
@@ -899,14 +912,18 @@ strdone:
 ;;; P  print string from ACC until 0
 op_P:
         sty     savey
+        lda     _ivm_acc
+        sta     tmp_lo
+        lda     _ivm_acc+1
+        sta     tmp_hi
 P_plp:
         ldy     #0
-        lda     (_ivm_acc),y
+        lda     (tmp_lo),y
         beq     pdone
         jsr     _putchar
-        inc     _ivm_acc
+        inc     tmp_lo
         bne     P_plp
-        inc     _ivm_acc+1
+        inc     tmp_hi
         bne     P_plp
 pdone:
         jmp     ynext
@@ -966,7 +983,7 @@ op_U:
         adc     tmp_hi
         sta     MEM_HI_BASE,x
         sta     _ivm_acc+1
-        jmp     pnext
+        jmp     ynext   ; savey = next op
 
 ;;; `  (address-of) — not supported with byte planes
 op_tick:
@@ -1099,7 +1116,7 @@ t_exit:
         tay
         bcc     :+
         inc     _ivm_ipc+1
-:       jmp     xnext
+:       PNEXT_HAVEY
 
 ;;; n back
 op_n:
@@ -1125,10 +1142,10 @@ op_v:
         sta     _ivm_acc
         lda     MEM_HI_BASE,x
         sta     _ivm_acc+1
+        bne     v_skip          ; k is a byte
         ldy     #1
+        lda     _ivm_acc
         cmp     (_ivm_ipc),y
-        bne     v_skip
-        txa
         bne     v_skip
         lda     #3
         jmp     anext
@@ -1142,66 +1159,51 @@ v_skip:
 :       jmp     anext
 
 
-;;; a ll ii  striped word load (lo plane at ll, hi at ll+1)
+;;; a ll ii  striped word load: lo byte at mem[ll]+i, hi byte at mem[ll+1]+i
+;;; b ll ii  striped word store (same layout)
 op_a:
-        lda     (_ivm_ipc),y        ; ll
-        sta     swpb
-        iny
-        sty     savey
-        lda     (_ivm_ipc),y        ; ii
-        tax
-        lda     MEM_LO_BASE,x
-        sta     tmp_lo
-        lda     MEM_HI_BASE,x
-        sta     tmp_hi
-        ldx     swpb
-        clc
-        lda     MEM_LO_BASE,x
-        adc     tmp_lo
-        sta     tmp_lo
-        lda     MEM_HI_BASE,x
-        adc     tmp_hi
-        sta     tmp_hi
-        ; hi plane = ll+1
-        inx
-        clc
-        lda     MEM_LO_BASE,x
-        adc     tmp_lo              ; wait, tmp_lo is already the offset lo? 
-        ; simpler: recompute
-        ; for now basic
-        ldy     #0
-        lda     (tmp_lo),y
+        jsr     striped_ptrs
+        lda     (tmp_lo),y          ; Y = 0
         sta     _ivm_acc
-        ; hi
-        ; (full striped needs more care; placeholder loads lo only for now)
-        lda     #0
+        lda     (jmpvec),y
         sta     _ivm_acc+1
         jmp     pnext
 
-;;; b ll ii  striped word store
 op_b:
-        lda     (_ivm_ipc),y
-        sta     swpb
-        iny
-        sty     savey
-        lda     (_ivm_ipc),y
-        tax
-        lda     MEM_LO_BASE,x
-        sta     tmp_lo
-        lda     MEM_HI_BASE,x
-        sta     tmp_hi
-        ldx     swpb
-        clc
-        lda     MEM_LO_BASE,x
-        adc     tmp_lo
-        sta     tmp_lo
-        lda     MEM_HI_BASE,x
-        adc     tmp_hi
-        sta     tmp_hi
-        ldy     #0
+        jsr     striped_ptrs
         lda     _ivm_acc
         sta     (tmp_lo),y
+        lda     _ivm_acc+1
+        sta     (jmpvec),y
         jmp     pnext
+
+;;; tmp = mem[ll] + mem[ii]  (lo plane), jmpvec = mem[ll+1] + mem[ii] (hi)
+;;; savey = offset of ii; returns Y = 0
+striped_ptrs:
+        lda     (_ivm_ipc),y        ; ll
+        sta     swpb
+        iny
+        sty     savey               ; Y at ii; pnext skips it
+        lda     (_ivm_ipc),y        ; ii
+        tax
+        ldy     swpb
+        clc
+        lda     MEM_LO_BASE,y
+        adc     MEM_LO_BASE,x
+        sta     tmp_lo
+        lda     MEM_HI_BASE,y
+        adc     MEM_HI_BASE,x
+        sta     tmp_hi
+        iny                         ; ll+1
+        clc
+        lda     MEM_LO_BASE,y
+        adc     MEM_LO_BASE,x
+        sta     jmpvec
+        lda     MEM_HI_BASE,y
+        adc     MEM_HI_BASE,x
+        sta     jmpvec+1
+        ldy     #0
+        rts
 
 ;;; $ vv  ACC = strlen(mem[vv])
 op_dollar:
@@ -1218,7 +1220,7 @@ op_dollar:
         jsr     _strlen
         sta     _ivm_acc
         stx     _ivm_acc+1
-        jmp     pnext
+        jmp     ynext   ; savey = next op
 
 ;;; m pp vv  memset
 op_m:
