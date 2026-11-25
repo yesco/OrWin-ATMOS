@@ -975,13 +975,14 @@ op_tick:
         sta     tmp_lo
 @msg:   ldy     tmp_lo
         lda     tick_msg,y
-        beq     done
+        bne     :+
+	jmp     done
         jsr     _putchar
         inc     tmp_lo
         bne     @msg
 tick_msg:
         .byte   10, "%Error: ivm-fixed: no & of a variable (`): mem[] is byte planes", 10, 0
-
+gr
 ;;; unknown opcode — report it
 op_bad:
         stx     tmp_lo              ; save opcode
@@ -997,17 +998,156 @@ op_bad:
         ; fall through to done
 
 ;;; ------------------------------------------------------------
+;;; Jumps / flow control
+;;; ------------------------------------------------------------
+
+;;; G delta  — if ACC > 0 then ipc += delta; always skip delta
+op_G:
+        lda     _ivm_acc+1
+        bmi     gskip
+        ora     _ivm_acc
+        beq     gskip
+        ; take the jump
+        FIXIPC
+        lda     (_ivm_ipc),y
+        clc
+        adc     _ivm_ipc
+        sta     _ivm_ipc
+        bcc     :+
+        inc     _ivm_ipc+1
+:       iny
+        jmp     xnext
+gskip:
+        iny
+        jmp     xnext
+
+;;; B delta  — ipc -= delta; skip delta
+op_B:
+        FIXIPC
+        lda     _ivm_ipc
+        sec
+        sbc     (_ivm_ipc),y
+        sta     _ivm_ipc
+        bcs     :+
+        dec     _ivm_ipc+1
+:       iny
+        jmp     xnext
+
+;;; t v u oo / u v u oo  — for-test
+op_u:
+op_t:
+        FIXIPC
+        lda     (_ivm_ipc),y        ; v
+        tax
+        lda     MEM_LO_BASE,x
+        sta     _ivm_acc
+        lda     MEM_HI_BASE,x
+        sta     _ivm_acc+1
+        jmp     t_skip_load
+
+op_t_step:
+        ldy     #0
+        lda     (_ivm_ipc),y
+        tax
+        clc
+        lda     MEM_LO_BASE,x
+        adc     #1
+        sta     _ivm_acc
+        sta     MEM_LO_BASE,x
+        lda     MEM_HI_BASE,x
+        adc     #0
+        sta     _ivm_acc+1
+        sta     MEM_HI_BASE,x
+
+t_skip_load:
+        ldy     #1
+        lda     (_ivm_ipc),y        ; u
+        tax
+        lda     MEM_LO_BASE,x
+        cmp     _ivm_acc
+        lda     MEM_HI_BASE,x
+        sbc     _ivm_acc+1
+        bcc     t_exit
+        ; equal check for 'u'
+        lda     MEM_LO_BASE,x
+        cmp     _ivm_acc
+        bne     t_enter
+        lda     MEM_HI_BASE,x
+        cmp     _ivm_acc+1
+        bne     t_enter
+        ; peek previous opcode
+        lda     _ivm_ipc
+        sec
+        sbc     #1
+        sta     tmp_lo
+        lda     _ivm_ipc+1
+        sbc     #0
+        sta     tmp_hi
+        ldy     #0
+        lda     (tmp_lo),y
+        cmp     #'u'
+        beq     t_exit
+
+t_enter:
+        ldy     #3
+        jmp     xnext
+
+t_exit:
+        ldy     #2
+        lda     (_ivm_ipc),y        ; oo
+        clc
+        adc     #3
+        tay
+        bcc     :+
+        inc     _ivm_ipc+1
+:       jmp     xnext
+
+;;; n back
+op_n:
+        tya
+        clc
+        adc     #2
+        sec
+        sbc     (_ivm_ipc),y
+        beq     op_t_step
+        bcs     :+
+        dec     _ivm_ipc+1
+:       tay
+        FIXIPC
+        jmp     op_t_step
+
+;;; v a #k oo  — if mem[a] == k then body else skip oo
+op_v:
+        FIXIPC
+        sty     savey
+        lda     (_ivm_ipc),y
+        tax
+        lda     MEM_LO_BASE,x
+        sta     _ivm_acc
+        lda     MEM_HI_BASE,x
+        sta     _ivm_acc+1
+        ldy     #1
+        cmp     (_ivm_ipc),y
+        bne     v_skip
+        txa
+        bne     v_skip
+        lda     #3
+        jmp     anext
+v_skip:
+        ldy     #2
+        lda     (_ivm_ipc),y
+        clc
+        adc     #3
+        bcc     :+
+        inc     _ivm_ipc+1
+:       jmp     anext
+
+;;; ------------------------------------------------------------
 ;;; Not yet ported (code exists in ivm-vm.asm; needs param rewrite)
 ;;; ------------------------------------------------------------
 op_A:           ; swap word array elements
 op_a:           ; striped word load
 op_b:           ; striped word store
-op_G:           ; conditional goto
-op_B:           ; back jump
-op_t:           ; for-test
-op_u:           ; for-test (strict)
-op_n:           ; for-next
-op_v:           ; if-eq inline
 op_V:           ; memmove
 op_x:           ; call with 1 arg
 op_y:           ; call with 2 args
