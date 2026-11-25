@@ -123,20 +123,21 @@ HIBIT:
         asl     a
         bmi     subvec
 
-;;; 0x80..0xBF relative if ACC==0
+;;; 0x80..0xBF relative if ACC==0  (Y-relative: no FIXIPC)
 rjp:
-        FIXIPC
         lda     _ivm_acc
         ora     _ivm_acc+1
-        bne     xnext
+        bne     rjp_no
         txa
         and     #$3F
+        sty     savey
         clc
-        adc     _ivm_ipc
-        sta     _ivm_ipc
-        bcc     xnext
+        adc     savey               ; target = Y (after opcode) + off
+        tay
+        bcc     pnext_no_load       ; N from tay
         inc     _ivm_ipc+1
-        bcs     xnext
+rjp_no: tya
+        jmp     pnext_no_load
 
 subvec:
         FIXIPC
@@ -533,57 +534,54 @@ op_idxs:
         sta     (tmp_lo),y
         jmp     pnext
 
-;;; R aa ii   ACC = ((uchar*)mem[aa])[mem[ii]]
+;;; [ aa ii   ACC = ((uchar*)mem[aa])[mem[ii]]
+;;; self-modified lda abs,x: Y untouched
 op_bidxl:
         lda     (_ivm_ipc),y        ; aa
-        sta     swpb
+        tax
         iny
-        sty     savey
+        lda     MEM_LO_BASE,x
+        sta     bidxl_smc+1
+        lda     MEM_HI_BASE,x
+        sta     bidxl_smc+2
         lda     (_ivm_ipc),y        ; ii
         tax
-        lda     MEM_LO_BASE,x
-        sta     tmp_lo
-        lda     MEM_HI_BASE,x
-        sta     tmp_hi
-        ldx     swpb
+        iny
         clc
-        lda     MEM_LO_BASE,x
-        adc     tmp_lo
-        sta     tmp_lo
         lda     MEM_HI_BASE,x
-        adc     tmp_hi
-        sta     tmp_hi
-        ldy     #0
-        lda     (tmp_lo),y
+        adc     bidxl_smc+2
+        sta     bidxl_smc+2
+        lda     MEM_LO_BASE,x
+        tax
+bidxl_smc:
+        lda     $FFFF,x
         sta     _ivm_acc
         lda     #0
         sta     _ivm_acc+1
-        jmp     pnext
+        PNEXT_HAVEY
 
-;;; W aa ii   ((uchar*)mem[aa])[mem[ii]] = lo(ACC)
+;;; ] aa ii   ((uchar*)mem[aa])[mem[ii]] = lo(ACC)
 op_bidxs:
-        lda     (_ivm_ipc),y
-        sta     swpb
-        iny
-        sty     savey
-        lda     (_ivm_ipc),y
+        lda     (_ivm_ipc),y        ; aa
         tax
+        iny
         lda     MEM_LO_BASE,x
-        sta     tmp_lo
+        sta     bidxs_smc+1
         lda     MEM_HI_BASE,x
-        sta     tmp_hi
-        ldx     swpb
+        sta     bidxs_smc+2
+        lda     (_ivm_ipc),y        ; ii
+        tax
+        iny
         clc
-        lda     MEM_LO_BASE,x
-        adc     tmp_lo
-        sta     tmp_lo
         lda     MEM_HI_BASE,x
-        adc     tmp_hi
-        sta     tmp_hi
-        ldy     #0
+        adc     bidxs_smc+2
+        sta     bidxs_smc+2
+        lda     MEM_LO_BASE,x
+        tax
         lda     _ivm_acc
-        sta     (tmp_lo),y
-        jmp     pnext
+bidxs_smc:
+        sta     $FFFF,x
+        PNEXT_HAVEY
 
 ;;; 'xx  ACC = *(uchar*)ptr; ptr++   (ptr in slot xx)
 op_ri:
@@ -968,7 +966,6 @@ op_U:
         lda     (_ivm_ipc),y        ; b
         tax
         iny
-        sty     savey
         lda     MEM_LO_BASE,x
         sta     tmp_lo
         lda     MEM_HI_BASE,x
@@ -983,7 +980,7 @@ op_U:
         adc     tmp_hi
         sta     MEM_HI_BASE,x
         sta     _ivm_acc+1
-        jmp     ynext   ; savey = next op
+        PNEXT_HAVEY
 
 ;;; `  (address-of) — not supported with byte planes
 op_tick:
@@ -1018,119 +1015,145 @@ op_bad:
 ;;; ------------------------------------------------------------
 
 ;;; G delta  — if ACC > 0 then ipc += delta; always skip delta
+;;; Y-relative: target = Y (at delta) + delta + 1
 op_G:
         lda     _ivm_acc+1
         bmi     gskip
         ora     _ivm_acc
         beq     gskip
-        ; take the jump
-        FIXIPC
-        lda     (_ivm_ipc),y
-        clc
-        adc     _ivm_ipc
-        sta     _ivm_ipc
-        bcc     :+
-        inc     _ivm_ipc+1
-:       iny
-        PNEXT_HAVEY
+        tya
+        sec                         ; +1
+        adc     (_ivm_ipc),y
+        tay
+        bcs     :+
+        jmp     pnext_no_load       ; N from tay
+:       inc     _ivm_ipc+1
+        tya
+        jmp     pnext_no_load
 gskip:
         iny
         PNEXT_HAVEY
 
 ;;; B delta  — ipc -= delta; skip delta
+;;; Y-relative: target = Y (at delta) - delta + 1, FIXIPC only on borrow
 op_B:
-        FIXIPC
-        lda     _ivm_ipc
+        tya
         sec
         sbc     (_ivm_ipc),y
-        sta     _ivm_ipc
-        bcs     :+
-        dec     _ivm_ipc+1
-:       iny
-        PNEXT_HAVEY
-
-;;; t v u oo / u v u oo  — for-test
-op_u:
-op_t:
+        bcc     b_far
+        tay
+        iny                         ; <= old Y: no check
+        jmp     xnext
+b_far:
+        dec     _ivm_ipc+1          ; ipc+256 = ipc+A, A = Y - delta + 256
+        tay
         FIXIPC
+        inc     _ivm_ipc            ; +1 (FIXIPC left Y = 0)
+        bne     :+
+        inc     _ivm_ipc+1
+:       jmp     xnext
+
+;;; t v u oo  for-test (v <= u)   u v u oo  (v < u)
+;;; ACC = mem[v]; true: body after oo, false: skip oo+1 more
+;;; Y-relative: Y = offset of v on entry (no FIXIPC)
+op_t:
         lda     (_ivm_ipc),y        ; v
         tax
         lda     MEM_LO_BASE,x
         sta     _ivm_acc
         lda     MEM_HI_BASE,x
         sta     _ivm_acc+1
-        jmp     t_skip_load
-
-op_t_step:
-        ldy     #0
-        lda     (_ivm_ipc),y
-        tax
-        clc
-        lda     MEM_LO_BASE,x
-        adc     #1
-        sta     _ivm_acc
-        sta     MEM_LO_BASE,x
-        lda     MEM_HI_BASE,x
-        adc     #0
-        sta     _ivm_acc+1
-        sta     MEM_HI_BASE,x
-
-t_skip_load:
-        ldy     #1
+t_test:
+        iny
         lda     (_ivm_ipc),y        ; u
         tax
-        lda     MEM_LO_BASE,x
+        lda     MEM_LO_BASE,x       ; u - v: borrow = v > u
         cmp     _ivm_acc
         lda     MEM_HI_BASE,x
         sbc     _ivm_acc+1
-        bcc     t_exit
-        ; equal check for 'u'
-        lda     MEM_LO_BASE,x
-        cmp     _ivm_acc
-        bne     t_enter
-        lda     MEM_HI_BASE,x
-        cmp     _ivm_acc+1
-        bne     t_enter
-        ; peek previous opcode
-        lda     _ivm_ipc
-        sec
-        sbc     #1
-        sta     tmp_lo
-        lda     _ivm_ipc+1
-        sbc     #0
-        sta     tmp_hi
-        ldy     #0
-        lda     (tmp_lo),y
-        cmp     #'u'
-        beq     t_exit
-
-t_enter:
-        ldy     #3
+        bcc     tu_exit
+tu_enter:
+        iny                         ; oo
+        iny                         ; body
         PNEXT_HAVEY
 
-t_exit:
-        ldy     #2
-        lda     (_ivm_ipc),y        ; oo
-        clc
-        adc     #3
+op_u:
+        lda     (_ivm_ipc),y        ; v
+        tax
+        lda     MEM_LO_BASE,x
+        sta     _ivm_acc
+        lda     MEM_HI_BASE,x
+        sta     _ivm_acc+1
+u_test:
+        iny
+        lda     (_ivm_ipc),y        ; u
+        tax
+        lda     _ivm_acc            ; v - u: borrow = v < u
+        cmp     MEM_LO_BASE,x
+        lda     _ivm_acc+1
+        sbc     MEM_HI_BASE,x
+        bcc     tu_enter
+tu_exit:
+        iny                         ; Y at oo
+        tya
+        sec                         ; +1
+        adc     (_ivm_ipc),y
         tay
-        bcc     :+
-        inc     _ivm_ipc+1
-:       PNEXT_HAVEY
+        bcs     :+
+        jmp     pnext_no_load       ; N from tay
+:       inc     _ivm_ipc+1
+        tya
+        jmp     pnext_no_load
 
-;;; n back
+;;; n back  — ++v of the t/u at Y+1-back, then its test
+;;; Y-relative: t/u opcode at Y+1-back, FIXIPC only on borrow
 op_n:
         tya
         clc
-        adc     #2
+        adc     #1
         sec
         sbc     (_ivm_ipc),y
-        beq     op_t_step
-        bcs     :+
+        tay
+        bcs     n_step
         dec     _ivm_ipc+1
-:       tay
-        FIXIPC
-        jmp     op_t_step
+        FIXIPC                      ; Y may be >= 253: re-base on opcode
+n_step:
+        iny                         ; v (Y >= 1: dey below is safe)
+        lda     (_ivm_ipc),y        ; v
+        tax
+        inc     MEM_LO_BASE,x
+        bne     :+
+        inc     MEM_HI_BASE,x
+:       lda     MEM_LO_BASE,x
+        sta     _ivm_acc
+        lda     MEM_HI_BASE,x
+        sta     _ivm_acc+1
+        iny
+        lda     (_ivm_ipc),y        ; u
+        tax
+        lda     _ivm_acc            ; v == u: t enters, u exits
+        cmp     MEM_LO_BASE,x
+        bne     n_ne
+        lda     _ivm_acc+1
+        cmp     MEM_HI_BASE,x
+        bne     n_ne
+        dey                         ; peek the t / u (only when equal)
+        dey
+        lda     (_ivm_ipc),y
+        iny
+        iny
+        cmp     #'u'
+        bne     n_enter
+n_exit: jmp     tu_exit
+n_ne:   lda     MEM_LO_BASE,x       ; v != u: u - v, borrow = exit
+        cmp     _ivm_acc
+        lda     MEM_HI_BASE,x
+        sbc     _ivm_acc+1
+        bcc     n_exit
+n_enter:
+        iny                         ; oo
+        iny                         ; body
+        PNEXT_HAVEY
 
 ;;; v a #k oo  — if mem[a] == k then body else skip oo
 op_v:
