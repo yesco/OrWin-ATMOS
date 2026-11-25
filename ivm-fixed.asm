@@ -12,7 +12,7 @@ MEM_HI_BASE = _slice_hi
 ;;; Everything else is as in the original ALTCODE=1 path.
 
 TRACE=1
-;TRACE=0
+;TRACE=0				
 
 .export         _run_ivm_asm
 .export         _IVM_ASM_START
@@ -790,27 +790,17 @@ op_s:                           ; mem[xx] = lo(ACC)
         sta     MEM_HI_BASE,x
         PNEXT_HAVEY
 
-op_j:                           ; char --
-        lda     (_ivm_ipc),y
-        tax
-        iny
-        lda     #$FF
-        bne     bincdec
-
 op_i:                           ; char ++
         lda     (_ivm_ipc),y
         tax
-        iny
-        lda     #1
-bincdec:
-        clc
-        adc     MEM_LO_BASE,x
-        sta     MEM_LO_BASE,x
-        sta     _ivm_acc
-        lda     #0
-        sta     MEM_HI_BASE,x
-        sta     _ivm_acc+1
-        PNEXT_HAVEY
+        inc     MEM_LO_BASE,x
+	PNEXT_HAVEY
+
+op_j:                           ; char --
+        lda     (_ivm_ipc),y
+        tax
+	dec     MEM_LO_BASE,x
+	PNEXT_HAVEY
 
 ;;; rxx / wxx  byte pointer via slot
 op_r:
@@ -1004,7 +994,7 @@ op_bad:
         jsr     _putchar
         lda     #10
         jsr     _putchar
-        ; fall through to done
+        jmp     done
 
 ;;; ------------------------------------------------------------
 ;;; Jumps / flow control
