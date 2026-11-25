@@ -80,7 +80,7 @@ GRAMMAR ENCODING (parse.c, current)
   \"text" prints text on its own line, once per source place (rule L:
   the &x warning). Free directive chars: ` only.
 
-OPTIMIZATIONS (ivm-gen.c; impact: MeteoriC-man.md 14, test-opts.c)
+OPTIMIZATIONS (ivm-gen.c; impact: MeteoriC-man.md "Optimizations", test-opts.c)
   - IVM_OPT (-O: layout, gen_pack, gen_optimize = peephole + squeeze):
     on for host (./pc), off in cc65 parse.sim (-DIVM_OPT: 3.6 KB).
   - IVM_CSE (gen_deadload, gen_swap): host only (-DIVM_CSE: 3.5 KB).

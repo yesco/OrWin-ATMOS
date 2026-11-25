@@ -1,5 +1,45 @@
 # MeteoriC-65 C Manual
 
+<!-- toc -->
+
+- [Introduction](#introduction)
+  - [Context and features](#context-and-features)
+  - [Goals](#goals)
+  - [Non-goals](#non-goals)
+- [What MeteoriC-65 supports](#what-meteoric-65-supports)
+- [The compiler](#the-compiler)
+- [Program structure](#program-structure)
+  - [Preprocessor](#preprocessor)
+- [Types](#types)
+- [Variables and declarations](#variables-and-declarations)
+- [Expressions](#expressions)
+  - [Operators](#operators)
+  - [Precedence: left to right, never "up"](#precedence-left-to-right-never-up)
+  - [Assignment forms](#assignment-forms)
+- [Statements](#statements)
+- [Functions](#functions)
+- [Arrays](#arrays)
+- [Pointers and strings](#pointers-and-strings)
+- [Structs](#structs)
+  - [Definition and variables](#definition-and-variables)
+  - [Fields](#fields)
+  - [Arrays of structs](#arrays-of-structs)
+  - [`__striped` and `-S`](#__striped-and--s)
+- [Input and output](#input-and-output)
+- [Errors](#errors)
+- [Efficiency](#efficiency)
+  - [Increment, assign](#increment-assign)
+  - [Multiply, divide](#multiply-divide)
+  - [Arrays, pointers, structs (reads; writes cost about the same)](#arrays-pointers-structs-reads-writes-cost-about-the-same)
+  - [Branches](#branches)
+  - [Loops](#loops)
+  - [memset loops](#memset-loops)
+  - [Calls](#calls)
+- [Optimizations](#optimizations)
+- [Not supported: a summary](#not-supported-a-summary)
+
+<!-- /toc -->
+
 ## Introduction
 
 MeteoriC-65 is a limited C compiler (subset) for the OrWin-ATMOS
@@ -128,7 +168,7 @@ gives what gcc gives, what does not is a reported error.
 
 
 
-## 1. The compiler
+## The compiler
 
 On host (does "more" optimizations, and more verbose output):
 
@@ -149,7 +189,7 @@ Both write `prog.ivm`; a `-DRUN` build also runs it (on the VM in C).
 | flag | effect |
 |------|--------|
 | `-O` | optimize: packs variables (registers 0..31, globals, frames by call graph), peephole |
-| `-S` | stripe all arrays of structs (faster on the JIT, slower on the VMs: see 10.4) |
+| `-S` | stripe all arrays of structs (faster on the JIT, slower on the VMs: see [`__striped` and `-S`](#__striped-and--s)) |
 | `-v` | `-v -v` shows each statement's source and bytecode (`GEN:`), `-v -v -v` traces the rules |
 
 The compiler predefines `__MC65__` (the `.ivm` version) and
@@ -162,17 +202,17 @@ The compiler predefines `__MC65__` (the `.ivm` version) and
 ```
 
 All the `test-*.c` files and [`Tests/Compiler/man-*.c`](Tests/Compiler/) are written that
-way: gcc's output is the reference (except where `int` size shows, see 3).
+way: gcc's output is the reference (except where `int` size shows, see [Types](#types)).
 
 ---
 
 
 
-## 2. Program structure
+## Program structure
 
 - Functions and global declarations at the top, `main` is the entry.
 - Comments: `/* */` and `//`.
-- `#include` lines are skipped (there is a small fixed library, see 11).
+- `#include` lines are skipped (there is a small fixed library, see [Input and output](#input-and-output)).
 - A function must be **defined before it is called**: there are no
   prototypes.
 
@@ -234,7 +274,7 @@ evaluated): use `#ifdef`.  *TODO: evaluate a name.*
 
 
 
-## 3. Types
+## Types
 
 | type | size | notes |
 |------|------|-------|
@@ -242,7 +282,7 @@ evaluated): use `#ifdef`.  *TODO: evaluate a name.*
 | `char`, `unsigned char`       | 8 bit  | **unsigned**: 0..255, wraps |
 | `void`                        |        | function results / params |
 | `char *`, `int *` (any `T *`) | 16 bit |                           |
-| `struct NAME`, `struct NAME *`| slots  | see 10                    |
+| `struct NAME`, `struct NAME *`| slots  | see [Structs](#structs) |
 
 `sizeof(char)` is 1, `sizeof(int)` and any pointer 2. `sizeof(struct
 pt)`, `sizeof(p)` of a struct variable and `sizeof(a)` of an array of
@@ -271,7 +311,7 @@ Examples: [`man-types.c`](Tests/Compiler/man-types.c), errors: [`man-decl-err.c`
 
 
 
-## 4. Variables and declarations
+## Variables and declarations
 
 ```c
 int a, b;                 /* several in one */
@@ -284,7 +324,7 @@ static int s;             /* accepted */
 
 - Globals start at 0.
 - Locals live in their function's frame. Frames are fixed memory (no
-  stack, see 7), so a local keeps its value between calls; do not rely
+  stack, see [Functions](#functions)), so a local keeps its value between calls; do not rely
   on it, but `static` locals work for that reason.
 - Locals: an initializer may be any expression: `int x = f(2) + 1;`.
 - Declarations may come after statements in a block.
@@ -316,10 +356,10 @@ Examples: [`man-decl.c`](Tests/Compiler/man-decl.c), errors: [`man-decl-err.c`](
 
 
 
-## 5. Expressions
+## Expressions
 
 
-### 5.1 Operators
+### Operators
 
 | works | |
 |-------|---|
@@ -328,7 +368,7 @@ Examples: [`man-decl.c`](Tests/Compiler/man-decl.c), errors: [`man-decl-err.c`](
 | `!x`                               | binds tight: `!a + 1` is `(!a) + 1` |
 | `(char)x` `(char *)p` `(int *)p`   | casts |
 | `f(a, b)`                          | calls, also in expressions and as arguments: `add(f(1), f(2))` |
-| `sizeof(T)` `sizeof(a)`            | see 3, 8 |
+| `sizeof(T)` `sizeof(a)`            | see [Types](#types), [Arrays](#arrays) |
 | `0x1f` `0b101` `017` `0o17` `'a'` `'\n'` | literals (`017` and `0o17`: octal, as in C) |
 
 **NOTE:** not supported in expressions: unary minus (`-x`, `-5`: write
@@ -337,7 +377,7 @@ assignments (`b = (a = 3)`, `a = b = 3`), `x++` / `--x` inside an
 expression, `*(p + 1)` (write `p[1]`), `&x` of a plain variable.
 
 
-### 5.2 Precedence: left to right, never "up"
+### Precedence: left to right, never "up"
 
 The precedence levels are strictly adhered to, but restricted to what
 is only very efficient in a `train of operators` manipulating the
@@ -364,7 +404,7 @@ The levels, tightest first:
 | 8 | `\|` |
 
 Level 0 always binds tightest: `!a + 1` is `(!a) + 1`, `*p * 2` is
-`(*p) * 2`. `++` and `--` are not operators here but statements (5.3).
+`(*p) * 2`. `++` and `--` are not operators here but statements ([Assignment forms](#assignment-forms)).
 
 So C's precedence holds wherever the expression parses:
 
@@ -394,7 +434,7 @@ to avoid using extra temps: `35 + (d * a)`, `(d * a) + 35` and `d * a
 + 35` compile to the same bytecode.
 
 
-### 5.3 Assignment forms
+### Assignment forms
 
 | works | |
 |-------|---|
@@ -404,7 +444,7 @@ to avoid using extra temps: `35 + (d * a)`, `(d * a) + 35` and `d * a
 | `a[i] = E;` `p[i] = E;` `*p = E;` `s.f = E;` `p->f = E;` | |
 
 `x++` and `x--` are the cheapest: one op (`I x`, `J x`), 2 bytes. Use
-them rather than `x += 1`: half the cycles on every backend (13.1):
+them rather than `x += 1`: half the cycles on every backend ([Increment, assign](#increment-assign)):
 
 | statement | bytecode | ivm | ivm-asm | JIT |
 |---|---:|---:|---:|---:|
@@ -415,14 +455,14 @@ them rather than `x += 1`: half the cycles on every backend (13.1):
 
 **NOTE:** no `*= /= %= &= |= ^= <<= >>=`: write `x = x * 2;`.
 **NOTE:** on array elements only `=`: `a[i]++` and `a[i] += 2` are
-errors, write `a[i] = a[i] + 2;` (struct fields: see 10).
+errors, write `a[i] = a[i] + 2;` (struct fields: see [Structs](#structs)).
 
 Examples: [`man-expr.c`](Tests/Compiler/man-expr.c), errors: [`man-expr-err.c`](Tests/Compiler/man-expr-err.c).
 
 ---
 
 
-## 6. Statements
+## Statements
 
 | works | |
 |-------|---|
@@ -455,7 +495,7 @@ Examples: [`man-stmt.c`](Tests/Compiler/man-stmt.c), errors: [`man-stmt-err.c`](
 ---
 
 
-## 7. Functions
+## Functions
 
 ```c
 int add(int a, int b) { return a + b; }
@@ -486,7 +526,7 @@ Examples: [`man-func.c`](Tests/Compiler/man-func.c), errors: [`man-stmt-err.c`](
 ---
 
 
-## 8. Arrays
+## Arrays
 
 ```c
 char buf[80];                 /* zeroed */
@@ -524,7 +564,7 @@ Examples: [`man-array.c`](Tests/Compiler/man-array.c), errors: [`man-decl-err.c`
 ---
 
 
-## 9. Pointers and strings
+## Pointers and strings
 
 ```c
 char *s; int *p; int n;
@@ -561,10 +601,10 @@ Examples: [`man-pointer.c`](Tests/Compiler/man-pointer.c), errors: [`man-decl-er
 ---
 
 
-## 10. Structs
+## Structs
 
 
-### 10.1 Definition and variables
+### Definition and variables
 
 ```c
 struct pt { int x; int y; };
@@ -591,7 +631,7 @@ structs by value as parameters / results (pass pointers), nested struct
 values (a pointer field is fine), `union`.
 
 
-### 10.2 Fields
+### Fields
 
 ```c
 p.x = 3;          n = p.y;         p.x++;     p.x += 5;
@@ -609,7 +649,7 @@ n = mk(6)->x;            /* a function returning struct pt * */
 ```
 
 
-### 10.3 Arrays of structs
+### Arrays of structs
 
 ```c
 struct pt a[16];
@@ -638,7 +678,7 @@ For a list of structs to pass around, use an array of pointers
 (`struct pt *ps[N]`, each one `malloc`ed): 10.2.
 
 
-### 10.4 `__striped` and `-S`
+### `__striped` and `-S`
 
 ```c
 __striped struct pt a[32];
@@ -666,7 +706,7 @@ Examples: [`man-struct.c`](Tests/Compiler/man-struct.c), [`test-struct.c`](test-
 ---
 
 
-## 11. Input and output
+## Input and output
 
 | works | |
 |-------|---|
@@ -700,7 +740,7 @@ Examples: [`man-io.c`](Tests/Compiler/man-io.c). The silent cases of this manual
 ---
 
 
-## 12. Errors
+## Errors
 
 - An error in a statement, declaration or function is reported
   (`file:line: error: ...`, the line, a caret) and skipped (to its `;`,
@@ -717,7 +757,7 @@ Examples: [`man-io.c`](Tests/Compiler/man-io.c). The silent cases of this manual
 ---
 
 
-## 13. Efficiency
+## Efficiency
 
 Measured with sim65: each statement in a loop of 1000 rounds, the
 difference to the empty loop, per execution. `BC` the bytecode bytes, `JIT`
@@ -729,7 +769,7 @@ The loop itself: an empty `for (k = 0; k < 1000; k++)` costs 695 / 132 /
 22 cycles per round (`ivm` / `ivm-asm` / JIT).
 
 
-### 13.1 Increment, assign
+### Increment, assign
 
 | statement | BC | JIT | ivm | asm | jit |
 |---|---:|---:|---:|---:|---:|
@@ -748,7 +788,7 @@ The loop itself: an empty `for (k = 0; k < 1000; k++)` costs 695 / 132 /
 - A `char` (`unsigned char`) counter is the cheapest on the JIT.
 
 
-### 13.2 Multiply, divide
+### Multiply, divide
 
 | statement | BC | JIT | ivm | asm | jit |
 |---|---:|---:|---:|---:|---:|
@@ -767,7 +807,7 @@ The loop itself: an empty `for (k = 0; k < 1000; k++)` costs 695 / 132 /
 - Any other multiply is a library call on the JIT (156 cycles).
 
 
-### 13.3 Arrays, pointers, structs (reads; writes cost about the same)
+### Arrays, pointers, structs (reads; writes cost about the same)
 
 | statement | BC | JIT | ivm | asm | jit |
 |---|---:|---:|---:|---:|---:|
@@ -791,10 +831,10 @@ The loop itself: an empty `for (k = 0; k < 1000; k++)` costs 695 / 132 /
 - `q->x` through a pointer costs about the same as a const index on the
   VMs and 23 cycles on the JIT.
 - `__striped` makes `a[i].f` three times faster on the JIT and slower on
-  `ivm` (10.4).
+  `ivm` ([`__striped` and `-S`](#__striped-and--s)).
 
 
-### 13.4 Branches
+### Branches
 
 | statement | BC | JIT | ivm | asm | jit |
 |---|---:|---:|---:|---:|---:|
@@ -819,7 +859,7 @@ The loop itself: an empty `for (k = 0; k < 1000; k++)` costs 695 / 132 /
   about half the cost on every backend.
 
 
-### 13.5 Loops
+### Loops
 
 | loop (body `n++`) | BC | JIT | ivm | asm | jit |
 |---|---:|---:|---:|---:|---:|
@@ -829,8 +869,14 @@ The loop itself: an empty `for (k = 0; k < 1000; k++)` costs 695 / 132 /
 | `while (k < 1000) { ...; k++; }` | +2 | +4 | +139 | +127 | -1 |
 | `for (k = 1000; k; k--)` | +5 | +10 | +242 | +156 | +17 |
 | `for (k = 1000; k-- > 0; )` | +10 | +35 | +146 | +137 | +12 |
+| `while (k + 1 <= 1000) { ...; k++; }` (no loop op; body `s = s + k`) | +5 | +12 | +509 | +252 | +16 |
 
 (per round, compared to the first form)
+
+- Without the fused loop ops (a test the loop ops don't know, last
+  row) the plain `for` is 1.4x (ivm) to 1.8x (asm) faster.
+- On the JIT the `while` form can be faster: its `n` costs up to 6
+  cycles more than `I` `B` (body `s = s + i`). To improve.
 
 - The counting `for (i = A; i < B; i++)` / `<=` is one fused loop op:
   `u` for `<`, `t` for `<=` (the same op twice: test, body, `n`: i++ and
@@ -843,7 +889,7 @@ The loop itself: an empty `for (k = 0; k < 1000; k++)` costs 695 / 132 /
   counting down.
 
 
-### 13.6 memset loops
+### memset loops
 
 A loop that sets a whole array is recognized and becomes one `memset` op:
 
@@ -869,7 +915,7 @@ Up to 100 times faster on `ivm`: write clearing / filling loops exactly in
 this form.
 
 
-### 13.7 Calls
+### Calls
 
 | statement | BC | JIT | ivm | asm | jit |
 |---|---:|---:|---:|---:|---:|
@@ -880,7 +926,7 @@ A call is cheap in bytecode; on the VMs it costs about two loop rounds.
 ---
 
 
-## 14. Optimizations
+## Optimizations
 
 **Byte code generation:**
 
@@ -946,7 +992,7 @@ built, `-DIVM_OPT`), value numbering 2.1 KB, CSE 3.5 KB (not built,
   array, constant index, constant pointer/array, setting constant value.
 
 
-## 15. Not supported: a summary
+## Not supported: a summary
 
 | | instead |
 |---|---|
