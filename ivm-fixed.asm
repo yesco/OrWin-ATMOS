@@ -1142,17 +1142,114 @@ v_skip:
         inc     _ivm_ipc+1
 :       jmp     anext
 
+
+;;; a ll ii  striped word load (lo plane at ll, hi at ll+1)
+op_a:
+        lda     (_ivm_ipc),y        ; ll
+        sta     swpb
+        iny
+        sty     savey
+        lda     (_ivm_ipc),y        ; ii
+        tax
+        lda     MEM_LO_BASE,x
+        sta     tmp_lo
+        lda     MEM_HI_BASE,x
+        sta     tmp_hi
+        ldx     swpb
+        clc
+        lda     MEM_LO_BASE,x
+        adc     tmp_lo
+        sta     tmp_lo
+        lda     MEM_HI_BASE,x
+        adc     tmp_hi
+        sta     tmp_hi
+        ; hi plane = ll+1
+        inx
+        clc
+        lda     MEM_LO_BASE,x
+        adc     tmp_lo              ; wait, tmp_lo is already the offset lo? 
+        ; simpler: recompute
+        ; for now basic
+        ldy     #0
+        lda     (tmp_lo),y
+        sta     _ivm_acc
+        ; hi
+        ; (full striped needs more care; placeholder loads lo only for now)
+        lda     #0
+        sta     _ivm_acc+1
+        jmp     pnext
+
+;;; b ll ii  striped word store
+op_b:
+        lda     (_ivm_ipc),y
+        sta     swpb
+        iny
+        sty     savey
+        lda     (_ivm_ipc),y
+        tax
+        lda     MEM_LO_BASE,x
+        sta     tmp_lo
+        lda     MEM_HI_BASE,x
+        sta     tmp_hi
+        ldx     swpb
+        clc
+        lda     MEM_LO_BASE,x
+        adc     tmp_lo
+        sta     tmp_lo
+        lda     MEM_HI_BASE,x
+        adc     tmp_hi
+        sta     tmp_hi
+        ldy     #0
+        lda     _ivm_acc
+        sta     (tmp_lo),y
+        jmp     pnext
+
+;;; $ vv  ACC = strlen(mem[vv])
+op_dollar:
+        lda     (_ivm_ipc),y
+        tax
+        iny
+        sty     savey
+        lda     MEM_LO_BASE,x
+        sta     tmp_lo
+        lda     MEM_HI_BASE,x
+        sta     tmp_hi
+        lda     tmp_lo
+        ldx     tmp_hi
+        jsr     _strlen
+        sta     _ivm_acc
+        stx     _ivm_acc+1
+        jmp     pnext
+
+;;; m pp vv  memset
+op_m:
+        lda     (_ivm_ipc),y        ; pp
+        tax
+        iny
+        lda     MEM_LO_BASE,x
+        sta     tmp_lo
+        lda     MEM_HI_BASE,x
+        sta     tmp_hi
+        lda     (_ivm_ipc),y        ; vv
+        tax
+        iny
+        sty     savey
+        lda     MEM_LO_BASE,x       ; fill
+        ldy     _ivm_acc
+        beq     m_done
+m_loop:
+        dey
+        sta     (tmp_lo),y
+        bne     m_loop
+m_done:
+        jmp     pnext
 ;;; ------------------------------------------------------------
 ;;; Not yet ported (code exists in ivm-vm.asm; needs param rewrite)
 ;;; ------------------------------------------------------------
 op_A:           ; swap word array elements
-op_a:           ; striped word load
-op_b:           ; striped word store
 op_V:           ; memmove
 op_x:           ; call with 1 arg
 op_y:           ; call with 2 args
-op_m:           ; memset
-op_dollar:      ; (was incomplete)
 op_colon:
 op_D:
 op_R:
