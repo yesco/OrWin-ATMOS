@@ -11,6 +11,9 @@ MEM_HI_BASE = _slice_hi
 
 ;;; Everything else is as in the original ALTCODE=1 path.
 
+TRACE=1
+;TRACE=0
+
 .export         _run_ivm_asm
 .export         _IVM_ASM_START
 .export         _IVM_ASM_END
@@ -93,6 +96,18 @@ ynext:                          ; kept for compatibility, but rarely needed
 
 xnext:
         lda     (_ivm_ipc),y
+
+        .if TRACE
+        sta     _ivm_op
+        sty     savey
+        lda     #'>'
+        jsr     _putchar
+        lda     _ivm_op
+        jsr     _putchar
+        ldy     savey
+        lda     _ivm_op
+        .endif
+
         iny
         tax                     ; X = opcode (and for 0..31 the slot!)
         bmi     HIBIT
