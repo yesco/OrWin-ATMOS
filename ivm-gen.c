@@ -88,13 +88,38 @@ uchar nvector;
 // emitted the callee's fneed is final (recorded by emitop()):
 //   fneed[v] = cells below v's frame = max over callees c of
 //              fneed[c] + size(c),  size(c) = frame_base[c+1] - frame_base[c]
+
 // Backtracking can only make it bigger (safe, just less packing).
+
 uchar fneed[MAX_VECTORS];
 uchar cur_func;           // function being emitted (gen_func_entry), 0xff none
 uchar next_slot; // frames/locals bump (and all slots when !optimize)
+
 // optimize==0: intermixed layout from 0 (as before); short L if slot<32
 // optimize!=0: REGISTER 0..31, other globals 32..95, frames at FRAME_BASE (96)+
+//
+// IVM_OPT: -O  = include optimizer that does various things:
+// - layout (frame packing)
+// - gen_pack
+// - gen_optimize
+// 
+// It's default and included on HOST builds using ./pc for compilation
+// Using ./parse it's off
+
+#if !defined(__CC65__) && !defined(IVM_NO_OPT) && !defined(IVM_OPT)
+  #define IVM_OPT
+#endif
+#ifdef IVM_OPT
 uchar optimize;
+#else
+#define optimize 0
+#endif
+
+// IVM_CSE: dead loads + gen_swap: on for host builds, off for cc65 unless
+// -DIVM_CSE. The value numbering (vn_temp) is always on (-DIVM_NO_VN: off)
+#if !defined(__CC65__) && !defined(IVM_NO_CSE) && !defined(IVM_CSE)
+  #define IVM_CSE
+#endif
 uchar next_reg;   // next REGISTER global (0..31)
 uchar next_glob;  // next normal global when optimize (32..95)
 // statics' slots (global, their names gone with their scope): gen_pack
@@ -758,6 +783,8 @@ static uchar *gen_tgt, *gen_del;
 #define SETBIT(m, x) ((m)[(x) >> 3] |= (1 << ((x) & 7)))
 #define TGT(x)       BIT(gen_tgt, x)
 
+#if defined(IVM_OPT) || defined(IVM_CSE)
+
 // replace the op byte at x by a DEL (squeezed out later)
 static void DEL(word x) {
   bin[x] = OP_DEL;
@@ -767,6 +794,7 @@ static void DEL(word x) {
 // ACC dead at pc? Ops on from it: one that sets ACC (not reading it): yes,
 // one that reads it (or a conditional jump, a call): no. Those that do
 // neither go on (ivm-walk.c's contract: KEEP without "in"), B: to where
+#ifdef IVM_OPT
 static int gen_acc_dead(word pc) {
   word n;
   uchar op, k;
@@ -894,6 +922,8 @@ static void gen_peephole(void) {
   }
 }
 
+#endif // IVM_OPT
+
 // DELs in [lo, hi[
 static word gen_dels(word lo, word hi) {
   word d = 0;
@@ -935,6 +965,24 @@ static void gen_squeeze(void) {
 
   free(gen_tgt);
 }
+
+#ifdef IVM_OPT
+// -O, after the slot remap (on the final slot numbers):
+// - the peephole puts DELs where it drops bytes
+// - the squeeze removes them, and fixes the jumps and vectors
+//
+// Done twice: some chances only show up after the first round.
+static void gen_optimize(void) {
+  uchar i;
+
+  for (i = 0; i < 2; i++) {
+    gen_peephole();
+    gen_squeeze();
+  }
+}
+#endif
+
+#endif // IVM_OPT || IVM_CSE
 
 // ---------------------------------------------------------------------------
 // FIXIPC: ivm-fixed.asm keeps the low byte of ipc in Y and only re-bases
@@ -1041,7 +1089,8 @@ static void gen_fixipc(void) {
 #define VN_N 16
 static struct { word h, at; uchar len, t; } vn_t[VN_N];
 
-// the code (bin[]) has an op op? (its operands and strings: not ops)
+// Does the code have this op?
+// Walks op by op, so operands and strings don't count.
 uchar gen_has_op(uchar op) {
   word pc, n;
 
@@ -1052,7 +1101,7 @@ uchar gen_has_op(uchar op) {
   return 0;
 }
 
-// a new compile: nothing known
+// A new compile: forget all values.
 void vn_reset(void) {
   memset(vn_t, 0, sizeof(vn_t));
   vn_label = 0;
@@ -1131,12 +1180,6 @@ uchar vn_temp(word from, uchar t) {
   vn_t[k].h = h; vn_t[k].at = st; vn_t[k].len = len; vn_t[k].t = t;
   return 0;
 }
-#endif
-
-// IVM_CSE: dead loads + gen_swap: on for host builds, off for cc65 unless
-// -DIVM_CSE. The value numbering (vn_temp) is always on (-DIVM_NO_VN: off)
-#if !defined(__CC65__) && !defined(IVM_NO_CSE)
-  #define IVM_CSE
 #endif
 
 #ifdef IVM_CSE
@@ -1246,6 +1289,7 @@ static int gen_swap(void) {
 }
 #endif // IVM_CSE
 
+#ifdef IVM_OPT
 // -O: [registers][globals][frames packed by call graph]
 // Fills map[] for the variable slots, returns the first free slot (consts).
 static uchar gen_pack(uchar *map) {
@@ -1282,6 +1326,7 @@ static uchar gen_pack(uchar *map) {
 
   return top;
 }
+#endif // IVM_OPT
 
 // after remap: frame bases and symbols follow map[] (also const aliases)
 static void gen_map_syms(uchar *map) {
@@ -1415,7 +1460,11 @@ uchar *build_blob(int *out_len) {
       if (!const_is_reloc[i] && const_pool[i] != 0 && CONST_USED(i)) nn++;
 
     // vars: -O closes the gaps (gen_pack), consts right after (no gap)
+#ifdef IVM_OPT
     constidx = optimize ? gen_pack(map) : next_slot;
+#else
+    constidx = next_slot;
+#endif
     if (constidx + nn > CONST_TOP + 1) IVM_GEN_FAIL("constants collided with frames");
     k = 0;
     // fill map and write words straight into the blob (no new_pool copy)
@@ -1504,17 +1553,10 @@ uchar *build_blob(int *out_len) {
     free(map);
   }
 
-  // -O: peephole on the FINAL slot numbers (after the remap above), then
-  // squeeze the DEL fillers out (fixes jumps, vectors[], main_offset).
-  // Must run before frame bases / code / vectors are copied into the blob.
-  if (optimize) {
-    // twice: a removed jump's target, or a jump over removed code (zjp+0),
-    // only shows up in the next round
-    for (i = 0; i < 2; i++) {
-      gen_peephole();
-      gen_squeeze();
-    }
-  }
+  // -O: before frame bases / code / vectors are copied into the blob
+#ifdef IVM_OPT
+  if (optimize) gen_optimize();
+#endif
 
   // DEL every FIX_RUN bytes: ivm-fixed.asm re-bases ipc there (after the
   // squeeze, it would remove them)

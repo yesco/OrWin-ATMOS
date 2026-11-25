@@ -895,6 +895,46 @@ A call is cheap in bytecode; on the VMs it costs about two loop rounds.
   same function calculating the same thing are reused if they are stored
   in ACC or in a temp variable slot.
 
+**What each one does, where it runs, what it saves:**
+
+Measured on the 43 test programs (all .ivm together: 18697 bytes with
+none of them, 17514 with all) and on `test-opts.c` (cycles on
+`./ivm-asm`, the loops of its cases).
+
+- Value numbering (ivm-gen.c `vn_temp`, while emitting; always on,
+  `-DIVM_NO_VN`: off). The same chain computed again into a temp
+  (`a[j + 1]` twice) becomes a load of the first temp. -40 bytes
+  (0.2%), test-opts 0.3% faster.
+- `&x` and value numbering. A store through a pointer may then hit a
+  variable's slot. The grammar warns (`\"%Warning..."` in rule L); if
+  value numbering kept a slot over such a store, parse.c compiles
+  again without that.
+- CSE and array swap (`IVM_CSE`: `gen_deadload`, `gen_swap`, bytecode
+  passes; host only). A dead load is dropped; `t = a[i]; a[i] = a[j];
+  a[j] = t` becomes one `A` op. -35 bytes (0.2%), 0.1% faster.
+- `-O` (`IVM_OPT`: host only, `./pc`; `./parse` on the 6502 has no -O).
+  Together:
+  - layout: `register` vars in slots 0..31, globals 32..95, frames
+    from 96;
+  - frames packed by the call tree (`gen_pack`): functions that are
+    never active at the same time share cells;
+  - peephole (`gen_peephole`, then `gen_squeeze` removes the DEL
+    fillers and fixes the jumps): `L xx` -> `xx` (one byte load),
+    `? G rr` -> zjp (one byte jump), `S x L x` -> `S x`, `0 X` -> `Q`,
+    dead code after a return / an always taken jump, constant branches.
+
+  -1108 bytes (5.9%); byte-sieve-array 5.8% smaller and 4.7% faster,
+  test-ifeq 14% smaller; test-opts 0.5% faster. Layout and packing
+  alone make the code bigger (globals move above 31): the peephole's
+  one byte loads are what pays.
+- Not optimizations, but in the same pass: unused constants are not
+  in the .ivm, and a DEL (FIXIPC) every 124 bytes of straight code
+  for `ivm-fix`.
+
+The sizes of this in the 6502 parse.sim (cc65): -O 3.6 KB (not
+built, `-DIVM_OPT`), value numbering 2.1 KB, CSE 3.5 KB (not built,
+`-DIVM_CSE`).
+
 **JIT compilation:**
 
 - Const propagation; all constants are put in code in place instead

@@ -23,5 +23,5 @@ echo "=== $name.c: `./wcode $name.c` LOC ==="
 echo "=== parse.c: `./wcode parse.c` LOC ==="
 echo "=== $name.c: `./wcode $name.c` LOC ==="
 echo
-ls -l $name.c $name.ivm 2>/dev/null
+ls -ugGlf $name.c $name.ivm 2>/dev/null
 echo

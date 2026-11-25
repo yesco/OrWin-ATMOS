@@ -878,10 +878,11 @@ static word cap_val(uchar n) {
 //   optimize!=0: REGISTER globals 0..31, other globals 32..95, frames >= FRAME_BASE (96)
 // Failed alts restore next_slot via slot_save (see restore_scope).
 
-// the compile again (an &x after value numbering kept a slot over a
-// store through a pointer: main): no \" warnings then
+// Compiling again (see main): no \" warnings the second time.
 static uchar vn_again;
-static word  said_at;       // \": the furthest place said
+
+// \": the furthest place already printed.
+static word  said_at;
 
 static uchar pending_register; // set by \r after literal "register" in BNF
 static uchar pending_const;    // set by \c after literal "const"
@@ -2396,8 +2397,8 @@ int run() {
   //   the name local
   else if (c == HIBIT('_')) static_decl = 1;
 
-  // \"text": print the text (a warning), on its own line, once a place
-  //   (backtracking may match it again; not when compiled again)
+  // \"text": print the text on its own line (a warning).
+  // Once per place: backtracking may match it again.
   else if (c == HIBIT('"')) {
     word at = abs_pos();
     uchar *t = a + 1;
@@ -2806,9 +2807,10 @@ static void report_reject(void) {
 
 
 // init: load grammar + open source (errors: FAIL)
-// a compile of src_path from scratch (the grammar: loaded before, once).
-// Twice in a run: the code has an &x (the ` op) and value numbering kept
-// a slot over a store through a pointer (vn_risk): again, vn_alias set
+// Start a compile of src_path from scratch.
+// The grammar is loaded before, once.
+//
+// It can run twice: see "compile again" in main.
 static void init(char *src_path) {
 
   src_name = src_path;
@@ -2940,7 +2942,9 @@ int main(int argc, char **argv) {
   
   verbose = 0;
   ignore_case = 1;
+#ifdef IVM_OPT
   optimize = 0;
+#endif
 #ifdef RUN
   compile_only = 0;
 #endif
@@ -2952,7 +2956,11 @@ int main(int argc, char **argv) {
     if (arg[0] == '-' && arg[1] && !arg[2])
       switch (arg[1]) {
       case 'v': verbose++;       continue;
+#ifdef IVM_OPT
       case 'O': optimize = 1;    continue;
+#else
+      case 'O': eprintf("-O: not in this build (-DIVM_OPT)\n"); continue;
+#endif
       case 'S': stripe = 1;      continue;
       case 'i': ignore_case = 1; continue; // LOL
       #ifdef BNF_TEXT
@@ -3061,9 +3069,13 @@ again:
     return 1;
   }
 
-  // the code has an &x (the ` op: what matched, backtracking undid the
-  // rest) and value numbering kept a slot over a store through a pointer:
-  // that may be wrong. Again, without that from the start
+  // Compile again, once, if both:
+  // - the code takes the address of a variable (the ` op)
+  // - value numbering kept a slot over a store through a pointer
+  //
+  // That slot may have been changed by the store. The second time
+  // value numbering knows it (vn_alias) from the start.
+#ifndef IVM_NO_VN
   if (vn_risk && !vn_again && gen_has_op('`')) {
     vn_again = 1;
     vn_alias = 1;
@@ -3072,6 +3084,7 @@ again:
     #endif
     goto again;
   }
+#endif
 
   eprintf("--- ACCEPT ---\n");
 

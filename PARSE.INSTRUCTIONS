@@ -14,6 +14,21 @@ MY RULES (always)
     unrelated lines.
   - Every code "paragraph" gets a 1-2 word comment (like naming a
     subroutine), blank lines between groups. Keep spacious comments.
+  - Comments: terse but spacious, to the point. Plain sentences and
+    short "- " lists, a blank line between thoughts; say where it
+    applies ("on for ./pc (host), off in ./parse"). NOT dense
+    colon-chained brain dumps ("X: y (z: w), else ..."). E.g.:
+      // IVM_OPT: -O  = include optimizer that does various things:
+      // - layout (frame packing)
+      // - gen_pack
+      // - gen_optimize
+      //
+      // It's default and included on HOST builds using ./pc
+      // Using ./parse it's off
+  - Includes: #include "file.c", no .h files (unless for "users").
+    A file's own main() goes under #ifndef MAIN.
+  - cc65 compiles all code it sees, used or not: anything not needed
+    on the 6502 goes under an #ifdef (measure: cc65 -S + ca65 -l).
   - No magic numbers: named constants.
   - Asm comments: whole line ;;;  inline ;;
   - cc65 C89: declarations before statements; no ?: in case labels
@@ -41,6 +56,11 @@ FILES
   cpu6502.c drv.c  host 6502 sim + JIT test driver (gcc -O2 -DHOSTSIM).
   parse.c       grammar engine + C/Pascal front end (gcc -O2 -o parse;
                 -DSYMS writes NAME.sym).
+  bnf2bin.c     the grammar: format, rule[], loads c.bnf.bin (all
+                targets). BNF_TEXT (host only): reads c.bnf, writes
+                the .bin (./parse.x -B c.bnf, or ./bnf2bin.x c.bnf).
+                The 6502 parse.sim only loads c.bnf.bin; on 6502 the
+                alt tables are relocated in place (no malloc).
   c.bnf p.bnf   grammars.  ivm-gen.c  emitter / consts / symbols / blob.
   ivm-walk.c    opcode table.  ivm-print.c  .ivm listing.  parse-syms.c
   bnfconv.py    one-off: old grammars (A..Z rule calls) -> $X syntax.
@@ -57,6 +77,17 @@ GRAMMAR ENCODING (parse.c, current)
   \> marks the jump target alt. \! statement error recovery. \% skip a
   false #if branch. \j no temp after a plain load. \xHH exact byte.
   \@ \$ \: \, \. arrays (make, sizeof, init). \c const, \g init.
+  \"text" prints text on its own line, once per source place (rule L:
+  the &x warning). Free directive chars: ` only.
+
+OPTIMIZATIONS (ivm-gen.c; impact: MeteoriC-man.md 14, test-opts.c)
+  - IVM_OPT (-O: layout, gen_pack, gen_optimize = peephole + squeeze):
+    on for host (./pc), off in cc65 parse.sim (-DIVM_OPT: 3.6 KB).
+  - IVM_CSE (gen_deadload, gen_swap): host only (-DIVM_CSE: 3.5 KB).
+  - Value numbering (vn_temp, while emitting): always (-DIVM_NO_VN).
+    &x in the code + a slot kept over a pointer store (vn_risk): main
+    compiles again with vn_alias (init() resets all compile state).
+  - Idea: move -O to a separate ./ivm-opt (.ivm in, .ivm out).
 
 C FRONT END STATE (c.bnf)
   - Precedence: left to right, an operator may only be followed by the
@@ -101,6 +132,18 @@ TESTS
   tested, why, the expected results; each case
      printf("name:\texpected\n\t\t");  then the actual values, printf("\n")
   gcc on the same file is the reference where possible.
+
+OPEN / NEXT: slot promotion (some day, an -O saving)
+  - Give the 32 one byte load slots (0..31) to the vars that use L xx
+    the most. Score per var: its L xx count (= bytes saved), +30 for
+    each L xx inside a loop (a backward B / n jump's range).
+  - Measured (2026-11): xx instead of L xx saves 1 byte, and per load
+    run: ivm-asm / ivm-fix 8 cycles, the C ivm 83.
+  - Layout stays: [promoted globals][other globals][frames, contiguous]
+    [globals after][consts]. Locals are not promoted (for now).
+  - gen_pack already lays globals out from 0 (frames right after): in
+    small programs everything is < 32. It only matters past 32 slots.
+  - The counting: ivm-count has it; gen_pack would order by the score.
 
 OPEN / NEXT (imacs.c port; easiest first)
   - Grammar-only: do K while (E); *(E) *--p *p--; unary minus; ?:;
