@@ -17,7 +17,15 @@ if stale parse.sim $PARSE_SRC parse; then
   cl65 -T -l parse.lst -t sim6502 -Oirs -o parse.sim     parse.c -vm -m parse.map || exit 1
 fi
 
-sim65 -c parse.sim -v c.bnf $name.c
+# the 6502 parse only knows the ready-built grammar (bnf2bin.c)
+if stale bnf2bin.x bnf2bin.c parse; then
+  clang -O2 bnf2bin.c -o bnf2bin.x || exit 1
+fi
+if stale c.bnf.bin c.bnf bnf2bin.x; then
+  ./bnf2bin.x c.bnf || exit 1
+fi
+
+sim65 -c parse.sim -v c.bnf.bin $name.c
 
 echo
 

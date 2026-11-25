@@ -574,7 +574,7 @@ R=getchar()[K]
 # - &x: the address of a variable (` op; the VM / JIT know mem[]'s). A
 #   static array: its address is the slot's value (also rule S)
 |&\i\$\=1[\l1]
-|&\i[`\1]
+|&\i\"%Warning: &var of a slot-var will not work in optimized interpreter -asm and -fix."[`\1]
 |malloc($E)[M\t]
 # - Library calls: V memmove (memcpy too), $ strlen, x / y id: by the
 #   vector (ivm.c ivm_libv, ivm-lib.asm _ivmlib_libv), the last argument in

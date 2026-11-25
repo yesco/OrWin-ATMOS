@@ -11,7 +11,14 @@ rm -f $name.ivm
 
 echo "--oscar build--"
 #./oscar -v2 -dRUN -dOSCAR64 -dNOFLOAT -dNOLONG -Os -o=parse.prg parse.c 
-./oscar -Os -dOSCAR64 -dNOFLOAT -dNOLONG parse.c
+# the grammar built in (#embed c.bnf.bin): no file to load
+if stale bnf2bin.x bnf2bin.c parse-oscar; then
+  clang -O2 bnf2bin.c -o bnf2bin.x || exit 1
+fi
+if stale c.bnf.bin c.bnf bnf2bin.x; then
+  ./bnf2bin.x c.bnf || exit 1
+fi
+./oscar -Os -dOSCAR64 -dNOFLOAT -dNOLONG -dBNF_EMBED parse.c
 ls -l parse.prg
 
 mv parse.asm parse.oscar.s

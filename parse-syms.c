@@ -64,6 +64,7 @@ static void sym_open(const char *path) {
   memset(sym_w, 0, sizeof(sym_w));
   memset(frame_sz, 0, sizeof(frame_sz));
 
+  if (sym_fp) fclose(sym_fp);            // (a compile again)
   sym_fp = fopen(out, "w");
   if (sym_fp)
     fprintf(sym_fp, "# %s\n# num  tag  name  scope  type  refs\n", out);

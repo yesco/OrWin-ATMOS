@@ -120,7 +120,8 @@ uchar ginit_acc;   // const slot the init code leaves in ACC, 0xff none
 void gen_func_entry(uchar v);
 #ifndef IVM_NO_VN
 word vn_label;   // last label (jump target) position: value numbering
-uchar vn_alias;  // the source has &x: stores through pointers may hit mem[]
+uchar vn_alias;  // the code has &x: stores through pointers may hit mem[]
+uchar vn_risk;   // a slot was kept over such a store while !vn_alias
 #endif
 uchar *build_blob(int *out_len);
 
@@ -687,6 +688,7 @@ void gen_reset(void) {
   ginit_acc = 0xff;
   cur_func = 0xff;
   memset(fneed, 0, sizeof(fneed));
+  memset(static_slot, 0, sizeof(static_slot));
 
   acc_invalidate();
 }
@@ -1039,6 +1041,24 @@ static void gen_fixipc(void) {
 #define VN_N 16
 static struct { word h, at; uchar len, t; } vn_t[VN_N];
 
+// the code (bin[]) has an op op? (its operands and strings: not ops)
+uchar gen_has_op(uchar op) {
+  word pc, n;
+
+  for (pc = 0; pc < (word)bin_ptr; pc += n) {
+    if (bin[pc] == op) return 1;
+    if (!(n = ivm_oplen(bin + pc))) n = 1;
+  }
+  return 0;
+}
+
+// a new compile: nothing known
+void vn_reset(void) {
+  memset(vn_t, 0, sizeof(vn_t));
+  vn_label = 0;
+  vn_risk = 0;
+}
+
 static word vn_hash(word at, uchar len) {
   word h = 0;
   while (len--) h = (word)(h * 31 + bin[at++] + 1);
@@ -1076,7 +1096,7 @@ static int vn_reads(word at, uchar len, uchar v, uchar mem) {
 // after recording the chain for temp t. from: the alternative's start.
 uchar vn_temp(word from, uchar t) {
   word s = (word)(bin_ptr - 1), st = vn_chain(from, s), h, e, pc, n, w;
-  uchar len, k, ok;
+  uchar len, k, ok, risky = 0;
   if (st == 0xffff || s - st < 2 || s - st > 32) return 0;
   len = (uchar)(s - st);
   h = vn_hash(st, len);
@@ -1095,10 +1115,15 @@ uchar vn_temp(word from, uchar t) {
     w = WRITES_VAR(op) ? bin[pc + 1] : 0xffff;
     if (w == vn_t[k].t || (w != 0xffff && vn_reads(e, len, (uchar)w, 0)))
       ok = 0;
-    if (strchr(")]!w,AmbVxy", op) && (vn_alias || vn_reads(e, len, 0xff, 1)))
-      ok = 0;                 // (& of a variable: a slot may be the target)
+    if (strchr(")]!w,AmbVxy", op)) {
+      if (vn_alias || vn_reads(e, len, 0xff, 1))
+        ok = 0;               // (& of a variable: a slot may be the target)
+      else
+        risky = 1;            // (unless an &x comes later: vn_risk)
+    }
   }
   if (ok && pc == st) {
+    if (risky) vn_risk = 1;
     bin_ptr = st;
     emitop2('L', vn_t[k].t);
     return vn_t[k].t;

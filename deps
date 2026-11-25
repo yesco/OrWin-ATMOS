@@ -10,7 +10,7 @@ IVM_SRC="ivm.c ivm-jit.c ivm-walk.c cpu6502.c disasm.c ivm-print.c
  ivm-jtable.c ivm-btable.c ivm-image.c ivm-print.h sim6502.cfg"
 
 # parse.c and what it #includes (ivm.c too)
-PARSE_SRC="parse.c ivm-gen.c parse-syms.c $IVM_SRC"
+PARSE_SRC="parse.c bnf2bin.c ivm-gen.c parse-syms.c $IVM_SRC"
 
 # stale TARGET DEP...: true if TARGET must be (re)built. It is removed
 # then, so a failed build doesn't leave the old one to run.

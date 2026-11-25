@@ -420,37 +420,15 @@ static void *xrealloc(void *p, word n) {
 
 // ------------------------------------------------------------
 
-// A-Z
-#define NRULES      ('z' - 'A' + 1)   // $A..$Z $a..$z (index: letter - 'A')
+// the grammar: its format, rule[] comments[], loading the ready-built .bin
+// (bnf2bin.c). Host: its text too (load_bnf_text, -B bnf_save)
+#if !defined(__CC65__) && !defined(OSCAR64)
+  #define BNF_TEXT
+#endif
+static void eprintf(const char *fmt, ...);
+#include "bnf2bin.c"
 
 #define MAX_STACK   64
-#define MAX_ALTS    64
-
-
-#define HIBIT(c) ((c) | 0x80)
-
-// Rule bytes: plain ASCII is a literal; with the hibit:
-//
-//   $81-$9A  letter directives \a..\z: HIDIR (so $A..$Z $a..$z are free)
-//   $A0-$C0  ws gap, punctuation / digit directives \+ \# \< ..: HIBIT
-//   $C1-$DA  rule calls $A..$Z, $E1-$FA $a..$z: HIBIT(letter)
-//   $DB $DD  production [ ], $FB $FD \{ \}
-//
-// \< is 2 bytes: HIBIT('<'), ALT_JUMP + alt (1-based; 0: the rule again)
-//
-// A rule's index: its letter - 'A' (a..z: 32.., a few unused slots)
-
-#define HIDIR(c)    (0x80 | ((c) & 31))  // a..z only (a case label: no ?:)
-#define IS_RULE(c)  ((uchar)(((c) | 32) - HIBIT('a')) < 26)   // c: hibit
-#define ALT_JUMP    0x20         // printable, not | [ ] \ \n: scans keep working
-#define MAX_JUMP    31           // \< to alt 1..31
-
-
-// rule['X'-'A'] = NULL-terminated array of uchar* into one malloc blob
-static uchar **rule[NRULES];
-
-// blobs[r] holds the contiguous text for rule r
-static uchar *blobs[NRULES];
 
 // ------------------------------------------------------------
 static FILE *src_fp = NULL;
@@ -900,6 +878,11 @@ static word cap_val(uchar n) {
 //   optimize!=0: REGISTER globals 0..31, other globals 32..95, frames >= FRAME_BASE (96)
 // Failed alts restore next_slot via slot_save (see restore_scope).
 
+// the compile again (an &x after value numbering kept a slot over a
+// store through a pointer: main): no \" warnings then
+static uchar vn_again;
+static word  said_at;       // \": the furthest place said
+
 static uchar pending_register; // set by \r after literal "register" in BNF
 static uchar pending_const;    // set by \c after literal "const"
 static uchar static_decl;      // in a static declaration: \_ in rule V,
@@ -1339,26 +1322,7 @@ static uchar *run_production(uchar *p) {
 #include <stdbool.h>
 #include <string.h>
 
-// Comment styles loaded from grammar:
-//   #= { }        block comment  start="{", end="}"
-//   #= /* */      block comment  start="/*", end="*/"
-//   #= //         line  comment  start="//", runs to newline
-// Multiple #= lines are allowed (C needs both /* */ and //).
-// Default (no #=): Pascal-style { } only.
 
-#define MAX_COMMENTS 4
-#define COMM_START_MAX 4
-#define COMM_END_MAX   4
-
-typedef struct {
-  char start[COMM_START_MAX]; // NUL-terminated, length 1..3
-  char end[COMM_END_MAX];     // empty => line comment (to \n)
-  uchar start_len;
-  uchar end_len;              // 0 = line comment
-} CommentStyle;
-
-static CommentStyle comments[MAX_COMMENTS];
-static uchar ncomments;
 
 // TODO: why we have 3 differnt ones
 // 1. skip_hspace
@@ -1381,51 +1345,6 @@ static uchar ncomments;
 static void skip_hspace(void) {
   while (nextc == ' ' || nextc == '\t' || nextc == '\r')
     skip();
-}
-
-// skip spaces and tabs of a text line
-static char *skipsp(char *p) {
-  char c;
-
-  while ((c = *p) == ' ' || c == '\t') p++;
-  return p;
-}
-
-// copy a non-space run (max 3 chars) from p to dst, NUL-terminated; its length
-static uchar copy_tok(char *dst, char *p) {
-  uchar i = 0;
-  char c;
-
-  while ((c = *p++) && c != ' ' && c != '\t' && i + 1 < COMM_START_MAX)
-    dst[i++] = c;
-  dst[i] = 0;
-  return i;
-}
-
-// Parse one #= directive body (after the "#="). Returns 1 on success.
-// Forms:  "{ }" | "/* */" | "//"   (whitespace separates start/end)
-static uchar comments_add_from_line(char *p) {
-  CommentStyle *cs;
-
-  if (ncomments >= MAX_COMMENTS) return 0;
-  p = skipsp(p);
-
-  cs = &comments[ncomments];
-
-  // start delimiter: non-space run
-  if (!(cs->start_len = copy_tok(cs->start, p))) return 0;
-
-  // optional end delimiter => block comment; none => line comment
-  cs->end_len = copy_tok(cs->end, skipsp(p + cs->start_len));
-
-  ncomments++;
-  return 1;
-}
-
-// Default: { } block (Pascal). Cleared/replaced when BNF has #= lines.
-static void comments_set_default(void) {
-  ncomments = 0;
-  comments_add_from_line((char*)"{ }");
 }
 
 // True if source at line_pos starts with s[0..len). Does not consume.
@@ -2116,252 +2035,6 @@ static uchar match_num(void) {
 }
 
 
-// frees rule blobs + alt tables (rule[r] and blobs[r] are separate allocations)
-static void free_rules(void) {
-  uchar r;
-
-  for (r = 0; r < NRULES; r++) {
-    free(rule[r]);
-    rule[r] = NULL;
-    free(blobs[r]);
-    blobs[r] = NULL;
-  }
-}
-
-// \X is a directive (stored with the hibit) or a quoted literal char e
-// note: '>' is load-time only (not stored)
-//       '<' becomes HIBIT('<') + ALT_JUMP + alt (1..31, 0: restart)
-static uchar is_dir(uchar e) {
-  return isdigit(e) || strchr("insfdprlxywmzkcahvgetoubjq+{}#='?*@$:,.!%&^()-/~;_", e) != NULL;
-}
-
-static void build_one_rule(uchar r, char *rhs) {
-  char *p;
-  uchar *blob, **altp, e, inprod, verbatim;
-  word a, bi, na, alt_starts[MAX_ALTS];
-  uchar taildest;   // 1-based alt index for \> / \< (0 = none yet)
-
-  // directives (\i \n \s \o \< \d \+ \{ \}, rule calls, bare space, [ ]) get
-  // the hibit
-//
-  // quoted \| \c (not specials) become the plain char
-  //
-  // \> is not stored; it only updates taildest
-  // \< becomes HIBIT('<'), ALT_JUMP + x: jump to alt x-1, x = 0 if no \> yet
-  // build contiguous string with 0 separators between alts.
-
-  blob = xrealloc(NULL, strlen(rhs) + 2);
-
-  free(blobs[r]);
-  free(rule[r]);
-  blobs[r] = blob;
-
-  bi = 0;
-  na = 0;
-  inprod = 0;
-  verbatim = 0;
-  taildest = 0;
-  alt_starts[na++] = 0;
-
-  for (p = rhs; (e = *p); p++) {
-
-    if (verbatim) {
-      
-      // Generic copy next "hex" bytes - rename
-      // A: renamed to verbatim (only \# uses it so far)
-
-      // \#xx: the two hex digits are data (may be A-F),
-      // stored as they are
-      verbatim--;
-
-    } else if (e == '\\' && p[1]) {
-
-      e = *++p;
-      if (e == '>') {
-        // \> : set jump target to current alt (1-based); do not store
-        taildest = (uchar)na;   // na is already the current alt count
-        continue;
-      }
-
-      if (e == '<') {
-
-        // \< : HIBIT('<'), then the \> target alt (1..31), else 0: the
-        //   whole rule again
-        if (taildest > MAX_JUMP) {
-          eprintf("\nrule %c: ", 'A' + r);
-          FAIL("\\< to an alt past 31");
-        }
-        blob[bi++] = HIBIT('<');
-        e = (uchar)(ALT_JUMP + taildest);
-
-      } else {
-
-        if (is_dir(e)) e = isalpha(e) ? HIDIR(e) : HIBIT(e);  // (a..z)
-      }
-
-    } else if (e == '|' && !inprod) {
-
-      // '|' separates alts only outside a bare [ ... ] production
-      // skip empty alts from || or line-join artifacts
-      if (na > 0 && alt_starts[na - 1] == bi)
-        continue;
-
-      blob[bi++] = 0;
-
-      if (na >= MAX_ALTS) {
-        // TODO: don't repeat message
-        // A: done: the rule letter here, the rest in the FAIL message
-        eprintf("\nrule %c: ", 'A' + r);
-        FAIL("too many alts (MAX_ALTS)");
-      }
-      alt_starts[na++] = bi;
-      continue;
-
-    } else if (e == '[') {
-
-      // bare [ ] = production (no nesting); | inside is a literal (\[ \] are handled above)
-      inprod = 1;
-      e = HIBIT('[');
-
-    } else if (e == ']' && inprod) {
-
-      inprod = 0;
-      e = HIBIT(']');
-
-    } else {
-
-      // rule calls $R $r and the ws-gap are directives, not in a production
-      if (!inprod && e == '$' && isalpha(p[1])) e = HIBIT(*++p);
-      else if (!inprod && e == ' ') e = HIBIT(e);
-
-    }
-    
-    blob[bi++] = e;
-
-    // \#xx \xHH => copy next two chars verbatim
-    if (e == HIBIT('#') ||
-        (e == HIDIR('x') && isxdigit(p[1]) && isxdigit(p[2]))) verbatim = 2;
-    
-  }
-
-  blob[bi++] = 0;
-
-  altp = xrealloc(NULL, sizeof(uchar *) * (na + 1));
-
-  // create and fill an array of pointers to ALTs
-  for (a = 0; a < na; a++)
-    altp[a] = blob + alt_starts[a];
-
-  // end with 0 -- TODO: just make all allocs clean/zero?
-  // A: calloc would clear all of it for this one store: no gain
-
-  // TODO: I mean if xrealloc always made new bytes allocated
-  //   0 we wouldn't need to null things out later... like here!
-  altp[na] = NULL;
-  
-  rule[r] = altp;
-}
-
-
-// ------------------------------------------------------------
-
-// TODO: the idea was that several short alts wouldn't
-//   be malloced separately, however these are big buffers?
-//   do all ALTS need to fit inside a MAX_ACCUM?
-//   why not just read and fill it fully?
-//
-// A: line and acc are only used while loading, then freed. acc collects
-//   ONE rule: its first line plus all "|" continuation lines, so yes, all
-//   alts of one rule must fit in MAX_ACCUM. build_one_rule then copies it
-//   into one exact-size malloc. Reading lines straight into acc+acc_len
-//   would save the 1 KB line buffer and the copy loop below.
-
-#define MAX_LINE 1024
-#define MAX_ACCUM 4096
-
-
-static void load_bnf(const char *path) {
-  FILE *f;
-  char *line = xrealloc(NULL, MAX_LINE);
-  char *acc = xrealloc(NULL, MAX_ACCUM);
-  uchar cr;
-  char *nl, *eq, *p, c;
-  word acc_len, have_cur;
-  
-  free_rules();
-
-  fail_file = path;
-  f = fopen(path, "r");
-  if (!f) FAIL("cannot open grammar");
-  fail_file = NULL;
-
-  have_cur = 0;
-  cr = 0;
-  acc_len = 0;
-  acc[0] = 0;
-
-  // comment styles from #= lines; default Pascal { } if none given
-  ncomments = 0;
-
-  while (fgets(line, MAX_LINE, f)) {
-
-    nl = strchr(line, '\n');
-    if (nl) *nl = 0;
-
-    // split a new line - use the rest
-    c = *line;
-    if (c == '.') break;
-    if (c == 0) continue;
-
-    // #= comment-style directive (must be before bare # skip)
-    if (c == '#' && line[1] == '=') {
-      comments_add_from_line(line + 2);
-      continue;
-    }
-    if (c == '#') continue;
-
-    p = skipsp(line);
-
-    // continuation: line starts with |  (p stays, text is appended below)
-    if (!(*p == '|' && have_cur)) {
-
-      // new rule: flush previous
-      if (have_cur)
-        build_one_rule(cr, acc);
-      have_cur = 0;
-
-      if (!isalpha(c)) continue;
-
-      eq = strchr(line, '=');
-      if (!eq) continue;
-
-      cr = c - 'A';
-      have_cur = 1;
-      p = eq + 1;
-      acc_len = 0;
-    }
-
-    // TODO: why" it's just copying?
-    // A: yes: append this line (or its part after "X=") to acc, because
-    //   fgets reuses line for the next line
-    while ((c = *p) && acc_len + 1 < MAX_ACCUM) {
-      acc[acc_len++] = c;
-      p++;
-    }
-    acc[acc_len] = 0;
-  }
-
-  if (have_cur)
-    build_one_rule(cr, acc);
-
-  if (ncomments == 0)
-    comments_set_default();
-
-  fclose(f);
-  free(line);
-  free(acc);
-}
-
 
 // ------------------------------------------------------------
 // STACK
@@ -2722,6 +2395,22 @@ int run() {
   // \_: a static declaration (rule V): as a global (\+ \g, V's end),
   //   the name local
   else if (c == HIBIT('_')) static_decl = 1;
+
+  // \"text": print the text (a warning), on its own line, once a place
+  //   (backtracking may match it again; not when compiled again)
+  else if (c == HIBIT('"')) {
+    word at = abs_pos();
+    uchar *t = a + 1;
+
+    if (!vn_again && at > said_at) {
+      said_at = at;
+      eputc('\n');
+      while (*t && *t != '"') eputc(*t++);
+      eputc('\n');
+    }
+    for (t = a + 1; *t && *t != '"'; t++) ;
+    adv = (uchar)(t - a + (*t == '"'));
+  }
 
   // \;c: fail if the next char is c, read nothing (& but not &&)
   else if (c == HIBIT(';')) {
@@ -3117,40 +2806,22 @@ static void report_reject(void) {
 
 
 // init: load grammar + open source (errors: FAIL)
-static void init(char *bnf_path, char *src_path) {
+// a compile of src_path from scratch (the grammar: loaded before, once).
+// Twice in a run: the code has an &x (the ` op) and value numbering kept
+// a slot over a store through a pointer (vn_risk): again, vn_alias set
+static void init(char *src_path) {
 
   src_name = src_path;
-#ifdef SYMS
-  sym_open(src_name);
-#endif
-  load_bnf(bnf_path);
+  #ifdef SYMS
+    sym_open(src_name);
+  #endif
 
   if (src_fp) fclose(src_fp);
   fail_file = src_path;
   src_fp = fopen(src_path, "r");
 
 
-// TODO: a line like this is 22 bytes!
-// A: FAIL is a function now: fail(msg) instead of an inline longjmp,
-//   so each FAIL is about the message pointer plus one jsr.
-
   if (!src_fp) FAIL("cannot open source");
-
-  // & of a variable anywhere (&x, not && &=): stores through pointers may
-  // hit mem[], value numbering then keeps no slot over them (vn_alias).
-  // The whole source first: the & may come after the code it affects
-  {
-    int c, last = 0;
-    uchar amp = 0;                         // after a lone & (and spaces)
-    while ((c = fgetc(src_fp)) != EOF) {
-      if (c == '&') amp = last != '&';      // && : no
-      else if (amp && (isalpha(c) || c == '_')) vn_alias = 1;
-      else if (c != ' ') amp = 0;           // &= &( &1 ...
-      last = c;
-    }
-    fclose(src_fp);                      // (no fseek on sim65)
-    src_fp = fopen(src_path, "r");
-  }
 
   fail_file = NULL;
 
@@ -3160,10 +2831,12 @@ static void init(char *bnf_path, char *src_path) {
 // A: right: statics start at 0 and init() runs once per program run, so
 //   every "= 0" below is only needed if init() is ever called again. Put
 //   the line/parse state in one static struct: then one memset.
+// A: it is called again now (vn_again): all the compile state below
 
 // TODO: do it! That state should have been one struct to start with
 //   then rewind is just memmove or struct assign!
 
+  free(line_buf);
   line_buf = NULL;
   line_no_base = 0;
   line_cap = 0;
@@ -3174,6 +2847,7 @@ static void init(char *bnf_path, char *src_path) {
   load_nextc();     // prime nextc (reads the first source char)
   max_pos_abs = 0;
   far_sp = 0;
+  free(stack);
   stack = NULL;
   stack_cap = 0;
   sp = 0;
@@ -3184,9 +2858,21 @@ static void init(char *bnf_path, char *src_path) {
   undef_pos_abs = 0;
   last_undef[0] = 0;
 
+  // statements, loops, errors, declarations, the last matches
+  nloop = nbrk = 0;
+  nerr = err_at = err_code = 0;
+  cur_type = TY_WORD;
+  pending_const = static_decl = any_name = 0;
+  last_sym = pl_end = 0xffff;
+  ws_at = ws_end = 0;
+  said_at = 0;
+
   next_slot = 0;
   pending_register = 0;
   gen_reset();
+#ifndef IVM_NO_VN
+  vn_reset();
+#endif
 
   if (optimize)
     next_slot = FRAME_BASE; // frames; globals use next_reg / next_glob
@@ -3244,6 +2930,9 @@ int main(int argc, char **argv) {
   char *bnf = NULL;
   char *srcpath = NULL;
   char *arg;
+#ifdef BNF_TEXT
+  uchar bnf_out = 0;
+#endif
   word i;
   int err;
   int blen;
@@ -3266,9 +2955,12 @@ int main(int argc, char **argv) {
       case 'O': optimize = 1;    continue;
       case 'S': stripe = 1;      continue;
       case 'i': ignore_case = 1; continue; // LOL
-#ifdef RUN
-      case 'c': compile_only = 1; continue;  // just the .ivm, don't run it
-#endif
+      #ifdef BNF_TEXT
+        case 'B': bnf_out = 1;     continue;  // write c.bnf.bin, that's all
+      #endif
+      #ifdef RUN
+        case 'c': compile_only = 1; continue;  // just the .ivm, don't run it
+      #endif
       default: ;// TODO: give error
       }
 
@@ -3277,8 +2969,14 @@ int main(int argc, char **argv) {
     else if (!srcpath)               srcpath = arg;
   }
 
+  #ifdef BNF_TEXT
+    if (bnf && bnf_out) srcpath = bnf;
+  #endif
   if (!bnf || !srcpath) {
     eprintf("usage: %s [-v ...] [-O] [-S] [-i] [-c] c.bnf src.c\n", argv[0]);
+    #ifdef BNF_TEXT
+      eprintf("       %s -B c.bnf    (writes c.bnf.bin)\n", argv[0]);
+    #endif
     return 1;
   }
 
@@ -3300,8 +2998,23 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  // setup
-  init(bnf, srcpath);
+#ifdef BNF_TEXT
+  // -B: the grammar ready-built (bnf2bin.c), no source
+  if (bnf_out) {
+    char *out = bnf_bin_name(bnf);
+
+    load_bnf(bnf);
+    eprintf("%s: %u bytes\n", out, (unsigned)bnf_save(out));
+    free(out);
+    free_rules();
+    return 0;
+  }
+#endif
+
+  // setup: the grammar once, then the compile (again: vn_again)
+  load_bnf(bnf);
+again:
+  init(srcpath);
 
   #ifdef VERBOSE
     // TODO: move to extra module
@@ -3346,6 +3059,18 @@ int main(int argc, char **argv) {
     eprintf("--- %u error%s ---\n", nerr, nerr > 1 ? "s" : "");
     shutdown();
     return 1;
+  }
+
+  // the code has an &x (the ` op: what matched, backtracking undid the
+  // rest) and value numbering kept a slot over a store through a pointer:
+  // that may be wrong. Again, without that from the start
+  if (vn_risk && !vn_again && gen_has_op('`')) {
+    vn_again = 1;
+    vn_alias = 1;
+    #ifdef VERBOSE
+      if (verbose) eprintf("--- &x after value numbering: again ---\n");
+    #endif
+    goto again;
   }
 
   eprintf("--- ACCEPT ---\n");
