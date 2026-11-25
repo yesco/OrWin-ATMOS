@@ -982,7 +982,7 @@ op_tick:
         bne     @msg
 tick_msg:
         .byte   10, "%Error: ivm-fixed: no & of a variable (`): mem[] is byte planes", 10, 0
-gr
+
 ;;; unknown opcode — report it
 op_bad:
         stx     tmp_lo              ; save opcode
