@@ -1200,7 +1200,7 @@ ivmvar run_ivm(Process *p) {
 
 #else
 
-#if defined(IVMASM) || defined(JIT)
+#if defined(IVMASM) || defined(FIXED) || defined(JIT)
 
 // Single ZP block for importzp (_name in asm). Process switch = save/restore.
 
@@ -1231,12 +1231,12 @@ void opputnum(void) { printf("%u", (unsigned)ivm_acc); }
 #endif // !JIT
 #endif
 
-#ifdef IVMASM
+#if defined(IVMASM) || defined(FIXED)
 
 
 // TODO: pivot in-place during loading
-static uchar slice_lo[256];
-static uchar slice_hi[256];
+uchar slice_lo[256];
+uchar slice_hi[256];
 static ivmvar *live_mem;
 static word live_n;
 

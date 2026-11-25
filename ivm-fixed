@@ -1,0 +1,20 @@
+. ./deps   # stale: rebuild only when a source changed
+
+name=$1
+case "${name##*/}" in ?*.*) name="${name%.*}";; esac  # PROG, PROG.c, PROG.ivm all ok
+
+if stale ivm-fixed.sim $IVM_SRC ivm-fixed.asm ivm.c ivm-fixed; then
+  cl65 -DFIXED -Oirs -C sim6502.cfg -t sim6502 -vm -m ivm-fixed.map -o ivm-fixed.sim ivm-fixed.asm ivm.c  || exit 1
+fi
+
+sim65 -c ivm-fixed.sim $name.ivm
+
+echo
+echo
+ls -ugGlf ivm-fixed.sim ivm-fixed.map $name.ivm 2>/dev/null
+echo
+echo "=== ivm.c         : `./wcode ivm.c` LOC ==="
+echo "=== ivm-fixed.asm : `./wcode ivm-fixed.asm` LOC ==="
+echo
+grep _FISH ivm-fixed.map
+echo
