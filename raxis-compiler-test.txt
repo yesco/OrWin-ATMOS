@@ -1,0 +1,82 @@
+-- https://raxiss.com/article/id/30-MOS6502-compiler-benchmark
+
+MOS6502 compiler benchmark   (2026-07-27)
+
+---------------------------- OPTIMIZED FOR SIZE -------------------------------
+(size, bytes)
+                                          osdk     osdk
+                 cc65  llvm-mos    vbcc  lcc65  ...-1.x  kickc             sdcc
+\BYTES             -O       -Oz  -O=991    -O3      -O2         --opt-code-size
+===============================================================================
+dummy              15        41      15     38      192      1              283
+hello-world       197       114      99    335      407     60              342
+bytecpy            21        47      21     44      202      7              289
+memcopy            94       113      93    119      340     62              372
+0xcafe            398       148     321    708        C    119                C
+sieve            1108      1162     914   1160     9745      C            10012
+aes256           6244      3510    5083   8718    14340      C                C
+mandelbrot        968      1001    1087   1635      863      C             1481
+frogmove         2056      1886    1841   2320     2807   1615                R
+pi               1533      1995    1400   2115        R      C             5380
+shuffle          1888      2332    1522   2136     2263      C                R
+bubble-sort      1584      1762    1414   1625     2061      C                R
+selection-sort   1589      1863    1410   1671     2123      C                R
+insertion-sort   1540      1767    1382   1606     2027      C                R
+merge-sort       2153      2475    2194   2262     4270      C                R
+quick-sort       1702      2044    1741   1938     2517      C                T
+counting-sort    1969      2289    1760   1942     3737      C                R
+radix-sort       2302      3364    2454   2556     4659      C                R
+shell-sort       1615      1979    1580   1683     2172      C                R
+heap-sort        1798      2197    1826   2067     2744      C                R
+eight-queens     1079       902     895   2137     2649    593             1438
+qrcode          17276         C       R  22850        R      C                C
+
+Legend:
+
+C - Compilation failed.
+
+
+
+------------------------------- OPTIMIZED FOR SPEED ------------------------------------------
+(time, cpu cycles)
+                                                         osdk        osdk
+                      cc65       llvm       vbcc        lcc65     ...-1.x    kickc         sdcc
+\CYCLES              -Oirs        -Os    -O=1023          -O3         -O2     /--opt-code-speed
+===============================================================================================
+dummy                   29         84         29           37          37        12      327439
+hello-world           3374       1060        943         7114        8495       873      334158
+bytecpy                 37         92         37           45          51        20      325951
+memcopy             721210     910039     647376       762084    1,507551    557220    1,107721
+0xcafe                3593       1118       1263         9029           C       878           C
+sieve            10,318407   6,786242    7,559299   14,943291   16,502355         C   20,788032
+aes256           35,663969   9,718790   15,505793   23,850712   84,684177         C           C
+mandelbrot       22,261475   8,939428   10,366252   22,356417  180,732758         C   45,226206
+frogmove         14,813374   6,681292    7,834835    8,892397   14,701662  5,085372           R
+pi              118,495666  71,941172  106,033280  140,396480           R         C  276,160049
+shuffle           3,155071   1,518700    2,893997    3,901284    3,023907         C           R
+bubble-sort      22,300237   5,036778    5,568550   10,478605   15,239177         C           R
+selection-sort   12,643194   4,813455    4,798072    6,070229   10,134811         C           R
+insertion-sort    7,288662   3,091987    3,718157    4,860223    6,437330         C           R
+merge-sort        3,106156   1,594951    2,349658    3,149154    4,028621         C           R
+quick-sort        2,701238     950610    1,680543    2,843207    3,358937         C           T
+counting-sort     1,673750          T    1,366740    1,824284    2,137721         C           R
+radix-sort        6,128389          T    6,482986    7,333660    7,924337         C           R
+shell-sort        3,705706   1,340236    2,028688    2,941291    3,704984         C           R
+heap-sort         4,040806   1,487199    2,260800    4,542538    5,339768         C           R
+eight-queens     27,965949   2,892458    8,496053   61,059708   72,651727  5,565918   14,516371
+qrcode           97,352267          C           R  106,525639           R         C           C
+
+
+Legend:
+
+C - Compilation failed.
+T - Time-out error - test runs longer than the preset time limit 300000000 cycles (5 min. for 1 MHz cpu).
+R - Run-time error - the output doesn't match the expected one.
+
+Size numbers are length of the compiled binary in bytes. The lower is better.
+Speed numbers are cpu cycles counted for execution. The lower is better.
+
+MOS6502 compiler benchmark sources at github.
+Compilation intermediate files: bench-data-2026-07-27.tar.bz2
+
+copyright © 2012-2023, [iss@raxiss]

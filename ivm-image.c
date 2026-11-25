@@ -87,11 +87,11 @@ static int hl_load(const char *target) {
 static word hl_cut(word top, word floor) {
   static const char *const cut[] = { "_ivmlib_cut0", "_ivmlib_cut1",
     "_ivmlib_cut2", "_ivmlib_cut3", "_ivmlib_cut4", "_ivmlib_cut5",
-    "_ivmlib_end" };
+    "_ivmlib_cut6", "_ivmlib_end" };
   uchar k;
 
   if (top < floor) top = floor;
-  for (k = 0; k < 6 && top >= hl_sym(cut[k]); k++) ;
+  for (k = 0; k < 7 && top >= hl_sym(cut[k]); k++) ;
   return hl_sym(cut[k]);
 }
 

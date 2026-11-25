@@ -2719,7 +2719,7 @@ static word ivm_jit1(const uchar *code, word code_len,
     //
     // Arguments are put into ivmlib_args.
     // (ACC, x y's last one: first, AX is used after)
-    // JSR the routine (ivm-lib.asm cut 5)
+    // JSR the routine (ivm-lib.asm cut 6)
     // result: in AX
     case 'V': case '$': case 'x': case 'y': {
       word args = REF(ivmlib_args), r = 0;

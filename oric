@@ -6,11 +6,17 @@
 #   ./oric --live test-swap     at 1 MHz (real time), the screen redrawn
 #                               ~10 times a second while it runs
 #   ./oric --live-fast ...      the same, as fast as it goes
+#   ./oric -b                   --basic: no program, just BASIC, live
+#                               (--live alone: the same). Ctrl-] quits
+#   ./oric --rom my.rom         your own 16K ROM instead, live (with a
+#                               program too: it runs on that ROM)
 #   ./oric game.tap             any .tap as it is: no build, just run it
 #
 # --live on a terminal: what you type goes to the Oric (keys, Return,
 # Esc, Del/Backspace, arrows; Ctrl-x: CTRL-x and Alt-x: FUNCT-x if the
-# emulator has keys-mod; Ctrl-C too: BASIC's break). Ctrl-] quits.
+# emulator has keys-mod; Ctrl-C too: BASIC's break). Ctrl-] quits. It
+# doesn't stop when the program ends (back in BASIC's Ready), no cycle
+# limit: its cycles and output are the ones at its exit.
 # keys-mod: Phosphoric's `keys` with \C<c> \F<c>. If ../Phosphoric has its
 # source but not that, --live offers to patch it (patch_phosphoric: asks
 # first; ORIC_NOPATCH=1: never) and rebuild it (make).
@@ -31,8 +37,13 @@
 # only holds 26). Logs: PROG.oric-build.log, PROG.oric.log (the session).
 #
 #   PHOSPHORIC   the emulator (default ../Phosphoric/oric1-emu)
-#   ORIC_ROM     the BASIC 1.1 ROM (default: Phosphoric's or the OSDK's)
+#   ORIC_ROM     the BASIC 1.1 ROM (default: Phosphoric's or the OSDK's;
+#                --rom FILE wins)
 #   ORIC_CYCLES  give up after (default 2000000000; other .tap: 100000000)
+#   ORIC_WIDE=0  on a terminal of 80+ columns each Oric char is drawn
+#                2 wide (fullwidth forms): 0 = 40 columns as is
+#   ORIC_BOLD=0  bold on a terminal (the default: thicker strokes, more
+#                contrast): 0 = normal
 
 import os, re, select, struct, subprocess, sys, termios, time
 
@@ -156,13 +167,22 @@ def evt(l, key):
 INK = "\x1b[%dm"
 
 
-def render(scr, color):
+# wide: each Oric char 2 columns (fullwidth forms U+FF01.., closer to its
+# 6x8 cell), bold: thicker strokes. On a terminal only (ORIC_WIDE=0,
+# ORIC_BOLD=0: off); wide needs 80+ columns
+def wide_ch(c):
+    if 0x21 <= c <= 0x7d and c != 0x60:
+        return chr(0xff01 + c - 0x21)
+    return {0x60: "\u00a9 ", 126: "\u2592\u2592", 127: "\u2588\u2588"}.get(c, "  ")
+
+
+def render(scr, color, wide=0, bold=0):
     """raw $BB80 bytes -> (rows to show, plain ASCII rows: the output)"""
     show, plain = [], []
     for y in range(28):
         fg, bg, s, a = 7, 0, "", ""
         if color:
-            s = "\x1b[0m" + INK % 37 + INK % 40
+            s = "\x1b[0m" + ("\x1b[1m" if bold else "") + INK % 37 + INK % 40
         for c in scr[40 * y:40 * y + 40]:
             inv, c = c & 0x80, c & 0x7f
             if c < 32:
@@ -170,7 +190,10 @@ def render(scr, color):
                     fg = c
                 elif 16 <= c < 24:
                     bg = c & 7
-                ch, a = " ", a + " "
+                ch, a = "  " if wide else " ", a + " "
+            elif wide:
+                ch = wide_ch(c)
+                a += chr(c)
             else:
                 ch = {0x60: "\u00a9", 126: "\u2592", 127: "\u2588"}.get(c, chr(c))
                 a += chr(c)
@@ -321,31 +344,51 @@ def tap_info(b):
 
 
 def main():
-    opts = [a for a in sys.argv[1:] if a in ("--live", "--live-fast")]
-    args = [a for a in sys.argv[1:] if a not in opts]
-    live, fast = bool(opts), "--live-fast" in opts
-    if not args:
-        die("usage: ./oric [--live|--live-fast] PROG [compiler args] | FILE.tap")
+    flags = ("--live", "--live-fast", "-b", "--basic")
+    opts, args, romf, av = [], [], None, sys.argv[1:]
+    while av:                                   # --rom FILE, --rom=FILE
+        a = av.pop(0)
+        if a == "--rom" and av:
+            romf = os.path.abspath(av.pop(0))
+        elif a.startswith("--rom="):
+            romf = os.path.abspath(a[6:])
+        elif a in flags:
+            opts.append(a)
+        else:
+            args.append(a)
+    live, fast = bool(opts) or romf is not None, "--live-fast" in opts
+    if romf and not os.path.exists(romf):
+        die("no ROM %s" % romf)
+    if not args and not live:
+        die("usage: ./oric [--live|--live-fast] PROG [compiler args] | FILE.tap\n"
+            "       ./oric -b|--basic|--rom FILE.rom   (BASIC / a ROM, live)")
     sys.argv[1:] = args
     # a .tap: as it is (its path from here, before the chdir)
     tapf = None
-    if args[0].endswith(".tap") and os.path.exists(args[0]):
+    if args and args[0].endswith(".tap") and os.path.exists(args[0]):
         tapf = os.path.abspath(args[0])
     os.chdir(here)
-    name = sys.argv[1]
+    name = sys.argv[1] if args else ""
     if tapf:
         name = tapf[:-4]
     elif re.match(r"^[^/]+\.[^./]+$", os.path.basename(name)):
         name = name.rsplit(".", 1)[0]
     extra = " ".join(sys.argv[2:])
     emu = first(os.environ.get("PHOSPHORIC"), up + "/Phosphoric/oric1-emu")
-    rom = first(os.environ.get("ORIC_ROM"),
+    rom = first(romf, os.environ.get("ORIC_ROM"),
                 up + "/Phosphoric/roms/basic11b.rom",
                 up + "/osdk/osdk/main/Osdk/_final_/Roms/basic11b.rom")
     if not emu:
         die("no Phosphoric (../Phosphoric/oric1-emu, or set PHOSPHORIC)")
     if not rom:
         die("no BASIC 1.1 ROM (set ORIC_ROM)")
+
+    # no program: just the ROM, live (logs: ROM.oric.log)
+    if not args:
+        name = os.path.splitext(os.path.basename(rom))[0]
+        limit = int(os.environ.get("ORIC_CYCLES", 100000000))
+        return run_tap(name, None, b"", 0, 0, None, limit, emu, rom, live,
+                       fast)
 
     # the program, the host compiler, the lib: only what is stale
     if not tapf:
@@ -385,14 +428,22 @@ def run_tap(name, tapf, tap, ttype, start, exit_, limit, emu, rom, live, fast):
     # (and without an exit: to see the limit): pause, read the screen,
     # draw it, go on
     scr = name + ".oric.scr"
-    if live and sys.stdout.isatty() and sys.stdin.isatty():
+    # live on a terminal: stays after the exit (BASIC), no limit, Ctrl-]
+    stay = live and sys.stdout.isatty() and sys.stdin.isatty()
+    if stay:
         patch_phosphoric(emu)
-    cmd = [emu, "--control", "-n", "-f", "-m", "atmos", "-r", rom,
-           "-t", tapf, "-c", str(limit * 2)]
+    cmd = [emu, "--control", "-n", "-m", "atmos", "-r", rom]
+    if tapf:
+        cmd += ["-f", "-t", tapf]
+    if not stay:
+        cmd += ["-c", str(limit * 2)]
     if live and not fast:
         cmd.append("--realtime")
     print("$ %s > %s.oric.log" % (" ".join(cmd), name), file=sys.stderr)
     color = sys.stdout.isatty()
+    cols = os.get_terminal_size().columns if color else 0
+    wide = color and cols >= 82 and os.environ.get("ORIC_WIDE") != "0"
+    bold = color and os.environ.get("ORIC_BOLD") != "0"
     log = open(name + ".oric.log", "w")
     e = Emu(cmd, log)
     while not (e.event() or "EVT stopped").startswith("EVT stopped"):
@@ -413,6 +464,7 @@ def run_tap(name, tapf, tap, ttype, start, exit_, limit, emu, rom, live, fast):
         e.cmd("break %04X" % exit_)
     e.cmd("continue")
     cyc, done, frame, t0, why = [], 0, 0, time.time(), ""
+    at_exit = None                              # stay: its screen at the exit
     poll = 0.1 if live else 0.5
     # not live, stdin not a terminal: what it gives, typed once the program
     # runs, as it comes (printf 'hi\x1b' | ./oric test-getchar; /dev/null:
@@ -452,13 +504,16 @@ def run_tap(name, tapf, tap, ttype, start, exit_, limit, emu, rom, live, fast):
                     frame += 1
                     now = int(evt(l, "cycles"))
                     if live:
-                        draw(render(screen(), color)[0] if color else [""],
+                        draw(render(screen(), color, wide, bold)[0] if color else [""],
                              "%s: %s %s cycles, %.1f s" % (
                                  os.path.basename(name),
-                                 "running" if cyc else "booting",
-                                 "{:,}".format(now - (cyc[0] if cyc else 0)),
-                                 time.time() - t0))
-                    if now >= limit:            # (stopped: the screen is there)
+                                 "in BASIC, exited after" if done else
+                                 "running" if cyc or not tapf else "booting",
+                                 "{:,}".format((cyc[-1] if done else now) -
+                                               (cyc[0] if cyc else 0)),
+                                 time.time() - t0) +
+                             (" (Ctrl-] quits)" if stay else ""))
+                    if now >= limit and not stay:   # (stopped: the screen is there)
                         why = "the limit, %s cycles" % "{:,}".format(limit)
                         break
                     if feed is not None and cyc:   # it runs: the input
@@ -501,11 +556,13 @@ def run_tap(name, tapf, tap, ttype, start, exit_, limit, emu, rom, live, fast):
             if l is None or l.startswith("EVT halt"):
                 why = why or "the emulator stopped (%s)" % evt(l, "reason")
                 break
-            if evt(l, "reason") == "break":
+            if evt(l, "reason") == "break" and not done:
                 cyc.append(int(evt(l, "cycles")))
                 if exit_ and evt(l, "pc") == "%04X" % exit_:
                     done = 1
-                    break
+                    if not stay:
+                        break
+                    at_exit = screen()          # rts: on in BASIC
             e.cmd("continue")
     except KeyboardInterrupt:                   # stop it where it is
         why = "Ctrl-C"
@@ -515,7 +572,9 @@ def run_tap(name, tapf, tap, ttype, start, exit_, limit, emu, rom, live, fast):
         if tin is not None:
             termios.tcsetattr(tin, termios.TCSANOW, told)
     raw = screen() if e.p.poll() is None else b""
-    rows, plain = render(raw, color)
+    if at_exit is not None:                     # the program's, not BASIC's
+        raw = at_exit
+    rows, plain = render(raw, color, wide, bold)
     try:
         e.send("quit")
         e.p.wait(5)
@@ -530,14 +589,14 @@ def run_tap(name, tapf, tap, ttype, start, exit_, limit, emu, rom, live, fast):
     lines = [r.rstrip() for r in plain]
     while lines and not lines[-1].strip():
         lines.pop()
-    print("+" + "-" * 40 + "+")
+    print("+" + "-" * (80 if wide else 40) + "+")
     for r in rows[:len(lines)]:
         print("|%s|" % r)
-    print("+" + "-" * 40 + "+")
+    print("+" + "-" * (80 if wide else 40) + "+")
     done = done and len(cyc) >= 2
 
     if not exit_:                               # not ours: no exit, no .out
-        print("= %s: stopped by %s" % (os.path.basename(tapf), why))
+        print("= %s: stopped by %s" % (os.path.basename(tapf or name), why))
         return 0
     if not done and why in ("Ctrl-]", "Ctrl-C") or why.startswith("waiting"):
         print("= %s: stopped by %s" % (os.path.basename(name), why))

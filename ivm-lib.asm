@@ -63,6 +63,7 @@
 .export _ivmlib_zplo
 .export _ivmlib_load, _ivmlib_seg, _ivmlib_dst, _ivmlib_run
 .export _ivmlib_cut0, _ivmlib_cut1, _ivmlib_cut2, _ivmlib_cut3, _ivmlib_cut4
+.export _ivmlib_cut6
 .export _ivmlib_bssp, _ivmlib_bssr
 
 .export _opmul, _opdiv, _opmod, _opputnum
@@ -374,8 +375,34 @@ _opprintstr:
         jmp     (ptr1)
 
 ;;; ---------------------------------------------------------------------------
+;;; P: print 0-terminated string at AX, AX kept (retax: putnum's too)
+;;; 34 B; ~40 c + ~24 c per char + opputchar
+
+_opputs:
+        sta     tmp3
+        stx     tmp4
+        sta     ptr1
+        stx     ptr1+1
+        ora     ptr1+1
+        beq     retax                   ;; NULL
+@l:     ldy     #0
+        lda     (ptr1),y
+        beq     retax
+        jsr     _opputchar
+        inc     ptr1
+        bne     @l
+        inc     ptr1+1
+        bne     @l                      ;; (wrapped past $FFFF: done)
+retax:  lda     tmp3                    ;; AX as on entry
+        ldx     tmp4
+        rts
+
+;;; ---- cut 2: ... no number printing ----
+_ivmlib_cut2:
+
+;;; ---------------------------------------------------------------------------
 ;;; .: print AX unsigned decimal, AX kept
-;;; 53 B; 0-9: 425 c, 42: 815 c, 1234: 1631 c, 65535: 2063 c; + opputchar
+;;; 48 B; 0-9: 425 c, 42: 815 c, 1234: 1631 c, 65535: 2063 c; + opputchar
 
 _opputnum:
         sta     tmp3                    ;; AX kept for the return
@@ -404,34 +431,10 @@ _opputnum:
         beq     retax
         jsr     _opputchar
         bne     @out                    ;; A kept: a digit, never 0
-retax:  lda     tmp3                    ;; AX as on entry
-        ldx     tmp4
-        rts
-
-;;; ---------------------------------------------------------------------------
-;;; P: print 0-terminated string at AX, AX kept
-;;; 31 B; ~40 c + ~24 c per char + opputchar
-
-_opputs:
-        sta     tmp3
-        stx     tmp4
-        sta     ptr1
-        stx     ptr1+1
-        ora     ptr1+1
-        beq     retax                   ;; NULL
-@l:     ldy     #0
-        lda     (ptr1),y
-        beq     retax
-        jsr     _opputchar
-        inc     ptr1
-        bne     @l
-        inc     ptr1+1
-        bne     @l
-        beq     retax                   ;; wrapped past $FFFF
 
 
-;;; ---- cut 2: ... no mul/div/mod ----
-_ivmlib_cut2:
+;;; ---- cut 3: ... no mul/div/mod ----
+_ivmlib_cut3:
 ;;; ===========================================================================
 ;;; Arithmetic: JT = first (ACC), AX = second, AX = result (unsigned 16 bit)
 ;;; ===========================================================================
@@ -515,8 +518,8 @@ _opdiv:
 
 
 
-;;; ---- cut 3: ... no malloc/free ----
-_ivmlib_cut3:
+;;; ---- cut 4: ... no malloc/free ----
+_ivmlib_cut4:
 
 ;;; ===========================================================================
 ;;; Heap: bump allocator, zeroed (calloc), even sizes. free is a no-op.
@@ -589,12 +592,12 @@ _ivmlib_heapend: .word 0                ;; first byte after heap
 
 
 
-;;; ---- cut 4: ... no getchar (the image's end then: _ivmlib_end) ----
-_ivmlib_cut4:
+;;; ---- cut 5: ... no getchar (the image's end then: _ivmlib_end) ----
+_ivmlib_cut5:
 
 ;;; ===========================================================================
 ;;; getchar: the last tier (an image with it ends at _ivmlib_end). Uses
-;;; pvio / pcbuf (cut 2: below, so in such an image)
+;;; pvio / pcbuf (cut 1: below, so in such an image)
 ;;; ===========================================================================
 
 ;;; SIM 22 B, ATMOS 17 B
@@ -623,8 +626,8 @@ _opgetchar:
         rts
 .endif
 
-;;; ---- cut 5: ... no string / memory routines (else: _ivmlib_end) ----
-_ivmlib_cut5:
+;;; ---- cut 6: ... no string / memory routines (else: _ivmlib_end) ----
+_ivmlib_cut6:
 
 ;;; ===========================================================================
 ;;; Strings and memory (ivm.c: V $ x y..

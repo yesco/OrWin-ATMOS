@@ -334,7 +334,7 @@ static word ivm_lib(uchar *m, uchar id, word a0, word a1, word a2) {
   // the lib is in tiers: an -o image ends at the cut after the last
   // routine its code calls (jit_lib_more)
   extern uchar ivmlib_cut0[], ivmlib_cut1[], ivmlib_cut2[], ivmlib_cut3[],
-    ivmlib_cut4[], ivmlib_cut5[];
+    ivmlib_cut4[], ivmlib_cut5[], ivmlib_cut6[];
   // patched operands (startup), vars (heap)
   extern word  ivmlib_dst;
   extern uchar ivmlib_bssp, ivmlib_bssr;   // bss: pages, rest
@@ -1976,11 +1976,11 @@ static word    jit_heapend;             // the heap's end (the bss below it)
 // the cut after lib address top (the highest routine called)
 static uchar *jit_cut(word top) {
   static uchar *const cut[] = { ivmlib_cut0, ivmlib_cut1, ivmlib_cut2,
-    ivmlib_cut3, ivmlib_cut4, ivmlib_cut5, ivmlib_end };
+    ivmlib_cut3, ivmlib_cut4, ivmlib_cut5, ivmlib_cut6, ivmlib_end };
   uchar k;
 
   if (top < jit_libfloor) top = jit_libfloor;
-  for (k = 0; k < 6 && top >= (word)(unsigned)cut[k]; k++) ;
+  for (k = 0; k < 7 && top >= (word)(unsigned)cut[k]; k++) ;
   return cut[k];
 }
 
