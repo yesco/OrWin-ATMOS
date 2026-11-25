@@ -934,6 +934,96 @@ static void gen_squeeze(void) {
   free(gen_tgt);
 }
 
+// ---------------------------------------------------------------------------
+// FIXIPC: ivm-fixed.asm keeps the low byte of ipc in Y and only re-bases
+// (ipc += Y, Y = 0) on: taken jumps landing at Y >= 128, calls, returns,
+// strings (" #), and DEL. Ops themselves don't check, so a straight run
+// of code must not carry Y past 255: a DEL every FIX_RUN bytes.
+//
+//   a run starts at Y <= 127 (a taken jump) or Y = 0 (re-based); its
+//   bytes are read at Y <= 127 + FIX_RUN - 1, the DEL after it too, and
+//   the dispatch's iny on it must not wrap (<= 255): FIX_RUN <= 127
+//
+// The other VMs: DEL is a NOP. Jumps land on the op, not on its DEL (n
+// needs its t / u, a loop's B would run the DEL every round).
+#define FIX_RUN 124
+
+static word fix_ins[MAX_BIN_LEN / FIX_RUN + 2];
+static word fix_n;
+
+// x moved by the DELs inserted before or at x
+static word fix_map(word x) {
+  word j;
+
+  for (j = 0; j < fix_n && fix_ins[j] <= x; j++)
+    ;
+  return (word)(x + j);
+}
+
+static void gen_fixipc(void) {
+  word pc, n, c, k, t, nt, nr, np, rel, r;
+  uchar *a, i, op;
+
+  // where: before the op that would make the run too long
+  fix_n = 0;
+  for (pc = c = 0; pc < (word)bin_ptr; pc += n) {
+    a = bin + pc;
+    op = *a;
+    n = ivm_oplen(a);
+    if (!n) n = 1;
+    k = (op == '"' || op == '#') ? 1 : n;   // re-base on their 1st byte
+    if (c + k > FIX_RUN) {
+      fix_ins[fix_n++] = pc;
+      c = 0;
+    }
+    c += k;
+    if (op == '"' || op == '#' || op >= 0xc0 || op == OP_DEL) c = 1;
+  }
+  if (!fix_n) return;
+  if (bin_ptr + fix_n > MAX_BIN_LEN)
+    IVM_GEN_FAIL("bytecode buffer overflow (FIXIPC)");
+
+  // jumps: the rel spans the inserted DELs too
+  for (pc = 0; pc < (word)bin_ptr; pc += n) {
+    a = bin + pc;
+    n = ivm_oplen(a);
+    if (!n) n = 1;
+    t = ivm_jump(a, pc);
+    if (t == 0xffff) continue;
+
+    nt = fix_map(t);
+    np = fix_map(pc);
+    if ((uchar)(*a - OP_ZJP) < 64) {
+      rel = (word)(nt - np - 1);
+      if (rel > 63) IVM_GEN_FAIL("zjp too long (FIXIPC)");
+      *a = (uchar)(OP_ZJP + rel);
+      continue;
+    }
+    i = ivm_opinfo(*a);
+    k = OPI_NARGS(i);
+    nr = (word)(np + k + 1);              // after the rel byte
+    rel = (word)((i & OPI_BACK) ? nr - nt : nt - nr);
+    if (rel > 255) IVM_GEN_FAIL("jump too long (FIXIPC)");
+    a[k] = (uchar)rel;
+  }
+
+  for (k = 0; k < nvector; k++)
+    vectors[k] = fix_map(vectors[k]);
+  main_offset = fix_map(main_offset);
+
+  // spread: from the end, a DEL before each fix_ins[] op
+  r = (word)(bin_ptr + fix_n);
+  k = fix_n;
+  for (pc = (word)bin_ptr; pc-- > 0; ) {
+    bin[--r] = bin[pc];
+    if (k && fix_ins[k - 1] == pc) {
+      bin[--r] = OP_DEL;
+      k--;
+    }
+  }
+  bin_ptr += fix_n;
+}
+
 // ---- value numbering while generating (parse.c \t) ------------------------
 //
 // When the grammar puts ACC into a new temp ("S \t"), the code since ACC
@@ -1400,6 +1490,10 @@ uchar *build_blob(int *out_len) {
       gen_squeeze();
     }
   }
+
+  // DEL every FIX_RUN bytes: ivm-fixed.asm re-bases ipc there (after the
+  // squeeze, it would remove them)
+  gen_fixipc();
 
   // Entry for _start trampoline (call entry_vec then q):
   // 1) main_vec set — normal C "main"

@@ -1836,6 +1836,7 @@ op_n_compute:
 
 ;;; NOP - SPACE
 op_sp:
+op_del:                 ;; DEL: NOP (ivm-fixed.asm: FIXIPC)
 	jmp     xnext
 
 
@@ -2125,8 +2126,6 @@ op_x:                                   ;; (not done: ALTCODE=1 only)
 op_y:
 .endif
 op_z:
-
-op_del:
 
 ;;; ` vv: &x. Here mem[] is two byte planes (slice_lo, slice_hi: the fast
 ;;; way, but a slot has no word address): a runtime error, stops
