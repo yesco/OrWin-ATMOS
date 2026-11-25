@@ -458,20 +458,17 @@ op_bang:
 ;;; ( aa ii   ACC = base[index]  (word elements, index *= 2)
 op_idxl:
         lda     (_ivm_ipc),y        ; aa
-        sta     swpb                ; base slot
+        sta     swpb
         iny
+        sty     savey               ; Y at ii; pnext skips it
         lda     (_ivm_ipc),y        ; ii
         tax
-        iny
-        sty     savey
-        ; scaled = mem[ii] * 2
         lda     MEM_LO_BASE,x
         asl
         sta     tmp_lo
         lda     MEM_HI_BASE,x
         rol
         sta     tmp_hi
-        ; ptr = mem[aa] + scaled
         ldx     swpb
         clc
         lda     MEM_LO_BASE,x
@@ -480,7 +477,6 @@ op_idxl:
         lda     MEM_HI_BASE,x
         adc     tmp_hi
         sta     tmp_hi
-        ; load word
         ldy     #0
         lda     (tmp_lo),y
         sta     _ivm_acc
@@ -494,10 +490,9 @@ op_idxs:
         lda     (_ivm_ipc),y
         sta     swpb
         iny
+        sty     savey
         lda     (_ivm_ipc),y
         tax
-        iny
-        sty     savey
         lda     MEM_LO_BASE,x
         asl
         sta     tmp_lo
@@ -525,16 +520,13 @@ op_bidxl:
         lda     (_ivm_ipc),y        ; aa
         sta     swpb
         iny
+        sty     savey
         lda     (_ivm_ipc),y        ; ii
         tax
-        iny
-        sty     savey
-        ; idx = mem[ii]
         lda     MEM_LO_BASE,x
         sta     tmp_lo
         lda     MEM_HI_BASE,x
         sta     tmp_hi
-        ; ptr = mem[aa] + idx
         ldx     swpb
         clc
         lda     MEM_LO_BASE,x
@@ -555,10 +547,9 @@ op_bidxs:
         lda     (_ivm_ipc),y
         sta     swpb
         iny
+        sty     savey
         lda     (_ivm_ipc),y
         tax
-        iny
-        sty     savey
         lda     MEM_LO_BASE,x
         sta     tmp_lo
         lda     MEM_HI_BASE,x
@@ -758,9 +749,8 @@ op_E:                           ; putchar(ACC)
         jmp     ynext
 
 op_O:                           ; inline putchar
-        lda     (_ivm_ipc),y
-        iny
         sty     savey
+        lda     (_ivm_ipc),y
         jsr     _putchar
         jmp     pnext
 
