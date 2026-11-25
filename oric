@@ -11,6 +11,9 @@
 #   ./oric --rom my.rom         your own 16K ROM instead, live (with a
 #                               program too: it runs on that ROM)
 #   ./oric game.tap             any .tap as it is: no build, just run it
+#   ./oric game.dsk             a disk: in drive A with a Microdisc (its
+#                               ROM: ORIC_DISKROM or microdis.rom), it
+#                               boots it, live (as oricutron does)
 #
 # --live on a terminal: what you type goes to the Oric (keys, Return,
 # Esc, Del/Backspace, arrows; Ctrl-x: CTRL-x and Alt-x: FUNCT-x if the
@@ -39,6 +42,8 @@
 #   PHOSPHORIC   the emulator (default ../Phosphoric/oric1-emu)
 #   ORIC_ROM     the BASIC 1.1 ROM (default: Phosphoric's or the OSDK's;
 #                --rom FILE wins)
+#   ORIC_DISKROM the Microdisc ROM for a .dsk (default: microdis.rom here,
+#                in Phosphoric's / oricutron's roms/, ~/ORIC, by the .dsk)
 #   ORIC_CYCLES  give up after (default 2000000000; other .tap: 100000000)
 #   ORIC_WIDE=0  on a terminal of 80+ columns each Oric char is drawn
 #                2 wide (fullwidth forms): 0 = 40 columns as is
@@ -356,7 +361,13 @@ def main():
             opts.append(a)
         else:
             args.append(a)
-    live, fast = bool(opts) or romf is not None, "--live-fast" in opts
+    dskf = None
+    if args and args[0].lower().endswith(".dsk"):
+        if not os.path.exists(args[0]):
+            die("no %s" % args[0])
+        dskf = os.path.abspath(args.pop(0))
+    live = bool(opts) or romf is not None or dskf is not None
+    fast = "--live-fast" in opts
     if romf and not os.path.exists(romf):
         die("no ROM %s" % romf)
     if not args and not live:
@@ -383,12 +394,26 @@ def main():
     if not rom:
         die("no BASIC 1.1 ROM (set ORIC_ROM)")
 
-    # no program: just the ROM, live (logs: ROM.oric.log)
+    # a disk: Microdisc + drive A, it boots (logs: by the .dsk)
+    media = []
+    if dskf:
+        drom = first(os.environ.get("ORIC_DISKROM"),
+                     os.path.join(here, "microdis.rom"),
+                     up + "/Phosphoric/roms/microdis.rom",
+                     up + "/oricutron/roms/microdis.rom",
+                     os.path.expanduser("~/ORIC/microdis.rom"),
+                     os.path.join(os.path.dirname(dskf), "microdis.rom"))
+        if not drom:
+            die("no Microdisc ROM for %s (microdis.rom: set ORIC_DISKROM)"
+                % os.path.basename(dskf))
+        media = ["--disk-rom", drom, "-d", dskf]
+
+    # no program: just the ROM (and the disk), live (logs: ROM.oric.log)
     if not args:
-        name = os.path.splitext(os.path.basename(rom))[0]
+        name = dskf[:-4] if dskf else os.path.splitext(os.path.basename(rom))[0]
         limit = int(os.environ.get("ORIC_CYCLES", 100000000))
         return run_tap(name, None, b"", 0, 0, None, limit, emu, rom, live,
-                       fast)
+                       fast, media)
 
     # the program, the host compiler, the lib: only what is stale
     if not tapf:
@@ -422,7 +447,8 @@ def build_tap(name, extra):
         die("no %s.tap (see %s.oric-build.log)" % (name, name))
 
 
-def run_tap(name, tapf, tap, ttype, start, exit_, limit, emu, rom, live, fast):
+def run_tap(name, tapf, tap, ttype, start, exit_, limit, emu, rom, live, fast,
+            media=()):
     """run it; ours (exit_): its cycles, its output vs the .out"""
     # break at the start (machine code) and the exit (ours), go; --live
     # (and without an exit: to see the limit): pause, read the screen,
@@ -432,7 +458,7 @@ def run_tap(name, tapf, tap, ttype, start, exit_, limit, emu, rom, live, fast):
     stay = live and sys.stdout.isatty() and sys.stdin.isatty()
     if stay:
         patch_phosphoric(emu)
-    cmd = [emu, "--control", "-n", "-m", "atmos", "-r", rom]
+    cmd = [emu, "--control", "-n", "-m", "atmos", "-r", rom] + list(media)
     if tapf:
         cmd += ["-f", "-t", tapf]
     if not stay:
