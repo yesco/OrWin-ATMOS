@@ -16,9 +16,10 @@
 #   ivm    ./ivm       cc65 C VM            size: .ivm
 #   asm    ./ivm-asm   asm VM               size: .ivm
 #   fix    ./ivm-fix   asm VM, fixed mem[]  size: .ivm
-#   jit    the host compiler's image (ivm-jit.x -z -o .jit.sim), sim65
-#                                           size: .jit.sim
-#   hjit   ivm-jit.x   JIT on host cpu sim  size: emitted code
+#   zpjit  the host compiler's image (ivm-jit.x -z -o .jit.sim), sim65:
+#          mem[] in zero page               size: .jit.sim
+#   hjit   ivm-jit.x   the same JIT on the host cpu sim (cpu6502.c):
+#          mem[] at $0300, not zp; lib calls 0 cycles  size: emitted code
 #   cc65   cl65 -Cl -Os                     size: .sim
 #   oscar  oscar64 -Os -ep                  size: .prg
 
@@ -132,7 +133,7 @@ def repro(name, t):
         "ivm":   "./ivm {t}",
         "asm":   "./ivm-asm {t}",
         "fix":   "./ivm-fix {t}",
-        "jit":   "./ivm-jit.x -z -tsim6502 -o{t}.jit.sim {t}.ivm && sim65 -c {t}.jit.sim",
+        "zpjit": "./ivm-jit.x -z -tsim6502 -o{t}.jit.sim {t}.ivm && sim65 -c {t}.jit.sim",
         "hjit":  "./ivm-jit.x {t}.ivm",
         "cc65":  "cl65 -Dputz=printf -t sim6502 -Cl -Os -o {t}.sim {t}.c && sim65 -c {t}.sim",
         "oscar": "./oscar -Dputz=printf -Os -ep {t}.c",
@@ -174,7 +175,7 @@ def test(t):
         if os.path.exists(t + ".jit.sim"):
             s = run(["sim65", "-c", t + ".jit.sim"], t + ".jit.log")
             o = sim_out(s)
-        res.append(("jit", last_int(r"^(\d+) cycles$", s),
+        res.append(("zpjit", last_int(r"^(\d+) cycles$", s),
                     fsize(t + ".jit.sim"), t + ".jit.sim", o, t + ".jit.log"))
 
         # hjit: the same JIT run in cpu6502.c on the host
@@ -311,7 +312,7 @@ def main():
         say("=== ./ptest %s   (%d tests)" %
             (" ".join(shlex.quote(a) for a in specs), len(tests)))
         say("#" * 60)
-        names = ["ivm", "asm", "fix", "jit", "hjit", "cc65", "oscar"]
+        names = ["ivm", "asm", "fix", "zpjit", "hjit", "cc65", "oscar"]
         say("= %-28s" % "test" + "".join("%15s" % n for n in names))
         for t, (res, status) in allres:
             row = {r[0]: r for r in res}

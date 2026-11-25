@@ -27,7 +27,7 @@ INSTRUCTIONS: Keeps this section but keep updated for status
 | Calls (vector table)     | **Done** — JMP + word table at start, JSR abs |
 | Call frame               | **Done** — fixed addresses from frame_base, AX stored at fp+FR_ACC on entry |
 | Compares `<` `=` `>`     | **Done** — boolean in ACC, UNSIGNED (needs testing) |
-| Loops `t` / `n` / `B` | **Present** — unsigned. `t` closed by a `B` back to it (`while (v <= lim)`, i_exit_b): rotated too, the `B` has the test (loop_close), AX = v in the body and after. Stride loop (is_stride: body ends `U v s; B`): `U` leaves Y = lo, A = hi, the `B` tests those (`cmp/cpy`), body start has v in Y/A (lc_yas: `[` `]` index), `t` sets Y/A then JMPs to the test. Closed by `n`, rotated: `t` = JMP to the test in `n` (patched there, lc_loop[]), one compare per loop. If the body starts by reading the loop var, the test leaves it in AX and that load / `[` index is free; a `B` back to such a body start loads it first (lc_ksa[]) |
+| Loops `t` / `n` / `B` | **Present** — unsigned. `t` closed by a `B` back to it (`while (v <= lim)`, i_exit_b): rotated too, the `B` has the test (loop_close), AX = v in the body and after. Stride loop (is_stride: body ends `U v s; B`): `U` leaves Y = lo, A = hi, the `B` tests those (`cmp/cpy`), body start has v in Y/A (lc_yas: `[` `]` index), `t` sets Y/A then JMPs to the test. Closed by `n`, rotated: `t` = JMP to the test in `n` (patched there, lc_loop[]), one compare per loop. The test always leaves the loop var in AX (cheaper: high byte first), so the body's load of it / `[` index is free; a `B` back to the body start loads it first (lc_ksa[]) |
 | `G`                      | **Done** — keeps AX (CPX #$80 / TAY / CPX #0), as the contract says |
 | `U`                      | Present |
 | `+` `-` `&` `\|` `^`      | **Done** — const hi byte 0: `adc #n; bcc; inx` (`sbc`/`dex`, `and #n; ldx #0`, `ora`/`eor` lo only). Followed by `S d`: each byte straight into d, leaves Y = lo, A = hi (lc_yah): no TAY/TXA/TAX/TYA |
@@ -2611,9 +2611,6 @@ static word ivm_jit1(const uchar *code, word code_len,
     //   n:    INC slot; test: LDA/LDX slot; CPX/CMP lim; Bcc body
     //   exit:                   (falls out of the test: skip is not used)
     case 't': case 'u': {
-      // does the body start by reading the loop var? (a load of it, or
-      // '[' with it as index): then the test leaves it in AX
-      const uchar *b = p + 3;
       uchar slot = p[0], ax;
       if (!is_loop_head(bc_pc)) {
         // if (l < r) / (l <= r): to the body, else out. u: out if l >= r
@@ -2646,10 +2643,12 @@ static word ivm_jit1(const uchar *code, word code_len,
         loop_pad(bc_pc);
         break;
       }
-      // while (closed by 'B'): no increment, the test always loads it
-      ax = i_exit_b(bc_pc) != 0xffff ||
-           ((b < end) && (b[0] == slot || (b[0] == 'L' && b[1] == slot) ||
-                          (b[0] == '[' && b[2] == slot)));
+      // The test always leaves the loop var in AX.
+      // - the body may use it (also s = s + i: + is commutative)
+      // - it's cheaper anyway: the high byte first, mostly done there
+      //
+      // Before, only when the body started with it (test-loop-*.c).
+      ax = 1;
       if (ax) {                    // body start: AX = loop var (loop top)
         if (lc_nksa < MAX_LOOPS * 4) ksa_add((word)(bc_pc + 4), slot, 0);
       }

@@ -29,6 +29,10 @@ MY RULES (always)
     A file's own main() goes under #ifndef MAIN.
   - cc65 compiles all code it sees, used or not: anything not needed
     on the 6502 goes under an #ifdef (measure: cc65 -S + ca65 -l).
+  - Tables in .md files: aligned in the source too (columns padded,
+    numbers right aligned, | under |): readable in a terminal. A short
+    name first (the test), the numbers, the long text (the code) last.
+    ./mdtoc FILE.md aligns them (and the linked index of the headings).
   - No magic numbers: named constants.
   - Asm comments: whole line ;;;  inline ;;
   - cc65 C89: declarations before statements; no ?: in case labels
@@ -132,6 +136,62 @@ TESTS
   tested, why, the expected results; each case
      printf("name:\texpected\n\t\t");  then the actual values, printf("\n")
   gcc on the same file is the reference where possible.
+
+OPEN / NEXT: JIT loops (test-loop-*.c, ./ptest 'loop-*')
+  - The family: one loop form each, same work (10000 rounds). Cycles
+    per round = (cycles - test-empty's) / 10000. Table and findings:
+    MeteoriC-man.md "Loop forms, measured".
+  - Done (2026-11): the JIT's loop test always leaves the loop var in
+    AX (ivm-jit.c 't' 'u': ax = 1); x = x + y, x = y + x (int) are
+    U x y in c.bnf (-133 bytes on all the tests, asm loops -24%).
+  - JIT: U a b with ACC = mem[b] known (the loop var) could be
+    clc / adc a / sta a / txa / adc a+1 / sta a+1: 2 cycles.
+  - JIT: <= (t) costs the same as < (u). A limit in a slot costs 4
+    (a variable), 6 (N - 1: computed at run time; fold it?).
+  - ACC contract: t u n as SLOT (ACC = the loop var at the body), not
+    UNDEF. The VM does it already, the JIT now too. Then the
+    interpreters can drop a body's first <i> (test-loop-for-acc).
+  - Interpreters: for is the fastest form; down / postdec / while-expr
+    have no loop op (a down-counting op? ask first: op letters).
+
+OPEN / NEXT: JIT, keep values in ACC (easiest first)
+  ACC is the value, its place A/X or A/Y (Y lo, A hi). The JIT has
+  A/X (acc_at, acc_s) and A/Y only in stride loops (lc_yas).
+
+  1. U a b with ACC = mem[b] known (the loop var): use it, no load.
+  2. Compares that jump (u t as if, < = > before G / zjp) and whose 0/1
+     result nobody reads: branch on the flags (high byte first) and
+     keep ACC = the first value. if (a < 32) ... a: no reload on either
+     path (f(int a) today: sta, lda cmp lda sbc, then lda ldx again on
+     both paths). Pays most in small recursive functions.
+  3. Rotate zj ... J B loops (down counting): the test at the bottom,
+     J's dec flags as the test. test-loop-down 45 -> about 30 (oscar).
+  4. Delayed write (a "dirty" ACC, as in my lisp compiler): S s doesn't
+     store, ACC = mem[s] (in A/X or A/Y) marked dirty. The JIT has the delayed LOAD
+     already (ACC_PEND); this is the other half. Write it out before:
+     A/X gets a new value; anything reads mem[s] not via ACC; a call;
+     a pointer read/store (with lc_alias); labels and jumps (all paths
+     must agree). Wins: S s ... S s (first store gone), a value used
+     right after its store, and loops: carried over the back jump, a
+     loop's accumulator in a register till the exit (oscar's win: s in
+     Y/X, i in zp, 30 cycles a round against our 39).
+  5. ACC at joins (my lisp compiler): at a label, if every path into it
+     ends with the same ACC (the same var, the same place, dirty or
+     not), keep knowing it, else "don't know". Today acc_label() always
+     forgets (only a while head, lc_ksa, makes its back jump agree).
+     Forward jumps: their state is known when emitted. A loop head:
+     assume the entry's, make the back jump agree (a load / move before
+     it), as lc_ksa does.
+
+OPEN / NEXT: run constant code at compile time (host, ivm-opt)
+  - Track known slot values while generating (the peephole's kc / kv
+    for ACC, extended to slots): known after a constant store,
+    unknown after anything else.
+  - A loop with only known inputs that writes only slots (no calls,
+    I/O, pointer stores): run it in the compiler (parse.x has the VM,
+    -DRUN), a step limit. Replace it by constant stores of each slot
+    it wrote (the loop var too) and the last ACC.
+  - That's oscar's 0.5 cycles a round on test-loop-count.
 
 OPEN / NEXT: slot promotion (some day, an -O saving)
   - Give the 32 one byte load slots (0..31) to the vars that use L xx

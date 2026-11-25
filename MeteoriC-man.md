@@ -33,6 +33,7 @@
   - [Arrays, pointers, structs (reads; writes cost about the same)](#arrays-pointers-structs-reads-writes-cost-about-the-same)
   - [Branches](#branches)
   - [Loops](#loops)
+  - [Loop forms, measured (test-loop-*.c)](#loop-forms-measured-test-loop-c)
   - [memset loops](#memset-loops)
   - [Calls](#calls)
 - [Optimizations](#optimizations)
@@ -80,14 +81,14 @@ never active together share it), call vectors, and loop ops for the
 improving interpretation speed and minimizing code of/for common
 counting loops.
 
-| backend   | what                                | command                    |
-|-----------|-------------------------------------|----------------------------|
-| `ivm`     | the VM in C (cc65 build, sim65)     | `./ivm prog`               |
-| `ivm-asm` | the VM in 6502 assembler            | `./ivm-asm prog`           |
-| `ivm-jit` | a 6502 JIT: bytecode to native code | `./ivm-jit prog [-z]`      |
-| `jit`     | gen native code and run on a 6502   | `./jit prog ...            |
-|`ivm-count`| virtual machine with "profiling"    | `./ivm-count prog ...      |
-|`ivm-trace`| virtual machine with tracing of ops | `./ivm-trace prog ...      |
+| backend     | what                                | command               |
+| ----------- | ----------------------------------- | --------------------- |
+| `ivm`       | the VM in C (cc65 build, sim65)     | `./ivm prog`          |
+| `ivm-asm`   | the VM in 6502 assembler            | `./ivm-asm prog`      |
+| `ivm-jit`   | a 6502 JIT: bytecode to native code | `./ivm-jit prog [-z]` |
+| `jit`       | gen native code and run on a 6502   | `./jit prog ...       |
+| `ivm-count` | virtual machine with "profiling"    | `./ivm-count prog ... |
+| `ivm-trace` | virtual machine with tracing of ops | `./ivm-trace prog ... |
 
 The same `.ivm` file runs on all of them. The JIT variants generate
 actual binary 6502 machine code that is executed directly, or can be
@@ -149,20 +150,20 @@ gives what gcc gives, what does not is a reported error.
 
 ## What MeteoriC-65 supports
 
-| area | |
-|------|---|
+| area         |                                                                                                                                                                  |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | types        | `word` `unsigned int` (16 bit), `char` `unsigned char` (8 bit), `void`, pointers, `struct`, for convenience `int` but comparisions may not agree, TODO: warnings |
-| declarations | globals, locals, several per line, initializers, `const`, `static`, `register` |
-| expressions  | `+ - * / % & ^ \|` `<< >>`, compares (as values too), `!`, casts, calls anywhere, `sizeof` |
-| assignment   | `=` `+=` `-=` `++` `--` |
-| statements   | `if` / `else`, `while`, counting `for` loops (up, down, `<` `<=`, a variable limit or step), blocks, `return` |
-| functions    | parameters, `int` / `char` / pointer results, calls in expressions and as arguments |
-| arrays       | `char` and `int` arrays, initializers (`{...}`, `"..."`, size from the initializer), `sizeof`, any index expression |
-| pointers     | `char*` `word*` `struct *` `int*` `*p` `*p++` `p[i]` `p++` `p += n`, strings, `malloc` / `free` / `memset` |
-| structs      | fields `s.f` `p->f`, initializers, pointers, chains (`a.next->v`, `ps[i]->x`, `mk()->x`), arrays of pointers, arrays of structs (SoA, `__striped`) |
-| output       | `printf` (text, one number, a string), `putchar` `puts` `fputs` `getchar` `putz` `putn` |
-| preprocessor | `#define` (numbers, strings), simple: `#ifdef` `#ifndef` `#if` `#else` `#endif`, `__MC65__` |
-| tools        | error recovery, `-O` (packing, peephole), `-S` (striping), `-v` (bytecode per statement) |
+| declarations | globals, locals, several per line, initializers, `const`, `static`, `register`                                                                                   |
+| expressions  | `+ - * / % & ^ \|` `<< >>`, compares (as values too), `!`, casts, calls anywhere, `sizeof`                                                                       |
+| assignment   | `=` `+=` `-=` `++` `--`                                                                                                                                          |
+| statements   | `if` / `else`, `while`, counting `for` loops (up, down, `<` `<=`, a variable limit or step), blocks, `return`                                                    |
+| functions    | parameters, `int` / `char` / pointer results, calls in expressions and as arguments                                                                              |
+| arrays       | `char` and `int` arrays, initializers (`{...}`, `"..."`, size from the initializer), `sizeof`, any index expression                                              |
+| pointers     | `char*` `word*` `struct *` `int*` `*p` `*p++` `p[i]` `p++` `p += n`, strings, `malloc` / `free` / `memset`                                                       |
+| structs      | fields `s.f` `p->f`, initializers, pointers, chains (`a.next->v`, `ps[i]->x`, `mk()->x`), arrays of pointers, arrays of structs (SoA, `__striped`)               |
+| output       | `printf` (text, one number, a string), `putchar` `puts` `fputs` `getchar` `putz` `putn`                                                                          |
+| preprocessor | `#define` (numbers, strings), simple: `#ifdef` `#ifndef` `#if` `#else` `#endif`, `__MC65__`                                                                      |
+| tools        | error recovery, `-O` (packing, peephole), `-S` (striping), `-v` (bytecode per statement)                                                                         |
 
 ---
 
@@ -186,11 +187,11 @@ On simulated 6502:
 Both write `prog.ivm`; a `-DRUN` build also runs it (on the VM in C).
 
 
-| flag | effect |
-|------|--------|
-| `-O` | optimize: packs variables (registers 0..31, globals, frames by call graph), peephole |
+| flag | effect                                                                                                             |
+| ---- | ------------------------------------------------------------------------------------------------------------------ |
+| `-O` | optimize: packs variables (registers 0..31, globals, frames by call graph), peephole                               |
 | `-S` | stripe all arrays of structs (faster on the JIT, slower on the VMs: see [`__striped` and `-S`](#__striped-and--s)) |
-| `-v` | `-v -v` shows each statement's source and bytecode (`GEN:`), `-v -v -v` traces the rules |
+| `-v` | `-v -v` shows each statement's source and bytecode (`GEN:`), `-v -v -v` traces the rules                           |
 
 The compiler predefines `__MC65__` (the `.ivm` version) and
 `__TARGET_6502__` (1), so a file can be compiled with gcc too:
@@ -253,14 +254,14 @@ int main(void) {
 }
 ```
 
-| | |
-|---|---|
-| `#define NAME number` / `"string"`  | a constant (a `const`, no storage) |
-| `#ifdef` `#ifndef` `#else` `#endif` | nested ones too |
-| `#if 0` `#if 1`                     | a number |
-| `__MC65__` `__TARGET_6502__`        | predefined |
+|                                     |                                             |
+| ----------------------------------- | ------------------------------------------- |
+| `#define NAME number` / `"string"`  | a constant (a `const`, no storage)          |
+| `#ifdef` `#ifndef` `#else` `#endif` | nested ones too                             |
+| `#if 0` `#if 1`                     | a number                                    |
+| `__MC65__` `__TARGET_6502__`        | predefined                                  |
 | `#pragma timed "name"`              | cycle marks (the JIT on the host simulator) |
-| other `#` lines (`#include`)        | skipped |
+| other `#` lines (`#include`)        | skipped                                     |
 
 Examples: [`man-pp.c`](Tests/Compiler/man-pp.c).
 
@@ -276,13 +277,13 @@ evaluated): use `#ifdef`.  *TODO: evaluate a name.*
 
 ## Types
 
-| type | size | notes |
-|------|------|-------|
-| `word`, `unsigned int`, `int` | 16 bit | all arithmetic is **unsigned** 16 bit |
-| `char`, `unsigned char`       | 8 bit  | **unsigned**: 0..255, wraps |
-| `void`                        |        | function results / params |
-| `char *`, `int *` (any `T *`) | 16 bit |                           |
-| `struct NAME`, `struct NAME *`| slots  | see [Structs](#structs) |
+| type                           | size   | notes                                 |
+| ------------------------------ | ------ | ------------------------------------- |
+| `word`, `unsigned int`, `int`  | 16 bit | all arithmetic is **unsigned** 16 bit |
+| `char`, `unsigned char`        | 8 bit  | **unsigned**: 0..255, wraps           |
+| `void`                         |        | function results / params             |
+| `char *`, `int *` (any `T *`)  | 16 bit |                                       |
+| `struct NAME`, `struct NAME *` | slots  | see [Structs](#structs)               |
 
 `sizeof(char)` is 1, `sizeof(int)` and any pointer 2. `sizeof(struct
 pt)`, `sizeof(p)` of a struct variable and `sizeof(a)` of an array of
@@ -361,15 +362,15 @@ Examples: [`man-decl.c`](Tests/Compiler/man-decl.c), errors: [`man-decl-err.c`](
 
 ### Operators
 
-| works | |
-|-------|---|
-| `+ - * / % & ^ \|` `<< >>`         | binary |
-| `< <= > >= == !=`                  | give 0 / 1, also as values: `x = a < b;` |
-| `!x`                               | binds tight: `!a + 1` is `(!a) + 1` |
-| `(char)x` `(char *)p` `(int *)p`   | casts |
-| `f(a, b)`                          | calls, also in expressions and as arguments: `add(f(1), f(2))` |
-| `sizeof(T)` `sizeof(a)`            | see [Types](#types), [Arrays](#arrays) |
-| `0x1f` `0b101` `017` `0o17` `'a'` `'\n'` | literals (`017` and `0o17`: octal, as in C) |
+| works                                    |                                                                |
+| ---------------------------------------- | -------------------------------------------------------------- |
+| `+ - * / % & ^ \|` `<< >>`               | binary                                                         |
+| `< <= > >= == !=`                        | give 0 / 1, also as values: `x = a < b;`                       |
+| `!x`                                     | binds tight: `!a + 1` is `(!a) + 1`                            |
+| `(char)x` `(char *)p` `(int *)p`         | casts                                                          |
+| `f(a, b)`                                | calls, also in expressions and as arguments: `add(f(1), f(2))` |
+| `sizeof(T)` `sizeof(a)`                  | see [Types](#types), [Arrays](#arrays)                         |
+| `0x1f` `0b101` `017` `0o17` `'a'` `'\n'` | literals (`017` and `0o17`: octal, as in C)                    |
 
 **NOTE:** not supported in expressions: unary minus (`-x`, `-5`: write
 `0 - x`), `~x` (write `x ^ 0xffff`), `&&` `||` (nest the `if`s), `?:`,
@@ -391,32 +392,32 @@ variable (equivalant).
 
 The levels, tightest first:
 
-| level | operators |
-|-------|-----------|
-| 0 | the operands: `!x` `*p` `(char)x` `sizeof(T)` `f(a)` `a[i]` `p->f` `( ... )` |
-| 1 | `* / %` |
-| 2 | `+ -` |
-| 3 | `<< >>` |
-| 4 | `< <= > >=` |
-| 5 | `== !=` |
-| 6 | `&` |
-| 7 | `^` |
-| 8 | `\|` |
+| level | operators                                                                    |
+| ----- | ---------------------------------------------------------------------------- |
+| 0     | the operands: `!x` `*p` `(char)x` `sizeof(T)` `f(a)` `a[i]` `p->f` `( ... )` |
+| 1     | `* / %`                                                                      |
+| 2     | `+ -`                                                                        |
+| 3     | `<< >>`                                                                      |
+| 4     | `< <= > >=`                                                                  |
+| 5     | `== !=`                                                                      |
+| 6     | `&`                                                                          |
+| 7     | `^`                                                                          |
+| 8     | `\|`                                                                         |
 
 Level 0 always binds tightest: `!a + 1` is `(!a) + 1`, `*p * 2` is
 `(*p) * 2`. `++` and `--` are not operators here but statements ([Assignment forms](#assignment-forms)).
 
 So C's precedence holds wherever the expression parses:
 
-| expression | |
-|------------|---|
-| `a * b + c` | ok: `+` is looser than `*` |
-| `a - b - c` | ok: same level, left to right |
-| `a + 1 < b` | ok |
-| `(a & b) == c` | ok |
-| `a + b * c` | **error**: `*` after `+` |
-| `a < b + 1` | **error**: `+` after `<` |
-| `a & b == c` | **error** (in C this is `a & (b == c)`, rarely meant) |
+| expression     |                                                       |
+| -------------- | ----------------------------------------------------- |
+| `a * b + c`    | ok: `+` is looser than `*`                            |
+| `a - b - c`    | ok: same level, left to right                         |
+| `a + 1 < b`    | ok                                                    |
+| `(a & b) == c` | ok                                                    |
+| `a + b * c`    | **error**: `*` after `+`                              |
+| `a < b + 1`    | **error**: `+` after `<`                              |
+| `a & b == c`   | **error** (in C this is `a & (b == c)`, rarely meant) |
 
 Rewrite with parentheses, or reorder so the tighter part comes first:
 
@@ -436,22 +437,22 @@ to avoid using extra temps: `35 + (d * a)`, `(d * a) + 35` and `d * a
 
 ### Assignment forms
 
-| works | |
-|-------|---|
-| `x = E;` | |
-| `x++;` `x--;` `++x;` `--x;` | statements only |
-| `x += E;` `x -= E;` | |
-| `a[i] = E;` `p[i] = E;` `*p = E;` `s.f = E;` `p->f = E;` | |
+| works                                                    |                 |
+| -------------------------------------------------------- | --------------- |
+| `x = E;`                                                 |                 |
+| `x++;` `x--;` `++x;` `--x;`                              | statements only |
+| `x += E;` `x -= E;`                                      |                 |
+| `a[i] = E;` `p[i] = E;` `*p = E;` `s.f = E;` `p->f = E;` |                 |
 
 `x++` and `x--` are the cheapest: one op (`I x`, `J x`), 2 bytes. Use
 them rather than `x += 1`: half the cycles on every backend ([Increment, assign](#increment-assign)):
 
-| statement | bytecode | ivm | ivm-asm | JIT |
-|---|---:|---:|---:|---:|
-| `x++;` (also `x = x + 1;`) | 2 B | 325 | 80 | 10 |
-| `x += 1;` | 6 B | 536 | 196 | 21 |
-| `x += 2;` | 2 B | 255 | 83 | 15 |
-| `x += d;` | 3 B | 479 | 112 | 22 |
+| statement                  | bytecode | ivm | ivm-asm | JIT |
+| -------------------------- | -------: | --: | ------: | --: |
+| `x++;` (also `x = x + 1;`) |      2 B | 325 |      80 |  10 |
+| `x += 1;`                  |      6 B | 536 |     196 |  21 |
+| `x += 2;`                  |      2 B | 255 |      83 |  15 |
+| `x += d;`                  |      3 B | 479 |     112 |  22 |
 
 **NOTE:** no `*= /= %= &= |= ^= <<= >>=`: write `x = x * 2;`.
 **NOTE:** on array elements only `=`: `a[i]++` and `a[i] += 2` are
@@ -464,15 +465,15 @@ Examples: [`man-expr.c`](Tests/Compiler/man-expr.c), errors: [`man-expr-err.c`](
 
 ## Statements
 
-| works | |
-|-------|---|
-| `if (E) S` `if (E) S else S` `else if` | |
-| `while (E) S` | |
-| `for (i = A; i < B; i++) S` | also `<=`, a var or const limit |
-| `for (i = N; i; i--)` `for (i = N; i > 0; i--)` `for (i = N; i-- > 0; )` | counting down |
-| `for (i = A; i < B; i += d)` | step a variable |
-| `{ ... }` | blocks, nested |
-| `return E;` `return;` | |
+| works                                                                    |                                 |
+| ------------------------------------------------------------------------ | ------------------------------- |
+| `if (E) S` `if (E) S else S` `else if`                                   |                                 |
+| `while (E) S`                                                            |                                 |
+| `for (i = A; i < B; i++) S`                                              | also `<=`, a var or const limit |
+| `for (i = N; i; i--)` `for (i = N; i > 0; i--)` `for (i = N; i-- > 0; )` | counting down                   |
+| `for (i = A; i < B; i += d)`                                             | step a variable                 |
+| `{ ... }`                                                                | blocks, nested                  |
+| `return E;` `return;`                                                    |                                 |
 
 **NOTE:** not supported: `do ... while`, `break`, `continue`,
 `switch`, `goto` and labels, `for (;;)`, `for (int i = 0; ...)`, `for
@@ -691,12 +692,12 @@ It is not the default, because the interpreters get slower:
 
 [`test-bench-striped-struct.c`](test-bench-striped-struct.c) (32 particles, 200 rounds), sim65 cycles:
 
-| | plain | striped |
-|---|---|---|
-| JIT `-z` | 2.90 M | 1.43 M |
+|           | plain   | striped |
+| --------- | ------- | ------- |
+| JIT `-z`  | 2.90 M  | 1.43 M  |
 | `ivm-asm` | 12.78 M | 13.67 M |
-| `ivm` | 32.14 M | 42.39 M |
-| bytecode | 204 B | 214 B |
+| `ivm`     | 32.14 M | 42.39 M |
+| bytecode  | 204 B   | 214 B   |
 
 Use `-S` / `__striped` when the program runs on the JIT.
 
@@ -708,17 +709,17 @@ Examples: [`man-struct.c`](Tests/Compiler/man-struct.c), [`test-struct.c`](test-
 
 ## Input and output
 
-| works | |
-|-------|---|
-| `putchar(c)` `putchar('\n')` | |
-| `puts("text")` `puts(s)` | with a newline |
-| `fputs("text", stdout)` `fputs(s, stdout)` `fflush(stdout)` | |
-| `printf("text")` | any text, escapes, no `%` |
-| `printf("%d", E)` `printf("%u", E)` | also `"%d "` `"%d\n"` (the same for `%u`) |
-| `printf("%s", s)` | |
-| `printf("%u%u%u", a, b, c)` | three numbers |
-| `c = getchar();` | |
-| `putz(s)` `putn(E)` `putnl(E)` `nl()` | non C: a string, a number and a space, a number and a newline, a newline |
+| works                                                       |                                                                          |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `putchar(c)` `putchar('\n')`                                |                                                                          |
+| `puts("text")` `puts(s)`                                    | with a newline                                                           |
+| `fputs("text", stdout)` `fputs(s, stdout)` `fflush(stdout)` |                                                                          |
+| `printf("text")`                                            | any text, escapes, no `%`                                                |
+| `printf("%d", E)` `printf("%u", E)`                         | also `"%d "` `"%d\n"` (the same for `%u`)                                |
+| `printf("%s", s)`                                           |                                                                          |
+| `printf("%u%u%u", a, b, c)`                                 | three numbers                                                            |
+| `c = getchar();`                                            |                                                                          |
+| `putz(s)` `putn(E)` `putnl(E)` `nl()`                       | non C: a string, a number and a space, a number and a newline, a newline |
 
 `%d` and `%u` both print unsigned (3).
 
@@ -771,16 +772,16 @@ The loop itself: an empty `for (k = 0; k < 1000; k++)` costs 695 / 132 /
 
 ### Increment, assign
 
-| statement | BC | JIT | ivm | asm | jit |
-|---|---:|---:|---:|---:|---:|
-| `x++;` (= `x = x + 1;`) | 2 | 6 | 325 | 80 | 10 |
-| `x += 1;` | 6 | 14 | 536 | 196 | 21 |
-| `x += 2;` | 2 | 11 | 255 | 83 | 15 |
-| `x += d;` | 3 | 13 | 479 | 112 | 22 |
-| `x = x + d;` | 6 | 14 | 536 | 196 | 24 |
-| `c++;` (`unsigned char`) | 2 | 2 | 244 | 74 | 6 |
-| `x = 0;` | 2 | 6 | 163 | 57 | 8 |
-| `x = 5;` / `x = a;` | 5 / 3 | 8 | 464 | 95 | 10 / 12 |
+| statement                |    BC | JIT | ivm | asm |     jit |
+| ------------------------ | ----: | --: | --: | --: | ------: |
+| `x++;` (= `x = x + 1;`)  |     2 |   6 | 325 |  80 |      10 |
+| `x += 1;`                |     6 |  14 | 536 | 196 |      21 |
+| `x += 2;`                |     2 |  11 | 255 |  83 |      15 |
+| `x += d;`                |     3 |  13 | 479 | 112 |      22 |
+| `x = x + d;`             |     6 |  14 | 536 | 196 |      24 |
+| `c++;` (`unsigned char`) |     2 |   2 | 244 |  74 |       6 |
+| `x = 0;`                 |     2 |   6 | 163 |  57 |       8 |
+| `x = 5;` / `x = a;`      | 5 / 3 |   8 | 464 |  95 | 10 / 12 |
 
 - Write `x++`, not `x += 1` (half the cycles everywhere).
 - `x += d` beats `x = x + d`.
@@ -790,17 +791,17 @@ The loop itself: an empty `for (k = 0; k < 1000; k++)` costs 695 / 132 /
 
 ### Multiply, divide
 
-| statement | BC | JIT | ivm | asm | jit |
-|---|---:|---:|---:|---:|---:|
-| `x = a * 2;` | 5 | 13 | 713 | 471 | 23 |
-| `x = a << 1;` | 5 | 13 | 512 | 188 | 23 |
-| `x = a * 8;` | 7 | 21 | 713 | 472 | 40 |
-| `x = a << 3;` | 5 | 21 | 536 | 218 | 40 |
-| `x = a * 3;` | 5 | 19 | 717 | 475 | 156 |
-| `x = a / 4;` | 7 | 18 | 1068 | 771 | 33 |
-| `x = a >> 2;` | 5 | 18 | 521 | 202 | 33 |
-| `x = a % 8;` | 7 | 10 | 1054 | 764 | 13 |
-| `x = a & 7;` | 5 | 12 | 558 | 183 | 17 |
+| statement     |  BC | JIT |  ivm | asm | jit |
+| ------------- | --: | --: | ---: | --: | --: |
+| `x = a * 2;`  |   5 |  13 |  713 | 471 |  23 |
+| `x = a << 1;` |   5 |  13 |  512 | 188 |  23 |
+| `x = a * 8;`  |   7 |  21 |  713 | 472 |  40 |
+| `x = a << 3;` |   5 |  21 |  536 | 218 |  40 |
+| `x = a * 3;`  |   5 |  19 |  717 | 475 | 156 |
+| `x = a / 4;`  |   7 |  18 | 1068 | 771 |  33 |
+| `x = a >> 2;` |   5 |  18 |  521 | 202 |  33 |
+| `x = a % 8;`  |   7 |  10 | 1054 | 764 |  13 |
+| `x = a & 7;`  |   5 |  12 |  558 | 183 |  17 |
 
 - The JIT turns `*` `/` `%` by a power of 2 into shifts / ANDs itself; the
   VMs do not: write `<<` `>>` `&` and all backends are fast.
@@ -809,20 +810,20 @@ The loop itself: an empty `for (k = 0; k < 1000; k++)` costs 695 / 132 /
 
 ### Arrays, pointers, structs (reads; writes cost about the same)
 
-| statement | BC | JIT | ivm | asm | jit |
-|---|---:|---:|---:|---:|---:|
-| `n = b[i];` (char array) | 5 | 19 | 530 | 169 | 27 |
-| `n = w[i];` (int array) | 5 | 33 | 461 | 181 | 56 |
-| `n = w[3];` (const index) | 5 | 10 | 461 | 181 | 14 |
-| `n = p[i];` (int *) | 5 | 33 | 461 | 181 | 58 |
-| `n = p[3];` | 5 | 12 | 461 | 181 | 23 |
-| `n = *p;` | 4 | 12 | 369 | 142 | 23 |
-| `n = s.x;` (static struct) | 5 | 10 | 461 | 181 | 14 |
-| `n = q->x;` | 5 | 12 | 461 | 181 | 23 |
-| `n = sa[i].x;` (array of structs) | 5 | 33 | 461 | 181 | 56 |
-| `n = st[i].x;` (`__striped`) | 9 | 12 | 692 | 202 | 18 |
-| `sa[i].x += a;` | 8 | 48 | 745 | 313 | 91 |
-| `st[i].x += a;` (`__striped`) | 12 | 28 | 1087 | 351 | 50 |
+| statement                         |  BC | JIT |  ivm | asm | jit |
+| --------------------------------- | --: | --: | ---: | --: | --: |
+| `n = b[i];` (char array)          |   5 |  19 |  530 | 169 |  27 |
+| `n = w[i];` (int array)           |   5 |  33 |  461 | 181 |  56 |
+| `n = w[3];` (const index)         |   5 |  10 |  461 | 181 |  14 |
+| `n = p[i];` (int *)               |   5 |  33 |  461 | 181 |  58 |
+| `n = p[3];`                       |   5 |  12 |  461 | 181 |  23 |
+| `n = *p;`                         |   4 |  12 |  369 | 142 |  23 |
+| `n = s.x;` (static struct)        |   5 |  10 |  461 | 181 |  14 |
+| `n = q->x;`                       |   5 |  12 |  461 | 181 |  23 |
+| `n = sa[i].x;` (array of structs) |   5 |  33 |  461 | 181 |  56 |
+| `n = st[i].x;` (`__striped`)      |   9 |  12 |  692 | 202 |  18 |
+| `sa[i].x += a;`                   |   8 |  48 |  745 | 313 |  91 |
+| `st[i].x += a;` (`__striped`)     |  12 |  28 | 1087 | 351 |  50 |
 
 - On the JIT a `char` array with a variable index is twice as fast as an
   `int` array: use `char` where the values fit.
@@ -836,16 +837,16 @@ The loop itself: an empty `for (k = 0; k < 1000; k++)` costs 695 / 132 /
 
 ### Branches
 
-| statement | BC | JIT | ivm | asm | jit |
-|---|---:|---:|---:|---:|---:|
-| `if (a < d) x++;` | 6 | 16 | 400 | 144 | 16 |
-| `if (a > d) x++;` | 6 | 16 | 681 | 220 | 24 |
-| `if (0 < a) x++;` | 6 | 16 | 681 | 220 | 22 |
-| `if (a) x++;` | 6 | 24 | 692 | 212 | 35 |
-| `if (!a) x++;` | 7 | 32 | 543 | 226 | 37 |
-| `if (a == d) x++;` | 8 | 36 | 727 | 247 | 31 |
-| `if (a != 0) x++;` | 9 | 44 | 1151 | 318 | 49 |
-| `if (a & 1) x++;` | 8 | 28 | 979 | 281 | 39 |
+| statement          |  BC | JIT |  ivm | asm | jit |
+| ------------------ | --: | --: | ---: | --: | --: |
+| `if (a < d) x++;`  |   6 |  16 |  400 | 144 |  16 |
+| `if (a > d) x++;`  |   6 |  16 |  681 | 220 |  24 |
+| `if (0 < a) x++;`  |   6 |  16 |  681 | 220 |  22 |
+| `if (a) x++;`      |   6 |  24 |  692 | 212 |  35 |
+| `if (!a) x++;`     |   7 |  32 |  543 | 226 |  37 |
+| `if (a == d) x++;` |   8 |  36 |  727 | 247 |  31 |
+| `if (a != 0) x++;` |   9 |  44 | 1151 | 318 |  49 |
+| `if (a & 1) x++;`  |   8 |  28 |  979 | 281 |  39 |
 
 (the cycles include the `x++` when it runs: it does for `>`, `0 <`,
 `a`, `!=`, `& 1` here)
@@ -861,15 +862,15 @@ The loop itself: an empty `for (k = 0; k < 1000; k++)` costs 695 / 132 /
 
 ### Loops
 
-| loop (body `n++`) | BC | JIT | ivm | asm | jit |
-|---|---:|---:|---:|---:|---:|
-| `for (k = 0; k < 1000; k++)` | +0 | +0 | +0 | +0 | +0 |
-| `for (k = 0; k <= 999; k++)` | +0 | +0 | +0 | +0 | +0 |
-| `for (k = 0; k < lim; k++)` (var limit) | +3 | +0 | +1 | +0 | +2 |
-| `while (k < 1000) { ...; k++; }` | +2 | +4 | +139 | +127 | -1 |
-| `for (k = 1000; k; k--)` | +5 | +10 | +242 | +156 | +17 |
-| `for (k = 1000; k-- > 0; )` | +10 | +35 | +146 | +137 | +12 |
-| `while (k + 1 <= 1000) { ...; k++; }` (no loop op; body `s = s + k`) | +5 | +12 | +509 | +252 | +16 |
+| loop (body `n++`)                                                    |  BC | JIT |  ivm |  asm | jit |
+| -------------------------------------------------------------------- | --: | --: | ---: | ---: | --: |
+| `for (k = 0; k < 1000; k++)`                                         |  +0 |  +0 |   +0 |   +0 |  +0 |
+| `for (k = 0; k <= 999; k++)`                                         |  +0 |  +0 |   +0 |   +0 |  +0 |
+| `for (k = 0; k < lim; k++)` (var limit)                              |  +3 |  +0 |   +1 |   +0 |  +2 |
+| `while (k < 1000) { ...; k++; }`                                     |  +2 |  +4 | +139 | +127 |  -1 |
+| `for (k = 1000; k; k--)`                                             |  +5 | +10 | +242 | +156 | +17 |
+| `for (k = 1000; k-- > 0; )`                                          | +10 | +35 | +146 | +137 | +12 |
+| `while (k + 1 <= 1000) { ...; k++; }` (no loop op; body `s = s + k`) |  +5 | +12 | +509 | +252 | +16 |
 
 (per round, compared to the first form)
 
@@ -889,6 +890,45 @@ The loop itself: an empty `for (k = 0; k < 1000; k++)` costs 695 / 132 /
   counting down.
 
 
+### Loop forms, measured (test-loop-*.c)
+
+The same work, 10000 rounds of `s = s + i` (`n++` in the two count
+ones), in each loop form: `./ptest 'loop-*'` tracks them. Cycles per
+round (2026-11, `s = s + i` is one `U` op, the JIT keeps i in A/X):
+
+- zpjit: the JIT's image on sim65, mem[] in zero page (`-z`)
+- hjit: the same JIT on the host's 6502 sim, mem[] not in zero page
+
+| test          |  ivm | asm | fix | zpjit | hjit | cc65 | oscar | loop                        |
+| ------------- | ---: | --: | --: | ----: | ---: | ---: | ----: | --------------------------- |
+| `for-lt`      | 1095 | 239 | 213 |    39 |   48 |   82 |    33 | `for (i = 0; i < N; i++)`   |
+| `for-le`      | 1095 | 239 | 213 |    39 |   48 |   82 |    35 | `i <= 9999`                 |
+| `for-le-expr` | 1095 | 239 | 213 |    45 |   55 |   82 |    35 | `i <= N - 1`                |
+| `for-var`     | 1095 | 239 | 213 |    43 |   53 |   86 |    33 | `i < n`                     |
+| `for-acc`     | 1095 | 239 | 213 |    39 |   48 |   82 |    29 | body `s = i + s`            |
+| `for-pluseq`  | 1095 | 239 | 213 |    40 |   48 |   82 |    33 | body `s += i`               |
+| `while`       | 1233 | 367 | 277 |    39 |   48 |   80 |    33 | `while (i < N) {...; i++;}` |
+| `while-expr`  | 1604 | 490 | 396 |    59 |   67 |  101 |    54 | `while (i + 1 <= N)`        |
+| `down`        | 1059 | 348 | 268 |    45 |   55 |   75 |    30 | `for (i = N; i; i--)`       |
+| `postdec`     | 1153 | 368 | 291 |    53 |   62 |   87 |    52 | `for (i = N; i-- > 0; )`    |
+| `count`       | 1015 | 206 | 183 |    27 |   31 |   91 |   0.5 | `for (...) n++`             |
+| `while-count` | 1153 | 335 | 249 |    28 |   31 |   89 |   0.5 | `while (...) {n++; i++;}`   |
+
+- Interpreters: the fused `for` (`u` ... `n`) is the fastest form on
+  asm / fix, 2x faster than a loop the loop ops don't know
+  (`while-expr`). `while` is 50% slower: its step is two ops.
+- `s = s + i` and `s = i + s` are one `U` op now (as `s += i`): asm
+  24% faster than before, fix 20%, the C ivm 4%. (The C `U` was
+  `acc = (mem[a] += mem[b])`: cc65 made that 75 cycles slower.)
+- JIT: the loop test always leaves `i` in A/X (it used to only when
+  the body started with `i`): `for` is now as fast as `while`.
+- JIT: `U s i` doesn't use the `i` in A/X: 2 cycles more than the old
+  `<i> + s S s` (for-acc, while, down). To improve.
+- JIT: `<=` costs nothing more than `<`. A limit in a slot does: 4
+  more as a variable, 6 as `N - 1` (computed at run time, a temp).
+- oscar: 0.5 for the count loops: it computes `n++` N times at
+  compile time.
+
 ### memset loops
 
 A loop that sets a whole array is recognized and becomes one `memset` op:
@@ -902,14 +942,14 @@ memset(b, v, n);
 On the JIT a constant size of 1..256 is an inline `STA (p),Y` loop, a
 larger one calls the library. The cycles for the whole loop:
 
-| loop | ivm | ivm-asm | JIT |
-|---|---:|---:|---:|
-| `b[i] = 0`, 200 bytes (memset) | 4.9 k | 5.7 k | 4.5 k |
-| `b[i] = i`, 200 bytes (a loop) | 232 k | 61 k | 12 k |
-| `b[i] = 7`, 1000 bytes (memset) | 11.3 k | 14.5 k | 11.3 k |
-| `b[i] = i`, 1000 bytes (a loop) | 1144 k | 289 k | 50 k |
-| `w[i] = 0`, 200 ints (memset) | 7.0 k | 8.3 k | 5.3 k |
-| `w[i] = 5`, 200 ints (a loop: not 0) | 234 k | 67 k | 19 k |
+| loop                                 |    ivm | ivm-asm |    JIT |
+| ------------------------------------ | -----: | ------: | -----: |
+| `b[i] = 0`, 200 bytes (memset)       |  4.9 k |   5.7 k |  4.5 k |
+| `b[i] = i`, 200 bytes (a loop)       |  232 k |    61 k |   12 k |
+| `b[i] = 7`, 1000 bytes (memset)      | 11.3 k |  14.5 k | 11.3 k |
+| `b[i] = i`, 1000 bytes (a loop)      | 1144 k |   289 k |   50 k |
+| `w[i] = 0`, 200 ints (memset)        |  7.0 k |   8.3 k |  5.3 k |
+| `w[i] = 5`, 200 ints (a loop: not 0) |  234 k |    67 k |   19 k |
 
 Up to 100 times faster on `ivm`: write clearing / filling loops exactly in
 this form.
@@ -917,9 +957,9 @@ this form.
 
 ### Calls
 
-| statement | BC | JIT | ivm | asm | jit |
-|---|---:|---:|---:|---:|---:|
-| `n = f(a);` (`f` returns `a + 1`) | 4 | 11 | 1372 | 484 | 38 |
+| statement                         |  BC | JIT |  ivm | asm | jit |
+| --------------------------------- | --: | --: | ---: | --: | --: |
+| `n = f(a);` (`f` returns `a + 1`) |   4 |  11 | 1372 | 484 |  38 |
 
 A call is cheap in bytecode; on the VMs it costs about two loop rounds.
 
@@ -994,26 +1034,26 @@ built, `-DIVM_OPT`), value numbering 2.1 KB, CSE 3.5 KB (not built,
 
 ## Not supported: a summary
 
-| | instead |
-|---|---|
-| recursion | loops (silent: hangs) |
-| prototypes | define callee first |
-| `long` `short` `float` `signed` `typedef` `enum` `union` | |
-| negative literals, unary `-`, `~` | `0 - x`, `x ^ 0xffff` |
-| signed compares / printing | test `x & 0x8000` |
-| `&&` `\|\|` `?:` | nested `if` |
-| `a + b * c` (tighter after looser) | `a + (b * c)` or `b * c + a` |
-| assignment / `++` inside expressions | separate statements |
-| `*= /= %= &= \|= ^= <<= >>=` | `x = x * 2;` |
-| `a[i]++` `a[i] += n` | `a[i] = a[i] + n;` |
-| `*(p + i)` | `p[i]` |
-| `ptr + n` in expressions (not scaled: silent) | `p += n;` then use `p` |
-| `&x` of a variable | an array of 1 |
-| `do` `break` `continue` `switch` `goto` `for (;;)` | `while`, a function and `return` |
-| `for (int i ...)`, `for (...; i += 2)` | declare `i` before, step in a variable |
-| 2D arrays | `m[r * COLS + c]` |
-| global initializers with expressions | a constant, or assign in `main` |
-| `#define` expressions / macros | `const int`, functions |
-| `#if NAME` (always true: silent) | `#ifdef NAME` |
-| `printf` beyond the listed forms (silent) | split, `putchar` |
-| `struct s x, y;` `struct s {..} x;` struct copies, by-value | one per line, pointers |
+|                                                             | instead                                |
+| ----------------------------------------------------------- | -------------------------------------- |
+| recursion                                                   | loops (silent: hangs)                  |
+| prototypes                                                  | define callee first                    |
+| `long` `short` `float` `signed` `typedef` `enum` `union`    |                                        |
+| negative literals, unary `-`, `~`                           | `0 - x`, `x ^ 0xffff`                  |
+| signed compares / printing                                  | test `x & 0x8000`                      |
+| `&&` `\|\|` `?:`                                            | nested `if`                            |
+| `a + b * c` (tighter after looser)                          | `a + (b * c)` or `b * c + a`           |
+| assignment / `++` inside expressions                        | separate statements                    |
+| `*= /= %= &= \|= ^= <<= >>=`                                | `x = x * 2;`                           |
+| `a[i]++` `a[i] += n`                                        | `a[i] = a[i] + n;`                     |
+| `*(p + i)`                                                  | `p[i]`                                 |
+| `ptr + n` in expressions (not scaled: silent)               | `p += n;` then use `p`                 |
+| `&x` of a variable                                          | an array of 1                          |
+| `do` `break` `continue` `switch` `goto` `for (;;)`          | `while`, a function and `return`       |
+| `for (int i ...)`, `for (...; i += 2)`                      | declare `i` before, step in a variable |
+| 2D arrays                                                   | `m[r * COLS + c]`                      |
+| global initializers with expressions                        | a constant, or assign in `main`        |
+| `#define` expressions / macros                              | `const int`, functions                 |
+| `#if NAME` (always true: silent)                            | `#ifdef NAME`                          |
+| `printf` beyond the listed forms (silent)                   | split, `putchar`                       |
+| `struct s x, y;` `struct s {..} x;` struct copies, by-value | one per line, pointers                 |

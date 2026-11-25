@@ -1545,8 +1545,10 @@ ZL(op_bj,  'j')  zp.acc = (uchar)(PAR - 1); PAR = zp.acc; goto pnext;
 // word pointer ++ (int*)
 ZL(op_H,   'H')  zp.acc = PAR + 2; PAR = zp.acc; goto pnext;
 
-ZL(op_U,   'U')  zp.acc = (zp.mem[zp.ipc[0]]
-                        += zp.mem[zp.ipc[1]]);
+// (not "acc = (mem[a] += mem[b])": cc65 makes that a pointer on its
+// stack, 75 cycles more each, test-loop-for-lt)
+ZL(op_U,   'U')  zp.acc = zp.mem[zp.ipc[0]] + zp.mem[zp.ipc[1]];
+                 zp.mem[zp.ipc[0]] = zp.acc;
                                 zp.ipc += 2; goto xnext; // two args
 
 ZL(op_lt,  '<')  zp.acc = zp.acc < PAR;  goto pnext;
