@@ -11,8 +11,8 @@ MEM_HI_BASE = _slice_hi
 
 ;;; Everything else is as in the original ALTCODE=1 path.
 
-TRACE=1
-;TRACE=0				
+;TRACE=1
+TRACE=0
 
 .export         _run_ivm_asm
 .export         _IVM_ASM_START
@@ -1222,25 +1222,42 @@ op_dollar:
 
 ;;; m pp vv  memset
 op_m:
-        lda     (_ivm_ipc),y        ; pp
+        ;; exact port of ivm-vm.asm op_m (ALTCODE path)
+	;; tmp = ptr;
+        lda     (_ivm_ipc),y            ; PARY equivalent
         tax
-        iny
         lda     MEM_LO_BASE,x
         sta     tmp_lo
         lda     MEM_HI_BASE,x
         sta     tmp_hi
-        lda     (_ivm_ipc),y        ; vv
-        tax
+
+	;; A = vv.lo;
         iny
         sty     savey
-        lda     MEM_LO_BASE,x       ; fill
-        ldy     _ivm_acc
-        beq     m_done
-m_loop:
+
+        lda     (_ivm_ipc),y
+        tax
+        lda     MEM_LO_BASE,x           ; fill byte in A
+
+        pha
+        ldx     _ivm_acc+1              ; hi
+        txa
+        clc
+        adc     tmp_hi
+        sta     tmp_hi
+        pla
+
+        ldy     _ivm_acc                ; lo
+        beq     op_m_page
+op_m_loop:
         dey
         sta     (tmp_lo),y
-        bne     m_loop
-m_done:
+        bne     op_m_loop
+op_m_page:
+        dec     tmp_hi
+        dex
+        bpl     op_m_loop
+
         jmp     pnext
 ;;; ------------------------------------------------------------
 ;;; Not yet ported (code exists in ivm-vm.asm; needs param rewrite)
