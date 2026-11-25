@@ -871,6 +871,7 @@ op_F:
         jmp     pnext
 
 ;;; # name\0  skip zero-terminated string
+;;; # name\0  skip zero-terminated string
 op_hash:
         FIXIPC
 :       lda     (_ivm_ipc),y
@@ -879,6 +880,94 @@ op_hash:
         bne     :-
 :       iny
         jmp     pfixnext
+
+;;; "  print string at ipc until 0
+op_str:
+        FIXIPC
+strlp:
+        ldy     #0
+        lda     (_ivm_ipc),y
+        beq     strdone
+        jsr     _putchar
+        inc     _ivm_ipc
+        bne     strlp
+        inc     _ivm_ipc+1
+        bne     strlp
+strdone:
+        iny
+        jmp     xnext
+
+;;; P  print string from ACC until 0
+op_P:
+        sty     savey
+P_plp:
+        ldy     #0
+        lda     (_ivm_acc),y
+        beq     pdone
+        jsr     _putchar
+        inc     _ivm_acc
+        bne     P_plp
+        inc     _ivm_acc+1
+        bne     P_plp
+pdone:
+        jmp     ynext
+
+;;; Hxx  ACC = mem[xx] += 2
+op_H:
+        lda     (_ivm_ipc),y
+        tax
+        iny
+        clc
+        lda     MEM_LO_BASE,x
+        adc     #2
+        sta     MEM_LO_BASE,x
+        sta     _ivm_acc
+        lda     MEM_HI_BASE,x
+        adc     #0
+        sta     MEM_HI_BASE,x
+        sta     _ivm_acc+1
+        jmp     pfixnext
+
+;;; Jxx  ACC = --mem[xx]
+op_J:
+        lda     (_ivm_ipc),y
+        tax
+        iny
+        sec
+        lda     MEM_LO_BASE,x
+        sbc     #1
+        sta     MEM_LO_BASE,x
+        sta     _ivm_acc
+        lda     MEM_HI_BASE,x
+        sbc     #0
+        sta     MEM_HI_BASE,x
+        sta     _ivm_acc+1
+        jmp     pfixnext
+
+;;; Uab  mem[a] += mem[b]; ACC = mem[a]
+op_U:
+        lda     (_ivm_ipc),y        ; a
+        sta     swpb
+        iny
+        lda     (_ivm_ipc),y        ; b
+        tax
+        iny
+        sty     savey
+        lda     MEM_LO_BASE,x
+        sta     tmp_lo
+        lda     MEM_HI_BASE,x
+        sta     tmp_hi
+        ldx     swpb
+        clc
+        lda     MEM_LO_BASE,x
+        adc     tmp_lo
+        sta     MEM_LO_BASE,x
+        sta     _ivm_acc
+        lda     MEM_HI_BASE,x
+        adc     tmp_hi
+        sta     MEM_HI_BASE,x
+        sta     _ivm_acc+1
+        jmp     pnext
 
 ;;; `  (address-of) — not supported with byte planes
 op_tick:
@@ -907,8 +996,23 @@ op_bad:
         jsr     _putchar
         ; fall through to done
 
-;;; unrecognized / not-yet-ported fall here
-op_dollar:
+;;; ------------------------------------------------------------
+;;; Not yet ported (code exists in ivm-vm.asm; needs param rewrite)
+;;; ------------------------------------------------------------
+op_A:           ; swap word array elements
+op_a:           ; striped word load
+op_b:           ; striped word store
+op_G:           ; conditional goto
+op_B:           ; back jump
+op_t:           ; for-test
+op_u:           ; for-test (strict)
+op_n:           ; for-next
+op_v:           ; if-eq inline
+op_V:           ; memmove
+op_x:           ; call with 1 arg
+op_y:           ; call with 2 args
+op_m:           ; memset
+op_dollar:      ; (was incomplete)
 op_colon:
 op_D:
 op_R:
@@ -927,24 +1031,6 @@ op_o:
 op_p:
 op_z:
 op_del:
-op_A:
-op_a:
-op_b:
-op_U:
-op_G:
-op_B:
-op_t:
-op_u:
-op_n:
-op_v:
-op_V:
-op_x:
-op_y:
-op_str:
-op_H:
-op_J:
-op_P:
-op_m:
         jmp     op_bad
 
 done:
