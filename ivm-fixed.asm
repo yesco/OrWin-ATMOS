@@ -403,45 +403,16 @@ op_I:
         sta     _ivm_acc+1
         jmp     pfixnext
 
-;;; Remaining ops (mul, div, indexed, for-loops, string, etc.)
-;;; should be rewritten in the same style:
-;;;   - read slot(s) with lda (_ivm_ipc),y / tax / iny
-;;;   - access MEM_*_BASE,x
-;;;   - never clobber Y except when you intentionally advance it
-;;;   - use FIXIPC only for true control-flow
-;;;
-;;; Example skeleton for a one-operand load-style op:
-;;; op_whatever:
-;;;         lda     (_ivm_ipc),y
-;;;         tax
-;;;         iny
-;;;         ; ... use MEM_LO_BASE,x / MEM_HI_BASE,x ...
-;;;         jmp     pfixnext
-;;;
-;;; For two-operand ops do two (lda / tax / iny) pairs.
-;;;
-;;; The original complex ops (op_t/u/n, op_A, op_idxl/idxs, op_V, etc.)
-;;; can be ported by replacing every
-;;;     lda (_ivm_memlo),y
-;;; with
-;;;     lda MEM_LO_BASE,x   (after moving the index into X)
-;;; and similarly for stores and the hi plane.
-;;; Because Y is no longer needed for the slot, the surrounding
-;;; USEY / sty savey / ynext disappear.
+;;; ============================================================
+;;; Remaining operators (fixed absolute,X style)
+;;; ============================================================
 
-;;; Stub the rest so the file assembles; replace with full ports.
-op_mul:
-op_div:
-op_mod:
-op_dot:
-op_hash:
-op_dollar:
-op_and:
-op_or:
-op_xor:
-op_shl:
-op_shr:
-op_bnot:
+;;; NOP
+op_sp:
+        jmp     xnext
+
+;;; * / %  — PAR in _ivm_par, then C helper
+
 ;;; @xx  ACC = *(word*)mem[xx]
 op_at:
         lda     (_ivm_ipc),y
@@ -646,37 +617,300 @@ op_wi:
         sta     MEM_HI_BASE,x
         jmp     pnext
 
-op_M:
-op_F:
-op_m:
-op_l:
-op_s:
-op_j:
-op_i:
+op_mul:
+        lda     (_ivm_ipc),y
+        tax
+        iny
+        sty     savey
+        lda     MEM_LO_BASE,x
+        sta     _ivm_par
+        lda     MEM_HI_BASE,x
+        sta     _ivm_par+1
+        jsr     _opmul
+        jmp     pnext
+
+op_div:
+        lda     (_ivm_ipc),y
+        tax
+        iny
+        sty     savey
+        lda     MEM_LO_BASE,x
+        sta     _ivm_par
+        lda     MEM_HI_BASE,x
+        sta     _ivm_par+1
+        jsr     _opdiv
+        jmp     pnext
+
+op_mod:
+        lda     (_ivm_ipc),y
+        tax
+        iny
+        sty     savey
+        lda     MEM_LO_BASE,x
+        sta     _ivm_par
+        lda     MEM_HI_BASE,x
+        sta     _ivm_par+1
+        jsr     _opmod
+        jmp     pnext
+
+;;; bitwise
+op_and:
+        lda     (_ivm_ipc),y
+        tax
+        iny
+        lda     MEM_LO_BASE,x
+        and     _ivm_acc
+        sta     _ivm_acc
+        lda     MEM_HI_BASE,x
+        and     _ivm_acc+1
+        sta     _ivm_acc+1
+        jmp     pfixnext
+
+op_or:
+        lda     (_ivm_ipc),y
+        tax
+        iny
+        lda     MEM_LO_BASE,x
+        ora     _ivm_acc
+        sta     _ivm_acc
+        lda     MEM_HI_BASE,x
+        ora     _ivm_acc+1
+        sta     _ivm_acc+1
+        jmp     pfixnext
+
+op_xor:
+        lda     (_ivm_ipc),y
+        tax
+        iny
+        lda     MEM_LO_BASE,x
+        eor     _ivm_acc
+        sta     _ivm_acc
+        lda     MEM_HI_BASE,x
+        eor     _ivm_acc+1
+        sta     _ivm_acc+1
+        jmp     pfixnext
+
+op_bnot:
+        lda     _ivm_acc
+        eor     #$FF
+        sta     _ivm_acc
+        lda     _ivm_acc+1
+        eor     #$FF
+        sta     _ivm_acc+1
+        jmp     xnext
+
+;;; { } shifts
+op_shl:
+        lda     (_ivm_ipc),y
+        tax
+        iny
+        sty     savey
+        lda     MEM_LO_BASE,x
+        tax
+        beq     :+
+:       asl     _ivm_acc
+        rol     _ivm_acc+1
+        dex
+        bne     :-
+        jmp     pnext
+
+op_shr:
+        lda     (_ivm_ipc),y
+        tax
+        iny
+        sty     savey
+        lda     MEM_LO_BASE,x
+        tax
+        beq     :+
+:       lsr     _ivm_acc+1
+        ror     _ivm_acc
+        dex
+        bne     :-
+        jmp     pnext
+
+;;; print / I/O
+op_dot:
+        sty     savey
+        jsr     _opputnum
+        jmp     ynext
+
+op_K:                           ; getchar
+        sty     savey
+        jsr     _getchar
+        sta     _ivm_acc
+        stx     _ivm_acc+1
+        jmp     ynext
+
+op_N:                           ; newline
+        sty     savey
+        lda     #10
+        jsr     _putchar
+        jmp     ynext
+
+op_E:                           ; putchar(ACC)
+        sty     savey
+        lda     _ivm_acc
+        jsr     _putchar
+        jmp     ynext
+
+op_O:                           ; inline putchar
+        lda     (_ivm_ipc),y
+        iny
+        sty     savey
+        jsr     _putchar
+        jmp     pnext
+
+;;; byte ops
+op_l:                           ; ACC = lo(mem[xx])
+        lda     (_ivm_ipc),y
+        tax
+        iny
+        lda     MEM_LO_BASE,x
+        sta     _ivm_acc
+        lda     #0
+        sta     _ivm_acc+1
+        jmp     pfixnext
+
+op_s:                           ; mem[xx] = lo(ACC)
+        lda     (_ivm_ipc),y
+        tax
+        iny
+        lda     _ivm_acc
+        sta     MEM_LO_BASE,x
+        lda     #0
+        sta     MEM_HI_BASE,x
+        jmp     pfixnext
+
+op_j:                           ; char --
+        lda     (_ivm_ipc),y
+        tax
+        iny
+        lda     #$FF
+        bne     bincdec
+
+op_i:                           ; char ++
+        lda     (_ivm_ipc),y
+        tax
+        iny
+        lda     #1
+bincdec:
+        clc
+        adc     MEM_LO_BASE,x
+        sta     MEM_LO_BASE,x
+        sta     _ivm_acc
+        lda     #0
+        sta     MEM_HI_BASE,x
+        sta     _ivm_acc+1
+        jmp     pfixnext
+
+;;; rxx / wxx  byte pointer via slot
 op_r:
+        lda     (_ivm_ipc),y
+        tax
+        iny
+        sty     savey
+        lda     MEM_LO_BASE,x
+        sta     tmp_lo
+        lda     MEM_HI_BASE,x
+        sta     tmp_hi
+        ldy     #0
+        lda     (tmp_lo),y
+        sta     _ivm_acc
+        lda     #0
+        sta     _ivm_acc+1
+        jmp     pnext
+
 op_w:
-op_A:
-op_a:
-op_b:
-op_U:
-op_G:
-op_B:
-op_t:
-op_u:
-op_n:
-op_v:
-op_V:
-op_x:
-op_y:
-op_sp:
-op_str:
+        lda     (_ivm_ipc),y
+        tax
+        iny
+        sty     savey
+        lda     MEM_LO_BASE,x
+        sta     tmp_lo
+        lda     MEM_HI_BASE,x
+        sta     tmp_hi
+        ldy     #0
+        lda     _ivm_acc
+        sta     (tmp_lo),y
+        jmp     pnext
+
+;;; M / F  malloc / free
+op_M:
+        lda     (_ivm_ipc),y
+        sta     swpb                ; slot
+        iny
+        sty     savey
+        lda     _ivm_acc
+        ldx     _ivm_acc+1
+        jsr     _ivm_zalloc
+        sta     _ivm_acc
+        stx     _ivm_acc+1
+        ldx     swpb
+        sta     MEM_LO_BASE,x
+        txa
+        sta     MEM_HI_BASE,x
+        jmp     pnext
+
+op_F:
+        lda     (_ivm_ipc),y
+        sta     swpb
+        iny
+        sty     savey
+        ldx     swpb
+        lda     MEM_LO_BASE,x
+        sta     tmp_lo
+        lda     MEM_HI_BASE,x
+        sta     tmp_hi
+        lda     tmp_lo
+        ldx     tmp_hi
+        jsr     _ivm_free
+        ldx     swpb
+        lda     #0
+        sta     MEM_LO_BASE,x
+        sta     MEM_HI_BASE,x
+        jmp     pnext
+
+;;; # name\0  skip zero-terminated string
+op_hash:
+        FIXIPC
+:       lda     (_ivm_ipc),y
+        beq     :+
+        iny
+        bne     :-
+:       iny
+        jmp     pfixnext
+
+;;; `  (address-of) — not supported with byte planes
+op_tick:
+        lda     #0
+        sta     tmp_lo
+@msg:   ldy     tmp_lo
+        lda     tick_msg,y
+        beq     done
+        jsr     _putchar
+        inc     tmp_lo
+        bne     @msg
+tick_msg:
+        .byte   10, "%Error: ivm-fixed: no & of a variable (`): mem[] is byte planes", 10, 0
+
+;;; unknown opcode — report it
+op_bad:
+        stx     tmp_lo              ; save opcode
+        FIXIPC
+        lda     #10
+        jsr     _putchar
+        lda     #'%'
+        jsr     _putchar
+        lda     tmp_lo
+        jsr     _putchar
+        lda     #10
+        jsr     _putchar
+        ; fall through to done
+
+;;; unrecognized / not-yet-ported fall here
+op_dollar:
 op_colon:
-op_H:
-op_J:
-op_K:
-op_N:
-op_O:
-op_P:
+op_D:
 op_R:
 op_T:
 op_W:
@@ -693,16 +927,31 @@ op_o:
 op_p:
 op_z:
 op_del:
-op_tick:
-op_D:
-op_E:
-op_bad:
-        jmp     done            ; placeholder
+op_A:
+op_a:
+op_b:
+op_U:
+op_G:
+op_B:
+op_t:
+op_u:
+op_n:
+op_v:
+op_V:
+op_x:
+op_y:
+op_str:
+op_H:
+op_J:
+op_P:
+op_m:
+        jmp     op_bad
 
 done:
         lda     _ivm_acc
         ldx     _ivm_acc+1
         rts
+
 
 .export _IVM_ASM_END
 _IVM_ASM_END:
