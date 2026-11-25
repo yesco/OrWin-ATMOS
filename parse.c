@@ -636,9 +636,11 @@ static void eprintf(const char *fmt, ...) {
 
   src_close();
 
+#ifndef OSCAR64
   va_start(ap, fmt);
   vfprintf(ERROUT, fmt, ap);
   va_end(ap);
+#endif
 }
 
 static void eputc(uchar c) {
@@ -1415,7 +1417,7 @@ static uchar comments_add_from_line(char *p) {
 // Default: { } block (Pascal). Cleared/replaced when BNF has #= lines.
 static void comments_set_default(void) {
   ncomments = 0;
-  comments_add_from_line("{ }");
+  comments_add_from_line((char*)"{ }");
 }
 
 // True if source at line_pos starts with s[0..len). Does not consume.
@@ -2661,7 +2663,7 @@ int run() {
   // \$: the ident \i matched is a static array: the result is its size in
   //   bytes (sizeof), else fail
   else if (c == HIBIT('$')) {
-    Symbol *sy = last_sym < nsym ? &syms[last_sym] : 0;
+    Symbol *sy = last_sym < nsym ? &syms[last_sym] : NULL;
     ok = sy ? sy->nelem != 0 : 0;
     if (ok)
       record_capture(const_slot(sy->vtype == 'c' ? sy->nelem : sy->nelem * 2));
@@ -3218,13 +3220,21 @@ static void shutdown(void) {
 
 
 /// ------------------------------------------------------------
+#ifdef OSCAR64
+int main() {
+  int argc = 3;
+  const uchar* argv[] = {"parse", "foo.bnf", "fish.foo", NULL};
+
+#else
 int main(int argc, char **argv) {
+#endif
+
   #ifdef VERBOSE
   word a;
   #endif
-  char *bnf = NULL;
-  char *srcpath = NULL;
-  char *arg;
+  uchar *bnf = NULL;
+  uchar *srcpath = NULL;
+  uchar *arg;
   word i;
   int err;
   int blen;
@@ -3239,7 +3249,7 @@ int main(int argc, char **argv) {
 
   // parse arguments
   for (i = 1; i < argc; i++) {
-    arg = argv[i];
+    arg = (uchar*)argv[i];
 
     if (arg[0] == '-' && arg[1] && !arg[2])
       switch (arg[1]) {

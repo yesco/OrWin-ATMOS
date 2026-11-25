@@ -9,7 +9,10 @@ echo "NAME: $name"
 . ./deps   # stale: rebuild only when a source changed
 rm -f $name.ivm
 
-time ./oscar -DRUN -DOSCAR64 -ep parse.c
+echo "--oscar build--"
+#./oscar -v2 -dRUN -dOSCAR64 -dNOFLOAT -dNOLONG -Os -o=parse.prg parse.c 
+./oscar -dOSCAR64 -dNOFLOAT -dNOLONG parse.c 
+ls -l parse.prg
 
 mv parse.asm parse.oscar.s
 

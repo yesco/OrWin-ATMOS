@@ -527,3 +527,56 @@ cache the current chunk and cold paths use `dmove`.
 
 
 ================================================================
+## PARSE.C big
+
+Since cb18626 parse.sim won't link, and once that's fixed it still runs out
+  of memory; the last working build was a30b179 when c.bnf was 25K, and it's
+  28.7K now. I'm breaking down where the memory goes by function next.
+
+  Ran 1 shell command
+
+● The per-function sizes are misleading, since cc65 only labels public names
+  and vn_temp's 16K includes the static functions after it. I'm measuring from
+  the assembler listing's .proc/.endproc blocks instead.
+
+  Ran 1 shell command
+
+● That's the real picture: 33K of code in 122 functions, plus 7.8K of BSS (bin
+  4K, data_pool 2K). The biggest functions:
+
+  ┌───────┬────────────────┬────────────────────────────────────┐
+  │ bytes │    function    │             what it is             │
+  ├───────┼────────────────┼────────────────────────────────────┤
+  │ 3,444 │ build_blob     │ writes the .ivm                    │
+  ├───────┼────────────────┼────────────────────────────────────┤
+  │ 2,622 │ run_production │ the [...] code-emitting directives │
+  ├───────┼────────────────┼────────────────────────────────────┤
+  │ 2,071 │ run            │ the match engine                   │
+  ├───────┼────────────────┼────────────────────────────────────┤
+  │ 1,850 │ gen_peephole   │ -O                                 │
+  ├───────┼────────────────┼────────────────────────────────────┤
+  │ 1,332 │ report_reject  │ error messages                     │
+  ├───────┼────────────────┼────────────────────────────────────┤
+  │ 1,235 │ build_one_rule │ reads c.bnf text into rules        │
+  ├───────┼────────────────┼────────────────────────────────────┤
+  │ 1,198 │ vn_temp        │ value numbering                    │
+  ├───────┼────────────────┼────────────────────────────────────┤
+  │ 689   │ load_bnf       │ reads c.bnf text into rules        │
+  ├───────┼────────────────┼────────────────────────────────────┤
+  │ 684   │ gen_squeeze    │ -O                                 │
+  ├───────┼────────────────┼────────────────────────────────────┤
+  │ 624   │ gen_pack       │ -O                                 │
+  └───────┴────────────────┴────────────────────────────────────┘
+
+  On saving code:
+  - The optimizers are about 5K: gen_peephole, gen_squeeze, gen_pack and value
+    numbering (vn_temp, vn_reads). The CSE passes are already host-only. If the
+    6502-native parser left -O to the host compiler, that's the biggest single
+    cut, with no change to the grammar.
+  - Error reporting is about 2K: report_reject, err_statement, note_progress. A
+    terser 6502 build could print only the position and the rule.
+  - Grammar loading is about 2K: load_bnf plus build_one_rule turn the 28.7K
+    c.bnf text into rule blobs at every start. If the host did that once and
+    wrote a binary grammar, the 6502 parser would just load it. That saves the
+    code, the parse time  Jump to bottom (ctrl+End) ↓ y the best rati
+    
