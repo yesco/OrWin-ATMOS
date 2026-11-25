@@ -1164,7 +1164,7 @@ static int gen_deadload(void) {
 
 static int gen_swap(void) {
   word pc, n, t, nb = (word)((bin_ptr >> 3) + 1), q;
-  uchar *a, x, op, y, k, m, ti, l, hit = 0, base, i;
+  uchar *a, x, op, y, k = 0, m, ti, l, hit = 0, base, i;   // k: oscar64 warns
 
   gen_tgt = (uchar *)calloc(nb, 2);
   if (!gen_tgt) IVM_GEN_FAIL("out of memory (swap)");

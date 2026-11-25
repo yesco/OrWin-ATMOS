@@ -305,7 +305,15 @@ static void anim_report(void) {
 // (- 26871 26002) = 869
 //#include "darr.c"
 
-#define MAX_BIN_LEN 4096
+#ifdef OSCAR64
+  // C64 ($0801-$9FFF): ~30K code, the rest bss / heap (rules) / stack
+  #define MAX_BIN_LEN 2048
+  #define MAX_DATA    1024
+  #pragma stacksize(1024)
+  #pragma heapsize(2048)
+#else
+  #define MAX_BIN_LEN 4096
+#endif
 #define MAX_SLOTS 255
 
 // 8 = (* 8 29) = 232 bytes bigger each time
@@ -3223,7 +3231,8 @@ static void shutdown(void) {
 #ifdef OSCAR64
 int main() {
   int argc = 3;
-  const uchar* argv[] = {"parse", "foo.bnf", "fish.foo", NULL};
+  char *argv[] = {(char *)"parse", (char *)"foo.bnf", (char *)"fish.foo",
+                  NULL};
 
 #else
 int main(int argc, char **argv) {
@@ -3232,9 +3241,9 @@ int main(int argc, char **argv) {
   #ifdef VERBOSE
   word a;
   #endif
-  uchar *bnf = NULL;
-  uchar *srcpath = NULL;
-  uchar *arg;
+  char *bnf = NULL;
+  char *srcpath = NULL;
+  char *arg;
   word i;
   int err;
   int blen;
@@ -3249,7 +3258,7 @@ int main(int argc, char **argv) {
 
   // parse arguments
   for (i = 1; i < argc; i++) {
-    arg = (uchar*)argv[i];
+    arg = argv[i];
 
     if (arg[0] == '-' && arg[1] && !arg[2])
       switch (arg[1]) {
