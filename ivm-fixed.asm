@@ -71,39 +71,24 @@ anext:
         clc
         adc     savey
         tay
-        bcc     pnext_no_load   ; N from tay
+        bcc     jnext   ; N from tay
         inc     _ivm_ipc+1
         tya
-        jmp     pnext_no_load
+        jmp     jnext
 
-;;; Y overflow rule: only ops WITH operands check Y (bit 7 -> FIXIPC).
-;;; No-param ops just Y+1 and jmp xnext: Y stays < 256 unless ~125 of
-;;; them run back to back (they're slot loads etc: operand ops follow).
+;;; Y overflow rule: ops never check Y. Re-based (FIXIPC) are: taken
+;;; jumps landing at Y >= 128 (jnext), calls, returns, strings, and DEL
+;;; (127), that the compiler puts every FIX_RUN (124) bytes of straight
+;;; code (ivm-gen.c gen_fixipc): a run starts at Y <= 127, so Y <= 255.
 
-;;; Operand op, Y already at the next opcode: check
-.macro PNEXT_HAVEY
-        tya
-        jmp     pnext_no_load
-.endmacro
-
-;;; No-param op: no check
+;;; Next op, Y at it
 .macro NEXT
         jmp     xnext
 .endmacro
 
-;;; savey = offset of the NEXT opcode, no-param op (after a jsr)
-ynext:
-        ldy     savey
-        jmp     xnext
-
-;;; savey = offset of LAST consumed byte (operand); continue after it
-pnext:
-        ldy     savey
-        iny
-pnext_no_load:                  ; entry: Y = next opcode offset, N = Y's bit 7
-        bmi     gofix
-
-xnext:
+;;; Fetch the op at Y and jump to its handler (twice: xnext, pnext)
+.macro DISPATCH
+        .local  smc
         lda     (_ivm_ipc),y
 
         .if TRACE
@@ -121,8 +106,26 @@ xnext:
         tax                     ; X = opcode (and for 0..31 the slot!)
         bmi     HIBIT
         asl
-        sta     pc+1
-pc:     jmp     (dispvec)
+        sta     smc+1
+smc:    jmp     (dispvec)
+.endmacro
+
+;;; savey = offset of the NEXT opcode (after a jsr)
+ynext:
+        ldy     savey
+        jmp     xnext
+
+;;; taken jump landed: Y = target offset, N = Y's bit 7
+jnext:
+        bmi     gofix
+xnext:
+        DISPATCH
+
+;;; savey = offset of LAST consumed byte (operand); continue after it
+pnext:
+        ldy     savey
+        iny
+        DISPATCH
 
 ;;; Y >= 128: fold into ipc
 gofix:
@@ -145,10 +148,10 @@ rjp:
         clc
         adc     savey               ; target = Y (after opcode) + off
         tay
-        bcc     pnext_no_load       ; N from tay
+        bcc     jnext       ; N from tay
         inc     _ivm_ipc+1
         tya
-        jmp     pnext_no_load
+        jmp     jnext
 rjp_no: NEXT
 
 subvec:
@@ -277,7 +280,7 @@ op_sub:
         lda     _ivm_acc+1
         sbc     MEM_HI_BASE,x
         sta     _ivm_acc+1
-        PNEXT_HAVEY
+        NEXT
 
 ;;; +xx
 op_add:
@@ -291,7 +294,7 @@ op_add:
         lda     _ivm_acc+1
         adc     MEM_HI_BASE,x
         sta     _ivm_acc+1
-        PNEXT_HAVEY
+        NEXT
 
 ;;; Lxx   ACC = mem[xx]
 op_L:
@@ -302,7 +305,7 @@ op_L:
         sta     _ivm_acc
         lda     MEM_HI_BASE,x
         sta     _ivm_acc+1
-        PNEXT_HAVEY
+        NEXT
 
 ;;; Sxx   mem[xx] = ACC
 op_S:
@@ -313,7 +316,7 @@ op_S:
         sta     MEM_LO_BASE,x
         lda     _ivm_acc+1
         sta     MEM_HI_BASE,x
-        PNEXT_HAVEY
+        NEXT
 
 ;;; Zxx   mem[xx] = 0
 op_Z:
@@ -323,7 +326,7 @@ op_Z:
         lda     #0
         sta     MEM_LO_BASE,x
         sta     MEM_HI_BASE,x
-        PNEXT_HAVEY
+        NEXT
 
 ;;; Yxx   mem[xx] = 1
 op_Y:
@@ -334,7 +337,7 @@ op_Y:
         sta     MEM_LO_BASE,x
         lda     #0
         sta     MEM_HI_BASE,x
-        PNEXT_HAVEY
+        NEXT
 
 ;;; C dest src
 op_C:
@@ -353,7 +356,7 @@ op_C:
         sta     MEM_LO_BASE,x
         lda     _ivm_acc+1
         sta     MEM_HI_BASE,x
-        PNEXT_HAVEY
+        NEXT
 
 ;;; = < > compares (unsigned)
 op_eq:
@@ -417,14 +420,14 @@ op_acc0p:
         lda     #0
         sta     _ivm_acc
         sta     _ivm_acc+1
-        PNEXT_HAVEY
+        NEXT
 
 op_acc1p:
         lda     #1
         sta     _ivm_acc
         lda     #0
         sta     _ivm_acc+1
-        PNEXT_HAVEY
+        NEXT
 
 ;;; Ixx  ACC = ++mem[xx]
 op_I:
@@ -440,7 +443,7 @@ op_I:
         adc     #0
         sta     MEM_HI_BASE,x
         sta     _ivm_acc+1
-        PNEXT_HAVEY
+        NEXT
 
 ;;; ============================================================
 ;;; Remaining operators (fixed absolute,X style)
@@ -569,7 +572,7 @@ bidxl_smc:
         sta     _ivm_acc
         lda     #0
         sta     _ivm_acc+1
-        PNEXT_HAVEY
+        NEXT
 
 ;;; ] aa ii   ((uchar*)mem[aa])[mem[ii]] = lo(ACC)
 op_bidxs:
@@ -592,7 +595,7 @@ op_bidxs:
         lda     _ivm_acc
 bidxs_smc:
         sta     $FFFF,x
-        PNEXT_HAVEY
+        NEXT
 
 ;;; 'xx  ACC = *(uchar*)ptr; ptr++   (ptr in slot xx)
 op_ri:
@@ -683,7 +686,7 @@ op_and:
         lda     MEM_HI_BASE,x
         and     _ivm_acc+1
         sta     _ivm_acc+1
-        PNEXT_HAVEY
+        NEXT
 
 op_or:
         lda     (_ivm_ipc),y
@@ -695,7 +698,7 @@ op_or:
         lda     MEM_HI_BASE,x
         ora     _ivm_acc+1
         sta     _ivm_acc+1
-        PNEXT_HAVEY
+        NEXT
 
 op_xor:
         lda     (_ivm_ipc),y
@@ -707,7 +710,7 @@ op_xor:
         lda     MEM_HI_BASE,x
         eor     _ivm_acc+1
         sta     _ivm_acc+1
-        PNEXT_HAVEY
+        NEXT
 
 op_bnot:
         lda     _ivm_acc
@@ -787,7 +790,7 @@ op_l:                           ; ACC = lo(mem[xx])
         sta     _ivm_acc
         lda     #0
         sta     _ivm_acc+1
-        PNEXT_HAVEY
+        NEXT
 
 op_s:                           ; mem[xx] = lo(ACC)
         lda     (_ivm_ipc),y
@@ -797,7 +800,7 @@ op_s:                           ; mem[xx] = lo(ACC)
         sta     MEM_LO_BASE,x
         lda     #0
         sta     MEM_HI_BASE,x
-        PNEXT_HAVEY
+        NEXT
 
 op_i:                           ; char ++  ACC = mem[xx] = (uchar)(mem[xx]+1)
         lda     (_ivm_ipc),y
@@ -817,7 +820,7 @@ bincdec:
         lda     #0
         sta     _ivm_acc+1
         sta     MEM_HI_BASE,x
-        PNEXT_HAVEY
+        NEXT
 
 ;;; rxx / wxx  byte pointer via slot
 op_r:
@@ -891,7 +894,8 @@ op_hash:
         iny
         bne     :-
 :       iny
-        PNEXT_HAVEY
+        FIXIPC                      ; Y may be large: re-base
+        NEXT
 
 ;;; "  print string at ipc until 0
 op_str:
@@ -907,7 +911,7 @@ strlp:
         bne     strlp
 strdone:
         iny
-        PNEXT_HAVEY
+        NEXT
 
 ;;; P  print string from ACC until 0
 op_P:
@@ -942,7 +946,7 @@ op_H:
         adc     #0
         sta     MEM_HI_BASE,x
         sta     _ivm_acc+1
-        PNEXT_HAVEY
+        NEXT
 
 ;;; Jxx  ACC = --mem[xx]
 op_J:
@@ -958,7 +962,7 @@ op_J:
         sbc     #0
         sta     MEM_HI_BASE,x
         sta     _ivm_acc+1
-        PNEXT_HAVEY
+        NEXT
 
 ;;; Uab  mem[a] += mem[b]; ACC = mem[a]
 op_U:
@@ -982,7 +986,7 @@ op_U:
         adc     tmp_hi
         sta     MEM_HI_BASE,x
         sta     _ivm_acc+1
-        PNEXT_HAVEY
+        NEXT
 
 ;;; `  (address-of) — not supported with byte planes
 op_tick:
@@ -1028,13 +1032,13 @@ op_G:
         adc     (_ivm_ipc),y
         tay
         bcs     :+
-        jmp     pnext_no_load       ; N from tay
+        jmp     jnext       ; N from tay
 :       inc     _ivm_ipc+1
         tya
-        jmp     pnext_no_load
+        jmp     jnext
 gskip:
         iny
-        PNEXT_HAVEY
+        NEXT
 
 ;;; B delta  — ipc -= delta; skip delta
 ;;; Y-relative: target = Y (at delta) - delta + 1, FIXIPC only on borrow
@@ -1044,8 +1048,8 @@ op_B:
         sbc     (_ivm_ipc),y
         bcc     b_far
         tay
-        iny                         ; <= old Y: no check
-        jmp     xnext
+        iny                         ; N for jnext
+        jmp     jnext
 b_far:
         dec     _ivm_ipc+1          ; ipc+256 = ipc+A, A = Y - delta + 256
         tay
@@ -1096,17 +1100,22 @@ n_step:
         iny
         iny
         cmp     #'u'
-        bne     tu_enter
+        bne     n_enter
         beq     tu_exit
 n_ne:   lda     MEM_LO_BASE,x       ; v != u: u - v, borrow = exit
         cmp     _ivm_acc
         lda     MEM_HI_BASE,x
         sbc     _ivm_acc+1
         bcc     tu_exit
+n_enter:
+        iny                         ; oo
+        iny                         ; body: jumped back here
+        jmp     jnext
+
 tu_enter:
         iny                         ; oo
         iny                         ; body
-        PNEXT_HAVEY
+        NEXT
 
 op_t:
         lda     (_ivm_ipc),y        ; v
@@ -1130,10 +1139,10 @@ tu_exit:
         adc     (_ivm_ipc),y
         tay
         bcs     :+
-        jmp     pnext_no_load       ; N from tay
+        jmp     jnext       ; N from tay
 :       inc     _ivm_ipc+1
         tya
-        jmp     pnext_no_load
+        jmp     jnext
 
 op_u:
         lda     (_ivm_ipc),y        ; v
@@ -1304,8 +1313,12 @@ op_k:
 op_o:
 op_p:
 op_z:
-op_del:
         jmp     op_bad
+
+;;; DEL (127): FIX, re-base ipc (compiler puts one every FIX_RUN bytes)
+op_del:
+        FIXIPC
+        NEXT
 
 done:
         lda     _ivm_acc
