@@ -67,18 +67,26 @@ _run_ivm_asm:
 anext:
         clc
         adc     savey
-        tay
         bcc     pfixnext
         inc     _ivm_ipc+1
-        jmp     pfixnext
+        tay
+	jmp pnext_no_load
 
 pnext:
         ldy     savey
         iny
 pfixnext:
+pnext_no_load:                  ; entry: Y already the desired offset
         bpl     xnext
         FIXIPC
         jmp     xnext
+
+;;; Use when Y is already advanced to the next opcode.
+;;; Forces the overflow check (BMI → FIXIPC) even on long linear runs.
+.macro PNEXT_HAVEY
+        tya
+        jmp     pnext_no_load
+.endmacro
 
 ynext:                          ; kept for compatibility, but rarely needed
         ldy     savey
@@ -153,7 +161,7 @@ subvec:
         sta     _ivm_ipc+1
 
         ldy     #0
-        jmp     xnext
+        PNEXT_HAVEY
 
 ;;; ============================================================
 ;;; Rewritten handlers — memory via absolute,X  (Y untouched)
@@ -165,7 +173,7 @@ op_31:
         sta     _ivm_acc
         lda     MEM_HI_BASE,x
         sta     _ivm_acc+1
-        jmp     xnext
+        PNEXT_HAVEY
 
 op_q:   jmp     done
 
@@ -197,7 +205,7 @@ op_X:   FIXIPC
         lda     MEM_LO_BASE,x
         sta     _ivm_fp
         ldy     #0
-        jmp     xnext
+        PNEXT_HAVEY
 
 ;;; arg 8
 op_8:
@@ -209,7 +217,7 @@ op_8:
         sta     _ivm_acc
         lda     MEM_HI_BASE,x
         sta     _ivm_acc+1
-        jmp     xnext
+        PNEXT_HAVEY
 
 ;;; args 1..7
 op_1to7:
@@ -224,7 +232,7 @@ op_1to7:
         sta     _ivm_acc
         lda     MEM_HI_BASE,x
         sta     _ivm_acc+1
-        jmp     xnext
+        PNEXT_HAVEY
 
 ;;; -xx   ACC -= mem[xx]
 op_sub:
@@ -252,7 +260,7 @@ op_add:
         lda     _ivm_acc+1
         adc     MEM_HI_BASE,x
         sta     _ivm_acc+1
-        jmp     pfixnext
+        PNEXT_HAVEY
 
 ;;; Lxx   ACC = mem[xx]
 op_L:
@@ -263,7 +271,7 @@ op_L:
         sta     _ivm_acc
         lda     MEM_HI_BASE,x
         sta     _ivm_acc+1
-        jmp     pfixnext
+        PNEXT_HAVEY
 
 ;;; Sxx   mem[xx] = ACC
 op_S:
@@ -274,7 +282,7 @@ op_S:
         sta     MEM_LO_BASE,x
         lda     _ivm_acc+1
         sta     MEM_HI_BASE,x
-        jmp     pfixnext
+        PNEXT_HAVEY
 
 ;;; Zxx   mem[xx] = 0
 op_Z:
@@ -284,7 +292,7 @@ op_Z:
         lda     #0
         sta     MEM_LO_BASE,x
         sta     MEM_HI_BASE,x
-        jmp     pfixnext
+        PNEXT_HAVEY
 
 ;;; Yxx   mem[xx] = 1
 op_Y:
@@ -295,7 +303,7 @@ op_Y:
         sta     MEM_LO_BASE,x
         lda     #0
         sta     MEM_HI_BASE,x
-        jmp     pfixnext
+        PNEXT_HAVEY
 
 ;;; C dest src
 op_C:
@@ -314,7 +322,7 @@ op_C:
         sta     MEM_LO_BASE,x
         lda     _ivm_acc+1
         sta     MEM_HI_BASE,x
-        jmp     pfixnext
+        PNEXT_HAVEY
 
 ;;; = < > compares (unsigned)
 op_eq:
@@ -355,7 +363,7 @@ op_9:
         lda     #$FF
         sta     _ivm_acc
         sta     _ivm_acc+1
-        jmp     xnext
+        PNEXT_HAVEY
 
 op_not:
         lda     _ivm_acc
@@ -365,27 +373,27 @@ op_0:
         lda     #0
         sta     _ivm_acc
         sta     _ivm_acc+1
-        jmp     xnext
+        PNEXT_HAVEY
 
 op_acc1:
         lda     #1
         sta     _ivm_acc
         lda     #0
         sta     _ivm_acc+1
-        jmp     xnext
+        PNEXT_HAVEY
 
 op_acc0p:
         lda     #0
         sta     _ivm_acc
         sta     _ivm_acc+1
-        jmp     pfixnext
+        PNEXT_HAVEY
 
 op_acc1p:
         lda     #1
         sta     _ivm_acc
         lda     #0
         sta     _ivm_acc+1
-        jmp     pfixnext
+        PNEXT_HAVEY
 
 ;;; Ixx  ACC = ++mem[xx]
 op_I:
@@ -401,7 +409,7 @@ op_I:
         adc     #0
         sta     MEM_HI_BASE,x
         sta     _ivm_acc+1
-        jmp     pfixnext
+        PNEXT_HAVEY
 
 ;;; ============================================================
 ;;; Remaining operators (fixed absolute,X style)
@@ -409,20 +417,19 @@ op_I:
 
 ;;; NOP
 op_sp:
-        jmp     xnext
+        PNEXT_HAVEY
 
 ;;; * / %  — PAR in _ivm_par, then C helper
 
 ;;; @xx  ACC = *(word*)mem[xx]
 op_at:
+        sty     savey               ; Y at operand; pnext skips it
         lda     (_ivm_ipc),y
         tax
-        iny
         lda     MEM_LO_BASE,x
         sta     tmp_lo
         lda     MEM_HI_BASE,x
         sta     tmp_hi
-        sty     savey
         ldy     #0
         lda     (tmp_lo),y
         sta     _ivm_acc
@@ -433,14 +440,13 @@ op_at:
 
 ;;; !xx  *(word*)mem[xx] = ACC
 op_bang:
+        sty     savey
         lda     (_ivm_ipc),y
         tax
-        iny
         lda     MEM_LO_BASE,x
         sta     tmp_lo
         lda     MEM_HI_BASE,x
         sta     tmp_hi
-        sty     savey
         ldy     #0
         lda     _ivm_acc
         sta     (tmp_lo),y
@@ -572,10 +578,9 @@ op_bidxs:
 
 ;;; 'xx  ACC = *(uchar*)ptr; ptr++   (ptr in slot xx)
 op_ri:
+        sty     savey
         lda     (_ivm_ipc),y
         tax
-        iny
-        sty     savey
         lda     MEM_LO_BASE,x
         sta     tmp_lo
         lda     MEM_HI_BASE,x
@@ -597,10 +602,9 @@ op_ri:
 
 ;;; ,xx  *(uchar*)ptr = ACC; ptr++
 op_wi:
+        sty     savey
         lda     (_ivm_ipc),y
         tax
-        iny
-        sty     savey
         lda     MEM_LO_BASE,x
         sta     tmp_lo
         lda     MEM_HI_BASE,x
@@ -664,7 +668,7 @@ op_and:
         lda     MEM_HI_BASE,x
         and     _ivm_acc+1
         sta     _ivm_acc+1
-        jmp     pfixnext
+        PNEXT_HAVEY
 
 op_or:
         lda     (_ivm_ipc),y
@@ -676,7 +680,7 @@ op_or:
         lda     MEM_HI_BASE,x
         ora     _ivm_acc+1
         sta     _ivm_acc+1
-        jmp     pfixnext
+        PNEXT_HAVEY
 
 op_xor:
         lda     (_ivm_ipc),y
@@ -688,7 +692,7 @@ op_xor:
         lda     MEM_HI_BASE,x
         eor     _ivm_acc+1
         sta     _ivm_acc+1
-        jmp     pfixnext
+        PNEXT_HAVEY
 
 op_bnot:
         lda     _ivm_acc
@@ -697,7 +701,7 @@ op_bnot:
         lda     _ivm_acc+1
         eor     #$FF
         sta     _ivm_acc+1
-        jmp     xnext
+        PNEXT_HAVEY
 
 ;;; { } shifts
 op_shl:
@@ -769,7 +773,7 @@ op_l:                           ; ACC = lo(mem[xx])
         sta     _ivm_acc
         lda     #0
         sta     _ivm_acc+1
-        jmp     pfixnext
+        PNEXT_HAVEY
 
 op_s:                           ; mem[xx] = lo(ACC)
         lda     (_ivm_ipc),y
@@ -779,7 +783,7 @@ op_s:                           ; mem[xx] = lo(ACC)
         sta     MEM_LO_BASE,x
         lda     #0
         sta     MEM_HI_BASE,x
-        jmp     pfixnext
+        PNEXT_HAVEY
 
 op_j:                           ; char --
         lda     (_ivm_ipc),y
@@ -801,7 +805,7 @@ bincdec:
         lda     #0
         sta     MEM_HI_BASE,x
         sta     _ivm_acc+1
-        jmp     pfixnext
+        PNEXT_HAVEY
 
 ;;; rxx / wxx  byte pointer via slot
 op_r:
@@ -879,7 +883,7 @@ op_hash:
         iny
         bne     :-
 :       iny
-        jmp     pfixnext
+        PNEXT_HAVEY
 
 ;;; "  print string at ipc until 0
 op_str:
@@ -895,7 +899,7 @@ strlp:
         bne     strlp
 strdone:
         iny
-        jmp     xnext
+        PNEXT_HAVEY
 
 ;;; P  print string from ACC until 0
 op_P:
@@ -926,7 +930,7 @@ op_H:
         adc     #0
         sta     MEM_HI_BASE,x
         sta     _ivm_acc+1
-        jmp     pfixnext
+        PNEXT_HAVEY
 
 ;;; Jxx  ACC = --mem[xx]
 op_J:
@@ -942,7 +946,7 @@ op_J:
         sbc     #0
         sta     MEM_HI_BASE,x
         sta     _ivm_acc+1
-        jmp     pfixnext
+        PNEXT_HAVEY
 
 ;;; Uab  mem[a] += mem[b]; ACC = mem[a]
 op_U:
@@ -1016,10 +1020,10 @@ op_G:
         bcc     :+
         inc     _ivm_ipc+1
 :       iny
-        jmp     xnext
+        PNEXT_HAVEY
 gskip:
         iny
-        jmp     xnext
+        PNEXT_HAVEY
 
 ;;; B delta  — ipc -= delta; skip delta
 op_B:
@@ -1031,7 +1035,7 @@ op_B:
         bcs     :+
         dec     _ivm_ipc+1
 :       iny
-        jmp     xnext
+        PNEXT_HAVEY
 
 ;;; t v u oo / u v u oo  — for-test
 op_u:
@@ -1090,7 +1094,7 @@ t_skip_load:
 
 t_enter:
         ldy     #3
-        jmp     xnext
+        PNEXT_HAVEY
 
 t_exit:
         ldy     #2
