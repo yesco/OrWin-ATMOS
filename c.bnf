@@ -174,8 +174,8 @@ K=$Y
 |puts("["]\u);[N]
 |puts(\i);[L\1PN]
 
-# raxiss's conio.h (libmos6502vm): _putc _puts - let's just recognize it!
-|_putc(CR);[O\x0d]
+# raxiss's conio.h (libmos6502vm): _putc _puts - let's ju
+#|_putc(CR);[O\x0d] # TODO: - crashes?
 |_putc(LF);[O\x0a]
 |_putc($E);[E]
 |_puts("["]\u);
