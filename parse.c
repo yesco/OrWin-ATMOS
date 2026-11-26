@@ -146,7 +146,7 @@
 //   (A-Z are rule names; space is the ws-gap directive)
 //
 // Free (not directives; ok as \X literal or future ops):
-//   " `
+//   none (" is \"text", ` a number for an initializer: \`)
 //
 
 
@@ -328,18 +328,18 @@ static void anim_report(void) {
 
 
 // Change .ext
-// "dir/foo.c" -> "foo" + ext (".ivm", ".sym") into out[128]
+// "dir/foo.c" -> "dir/foo" + ext (".ivm", ".sym") into out[128]
 static void change_ext(char *out, const char *path, const char *ext) {
   word n = 0;
-  const char *base = path, *s;
+  const char *s;
   char *dot = 0;
 
-  for (s = path; *s; s++)
-    if (*s == '/' || *s == '\\') base = s + 1;
-
-  for (s = base; *s && n < 128 - 5; s++) {
+  // the path as it is (its dir too: TMP/x.c -> TMP/x.ivm), the last
+  // name's extension replaced
+  for (s = path; *s && n < 128 - 5; s++) {
     out[n++] = *s;
     if (*s == '.') dot = out + n - 1;
+    else if (*s == '/' || *s == '\\') dot = 0;
   }
 
   if (dot) n = (word)(dot - out);
@@ -582,6 +582,10 @@ uchar next_slot; // next free slot index for \+ decls / temps
 
 // const + bin / bin_ptr from ivm-gen.c
 #define VAL_ACC  0xffff
+// \`: an initializer's number: its value for \, (ia_v), no const slot
+#define VAL_RAW  0xfffe
+static word ia_v;
+static uchar ia_raw;
 
 // Type of the declaration currently being parsed (set by matching I/T).
 // High byte is type char: 'c'/'w' or uppercase 'C'/'W' for pointer.
@@ -1717,8 +1721,10 @@ static uchar init_start(void) {
 static uchar init_elem(void) {
   uchar k = CAP_SLOT(cur.result);
   word v;
-  if (!nsym || !is_lit(k)) return 0;
-  v = (word)lit_val(k);
+  if (!nsym) return 0;
+  if (cur.result == VAL_RAW) v = ia_v;          // \`: no const slot
+  else if (!is_lit(k)) return 0;
+  else v = (word)lit_val(k);
   data_putc((char)v);
   if (ESIZE() == 2) data_putc((char)(v >> 8));
   return 1;
@@ -1779,6 +1785,15 @@ static uchar match_param_decl(void) {
 
   if (!read_ident()) return 0;
   if (last_func_vec == 0xff) return 0;
+
+  // "int a[]": a pointer, as C
+  skip_ws();
+  if (got('[')) {
+    skip_ws();
+    if (!got(']')) return 0;
+    cur_type = (word)toupper((uchar)(cur_type >> 8)) << 8;
+  }
+
   if (!(s = param_add(last_func_vec, id_buf))) return 0;
   set_decl_type(s);
 
@@ -1967,10 +1982,16 @@ static uchar match_num(void) {
   uchar base = 10;
   word v = 0;
   uchar n = 0;
+  uchar neg = 0;
 
   skip_ws();
 
-  if (got('\'')) {
+  // -55: a number's own minus (all bits: 0 - 55). Only where a number
+  // starts: in "a - 1" and "a -1" the - is the operator (O), its $S
+  // comes after it
+  if (nextc == '-') { skip(); neg = 1; }
+
+  if (!neg && got('\'')) {
 
     // character literal 'x' / '\n' / ... → small integer const
     if (!read_c_char(&c)) return 0;
@@ -2003,10 +2024,6 @@ static uchar match_num(void) {
     // parse number (or cont of 0...)
     for (;;) {
 
-      // TODO: negative!
-      // A: leave it to the grammar: "-" then \d, emit 0 - x (or a
-      //   neg op). Here "a -1" would read -1 and lose the minus.
-
       // Convert (HEX) character to its numeric value
       // (- 28827 28807) = saved 20 bytes
       c = toupper(nextc) - '0';
@@ -2026,10 +2043,16 @@ static uchar match_num(void) {
     // If no digits were successfully parsed, it's a failure
     if (n == 0) return 0;
 
+    if (neg) v = (word)(0 - v);
     ty = (v < 256) ? TY_CHAR : TY_WORD;
   }
 
   note_progress();
+  if (ia_raw) {                         // \`: for \, only
+    ia_v = v;
+    record_capture(VAL_RAW);
+    return 1;
+  }
   record_capture(MAKE_CAP(const_slot(v), ty));
 
   return 1;
@@ -2339,6 +2362,13 @@ int run() {
 
   // \: \, \.: an initialized array: start, an element, end
   else if (c == HIBIT(':')) ok = init_start();
+
+  // \`: a number / 'c' for an initializer (\,): no const slot
+  else if (c == HIBIT('`')) {
+    ia_raw = 1;
+    ok = match_num();
+    ia_raw = 0;
+  }
   else if (c == HIBIT(',')) ok = init_elem();
   else if (c == HIBIT('.')) ok = init_end();
 

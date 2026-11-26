@@ -59,5 +59,27 @@ int main(void) {
   x = 300; x = (char)x; printf("%d ", x);
   x = 300; x = (char)x + 1; printf("%d\n", x);
 
+  // negative literals, && || ?:, op=, assignments in expressions
+  printf("neg logic:\t5 1 0 7\n\t\t");
+  a = 2; b = 0;
+  x = -5 + 10; printf("%d ", x);
+  x = 0; if (a && a < 9) x = 1; printf("%d ", x);
+  x = 0; if (b || a > 9) x = 1; printf("%d ", x);
+  x = a ? 7 : 8; printf("%d\n", x);
+
+  printf("op=:\t\t14 2 63 165 10 48 75\n\t\t");
+  x = 100; x /= 7; printf("%d ", x);
+  x %= 4; printf("%d ", x);
+  x = 9; x *= 7; printf("%d ", x);
+  x = 0x5a; x ^= 0xff; printf("%d ", x);
+  x = 0x5a; x &= 0x0f; printf("%d ", x);
+  x = 3; x <<= 4; printf("%d ", x);
+  x = 300; x >>= 2; printf("%d\n", x);
+
+  printf("assign in:\t33 43 56\n\t\t");
+  a = b = 3; x = a * 10 + b; printf("%d ", x);
+  x = (a = 3) + 1; x = x * 10 + a; printf("%d ", x);
+  a = 5; x = a++; x = x * 10 + a; printf("%d\n", x);
+
   return 0;
 }

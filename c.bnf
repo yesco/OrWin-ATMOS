@@ -91,7 +91,10 @@ M=\+\[$S\]={0}\:\@$U
 |\+\[$S\]\@$U|\+=$S[\g]$U|\+=$E[S\1]$U|\+$U
 # initializer elements: consts, a trailing , allowed. The , before \, : a
 #   failed alt does not take back data (the last one went in twice)
-N=$S,\,\<|$S\,|
+N=$g,\,\<|$g\,|
+# an element: a number / 'c' straight to the data (\`: no const slot, a
+#   256 value table must not fill the pool), else a const name ($S)
+g=\`|$S
 
 # - TODO: deep recursion might be bad...
 # the ; here, not in V: "int b = a + 1;" - M's "\+=$S" alt matched "b = a"
@@ -101,7 +104,13 @@ U=,$M|;
 
 # - TODO: why I^* - pascal artifact?
 T=struct\'W \i *|$I *\'^|$I^*\'^|$I
-I=int\'w|word\'w|void\'w|char\'c|unsigned int\'w|unsigned char\'c
+# (the stdint names first: "int" would match int8_t's start, and a rule
+#   that returned isn't tried again; the same for the longer unsigned ...
+#   and short int before unsigned, short)
+# short is an int (16 bits, as on cc65)
+I=uint8_t\'c|int8_t\'c|uint16_t\'w|int16_t\'w|int\'w|word\'w|void\'w|char\'c|unsigned int\'w|unsigned char\'c
+|unsigned short int\'w|unsigned short\'w|unsigned\'w
+|short int\'w|short\'w|signed char\'c|signed int\'w|signed\'w
 
 # - Function/Args definition
 F=\o$T \f\{($A)\r $B \}[X]\o
@@ -161,6 +170,18 @@ K=$Y
 
 |puts("["]\u);[N]
 |puts(\i);[L\1PN]
+
+# raxiss's conio.h (libmos6502vm): _putc _puts, our own: as putchar, as
+#   puts without the newline
+|_putc($E);[E]
+|_puts("["]\u);
+|_puts($E);[P]
+
+# peek / poke (a byte), deek / doke (a word) at an address: r w @ !
+#   through the address's slot (\j: a variable's own, else a temp).
+#   captures: 1=address 2=its slot 3=value
+|poke($E[S\j],$E);[w\2]
+|doke($E[S\j],$E);[!\2]
 
 |fflush(stdout);
 |fputs("["]\u,stdout);
@@ -278,28 +299,42 @@ L=$I\{ \+=0; \2<$E; \2++) \i\?\C\[\2\]=\d;\}[m\6\8]
 # for(i=0; i<n; i++) a[i]=v;   captures: 1=i 2=i 3=E 4=i 5=ptr 6=i 7=val
 
 |\i=0; [\(Z\1]   \1<=\d; \1++) [\mt\1\3\x] $K [\-n\z\y\)]
+|\i=0; [\(Z\1]   \1<=\d; ++\1) [\mt\1\3\x] $K [\-n\z\y\)]
 |\i=\d;[\(C\1\2] \1<=\d; \1++) [\mt\1\4\x] $K [\-n\z\y\)]
+|\i=\d;[\(C\1\2] \1<=\d; ++\1) [\mt\1\4\x] $K [\-n\z\y\)]
 |\i=\i;[\(C\1\2] \1<=\d; \1++) [\mt\1\4\x] $K [\-n\z\y\)]
+|\i=\i;[\(C\1\2] \1<=\d; ++\1) [\mt\1\4\x] $K [\-n\z\y\)]
 
 # limit is a name (#define const or variable): use its slot directly, no
 # copy. t/n read the limit slot every round, so a variable limit that the
 # body changes behaves like C (the E[S\t] copy below is a snapshot)
 |\i=0; [\(Z\1]   \1<=\i; \1++) [\mt\1\3\x] $K [\-n\z\y\)]
+|\i=0; [\(Z\1]   \1<=\i; ++\1) [\mt\1\3\x] $K [\-n\z\y\)]
 |\i=\d;[\(C\1\2] \1<=\i; \1++) [\mt\1\4\x] $K [\-n\z\y\)]
+|\i=\d;[\(C\1\2] \1<=\i; ++\1) [\mt\1\4\x] $K [\-n\z\y\)]
 |\i=\i;[\(C\1\2] \1<=\i; \1++) [\mt\1\4\x] $K [\-n\z\y\)]
+|\i=\i;[\(C\1\2] \1<=\i; ++\1) [\mt\1\4\x] $K [\-n\z\y\)]
 
 # i < lim: the 'u' loop op (exclusive), same layout as 't'
 |\i=0; [\(Z\1]   \1<\d; \1++) [\mu\1\3\x] $K [\-n\z\y\)]
+|\i=0; [\(Z\1]   \1<\d; ++\1) [\mu\1\3\x] $K [\-n\z\y\)]
 |\i=\d;[\(C\1\2] \1<\d; \1++) [\mu\1\4\x] $K [\-n\z\y\)]
+|\i=\d;[\(C\1\2] \1<\d; ++\1) [\mu\1\4\x] $K [\-n\z\y\)]
 |\i=\i;[\(C\1\2] \1<\d; \1++) [\mu\1\4\x] $K [\-n\z\y\)]
+|\i=\i;[\(C\1\2] \1<\d; ++\1) [\mu\1\4\x] $K [\-n\z\y\)]
 |\i=0; [\(Z\1]   \1<\i; \1++) [\mu\1\3\x] $K [\-n\z\y\)]
+|\i=0; [\(Z\1]   \1<\i; ++\1) [\mu\1\3\x] $K [\-n\z\y\)]
 |\i=\d;[\(C\1\2] \1<\i; \1++) [\mu\1\4\x] $K [\-n\z\y\)]
+|\i=\d;[\(C\1\2] \1<\i; ++\1) [\mu\1\4\x] $K [\-n\z\y\)]
 |\i=\i;[\(C\1\2] \1<\i; \1++) [\mu\1\4\x] $K [\-n\z\y\)]
+|\i=\i;[\(C\1\2] \1<\i; ++\1) [\mu\1\4\x] $K [\-n\z\y\)]
 
 
 |\i=$E[\(S\1]; \1<=$E[S\t];  \1++) [\mt\1\5\x] $K [\-n\z\y\)]
+|\i=$E[\(S\1]; \1<=$E[S\t];  ++\1) [\mt\1\5\x] $K [\-n\z\y\)]
 # -- TODO: \t is wrong, it's taking a snapshot like PASCAL!
 |\i=$E[\(S\1]; \1<$E[S\t];   \1++) [\mu\1\5\x] $K [\-n\z\y\)]
+|\i=$E[\(S\1]; \1<$E[S\t];   ++\1) [\mu\1\5\x] $K [\-n\z\y\)]
 
 # counting-down-to-zero (very common in C)
 #   (commented out: needs a down-loop op, \mu below is from before 'u' = <)
@@ -338,7 +373,26 @@ L=$I\{ \+=0; \2<$E; \2++) \i\?\C\[\2\]=\d;\}[m\6\8]
 
 |\i=$E[\(S\1]; [\m]$E[?G\x]; \i+=\i) $K[\-U\1\5B\z\y\)]
 
+# ++i --i: as i++ i-- (the t / u loops above have a ++\1 twin each)
+|\i\?c=$E[\(s\1]; [\m]$E[?G\x] ;++\1) $K[\-i\4B\z\y\)]
+|\i\?c=$E[\(s\1]; [\m]$E[?G\x] ;--\1) $K[\-j\4B\z\y\)]
+|\i=$E[\(S\1]; [\m]$E[?G\x] ;++\i) $K[\-I\4B\z\y\)]
+|\i=$E[\(S\1]; [\m]$E[?G\x] ;--\i) $K[\-J\4B\z\y\)]
+
+# i += n, i -= n (n a number or a name)   captures: 1=i 2=E 3=E 4=i 5=n
+|\i\?c=$E[\(s\1]; [\m]$E[?G\x]; \1+=$S) $K[\-L\1+\5s\1B\z\y\)]
+|\i\?c=$E[\(s\1]; [\m]$E[?G\x]; \1-=$S) $K[\-L\1-\5s\1B\z\y\)]
+|\i=$E[\(S\1]; [\m]$E[?G\x]; \1+=$S) $K[\-U\1\5B\z\y\)]
+|\i=$E[\(S\1]; [\m]$E[?G\x]; \1-=$S) $K[\-L\1-\5S\1B\z\y\)]
+
+# no init: for (; c; ), for (;;), for (; c; i++)   captures: 1=E 2=i
+|; [\(\m]$E[?G\x] ;) $K[\-B\z\y\)]
+|; ;) [\(\m] $K[\-B\z\)]
+|; [\(\m]$E[?G\x] ;\i++) $K[\-I\2B\z\y\)]
+|; [\(\m]$E[?G\x] ;++\i) $K[\-I\2B\z\y\)]
+
 |\i=$E[\(S\1]; \1<=$E[S\t]; \1++) [\mt\1\5\x] $K [\-n\z\y\)]
+|\i=$E[\(S\1]; \1<=$E[S\t]; ++\1) [\mt\1\5\x] $K [\-n\z\y\)]
 
 # the last resort: E; E; and no step (an init x = .. is an E too, x = E
 #   is one). TODO: E; E; E: the step's code would come BEFORE the body
@@ -433,6 +487,7 @@ H=\i=\i\?\W\[\i\]; \2\[\3\]=\2\[\i\]; \2\[\7\]=\1;[A\2\3\7S\1]
 |\i\?c-=$E;[S\tL\1-\3s\1]
 |\i+=$E;[+\1S\1]
 |\i-=$E;[S\tL\1-\3S\1]
+|$a
 |\i=\1+1;[I\1]
 |\i=1+\1;[I\1]
 |\i=\1-1;[J\1]
@@ -471,6 +526,28 @@ H=\i=\i\?\W\[\i\]; \2\[\3\]=\2\[\i\]; \2\[\7\]=\1;[A\2\3\7S\1]
 |\i--;[J\1]
 |--\i;[J\1]
 |\i=$E;[S\1]
+
+# the other op= (* / % & | ^ << >>): in a, H has no room (MAX_ALTS)
+#   - * & | ^: ACC = E op v
+#   - / % << >>: E to a temp, then v op temp
+#   - a char: s, the low byte
+#   captures: 1=v 2=E 3=temp
+a=\i\?c*=$E;[*\1s\1]
+|\i\?c&=$E;[&\1s\1]
+|\i\?c\|=$E;[|\1s\1]
+|\i\?c^=$E;[^\1s\1]
+|\i\?c/=$E;[S\tL\1/\3s\1]
+|\i\?c%=$E;[S\tL\1%\3s\1]
+|\i\?c<<=$E;[S\tL\1\{\3s\1]
+|\i\?c>>=$E;[S\tL\1\}\3s\1]
+|\i*=$E;[*\1S\1]
+|\i&=$E;[&\1S\1]
+|\i\|=$E;[|\1S\1]
+|\i^=$E;[^\1S\1]
+|\i/=$E;[S\tL\1/\3S\1]
+|\i%=$E;[S\tL\1%\3S\1]
+|\i<<=$E;[S\tL\1\{\3S\1]
+|\i>>=$E;[S\tL\1\}\3S\1]
 
 # - Struct stores (from H)
 # a[i].f (an array of structs, SoA): word i of f's array (\&)
@@ -534,6 +611,8 @@ E=\i\?c=\;=$E[s\1l\1]
 #|(I)E  - not work (type annotation require a symbol?
 #|(T*)E - not work
 |(char*)$E
+# raxiss's types.h: MEMPTR(a) is (uint8_t *)(a)
+|MEMPTR($E)
 |(int*) $E
 |(word*)$E
 # (char): binds tighter than the operators: (char)x + y casts x only
@@ -588,6 +667,8 @@ R=getchar()[K]
 |memmove($E[S\j],$E[S\j],$E[S\j])[V\2\4\6]
 |memcpy($E[S\j],$E[S\j],$E[S\j])[V\2\4\6]
 |strlen($E[S\j])[$\2]
+|peek($E[S\j])[r\2]
+|deek($E[S\j])[@\2]
 |strcmp($E[S\j],$E)[x\#10\2]
 |strncmp($E[S\j],$E[S\j],$E)[y\#11\2\4]
 |memcmp($E[S\j],$E[S\j],$E)[y\#12\2\4]

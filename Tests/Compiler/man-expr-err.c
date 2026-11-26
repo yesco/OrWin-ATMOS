@@ -19,16 +19,7 @@ int main(void) {
   x = a | b ^ c;             // ERR ^ after |
   x = a << b + 1;            // ERR + after <<
   x = -a;                    // ERR no unary minus: 0 - a
-  x = -5;                    // ERR no negative literal: 0 - 5
   x = ~a;                    // ERR no ~: a ^ 0xffff
-  if (a && b) x = 1;         // ERR no &&: nested ifs
-  if (a || b) x = 1;         // ERR no ||
-  x = a ? b : c;             // ERR no ?:
-  a = b = 3;                 // ERR no assignment in an expression
-  x = (a = 3) + 1;           // ERR the same
-  x = a++;                   // ERR ++ only as a statement
-  x *= 2;                    // ERR only += and -=
-  x <<= 1;                   // ERR the same
   x = 09;                    // ERR 0... is octal: no 8 or 9
   x = a * b + c;
   x = f(a) + (b * c);

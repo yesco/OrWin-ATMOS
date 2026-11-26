@@ -2,6 +2,9 @@
 
 # MeteoriC-65 (parse.c c.bnf): next, after the manual (MeteoriC-man.md)
 
+- for (int j = 0; j < 3; j++) a++;              // ERR no declaration in for
+  well, why not? we do "recognize it for memset" (not expect i set after)
+
 - I'm assuming that a[i]=a[i]+1; becomes quite efficient code? Adress
   calc only once and reused. Particular for small fixed char arrays one
   can use INC $addr,X

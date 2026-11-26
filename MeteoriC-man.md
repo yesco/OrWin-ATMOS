@@ -150,20 +150,20 @@ gives what gcc gives, what does not is a reported error.
 
 ## What MeteoriC-65 supports
 
-| area         |                                                                                                                                                                  |
-| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| types        | `word` `unsigned int` (16 bit), `char` `unsigned char` (8 bit), `void`, pointers, `struct`, for convenience `int` but comparisions may not agree, TODO: warnings |
-| declarations | globals, locals, several per line, initializers, `const`, `static`, `register`                                                                                   |
-| expressions  | `+ - * / % & ^ \|` `<< >>`, compares (as values too), `!`, casts, calls anywhere, `sizeof`                                                                       |
-| assignment   | `=` `+=` `-=` `++` `--`                                                                                                                                          |
-| statements   | `if` / `else`, `while`, counting `for` loops (up, down, `<` `<=`, a variable limit or step), blocks, `return`                                                    |
-| functions    | parameters, `int` / `char` / pointer results, calls in expressions and as arguments                                                                              |
-| arrays       | `char` and `int` arrays, initializers (`{...}`, `"..."`, size from the initializer), `sizeof`, any index expression                                              |
-| pointers     | `char*` `word*` `struct *` `int*` `*p` `*p++` `p[i]` `p++` `p += n`, strings, `malloc` / `free` / `memset`                                                       |
-| structs      | fields `s.f` `p->f`, initializers, pointers, chains (`a.next->v`, `ps[i]->x`, `mk()->x`), arrays of pointers, arrays of structs (SoA, `__striped`)               |
-| output       | `printf` (text, one number, a string), `putchar` `puts` `fputs` `getchar` `putz` `putn`                                                                          |
-| preprocessor | `#define` (numbers, strings), simple: `#ifdef` `#ifndef` `#if` `#else` `#endif`, `__MC65__`                                                                      |
-| tools        | error recovery, `-O` (packing, peephole), `-S` (striping), `-v` (bytecode per statement)                                                                         |
+| area         |                                                                                                                                                                                              |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| types        | `word` `unsigned int` (16 bit), `char` `unsigned char` (8 bit), `void`, pointers, `struct`, for convenience `int` `short` `unsigned` `signed` but comparisions may not agree, TODO: warnings |
+| declarations | globals, locals, several per line, initializers, `const`, `static`, `register`                                                                                                               |
+| expressions  | `+ - * / % & ^ \|` `<< >>`, compares (as values too), `!` `&&` `\|\|` `?:`, casts, calls anywhere, `sizeof`, negative literals                                                               |
+| assignment   | `=` `+=` `-=` `*=` `/=` `%=` `&=` `\|=` `^=` `<<=` `>>=` `++` `--`                                                                                                                           |
+| statements   | `if` / `else`, `while`, `for` (up, down, `<` `<=`, `++i` `i += n` steps, parts left out), `break` `continue`, blocks, `return`                                                               |
+| functions    | parameters (`int a[]` is `int *a`), `int` / `char` / pointer results, calls in expressions and as arguments                                                                                  |
+| arrays       | `char` and `int` arrays, initializers (`{...}`, `"..."`, size from the initializer), `sizeof`, any index expression                                                                          |
+| pointers     | `char*` `word*` `struct *` `int*` `*p` `*p++` `p[i]` `p++` `p += n`, strings, `malloc` / `free` / `memset`                                                                                   |
+| structs      | fields `s.f` `p->f`, initializers, pointers, chains (`a.next->v`, `ps[i]->x`, `mk()->x`), arrays of pointers, arrays of structs (SoA, `__striped`)                                           |
+| output       | `printf` (text, one number, a string), `putchar` `puts` `fputs` `getchar` `putz` `putn`                                                                                                      |
+| preprocessor | `#define` (numbers, strings), simple: `#ifdef` `#ifndef` `#if` `#else` `#endif`, `__MC65__`                                                                                                  |
+| tools        | error recovery, `-O` (packing, peephole), `-S` (striping), `-v` (bytecode per statement)                                                                                                     |
 
 ---
 
@@ -295,7 +295,7 @@ structs (plain or `__striped`) are their size in bytes: 2 per field.
 ```c
 int x;
 
-x = 0 - 1;               /* -1 is not a literal: write 0 - 1 */
+x = -1;                  /* all bits: 65535 */
 if (x < 0) ...           /* never true: x is 65535 */
 printf("%d\n", x);       /* prints 65535 */
 x = 300 * 300;           /* 24464 (90000 & 0xffff) */
@@ -303,8 +303,11 @@ x = 300 * 300;           /* 24464 (90000 & 0xffff) */
 
 Test the top bit when you need a sign: `if (x & 0x8000)`.
 
-**NOTE:** not supported: `long`, `short`, `float`/`double`, `signed`,
-`typedef`, `enum`, `union`, 2D arrays (`int m[3][3]`).
+`short` is an `int`, `signed` and `unsigned` alone are `int` too (all
+the same 16 bits, unsigned).
+
+**NOTE:** not supported: `long`, `float`/`double`, `typedef`, `enum`,
+`union`, 2D arrays (`int m[3][3]`).
 
 Examples: [`man-types.c`](Tests/Compiler/man-types.c), errors: [`man-decl-err.c`](Tests/Compiler/man-decl-err.c).
 
@@ -371,9 +374,11 @@ Examples: [`man-decl.c`](Tests/Compiler/man-decl.c), errors: [`man-decl-err.c`](
 | `f(a, b)`                                | calls, also in expressions and as arguments: `add(f(1), f(2))` |
 | `sizeof(T)` `sizeof(a)`                  | see [Types](#types), [Arrays](#arrays)                         |
 | `0x1f` `0b101` `017` `0o17` `'a'` `'\n'` | literals (`017` and `0o17`: octal, as in C)                    |
+| `-5` `-0x10`                             | negative literals (all bits: `-1` is 65535)                    |
+| `a && b` `a \|\| b` `c ? a : b`          | as in C                                                        |
 
-**NOTE:** not supported in expressions: unary minus (`-x`, `-5`: write
-`0 - x`), `~x` (write `x ^ 0xffff`), `&&` `||` (nest the `if`s), `?:`,
+**NOTE:** not supported in expressions: unary minus (`-x`: write
+`0 - x`), `~x` (write `x ^ 0xffff`),
 assignments (`b = (a = 3)`, `a = b = 3`), `x++` / `--x` inside an
 expression, `*(p + 1)` (write `p[1]`), `&x` of a plain variable.
 
@@ -471,24 +476,23 @@ Examples: [`man-expr.c`](Tests/Compiler/man-expr.c), errors: [`man-expr-err.c`](
 | `while (E) S`                                                            |                                 |
 | `for (i = A; i < B; i++) S`                                              | also `<=`, a var or const limit |
 | `for (i = N; i; i--)` `for (i = N; i > 0; i--)` `for (i = N; i-- > 0; )` | counting down                   |
-| `for (i = A; i < B; i += d)`                                             | step a variable                 |
+| `for (i = A; i < B; i += d)` `i -= d`                                    | a step: a variable or a number  |
+| `for (i = A; i < B; ++i)` `--i`                                          | as `i++` `i--`                  |
+| `for (; E; )` `for (;;)` `for (; E; i++)`                                | parts left out                  |
+| `break;` `continue;`                                                     | the innermost loop              |
 | `{ ... }`                                                                | blocks, nested                  |
 | `return E;` `return;`                                                    |                                 |
 
-**NOTE:** not supported: `do ... while`, `break`, `continue`,
-`switch`, `goto` and labels, `for (;;)`, `for (int i = 0; ...)`, `for
-(...; i += 2)` (a constant step: put it in a variable).
-*TODO: `break` / `continue` (cheaply: a jump per loop to patch), or
-`label:` / `goto` as a first step.*
+**NOTE:** not supported: `do ... while`, `switch`, `goto` and labels,
+`for (int i = 0; ...)`, a step that is not `i++` `++i` `i--` `--i` `i +=
+n` `i -= n`.
 
-Without `break`: put the loop in a function and `return`, or fold the
-exit into the condition:
+**NOTE (silent):** compares are unsigned, so a loop counting down past 0
+does not stop: `for (i = 20; i > 0; i -= 3)` goes 2, then 65535. Step to
+exactly 0, or test before the step.
 
 ```c
-for (i = 0; i < n; i++) if (a[i] == x) break;     /* error */
-
-i = 0;                                            /* ok */
-while (i < n) { if (a[i] == x) n = i; else i++; }
+for (i = 0; i < n; i++) if (a[i] == x) break;     /* ok */
 ```
 
 Examples: [`man-stmt.c`](Tests/Compiler/man-stmt.c), errors: [`man-stmt-err.c`](Tests/Compiler/man-stmt-err.c).
@@ -504,7 +508,8 @@ void hello(void) { puts("hi"); }
 struct pt *mk(int x) { ... return p; }      /* a pointer result */
 ```
 
-- Parameters and results are `int`, `char` or pointers.
+- Parameters and results are `int`, `char` or pointers. A parameter
+  `int a[]` is `int *a` (as in C).
 - Calls work as statements, in expressions and as arguments.
 - Each function has a fixed frame: its parameters and locals at fixed
   slots (with `-O` frames of functions never active at the same time
@@ -541,22 +546,22 @@ int q[N];                     /* a #define or const size */
 
 - Arrays are **static**, also inside a function: zeroed (or initialized)
   once, at load, not on each call.
-- Initializers: constants only.
+- Initializers: constants only. The values go straight into the
+  program's data, so a big table costs no constant slots.
+- An initializer in a function needs `static` (it's set once): `static
+  int w[2] = {5, 0};`. Without it: an error.
 - `sizeof(a)` is the size in bytes.
 - An array name is its address: pass it to an `int *` / `char *`
   parameter, assign it to a pointer.
 - Indexing: `a[i]`, `a[i + 1]`, `a[3]`, both reading and writing.
 
-**NOTE (silent):** a local array keeps its contents between calls; its
-initializer is not run again:
+**NOTE (silent):** a local array without an initializer keeps its
+contents between calls too (C: they're undefined):
 
 ```c
-int f(void) { int w[2] = {5, 0}; w[0] = w[0] + 1; return w[0]; }
-/* 6, 7, 8, ...: C would give 6 every time */
+int f(void) { int w[2]; w[0] = w[0] + 1; return w[0]; }
+/* 1, 2, 3, ... */
 ```
-
-*TODO: require `static` on a local array with an initializer (then it is
-standard C).*
 
 **NOTE:** 2D arrays are not supported; index by hand: `m[r * COLS + c]`.
 
@@ -720,6 +725,7 @@ Examples: [`man-struct.c`](Tests/Compiler/man-struct.c), [`test-struct.c`](test-
 | `printf("%u%u%u", a, b, c)`                                 | three numbers                                                            |
 | `c = getchar();`                                            |                                                                          |
 | `putz(s)` `putn(E)` `putnl(E)` `nl()`                       | non C: a string, a number and a space, a number and a newline, a newline |
+| `_putc(c)` `_puts(s)`                                       | raxiss's conio.h: `putchar`, `puts` without the newline                  |
 
 `%d` and `%u` both print unsigned (3).
 
@@ -734,6 +740,17 @@ printf("%d %d\n", a, b);  /* error */
 
 Split it: `printf("a="); printf("%d\n", a);` and use `putchar(c)` for a
 character. There is no `%x`, `%c`, no widths.
+
+Memory at an address (raxiss's `types.h`, and the BASIC words):
+
+- `peek(a)`: the byte at address `a`
+- `poke(a, v)`: `v` (its low byte) to address `a`
+- `deek(a)`: the word at `a` (little endian)
+- `doke(a, v)`: `v` to `a` as a word
+- `MEMPTR(a)`: `a` as a byte pointer (`uint8_t *`)
+
+The types `uint8_t` `int8_t` are `unsigned char` `char`, `uint16_t`
+`int16_t` are `int`. Examples: [`test-peekpoke.c`](test-peekpoke.c).
 
 Examples: [`man-io.c`](Tests/Compiler/man-io.c). The silent cases of this manual:
 [`man-quirks.c`](Tests/Compiler/man-quirks.c).
@@ -1034,26 +1051,24 @@ built, `-DIVM_OPT`), value numbering 2.1 KB, CSE 3.5 KB (not built,
 
 ## Not supported: a summary
 
-|                                                             | instead                                |
-| ----------------------------------------------------------- | -------------------------------------- |
-| recursion                                                   | loops (silent: hangs)                  |
-| prototypes                                                  | define callee first                    |
-| `long` `short` `float` `signed` `typedef` `enum` `union`    |                                        |
-| negative literals, unary `-`, `~`                           | `0 - x`, `x ^ 0xffff`                  |
-| signed compares / printing                                  | test `x & 0x8000`                      |
-| `&&` `\|\|` `?:`                                            | nested `if`                            |
-| `a + b * c` (tighter after looser)                          | `a + (b * c)` or `b * c + a`           |
-| assignment / `++` inside expressions                        | separate statements                    |
-| `*= /= %= &= \|= ^= <<= >>=`                                | `x = x * 2;`                           |
-| `a[i]++` `a[i] += n`                                        | `a[i] = a[i] + n;`                     |
-| `*(p + i)`                                                  | `p[i]`                                 |
-| `ptr + n` in expressions (not scaled: silent)               | `p += n;` then use `p`                 |
-| `&x` of a variable                                          | an array of 1                          |
-| `do` `break` `continue` `switch` `goto` `for (;;)`          | `while`, a function and `return`       |
-| `for (int i ...)`, `for (...; i += 2)`                      | declare `i` before, step in a variable |
-| 2D arrays                                                   | `m[r * COLS + c]`                      |
-| global initializers with expressions                        | a constant, or assign in `main`        |
-| `#define` expressions / macros                              | `const int`, functions                 |
-| `#if NAME` (always true: silent)                            | `#ifdef NAME`                          |
-| `printf` beyond the listed forms (silent)                   | split, `putchar`                       |
-| `struct s x, y;` `struct s {..} x;` struct copies, by-value | one per line, pointers                 |
+|                                                             | instead                         |
+| ----------------------------------------------------------- | ------------------------------- |
+| recursion                                                   | loops (silent: hangs)           |
+| prototypes                                                  | define callee first             |
+| `long` `float` `typedef` `enum` `union`                     |                                 |
+| unary `-`, `~`                                              | `0 - x`, `x ^ 0xffff`           |
+| signed compares / printing                                  | test `x & 0x8000`               |
+| `a + b * c` (tighter after looser)                          | `a + (b * c)` or `b * c + a`    |
+| assignment / `++` inside expressions (not `b[j++] = v`)     | separate statements             |
+| `a[i]++` `a[i] += n` (`op=` on an element)                  | `a[i] = a[i] + n;`              |
+| `*(p + i)`                                                  | `p[i]`                          |
+| `ptr + n` in expressions (not scaled: silent)               | `p += n;` then use `p`          |
+| `&x` of a variable                                          | an array of 1                   |
+| `do` `switch` `goto`                                        | `while`, `if` ... `else if`     |
+| `for (int i ...)`                                           | declare `i` before              |
+| 2D arrays                                                   | `m[r * COLS + c]`               |
+| global initializers with expressions                        | a constant, or assign in `main` |
+| `#define` expressions / macros                              | `const int`, functions          |
+| `#if NAME` (always true: silent)                            | `#ifdef NAME`                   |
+| `printf` beyond the listed forms (silent)                   | split, `putchar`                |
+| `struct s x, y;` `struct s {..} x;` struct copies, by-value | one per line, pointers          |

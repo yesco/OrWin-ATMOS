@@ -64,3 +64,4 @@ ptest*.log
 # parse: symbols of each program; ./jit: cycle counts
 *.sym
 *.cycles
+TMP

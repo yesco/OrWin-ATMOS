@@ -2,15 +2,28 @@
 # ptest - compile a test-NAME.c with ./pc, run it on every backend, compare
 # the output to test-NAME.out (if any), report cycles and sizes.
 #
-#   ./ptest              all test-*.c
+#   ./ptest              all test-*.c, test-*-asm.asm, raxiss's samples
 #   ./ptest empty        test-empty.c        (test-empty.c, test-empty ok too)
 #   ./ptest 'dispatch*'  test-dispatch*.c    (quote it, or the shell globs)
 #   ./ptest byte-sieve-prime   no test-byte-sieve-prime.c: byte-sieve-prime.c
+#   ./ptest 06-sieve     raxiss's sample 06-sieve ('1?-*': a glob of them)
+#
+# What it prints:
+#
+#   ./ptest        only the = lines: the results (and the summary table)
+#   ./ptest -v     also one progress line on stderr: [5/17] test: variant
+#   ./ptest -v -v  everything: each command and its output
+#
+# The = lines also go to ptest.out (./ptest SPEC: ptest-SPEC.out): small,
+# checked in, to follow the results over time.
+#
+# Everything else goes to TMP/ (a symlink to the system's tmp, one per
+# clone; asked for the first time): each test runs on a copy there, so
+# its .ivm .sim .log .got .expect land there, and the whole run's log:
+# TMP/ptest.log (TMP/ptest-SPEC.log).
 #
 # Per test, logs: test-NAME.{pc,ivm,asm,fix,jit,hjit,cc65-build,cc65,oscar}.log
 #   outputs:      test-NAME.expect (.out or majority), test-NAME.VARIANT.got
-# stdout: = lines are results (./ptest | grep ^=), %Error: lines failures
-# Whole run:      ptest.log (all tests), ptest-SPEC.log (./ptest SPEC)
 #
 # Variants:
 #   ivm    ./ivm       cc65 C VM            size: .ivm
@@ -26,29 +39,65 @@
 # A test-NAME-asm.asm (6502 asm, ivm-lib's routines on their own, no
 # compiler) has one variant:
 #   lib    cl65 -t sim6502 NAME.asm ivm-lib.asm, sim65  size: .sim
+#
+# raxiss's samples (RAX, ../oricCompilerBenchmark): each runs as
+# test-rax-NN-name, with two changes:
+# - its #include "..." are inlined
+# - <conio.h> <types.h> are "conio.h" "types.h": their libmos6502vm's,
+#   copied to TMP (the compiler skips them: c.bnf has its own _putc
+#   _puts peek poke MEMPTR uint8_t ...)
+# cc65 and oscar also get their _puts.c and a _putc that is putchar
+# (TMP/rax-io.c). The .out is what their own gcc command prints
+# (tools/test-samples.sh).
 
-import collections, difflib, glob, os, pty, re, shlex, signal, subprocess, sys, threading
+import collections, difflib, glob, os, pty, re, shlex, shutil, signal
+import subprocess, sys, threading
 
 TIMEOUT = 600
 OSCAR64 = os.environ.get("OSCAR64",
                          os.path.expanduser("~/GIT/oscar64/bin/oscar64"))
+RAX = "../oricCompilerBenchmark/playground"
+TMP = "TMP"
 
-out = None  # the whole-run log
+out = None       # the whole run's log (TMP)
+res_out = None   # the = lines (ptest.out)
+verbose = 0      # -v: progress, -v -v: everything
+step_n = (0, 0)  # [k/n] for the progress line
 
 
 def say(s=""):
-    sys.stdout.write(s + "\n")
-    sys.stdout.flush()
+    """a line for the log; the terminal: at -v -v, or a = line"""
     out.write(s + "\n")
     out.flush()
+    if s.startswith("="):
+        res_out.write(s + "\n")
+        res_out.flush()
+    if verbose >= 2 or s.startswith("="):
+        if verbose == 1:
+            sys.stderr.write("\r\x1b[K")         # (the progress line)
+        sys.stdout.write(s + "\n")
+        sys.stdout.flush()
+
+
+def step(t, what):
+    """-v: one progress line on stderr, overwritten each time"""
+    if verbose == 1:
+        k, n = step_n
+        sys.stderr.write("\r[%d/%d] %s: %s\x1b[K" % (k, n, base(t), what))
+        sys.stderr.flush()
+
+
+def base(t):
+    return os.path.basename(t)
 
 
 def run(cmd, log):
     """Run cmd (list), stream its output as '  | ' lines (never ^=), save
     stdout+stderr to log, return the text. A pty keeps the tools (sim65,
     printf) line buffered, so the output moves while it runs."""
-    sys.stderr.write("\n$ %s    > %s\n" % (" ".join(cmd), log))
-    sys.stderr.flush()
+    if verbose >= 2:
+        sys.stderr.write("\n$ %s    > %s\n" % (" ".join(cmd), log))
+        sys.stderr.flush()
     out.write("\n$ %s    > %s\n" % (" ".join(cmd), log))
     master, slave = pty.openpty()
     # its own process group: the timeout kills it all (bash ./ivm-asm: its
@@ -84,6 +133,19 @@ def run(cmd, log):
         if not timer.is_alive():
             line(b"%%Error: TIMEOUT after %d s" % TIMEOUT)
         timer.cancel()
+    return unglue("\n".join(lines) + "\n")
+
+
+def unglue(text):
+    """output without a newline at its end: the runner's lines after it
+    on their own line again (sim65's "N cycles", ivm's --- END ---, the
+    host sim's --- SIM:, oscar's Emulation result / Total Cycles)"""
+    text = re.sub(r"(?<=[^\n])(--- END ---|--- SIM: |Emulation result|"
+                  r"Total Cycles)", r"\n\1", text)
+    lines = text.rstrip("\n").split("\n")
+    m = re.match(r"^(.*\D)(\d+ cycles)$", lines[-1])
+    if m:                                      # "... 4093 12568166 cycles"
+        lines[-1:] = [m.group(1), m.group(2)]
     return "\n".join(lines) + "\n"
 
 
@@ -145,18 +207,127 @@ def repro(name, t):
     }[name].format(t=t)
 
 
+# ---- TMP --------------------------------------------------------------------
+
+def tmp_dir():
+    """TMP: a symlink to the system's tmp, its own dir per clone (the repo
+    dir's name). The first time: asked (a terminal), else just made"""
+    if os.path.isdir(TMP):
+        return
+    to = os.path.join(os.environ.get("TMPDIR", "/tmp"),
+                      os.path.basename(os.getcwd()))
+    if sys.stdin.isatty():
+        sys.stderr.write("ptest: create %s -> %s? [Y/n] " % (TMP, to))
+        if sys.stdin.readline().strip().lower() in ("n", "no"):
+            sys.exit("%Error: ptest: no TMP")
+    os.makedirs(to, exist_ok=True)
+    if os.path.lexists(TMP):
+        os.remove(TMP)                       # a dangling link
+    os.symlink(to, TMP)
+
+
+def to_tmp(src):
+    """a test (its .c / .asm, its .out) copied to TMP: its name there"""
+    name, ext = src.rsplit(".", 1)
+    t = os.path.join(TMP, base(name))
+    shutil.copyfile(src, t + "." + ext)
+    rm(t + ".out")
+    if os.path.exists(name + ".out"):
+        shutil.copyfile(name + ".out", t + ".out")
+    return t
+
+
+# ---- raxiss's samples ---------------------------------------------------------
+
+def rax_samples(pat="[0-9][0-9]-*"):
+    """the sample dirs matching pat (NN-name)"""
+    d = os.path.join(RAX, "samples")
+    return sorted(p for p in glob.glob(os.path.join(d, pat)) if os.path.isdir(p))
+
+
+def rax_inline(path, seen):
+    """a file's text, its #include "..." replaced by theirs (once each)"""
+    lines = []
+    for l in open(path, encoding="latin-1").read().split("\n"):
+        m = re.match(r'^\s*#\s*include\s+"([^"]+)"', l)
+        if m:
+            inc = os.path.normpath(os.path.join(os.path.dirname(path), m.group(1)))
+            if inc not in seen and os.path.exists(inc):
+                seen.add(inc)
+                lines += ["// ---- %s (inlined) ----" % m.group(1)]
+                lines += rax_inline(inc, seen)
+                lines += ["// ---- end of %s ----" % m.group(1)]
+                continue
+        lines.append(l)
+    return lines
+
+
+RAX_IO = ["_puts.c", "rax-io.c"]              # cc65, oscar: the I/O
+
+
+def rax_io():
+    """their conio.h types.h _puts.c in TMP, and rax-io.c: _putc"""
+    lib = os.path.join(RAX, "libmos6502vm")
+    for f in ("conio.h", "types.h", "_puts.c"):
+        shutil.copyfile(os.path.join(lib, f), os.path.join(TMP, f))
+    open(os.path.join(TMP, "rax-io.c"), "w").write(
+        "// their _putc (a store to the mos6502vm's port): putchar\n"
+        "#include <stdio.h>\n#include \"conio.h\"\n"
+        "void _putc(const char c) { putchar(c); }\n")
+
+
+def rax_test(d):
+    """sample dir d as TMP/test-rax-NN-name.c, its .out from their gcc"""
+    name = os.path.basename(d)
+    t = os.path.join(TMP, "test-rax-" + name)
+    srcs = sorted(glob.glob(os.path.join(d, "*.c")))
+    head = ["// test-rax-%s.c - raxiss's sample %s (made by ptest)" % (name, name),
+            "//",
+            "// From %s." % d,
+            "// Changed: its #include \"...\" inlined, <conio.h> <types.h>",
+            "// as \"conio.h\" \"types.h\" (theirs, in TMP).",
+            ""]
+    body = []
+    for s in srcs:
+        body += rax_inline(s, set())
+    body = [re.sub(r'^(\s*#\s*include\s*)<(conio|types)\.h>', r'\1"\2.h"', l)
+            for l in body]
+    rax_io()
+    open(t + ".c", "w").write("\n".join(head + body) + "\n")
+
+    # the reference: their gcc command (tools/test-samples.sh) on the original
+    lib = os.path.join(RAX, "libmos6502vm")
+    exe = t + ".host"
+    rm(t + ".out", exe)
+    cmd = ["gcc", "-w", "-o", exe] + srcs + [os.path.join(lib, "_puts.c"),
+           "-I", os.path.join(RAX, "samples"), "-I", lib,
+           "-D__HOST_C__", "-D_putc=putchar",
+           "-Wno-error=implicit-function-declaration"]   # (clang: putchar)
+    if subprocess.run(cmd, stdout=subprocess.DEVNULL,
+                      stderr=subprocess.DEVNULL).returncode == 0:
+        try:
+            r = subprocess.run([exe], stdout=subprocess.PIPE, timeout=60)
+            open(t + ".out", "wb").write(r.stdout)
+        except subprocess.TimeoutExpired:
+            pass
+    return t
+
+
+# ---- a test -------------------------------------------------------------------
+
 def test(t):
-    """Run all variants of test t (e.g. test-empty). Returns result list."""
+    """Run all variants of test t (TMP/test-empty). Returns result list."""
     res = []  # (name, cycles, bytes, file, output-lines, log)
 
     say("#" * 60)
-    say("=== ./ptest %s" % re.sub(r"^test-", "", t))
+    say("=== ./ptest %s" % re.sub(r"^test-", "", base(t)))
     say("#" * 60)
 
     # test-NAME-asm.asm: the lib's routines in asm, no compiler
     if t.endswith("-asm") and os.path.exists(t + ".asm"):
         return test_lib(t)
 
+    step(t, "pc")
     rm(t + ".ivm")
     run(["bash", "./pc", t], t + ".pc.log")
     have_ivm = os.path.exists(t + ".ivm")
@@ -164,19 +335,23 @@ def test(t):
         say("%%Error: ./pc %s: no %s.ivm (see %s.pc.log)" % (t, t, t))
 
     if have_ivm:
+        step(t, "ivm")
         s = run(["bash", "./ivm", t], t + ".ivm.log")
         res.append(("ivm", last_int(r"^(\d+) cycles$", s),
                     fsize(t + ".ivm"), t + ".ivm", ivm_out(s), t + ".ivm.log"))
 
+        step(t, "asm")
         s = run(["bash", "./ivm-asm", t], t + ".asm.log")
         res.append(("asm", last_int(r"^(\d+) cycles$", s),
                     fsize(t + ".ivm"), t + ".ivm", ivm_out(s), t + ".asm.log"))
 
+        step(t, "fix")
         s = run(["bash", "./ivm-fix", t], t + ".fix.log")
         res.append(("fix", last_int(r"^(\d+) cycles$", s),
                     fsize(t + ".ivm"), t + ".ivm", ivm_out(s), t + ".fix.log"))
 
         # jit: the host compiler writes the image, sim65 runs it
+        step(t, "zpjit")
         rm(t + ".jit.sim")
         run(["./ivm-jit.x", "-z", "-tsim6502", "-o" + t + ".jit.sim",
              t + ".ivm"], t + ".jit-build.log")
@@ -188,6 +363,7 @@ def test(t):
                     fsize(t + ".jit.sim"), t + ".jit.sim", o, t + ".jit.log"))
 
         # hjit: the same JIT run in cpu6502.c on the host
+        step(t, "hjit")
         s = run(["./ivm-jit.x", t + ".ivm"], t + ".hjit.log")
         m = re.search(r"code \$\w+-\$\w+ \((\d+) B\)", s)
         res.append(("hjit", last_int(r"^--- SIM: (\d+) cycles", s),
@@ -195,8 +371,13 @@ def test(t):
                     between(s, r"--- SIM: mem\[\]", r"--- SIM: \d+ cycles"),
                     t + ".hjit.log"))
 
+    # a raxiss sample: its I/O too (rax_io)
+    io = ([os.path.join(TMP, f) for f in RAX_IO]
+          if base(t).startswith("test-rax-") else [])
+
+    step(t, "cc65")
     rm(t + ".sim")
-    s = run(["cl65", "-Dputz=printf", "-t", "sim6502", "-Cl", "-Os", "-o", t + ".sim", t + ".c"],
+    s = run(["cl65", "-Dputz=printf", "-t", "sim6502", "-Cl", "-Os", "-o", t + ".sim", t + ".c"] + io,
             t + ".cc65-build.log")
     if os.path.exists(t + ".sim"):
         s = run(["sim65", "-c", t + ".sim"], t + ".cc65.log")
@@ -207,8 +388,9 @@ def test(t):
         res.append(("cc65", None, None, t + ".sim", None,
                     t + ".cc65-build.log"))
 
+    step(t, "oscar")
     rm(t + ".prg")
-    s = run([OSCAR64, "-Dputz=printf", "-Os", "-ep", t + ".c"], t + ".oscar.log")
+    s = run([OSCAR64, "-Dputz=printf", "-Os", "-ep", t + ".c"] + io, t + ".oscar.log")
     if os.path.exists(t + ".asm"):              # its listing (not ours)
         os.replace(t + ".asm", t + ".oscar.s")
     res.append(("oscar", last_int(r"^Total Cycles (\d+)", s),
@@ -222,10 +404,13 @@ def test(t):
 def test_lib(t):
     """a test-NAME-asm.asm: built with ivm-lib.asm, run on sim65"""
     res = []
+    step(t, "lib")
     rm(t + ".sim")
+    had_o = os.path.exists("ivm-lib.o")
     run(["cl65", "-t", "sim6502", "-o", t + ".sim", t + ".asm", "ivm-lib.asm"],
         t + ".lib-build.log")
     rm(t + ".o")
+    if not had_o: rm("ivm-lib.o")               # (cl65's, here)
     s, o = "", None
     if os.path.exists(t + ".sim"):
         s = run(["sim65", "-c", t + ".sim"], t + ".lib.log")
@@ -237,13 +422,14 @@ def test_lib(t):
 
 def results(t, res, have_ivm):
     """compare each variant's output, print the results"""
+    n = base(t)
     # expected output: .out (its RUN IVM .. END part if it has one), else
     # the majority. Saved as t.expect, each variant's as t.NAME.got: diff them
     ref, refname = None, None
     if os.path.exists(t + ".out"):
         e = open(t + ".out", encoding="latin-1").read()
         ref = norm(ivm_out(e) or e.splitlines())
-        refname = t + ".out"
+        refname = n + ".out"
     else:  # no .out: what most backends print (ties: the first, ivm)
         outs = [tuple(norm(r[4])) for r in res if r[4] is not None]
         if outs:
@@ -261,7 +447,7 @@ def results(t, res, have_ivm):
         o = norm(o)
         if cyc is None or o is None:
             status[name] = "FAILED"
-            say("%%Error: %s FAILED on %s (see %s)" % (name, t, log))
+            say("%%Error: %s FAILED on %s (see %s)" % (name, n, log))
             say("  rerun: " + repro(name, t))
             continue
         say("%8s bytes %s" % (size if size is not None else "?", f))
@@ -270,7 +456,7 @@ def results(t, res, have_ivm):
         with open(got, "w") as gf:
             gf.write("".join(l + "\n" for l in o))
         if ref is None:
-            say("(no %s.out)" % t)
+            say("(no %s.out)" % n)
         elif o == ref:
             say("matches" if refname != "majority" else "same as majority")
         else:
@@ -279,7 +465,7 @@ def results(t, res, have_ivm):
                     if op != "equal")
             status[name] = "DIFFERS %d/%d" % (k, max(len(ref), len(o)))
             say("%%Error: %s %s lines from %s on %s" %
-                (name, status[name], refname, t))
+                (name, status[name], refname, n))
             say("  rerun: " + repro(name, t))
             say("diff %s.expect %s" % (t, got))
             d = list(difflib.unified_diff(ref, o, t + ".expect", got, n=1,
@@ -291,52 +477,72 @@ def results(t, res, have_ivm):
     say("# results")
     w = max([len("{:,}".format(c or 0)) for _, c, *_ in res] + [1])
     if not have_ivm:
-        say("= %s %-21s - %-5s - %s" % ("-".rjust(w), "FAILED", "pc", t))
+        say("= %s %-21s - %-5s - %s" % ("-".rjust(w), "FAILED", "pc", n))
         say("= %s %s" % (" " * w, repro("pc", t)))
     for name, cyc, size, f, o, log in res:
         st = status.get(name)
         if st == "FAILED":
-            say("= %s %-21s - %-5s - %s" % ("-".rjust(w), "FAILED", name, t))
+            say("= %s %-21s - %-5s - %s" % ("-".rjust(w), "FAILED", name, n))
         else:
             say("= %s cycles (%5s bytes) - %-5s - %s%s" %
                 ("{:,}".format(cyc).rjust(w),
                  size if size is not None else "?",
-                 name, t, "  " + st if st else ""))
+                 name, n, "  " + st if st else ""))
         if st:
             say("= %s %s" % (" " * w, repro(name, t)))
     say()
     return res, status
 
 
+# ---- main ---------------------------------------------------------------------
+
 def main():
-    global out
-    specs = sys.argv[1:]
-    tests = []
+    global out, res_out, verbose, step_n
+    args = sys.argv[1:]
+    verbose = sum(a.count("v") for a in args if re.match(r"^-v+$", a))
+    specs = [a for a in args if not re.match(r"^-v+$", a)]
+    tmp_dir()
+
+    # the tests: ours (in the repo dir), raxiss's samples (dirs in RAX)
+    srcs, raxs = [], []
     if not specs:
-        tests = sorted(glob.glob("test-*.c") + glob.glob("test-*-asm.asm"))
+        srcs = sorted(glob.glob("test-*.c") + glob.glob("test-*-asm.asm"))
+        raxs = rax_samples()
     for s in specs:
         s = re.sub(r"([^/])\.[^./]*$", r"\1", s)   # foo.c foo.ivm -> foo
         s = re.sub(r"^test-", "", s)
+        if re.match(r"^([0-9]|\?\?-|\[)", s) and rax_samples(s):   # 06-sieve '1?-*'
+            raxs += [d for d in rax_samples(s) if d not in raxs]
+            continue
         # test-NAME.c, else the literal NAME.c (./ptest byte-sieve-prime)
         got = (sorted(glob.glob("test-%s.c" % s) + glob.glob("test-%s.asm" % s))
                or sorted(glob.glob(s + ".c")))
         if not got: print("%%Error: no test-%s.c or %s.c" % (s, s))
-        tests += [g for g in got if g not in tests]
-    tests = [t.rsplit(".", 1)[0] for t in tests]
+        srcs += [g for g in got if g not in srcs]
 
     spec = "-".join(re.sub(r"^test-|\.c$", "", s) for s in specs)
     spec = spec.replace("*", "ALL").replace("?", "_").replace("/", "_")
-    logname = "ptest-%s.log" % spec if spec else "ptest.log"
-    out = open(logname, "w")
+    if raxs and not srcs:                      # only raxiss's: ptest-rax
+        spec = "rax" if spec == "__-ALL" else "rax-" + spec
+    name = "ptest-%s" % spec if spec else "ptest"
+    out = open(os.path.join(TMP, name + ".log"), "w")
+    res_out = open(name + ".out", "w")
 
     # the host compiler and its lib (jit, hjit): when a source changed
     run(["bash", "-c", ". ./deps; "
          "if stale ivm-jit.x $IVM_SRC jit; then "
          "clang -DMEMMAP -DVERBOSE -DJIT -g ivm.c -o ivm-jit.x || exit 1; fi; "
          "if stale ivm-lib-sim6502.bin ivm-lib.asm mklib; then ./mklib; fi"],
-        "ptest-build.log")
+        os.path.join(TMP, "ptest-build.log"))
 
-    allres = [(t, test(t)) for t in tests]
+    # copies in TMP: everything they make lands there
+    tests = [to_tmp(s) for s in srcs] + [rax_test(d) for d in raxs]
+    allres = []
+    for k, t in enumerate(tests):
+        step_n = (k + 1, len(tests))
+        allres.append((t, test(t)))
+    if verbose == 1:
+        sys.stderr.write("\r\x1b[K")
 
     if len(tests) > 1:
         say("#" * 60)
@@ -353,12 +559,13 @@ def main():
                 cells.append("%15s" % ("- " if r is None else
                              "FAIL " if st == "FAILED" else
                              "{:,}".format(r[1]) + ("*" if st else " ")))
-            say("= %-28s" % t + "".join(cells))
+            say("= %-28s" % base(t) + "".join(cells))
         say("= (* output differs, FAIL: failed, -: not run; see each test's"
             " results above)")
         say()
     out.close()
-    print("log: " + logname)
+    res_out.close()
+    print("results: %s.out   log: %s" % (name, os.path.join(TMP, name + ".log")))
 
 
 main()

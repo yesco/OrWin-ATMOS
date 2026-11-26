@@ -197,6 +197,33 @@ JIT / IMAGE STATE
     63 B, byte-sieve-array 437 B.
 
 TESTS
+  ./ptest: the main one. Every test on every backend (ivm asm fix zpjit
+  hjit, cc65 oscar for comparison, lib for test-*-asm.asm):
+    ./ptest              all: test-*.c, test-*-asm.asm, raxiss's samples
+    ./ptest loop-for-lt  one (test-loop-for-lt.c); 'loop-*': a glob
+    ./ptest 06-sieve     a raxiss sample; '1?-*', '??-*': a glob of them
+  What it prints:
+    ./ptest              only the = lines (results, the summary table)
+    ./ptest -v           and one progress line on stderr ([5/17] t: zpjit)
+    ./ptest -v -v        everything: each command and its output
+  Where things go:
+    ptest.out            the = lines (ptest-SPEC.out): checked in, to
+                         follow the results over time
+    TMP/                 everything else: a symlink to the system's tmp,
+                         one per clone (asked the first time). Each test
+                         runs on a copy there (.ivm .sim .log .got .expect),
+                         and the run's log TMP/ptest.log
+  raxiss's samples (../oricCompilerBenchmark/playground/samples):
+    - run as test-rax-NN-name: their #include "..." inlined, <conio.h>
+      <types.h> as "conio.h" "types.h" (theirs, in TMP); the .out is
+      what their own gcc command prints (tools/test-samples.sh)
+    - c.bnf has their I/O: _putc _puts peek poke deek doke MEMPTR,
+      uint8_t int8_t uint16_t int16_t
+    - all of them: ./ptest '??-*' (only samples: ptest-rax.out)
+    - keep the "MeteoriC-65" section of raxis-compiler-test.txt updated
+      after a change: the table from ptest-rax.out, each sample's
+      missing features from TMP/test-rax-*.pc.log, one per line
+  Older:
   ./run.sh OUT   : every t/*.c, plain and -O, VM (ivmh) vs JIT (drv) and
                    drv -z; "fails: 0" expected; compare .ivm bytes and
                    jit B / cycles against the previous run (no regressions).

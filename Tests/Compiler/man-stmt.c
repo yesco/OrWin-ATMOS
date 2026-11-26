@@ -36,10 +36,23 @@ int main(void) {
   for (i = 0; i < 10; i += d) s += i;
   printf("%d\n", s);
 
-  // no break: fold the exit into the loop
-  printf("find:\t\t3\n\t\t");
-  n = 5; i = 0;
-  while (i < n) { if (i * i == 9) n = i; else i++; }
+  printf("for steps:\t20 30 28 36\n\t\t");
+  s = 0; for (i = 0; i < 10; i += 2) s += i; printf("%d ", s);
+  s = 0; for (i = 12; i > 0; i -= 3) s += i; printf("%d ", s);
+  s = 0; for (i = 0; i < 8; ++i) s += i; printf("%d ", s);
+  s = 0; for (i = 8; i > 0; --i) s += i; printf("%d\n", s);
+
+  printf("for parts out:\t5 7 10\n\t\t");
+  i = 0; for (; i < 5;) i++; printf("%d ", i);
+  i = 0; for (;;) { i++; if (i > 6) break; } printf("%d ", i);
+  i = 0; s = 0; for (; i < 5; i++) s += 2; printf("%d\n", s);
+
+  printf("break continue:\t12 3\n\t\t");
+  s = 0;
+  for (i = 0; i < 9; i++) { if (i == 3) continue; if (i == 6) break; s += i; }
+  printf("%d ", s);
+  n = 5;
+  for (i = 0; i < n; i++) if (i * i == 9) break;
   printf("%d\n", i);
   return 0;
 }

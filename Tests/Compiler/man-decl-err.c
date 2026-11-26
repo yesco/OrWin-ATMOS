@@ -11,9 +11,7 @@ typedef int T;                       // ERR no typedef
 enum e { A, B };                     // ERR no enum
 int g = 2 + 3;                       // ERR global initializer: a constant only
 long l;                              // ERR no long
-short sh;                            // ERR no short
 float fl;                            // ERR no float
-signed char sc;                      // ERR no signed
 int m[3][3];                         // ERR no 2D arrays
 
 int main(void) {
@@ -27,7 +25,6 @@ int main(void) {
   N = 4;                             // ERR a #define is a const
   two = 3;                           // ERR a const
   w = v;                             // ERR an array name is a const
-  p = &a;                            // ERR & only on arrays and structs
   x = *(p + 1);                      // ERR write p[1]
   w[1]++;                            // ERR only = on elements
   w[1] += 2;                         // ERR the same

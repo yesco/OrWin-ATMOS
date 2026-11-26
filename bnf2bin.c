@@ -192,7 +192,7 @@ static void comments_set_default(void) {
 // note: '>' is load-time only (not stored)
 //       '<' becomes HIBIT('<') + ALT_JUMP + alt (1..31, 0: restart)
 static uchar is_dir(uchar e) {
-  return isdigit(e) || strchr("insfdprlxywmzkcahvgetoubjq+{}#='?*@$:,.!%&^()-/~;_\"", e) != NULL;
+  return isdigit(e) || strchr("insfdprlxywmzkcahvgetoubjq+{}#='?*@$:,.!%&^()-/~;_\"`", e) != NULL;
 }
 
 static void build_one_rule(uchar r, char *rhs) {

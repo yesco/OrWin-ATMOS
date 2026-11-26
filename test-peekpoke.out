@@ -1,0 +1,6 @@
+poke peek:	ABC
+		ABC
+_puts MEMPTR:	ABC|
+		ABC|
+doke deek:	4660 52 18
+		4660 52 18

@@ -8,7 +8,7 @@
 int w[3] = {1, 2, 3};
 
 int keep(void) {
-  int t[2] = {5, 0};
+  static int t[2] = {5, 0};
   t[0] = t[0] + 1;
   return t[0];
 }
@@ -23,7 +23,7 @@ int main(void) {
   printf("%d ", x);
   if (x < 0) printf("neg\n"); else printf("pos\n");
 
-  // a local array is static: its initializer runs once
+  // an initialized local array needs static (C too: set once)
   printf("static array:\t6 7\n\t\t");
   printf("%d ", keep());
   printf("%d\n", keep());
