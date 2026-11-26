@@ -231,8 +231,13 @@ def tmp_dir():
         return
     to = os.path.join(os.environ.get("TMPDIR", "/tmp"),
                       os.path.basename(os.getcwd()))
-    if sys.stdin.isatty():
+    # both ends of the chat need to be a terminal: stdin to read the
+    # answer, stderr to show the question - else it's invisible and
+    # readline() still blocks on it forever (redirect either one away:
+    # just make it, no asking)
+    if sys.stdin.isatty() and sys.stderr.isatty():
         sys.stderr.write("ptest: create %s -> %s? [Y/n] " % (TMP, to))
+        sys.stderr.flush()
         if sys.stdin.readline().strip().lower() in ("n", "no"):
             sys.exit("%Error: ptest: no TMP")
     os.makedirs(to, exist_ok=True)
