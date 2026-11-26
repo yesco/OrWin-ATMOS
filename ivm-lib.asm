@@ -48,12 +48,17 @@
 ;;;
 ;;;   sim65: never returns to the C program (in place: ivmlib_load
 ;;;     jumps; -o image: exit), so all zp is ours:
-;;;       CSP      2  sim65's arg pointer (header byte 7): set to pvframe
+;;;       $00-$01  NULL: 00 00 (_ivmlib_start). A NULL pointer read
+;;;                gives 0, as lisp's (cdr nil) is nil
+;;;       CSP      2  sim65's arg pointer (header byte 7, $02: zp from
+;;;                   $02 in mklib and sim6502.cfg): set to pvframe
 ;;;                   before each call, no C stack kept
 ;;;       ZP_LIB   6  ptr1 ptr2 tmp3/tmp4 (tmp1/tmp2, sreg: aliases)
 ;;;     -z mem[] must stay above (ivm.c checks _ivmlib_zplo).
 ;;;   atmos: the in-process run returns to C, and the ROM owns low zp:
 ;;;     cc65's own scratch (zeropage.inc), the one place known free.
+;;;     $00-$01: NULL, 00 00 as on sim65 (the ROM / BASIC don't use
+;;;     $00-$0B).
 
 .export _ivmlib_init, _ivmlib_zpclr, _ivmlib_zpinit, _ivmlib_start, _ivmlib_end
 .export _ivmlib_exit
@@ -71,6 +76,11 @@
 .export _opmalloc, _opfree
 .export _opmemset, _opmemset_adr
 .export _ivmlib_cut5, _ivmlib_args, _ivmlib_libv
+.export _ivmlib_cut7
+.export _opputfu, _opputfd, _opputfx, _opputfX, _opputfs, _opputfz
+.export _opputfuz, _opputfdz, _opputfxz, _opputfXz, _opputfsz
+.export _opputfn, _opputfn0, _opputfout
+.export _ivmlib_pfpad, _ivmlib_pfprec, _ivmlib_pfcount, _ivmlib_pfout
 .export _opmove, _opstrlen, _opstrcmp, _opstrncmp, _opmemcmp
 .export _opstrchr, _opmemchr, _opstrcpy, _opstrncpy
 
@@ -98,8 +108,8 @@ JT = $FE
         CSP = sp
 .endif
 
-        ;; lib scratch: our own, after CSP ($00/$01)
-        ZP_LIB  = $02
+        ;; lib scratch: our own, after CSP ($02/$03; $00/$01: NULL)
+        ZP_LIB  = $04
         ZP_LIBN = 6
         ptr1    = ZP_LIB                ;; pointer: puts, load, div, malloc
         ptr2    = ZP_LIB+2              ;; pointer: load, mul, div, malloc
@@ -154,6 +164,7 @@ _ivmlib_libv:
         .word   _opstrcpy, _opstrncpy
 
 _ivmlib_load:
+;;; 81 B
         lda     _ivmlib_dst
         sta     ptr2
         lda     _ivmlib_dst+1
@@ -194,7 +205,9 @@ _ivmlib_load:
         bne     @byte
         inc     ptr2+1
         bne     @byte                   ;; always
-ldrun:  jmp     _ivmlib_start           ;; patched: the image's first byte
+ldrun:
+;;; 3 B
+        jmp     _ivmlib_start           ;; patched: the image's first byte
 _ivmlib_run = ldrun + 1
 
 
@@ -211,6 +224,7 @@ _ivmlib_run = ldrun + 1
 ;;; bss + pages * 256 (the last page)
 ;;; 10 B
 _ivmlib_init:
+;;; 9 B
         ldx     #0                      ;; patched: pages
 _ivmlib_bssp = * - 1
         ldy     #0                      ;; patched: rest
@@ -223,24 +237,32 @@ _ivmlib_bssr = * - 1
 ;;; sim65 fills it with $FF). Equal: none
 ;;; 13 B
 _ivmlib_zpclr:
+;;; 6 B
         ldx     #0                      ;; patched: mem[] bytes
 _ivmlib_zpclen = * - 1
         lda     #0
         beq     zpcl2                   ;; (always)
-zpcl1:  sta     $00,x                   ;; patched: zp base - 1
+zpcl1:
+;;; 3 B
+        sta     $00,x                   ;; patched: zp base - 1
 _ivmlib_zpcdst = * - 1
         dex
-zpcl2:  cpx     #0                      ;; patched: image bytes
+zpcl2:
+;;; 4 B
+        cpx     #0                      ;; patched: image bytes
 _ivmlib_zpcn = * - 1
         bne     zpcl1
 
 ;;; -z: copy mem[] image to zp, down from the last byte. 0 bytes: none
 ;;; 12 B
 _ivmlib_zpinit:
+;;; 4 B
         ldx     #0                      ;; patched: bytes
 _ivmlib_zplen = * - 1
         beq     _ivmlib_start
-zpcp:   lda     $FFFF,x                 ;; patched: image - 1
+zpcp:
+;;; 8 B
+        lda     $FFFF,x                 ;; patched: image - 1
 _ivmlib_zpsrc = * - 2
         sta     $00,x                   ;; patched: zp base - 1
 _ivmlib_zpdst = * - 1
@@ -252,17 +274,28 @@ _ivmlib_zpdst = * - 1
 ;;; ./oric counts the cycles from the image's start to it)
 ;;; SIM 9 B, ATMOS 4 B
 _ivmlib_start:
+;;; SIM 11 B, ATMOS 9 B
 .ifdef SIM
-        ldx     #$FF                    ;; no C stack: pvio points CSP
+        ;; NULL: 00 00 (sim65 loads with $FF everywhere)
+        ldx     #0
+        stx     $00
+        stx     $01
+        dex                             ;; no C stack: pvio points CSP
         txs
         jsr     $FFFF                   ;; patched: JIT code start
 _ivmlib_entry = * - 2
 _ivmlib_exit:
+;;; 3 B
         jmp     exit                    ;; A = exit code (lo of result)
 .else
+        ;; NULL: 00 00 ($00-$0B: not used by the ROM / BASIC)
+        ldx     #0
+        stx     $00
+        stx     $01
         jsr     $FFFF                   ;; patched: JIT code start
 _ivmlib_entry = * - 2
 _ivmlib_exit:
+;;; 1 B
         rts                             ;; back to BASIC
 .endif
 
@@ -286,14 +319,18 @@ _ivmlib_cut0:
 
 ;;; 17 B; ~20 c + 10 c per byte + 11 c per page
 _opmemset:
+;;; 4 B
         cpy     #0
         beq     opms_page               ;; no rest
 opms_loop:
+;;; 1 B
         dey
 opms_sta:
+;;; 5 B
         sta     $FFFF,y                 ;; operand patched by the caller
         bne     opms_loop
 opms_page:
+;;; 7 B
         dec     opms_sta+2              ;; next page down
         dex
         bpl     opms_loop
@@ -313,6 +350,7 @@ pcy:    .byte   0
 
 ;;; SIM 27 B, ATMOS 34 B; ~50 c + pvio + _write (SIM) / ROM
 _opputchar:
+;;; SIM 27 B, ATMOS 34 B
         sta     pcbuf
         stx     pcx
         sty     pcy
@@ -338,7 +376,9 @@ _opputchar:
 ;;; hook pops them from there (and moves CSP: set again each call).
 ;;; AX = count 1. No C stack.
 ;;; 16 B + 4 B frame, ~24 c
-pvio:   stx     pvfd                    ;; fd lo (hi stays 0)
+pvio:
+;;; 20 B
+        stx     pvfd                    ;; fd lo (hi stays 0)
         lda     #<pvframe
         sta     CSP
         lda     #>pvframe
@@ -356,6 +396,7 @@ pvfd:    .word  0                       ;; fd
 ;;; 30 B; ~90 c + ~24 c per char + opputchar
 
 _opprintstr:
+;;; 30 B
         sta     sreg                    ;; AX kept for the return
         stx     sreg+1
         pla                             ;; -> last byte of the JSR
@@ -379,6 +420,7 @@ _opprintstr:
 ;;; 34 B; ~40 c + ~24 c per char + opputchar
 
 _opputs:
+;;; 29 B
         sta     tmp3
         stx     tmp4
         sta     ptr1
@@ -393,7 +435,9 @@ _opputs:
         bne     @l
         inc     ptr1+1
         bne     @l                      ;; (wrapped past $FFFF: done)
-retax:  lda     tmp3                    ;; AX as on entry
+retax:
+;;; 5 B
+        lda     tmp3                    ;; AX as on entry
         ldx     tmp4
         rts
 
@@ -405,6 +449,7 @@ _ivmlib_cut2:
 ;;; 48 B; 0-9: 425 c, 42: 815 c, 1234: 1631 c, 65535: 2063 c; + opputchar
 
 _opputnum:
+;;; 48 B
         sta     tmp3                    ;; AX kept for the return
         stx     tmp4
         sta     ptr1
@@ -444,6 +489,7 @@ _ivmlib_cut3:
 ;;; constant there). JT is destroyed.
 ;;; 44 B; 63-847 c: *10: 197 c, *255: 439 c, *65535: 847 c
 _opmul:
+;;; 44 B
         sta     ptr2                    ;; multiplier
         stx     ptr2+1
         lda     #0
@@ -473,9 +519,11 @@ _opmul:
 ;;; AX = 0: AX = JT (unchanged, as the VM).
 ;;; 70 B; /0: 37 c, else 16 rounds: up to 1045 c
 _opmod:
+;;; 2 B
         sec                             ;; remainder
         .byte   $24                     ;; BIT zp: skips the CLC
 _opdiv:
+;;; 68 B
         clc                             ;; quotient
         ror     tmp3                    ;; bit 7: 1 = opmod
         sta     ptr2                    ;; divisor
@@ -527,6 +575,7 @@ _ivmlib_cut4:
 
 ;;; 106 B; ~120 c + 11 c per byte zeroed
 _opmalloc:
+;;; 106 B
         clc
         adc     #1
         and     #$FE
@@ -585,6 +634,7 @@ _opmalloc:
 ;;; TODO: make it reuse, lol
 ;;; 1 B; 12 c
 _opfree:
+;;; 5 B
         rts
 
 _ivmlib_heap:    .word 0                ;; next free heap byte
@@ -600,8 +650,8 @@ _ivmlib_cut5:
 ;;; pvio / pcbuf (cut 1: below, so in such an image)
 ;;; ===========================================================================
 
-;;; SIM 22 B, ATMOS 17 B
 _opgetchar:
+;;; SIM 22 B, ATMOS 19 B
 .ifdef SIM
         ldx     #0                      ;; stdin
         jsr     pvio
@@ -659,7 +709,9 @@ spad:           .byte   0               ;; strncpy: past the NUL, NULs
 ;;; ptr1 = a0, ptr2 = a1, tmp3/tmp4 = a2 (a count), Y = 0
 ;;; This to call if you have 3 args?
 ;;; TODO: if this was on stacK: PLA sta zp PLA sta azp ...
-sargs:  lda     _ivmlib_args
+sargs:
+;;; 33 B
+        lda     _ivmlib_args
         sta     ptr1
         lda     _ivmlib_args+1
         sta     ptr1+1
@@ -675,7 +727,9 @@ sargs:  lda     _ivmlib_args
         rts
 
 ;;; the count - 1; Z = 1: it was 0 (done, left 0)
-ndec:   lda     tmp3
+ndec:
+;;; 15 B
+        lda     tmp3
         bne     @lo
         lda     tmp4
         beq     @z
@@ -685,13 +739,16 @@ ndec:   lda     tmp3
 @z:     rts
 
 ;;; no limit: a2 = $FFFF
-nmax:   lda     #$FF
+nmax:
+;;; 9 B
+        lda     #$FF
         sta     _ivmlib_args+4
         sta     _ivmlib_args+5
         rts
 
 ;;; memmove(d, s, n) = memcpy too: from the end if d > s (they may overlap)
 _opmove:
+;;; 97 B
 ;;;  massive assembly, comment
         jsr     sargs
 
@@ -744,6 +801,7 @@ _opmove:
 
 ;;; strlen(s)
 _opstrlen:
+;;; 39 B
         lda     _ivmlib_args
         sta     ptr1
         lda     _ivmlib_args+1
@@ -769,12 +827,15 @@ _opstrlen:
 
 ;;; strcmp(a, b) > strncmp(a, b, n) > memcmp(a, b, n)
 _opstrcmp:
+;;; 3 B
         jsr     nmax
 
 _opstrncmp:
+;;; 3 B
         ldx     #1
         .byte   $2C                     ;; BIT abs: skips the ldx #0
 _opmemcmp:
+;;; 57 B
         ldx     #0
         stx     sflag
 
@@ -809,11 +870,13 @@ _opmemcmp:
 
 ;;; strchr(s, c) > memchr(s, c, n)
 _opstrchr:
+;;; 6 B
         jsr     nmax
 
         ldx     #1
         .byte   $2C
 _opmemchr:
+;;; 45 B
         ldx     #0
         stx     sflag
         jsr     sargs                   ;; ptr2: c (its lo)
@@ -839,10 +902,12 @@ _opmemchr:
 
 ;;; strcpy(d, s) > strncpy(d, s, n)
 _opstrcpy:
+;;; 6 B
         jsr     nmax
         ldx     #1
         .byte   $2C
 _opstrncpy:
+;;; 64 B
         ldx     #0
         stx     sflag
 
@@ -873,6 +938,396 @@ _opstrncpy:
         bne     @l                      ;; (always)
 @done:  lda     _ivmlib_args
         ldx     _ivmlib_args+1
+        rts
+
+
+;;; ---- cut 7: ... no putf (printf's parts: else _ivmlib_end) ----
+_ivmlib_cut7:
+
+;;; ===========================================================================
+;;; putf: printf's parts. The compiler splits the format, each part one
+;;; call:
+;;;
+;;;   printf("x=%-4u!\n", x)    LDA/LDX x  LDY #-4  JSR putfuz  "!\n"
+;;;
+;;; - putfu putfd putfx putfX putfs: print the value
+;;; - putfuz putfdz putfxz putfXz putfsz: the value, then the string
+;;;   after the JSR (returns after its 0)
+;;; - putfz: only the string after the JSR
+;;;
+;;; The arguments:
+;;;
+;;; - AX: the value (u d x X), the string's address (s)
+;;; - Y: the width, signed: 4 is %4 (right aligned), -4 is %-4 (left).
+;;;   0: none. As C: a longer value is printed in full.
+;;;
+;;; Anything else is in the control block. Its default is 0, and every
+;;; putf sets it back to 0 at the end, so set it right before:
+;;;
+;;; - _ivmlib_pfpad: the pad char (0: space). %05u: '0'
+;;; - _ivmlib_pfprec: .N (0: none). %.3s: at most 3 chars, %.3u: at
+;;;   least 3 digits (zeros in front)
+;;;
+;;; Kept over calls:
+;;;
+;;; - _ivmlib_pfcount: the chars printed, a word. putfn: AX = it,
+;;;   putfn0: back to 0 (sprintf's n)
+;;; - _ivmlib_pfout: the output routine (A = the char, keeps X Y).
+;;;   putfout: AX = it, 0: putchar again
+;;;
+;;; ACC (AX) is not kept. Signed d: the sign counts in the width; with
+;;; pad '0' it comes first (-0042), as in C.
+;;; ===========================================================================
+
+_ivmlib_pfpad:   .byte   0
+_ivmlib_pfprec:  .byte   0
+_ivmlib_pfcount: .word   0
+_ivmlib_pfout:   .word   0
+
+PFEND = 5                               ;; digits: 65535 (hex: 4)
+
+pfw:    .byte   0                       ;; the width (signed)
+pfsg:   .byte   0                       ;; the sign char, 0: none
+pfup:   .byte   0                       ;; X: upper case hex
+pfi:    .byte   0                       ;; the first digit in pfbuf
+pfn:    .byte   0                       ;; the digits / chars
+pfz:    .byte   0                       ;; zeros before the digits (.N)
+pfc:    .byte   0                       ;; the pad char, while padding
+pfbuf:  .res    PFEND                   ;; the digits, from the end
+
+pfhex:  .byte   "0123456789abcdef"
+
+;;; ---------------------------------------------------------------------------
+;;; one char (A) out: counted. Keeps X Y
+
+pfch:
+;;; 22 B
+        inc     _ivmlib_pfcount
+        bne     :+
+        inc     _ivmlib_pfcount+1
+:       pha
+        lda     _ivmlib_pfout+1         ;; 0: putchar (no routine in page 0)
+        beq     @std
+        pla
+        jmp     (_ivmlib_pfout)
+@std:   pla
+        jmp     _opputchar
+
+;;; ---------------------------------------------------------------------------
+;;; d: signed decimal. Negative: the sign, then as u
+
+_opputfd:
+;;; 24 B
+        cpx     #$80
+        bcc     _opputfu                ;; >= 0
+        pha
+        lda     #'-'
+        sta     pfsg
+        pla
+
+        ;; AX = -AX
+        eor     #$FF
+        clc
+        adc     #1
+        pha
+        txa
+        eor     #$FF
+        adc     #0
+        tax
+        pla
+
+;;; u: unsigned decimal
+
+_opputfu:
+;;; 44 B
+        sty     pfw
+        sta     ptr1
+        stx     ptr1+1
+        ldy     #PFEND
+
+        ;; ptr1 /= 10, A = the remainder: a digit, from the end
+@div:   lda     #0
+        ldx     #16
+@bit:   asl     ptr1
+        rol     ptr1+1
+        rol     a
+        cmp     #10
+        bcc     @nb
+        sbc     #10                     ;; C=1
+        inc     ptr1
+@nb:    dex
+        bne     @bit
+        ora     #'0'
+        dey
+        sta     pfbuf,y
+        lda     ptr1
+        ora     ptr1+1
+        bne     @div
+        jmp     pfnum
+
+;;; ---------------------------------------------------------------------------
+;;; X: hex, upper case. x: lower case
+
+_opputfX:
+;;; 7 B
+        pha
+        lda     #1
+        sta     pfup
+        pla
+
+_opputfx:
+;;; 47 B
+        sty     pfw
+        sta     ptr1
+        stx     ptr1+1
+        ldy     #PFEND
+
+        ;; the low 4 bits: a digit, from the end
+@nib:   lda     ptr1
+        and     #$0F
+        tax
+        lda     pfhex,x
+        ldx     pfup
+        beq     @st
+        cmp     #'a'
+        bcc     @st
+        and     #$DF                    ;; upper case
+@st:    dey
+        sta     pfbuf,y
+
+        ;; ptr1 >>= 4
+        ldx     #4
+@sh:    lsr     ptr1+1
+        ror     ptr1
+        dex
+        bne     @sh
+        lda     ptr1
+        ora     ptr1+1
+        bne     @nib
+
+;;; ---------------------------------------------------------------------------
+;;; a number: its digits pfbuf+Y.., the sign pfsg, .N zeros
+
+pfnum:
+;;; 91 B
+        sty     pfi
+
+        ;; the digits
+        lda     #PFEND
+        sec
+        sbc     pfi
+        sta     pfn
+
+        ;; zeros: .N - digits, if more
+        lda     _ivmlib_pfprec
+        sec
+        sbc     pfn
+        bcs     :+
+        lda     #0
+:       sta     pfz
+
+        ;; the width: digits, zeros, sign
+        lda     pfn
+        clc
+        adc     pfz
+        ldx     pfsg
+        beq     :+
+        adc     #1
+:       tax                             ;; X = the field
+
+        ;; left: sign, number, spaces
+        lda     pfw
+        bpl     @right
+        jsr     pfsign
+        jsr     pfdigits
+        jsr     pfspaces
+        jmp     pfdone
+
+        ;; right: pad, sign, number (pad '0': sign, zeros, number)
+@right: lda     _ivmlib_pfpad
+        beq     @sp
+        cmp     #' '
+        beq     @sp
+        jsr     pfsign
+        jsr     pfpad
+        jsr     pfdigits
+        jmp     pfdone
+@sp:    jsr     pfpad
+        jsr     pfsign
+        jsr     pfdigits
+        jmp     pfdone
+
+;;; the sign, if any
+pfsign:
+;;; 9 B
+        lda     pfsg
+        beq     :+
+        jsr     pfch
+:       rts
+
+;;; .N zeros, then the digits
+pfdigits:
+;;; 30 B
+        ldy     pfz
+        beq     @d
+@z:     lda     #'0'
+        jsr     pfch
+        dey
+        bne     @z
+@d:     ldy     pfi
+@dl:    cpy     #PFEND
+        beq     :+
+        lda     pfbuf,y
+        jsr     pfch
+        iny
+        bne     @dl                     ;; (always)
+:       rts
+
+;;; the pad: width - X (the field) times, the pad char (0: space).
+;;; pfspaces: spaces (left aligned: C pads with spaces then)
+pfspaces:
+;;; 4 B
+        lda     #' '
+        bne     pfpadc                  ;; (always)
+pfpad:
+;;; 7 B
+        lda     _ivmlib_pfpad
+        bne     pfpadc
+        lda     #' '
+pfpadc:
+;;; 35 B
+        sta     pfc
+        stx     pfn
+        lda     pfw
+        bpl     :+
+        eor     #$FF                    ;; |width|
+        clc
+        adc     #1
+:       sec
+        sbc     pfn
+        beq     @x
+        bcc     @x                      ;; the field is wider: no pad
+        tay
+@p:     lda     pfc
+        jsr     pfch
+        dey
+        bne     @p
+@x:     rts
+
+;;; ---------------------------------------------------------------------------
+;;; s: a string (at most .N chars)
+
+_opputfs:
+;;; 41 B
+        sty     pfw
+        sta     ptr1
+        stx     ptr1+1
+
+        ;; its length, at most .N (0: no limit)
+        ldy     #0
+@len:   lda     (ptr1),y
+        beq     @got
+        iny
+        cpy     _ivmlib_pfprec
+        bne     @len
+@got:   tya
+        tax                             ;; X = the field
+
+        ;; left: the string, spaces. Right: the pad, the string
+        lda     pfw
+        bpl     @right
+        jsr     pfstr
+        jsr     pfspaces
+        jmp     pfdone
+@right: jsr     pfpad
+        jsr     pfstr
+
+;;; the end of every putf: the control block back to its defaults
+pfdone:
+;;; 15 B
+        lda     #0
+        sta     _ivmlib_pfpad
+        sta     _ivmlib_pfprec
+        sta     pfsg
+        sta     pfup
+        rts
+
+;;; the string's first X chars
+pfstr:
+;;; 19 B
+        stx     pfn
+        ldy     #0
+@s:     cpy     pfn
+        beq     :+
+        lda     (ptr1),y
+        jsr     pfch
+        iny
+        bne     @s                      ;; (always)
+:       rts
+
+;;; ---------------------------------------------------------------------------
+;;; z: the string after the JSR, then on after its 0.
+;;; The ...z ones: the value, then this
+
+_opputfz:
+;;; 31 B
+        pla                             ;; -> the last byte of the JSR
+        sta     ptr1
+        pla
+        sta     ptr1+1
+        ldy     #0
+@l:     inc     ptr1
+        bne     :+
+        inc     ptr1+1
+:       lda     (ptr1),y
+        beq     @end
+        jsr     pfch
+        jmp     @l
+@end:   lda     ptr1+1                  ;; RTS: on after the 0
+        pha
+        lda     ptr1
+        pha
+        rts
+
+_opputfuz:
+;;; 6 B
+        jsr     _opputfu
+        jmp     _opputfz
+_opputfdz:
+;;; 6 B
+        jsr     _opputfd
+        jmp     _opputfz
+_opputfxz:
+;;; 6 B
+        jsr     _opputfx
+        jmp     _opputfz
+_opputfXz:
+;;; 6 B
+        jsr     _opputfX
+        jmp     _opputfz
+_opputfsz:
+;;; 6 B
+        jsr     _opputfs
+        jmp     _opputfz
+
+;;; ---------------------------------------------------------------------------
+;;; the counter (AX = it; n0: 0), the output routine (AX = it, 0: putchar)
+
+_opputfn:
+;;; 7 B
+        lda     _ivmlib_pfcount
+        ldx     _ivmlib_pfcount+1
+        rts
+_opputfn0:
+;;; 9 B
+        lda     #0
+        sta     _ivmlib_pfcount
+        sta     _ivmlib_pfcount+1
+        rts
+_opputfout:
+;;; 7 B
+        sta     _ivmlib_pfout
+        stx     _ivmlib_pfout+1
         rts
 
 

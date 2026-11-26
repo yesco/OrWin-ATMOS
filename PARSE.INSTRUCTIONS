@@ -29,6 +29,10 @@ MY RULES (always)
     A file's own main() goes under #ifndef MAIN.
   - cc65 compiles all code it sees, used or not: anything not needed
     on the 6502 goes under an #ifdef (measure: cc65 -S + ca65 -l).
+  - Lists and anything with structure: one item per line, never a
+    dense run of text (a | b | c ..., "x: y, z: w ..."). Sections like
+    lib tiers: the -- cut N -- lines and each routine on its own line.
+    The same in comments, docs, MEMMAP output and replies.
   - Tables in .md files: aligned in the source too (columns padded,
     numbers right aligned, | under |): readable in a terminal. A short
     name first (the test), the numbers, the long text (the code) last.
@@ -111,18 +115,84 @@ C FRONT END STATE (c.bnf)
     (data). Unused plain consts are dropped from the .ivm.
 
 JIT / IMAGE STATE
-  - Lib tiers, cut after the highest JSR target (lc_libtop; re-layout if
-    more needed): startup | cut0 | memset | cut1 | putchar printstr putnum
-    puts | cut2 | mul/div/mod | cut3 | malloc/free | cut4 | getchar | end.
-  - Startup parts, image starts at the first needed: _ivmlib_init (bss
-    zero via memset), _ivmlib_zpinit (-z: copy mem[] to zp), _ivmlib_start
-    (ldx #$FF/txs, jsr entry, jmp exit). Operands patched by ivm.c.
+  - Lib tiers (ivm-lib.asm). An image ends at the cut after the highest
+    routine its code calls (lc_libtop; re-layout if it needs more):
+
+      startup parts (see below)
+      -- cut 0 --
+      memset          (the startup's bss zeroing calls it)
+      -- cut 1 --
+      putchar
+      printstr        (")
+      puts            (P)
+      -- cut 2 --
+      putnum          (.)
+      -- cut 3 --
+      mul
+      mod
+      div
+      -- cut 4 --
+      malloc
+      free
+      -- cut 5 --
+      getchar
+      -- cut 6 --
+      args           (x / y's arguments)
+      move
+      strlen
+      strcmp
+      strncmp
+      memcmp
+      strchr
+      memchr
+      strcpy
+      strncpy
+      -- cut 7 --
+      putf ...        (513 B, below)
+      -- end --
+
+  - putf, printf's parts (cut 7). The arguments:
+      AX   the value (u d x X), the string's address (s)
+      Y    the width, signed: 4 is %4, -4 is %-4 (left aligned)
+    The control block, 0 = default, every putf sets it back to 0:
+      _ivmlib_pfpad     the pad char (0: space)
+      _ivmlib_pfprec    .N (0: none)
+    Kept between calls:
+      _ivmlib_pfcount   chars printed (putfn: AX = it, putfn0: 0)
+      _ivmlib_pfout     the output routine (putfout; 0: putchar)
+    The routines:
+      putfu putfd putfx putfX putfs     the value
+      putfuz ... putfsz                 the value, then the string after
+                                        the JSR
+      putfz                             only the string after the JSR
+    ACC is not kept.
+    Next: lib ids for x / y from 32, the compiler splitting printf.
+
+  - Startup parts. An image starts at the first one it needs:
+      _ivmlib_init      bss zeroed (memset)
+      _ivmlib_zpclr     -z: zero the live mem[] the image doesn't carry
+      _ivmlib_zpinit    -z: copy the mem[] image to zp
+      _ivmlib_start     $00-$01 = 00 00 (NULL reads 0); sim65: ldx #$FF
+                        txs; then jsr the code
+      _ivmlib_exit      sim65: jmp exit, Atmos: rts (to BASIC)
+    Their operands are patched by ivm.c / ivm-image.c.
+
   - Image: consts not in mem[] (immediates; lc_kread re-layout if read).
     -z: mem[] image after the code, only up to its last non-0 byte on a
     sim65 file (memory starts zeroed; also no bss zeroing then).
-  - Lib zp (sim65): CSP (cc65 sp address, sim65 header byte 7) + own
-    ZP_LIB $02..$07 (ptr1 ptr2 tmp3/4, aliases). Atmos keeps zeropage.inc.
-    pvio: static arg frame, no C stack.
+  - Zero page:
+      sim65:
+        $00-$01   NULL: 00 00 (_ivmlib_start; also ivm.c's main)
+        $02-$03   CSP: cc65's sp, sim65's arg pointer (header byte 7);
+                  zp from $02 in mklib and sim6502.cfg
+        $04-$09   ivm-lib: ptr1 ptr2 tmp3 tmp4 (tmp1/2 sreg: aliases)
+        $0A-$F9   -z mem[] (from _ivmlib_zplo, below zptop $FA)
+        $FC-$FF   JIT: array element pointer, scratch (tmp1 tmp2)
+      Atmos:
+        $00-$01   NULL: 00 00 (the ROM / BASIC don't use $00-$0B)
+        $E2-$FB   ivm-lib: cc65's zero page (zeropage.inc)
+        $FC-$FF   JIT, as sim65
+    pvio: a static arg frame, no C stack.
   - Results: test-empty.ivm.sim 33 B (cl65 191, Oscar 137), test-const
     63 B, byte-sieve-array 437 B.
 

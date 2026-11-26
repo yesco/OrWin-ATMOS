@@ -12,8 +12,8 @@ fi
 #   ./jit test-swap -z -otest-swap.sim      ./jit test-swap -tatmos -ox.tap
 if stale ivm-lib-sim6502.bin ivm-lib.asm mklib; then ./mklib || exit 1; fi
 
-time ./ivm-jit.x -tsim6502 -o$name.sim $name.ivm $*
-time ./ivm-jit.x -tatmos   -o$name.tap $name.ivm $*
+time ./ivm-jit.x -tsim6502 -z -o$name.sim $name.ivm $*
+time ./ivm-jit.x -tatmos   -z -o$name.tap $name.ivm $*
 
 echo
 echo "--- SIMRUN ---"

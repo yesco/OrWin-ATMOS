@@ -94,10 +94,10 @@
 // BYTE CODES OVERVIEW
 // ====================
 // 0-31                 - fast var load (load typically 4x more common th store)
-// $ \ : _              - FREE to use
+// \ : _                - FREE to use
 // 12345678             - local vars 1-7, 8 ist last var (AX)
-// D R T V              - FREE op vars
-//   possibly usage: Dlinke/next Recurse  Tail-call V+=accumulator;
+// D R T                - FREE op vars
+//   possibly usage: Dlink/next Recurse  Tail-call V+=accumulator;
 //
 // ? cdefgh             - FREEE (lisp?)
 // ? op                 - ?index stuff, oo 
@@ -334,7 +334,7 @@ static word ivm_lib(uchar *m, uchar id, word a0, word a1, word a2) {
   // the lib is in tiers: an -o image ends at the cut after the last
   // routine its code calls (jit_lib_more)
   extern uchar ivmlib_cut0[], ivmlib_cut1[], ivmlib_cut2[], ivmlib_cut3[],
-    ivmlib_cut4[], ivmlib_cut5[], ivmlib_cut6[];
+    ivmlib_cut4[], ivmlib_cut5[], ivmlib_cut6[], ivmlib_cut7[];
   // patched operands (startup), vars (heap)
   extern word  ivmlib_dst;
   extern uchar ivmlib_bssp, ivmlib_bssr;   // bss: pages, rest
@@ -1978,11 +1978,12 @@ static word    jit_heapend;             // the heap's end (the bss below it)
 // the cut after lib address top (the highest routine called)
 static uchar *jit_cut(word top) {
   static uchar *const cut[] = { ivmlib_cut0, ivmlib_cut1, ivmlib_cut2,
-    ivmlib_cut3, ivmlib_cut4, ivmlib_cut5, ivmlib_cut6, ivmlib_end };
+    ivmlib_cut3, ivmlib_cut4, ivmlib_cut5, ivmlib_cut6, ivmlib_cut7,
+    ivmlib_end };
   uchar k;
 
   if (top < jit_libfloor) top = jit_libfloor;
-  for (k = 0; k < 7 && top >= (word)(unsigned)cut[k]; k++) ;
+  for (k = 0; k < 8 && top >= (word)(unsigned)cut[k]; k++) ;
   return cut[k];
 }
 
@@ -2558,6 +2559,13 @@ int main(void) {
 int main(int argc, char** argv) {
 #endif
   char *s, *file = NULL;
+
+  // NULL: 00 00 at $00-$01, a NULL pointer reads 0 (as the JIT's
+  // images do: ivm-lib.asm _ivmlib_start). 6502 builds only
+#if defined(__CC65__) || defined(OSCAR64)
+  *(uchar *)0 = 0;
+  *(uchar *)1 = 0;
+#endif
 
   printf("ivm started.. doing args..\n");
 

@@ -3000,6 +3000,14 @@ static void mm_list(word end) {
   mm_nl = 0;
 }
 
+// the lib's routines: who knows them lists them (the -o image: its
+// .bin's symbols, ivm-image.c), else the simulator's below.
+// mm_title: the map's name (the -o file), mm_head: what comes before
+// the areas (the file, zero page)
+static void (*mm_lib)(word beg, word end);
+static const char *mm_title;
+static void (*mm_head)(void);
+
 static uchar mm_memsz;
 static void mm_print(uchar n) {
   static const char *const lib[] = { "putchar", "putnum", "puts", "free",
@@ -3010,7 +3018,9 @@ static void mm_print(uchar n) {
   mm_memsz = n;                        // (kept off the C stack)
   mm_syms();
   memsz = mm_memsz;
-  printf("\n\n======== MEMMAP %s ========\n", mm_ivm ? mm_ivm : (const char *)"");
+  printf("\n\n======== MEMMAP %s ========\n", mm_title ? mm_title :
+         mm_ivm ? mm_ivm : (const char *)"");
+  if (mm_head) mm_head();
   while (done != (1 << MM_N) - 1) {
 
     // the next area by address
@@ -3031,6 +3041,7 @@ static void mm_print(uchar n) {
 
     // the routines (the startup before them)
     case MM_LIB:
+      if (mm_lib) { mm_lib(mm_at[j], end); break; }
       #ifndef HOSTSIM
       mm_add(mm_at[j], "startup");
       #endif

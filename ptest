@@ -22,6 +22,10 @@
 #          mem[] at $0300, not zp; lib calls 0 cycles  size: emitted code
 #   cc65   cl65 -Cl -Os                     size: .sim
 #   oscar  oscar64 -Os -ep                  size: .prg
+#
+# A test-NAME-asm.asm (6502 asm, ivm-lib's routines on their own, no
+# compiler) has one variant:
+#   lib    cl65 -t sim6502 NAME.asm ivm-lib.asm, sim65  size: .sim
 
 import collections, difflib, glob, os, pty, re, shlex, signal, subprocess, sys, threading
 
@@ -137,6 +141,7 @@ def repro(name, t):
         "hjit":  "./ivm-jit.x {t}.ivm",
         "cc65":  "cl65 -Dputz=printf -t sim6502 -Cl -Os -o {t}.sim {t}.c && sim65 -c {t}.sim",
         "oscar": "./oscar -Dputz=printf -Os -ep {t}.c",
+        "lib":   "cl65 -t sim6502 -o {t}.sim {t}.asm ivm-lib.asm && sim65 -c {t}.sim",
     }[name].format(t=t)
 
 
@@ -147,6 +152,10 @@ def test(t):
     say("#" * 60)
     say("=== ./ptest %s" % re.sub(r"^test-", "", t))
     say("#" * 60)
+
+    # test-NAME-asm.asm: the lib's routines in asm, no compiler
+    if t.endswith("-asm") and os.path.exists(t + ".asm"):
+        return test_lib(t)
 
     rm(t + ".ivm")
     run(["bash", "./pc", t], t + ".pc.log")
@@ -207,6 +216,27 @@ def test(t):
                 between(s, r"Running emulation", r"Emulation result"),
                 t + ".oscar.log"))
 
+    return results(t, res, have_ivm)
+
+
+def test_lib(t):
+    """a test-NAME-asm.asm: built with ivm-lib.asm, run on sim65"""
+    res = []
+    rm(t + ".sim")
+    run(["cl65", "-t", "sim6502", "-o", t + ".sim", t + ".asm", "ivm-lib.asm"],
+        t + ".lib-build.log")
+    rm(t + ".o")
+    s, o = "", None
+    if os.path.exists(t + ".sim"):
+        s = run(["sim65", "-c", t + ".sim"], t + ".lib.log")
+        o = sim_out(s)
+    res.append(("lib", last_int(r"^(\d+) cycles$", s), fsize(t + ".sim"),
+                t + ".sim", o, t + ".lib.log"))
+    return results(t, res, True)
+
+
+def results(t, res, have_ivm):
+    """compare each variant's output, print the results"""
     # expected output: .out (its RUN IVM .. END part if it has one), else
     # the majority. Saved as t.expect, each variant's as t.NAME.got: diff them
     ref, refname = None, None
@@ -283,15 +313,16 @@ def main():
     specs = sys.argv[1:]
     tests = []
     if not specs:
-        tests = sorted(glob.glob("test-*.c"))
+        tests = sorted(glob.glob("test-*.c") + glob.glob("test-*-asm.asm"))
     for s in specs:
         s = re.sub(r"([^/])\.[^./]*$", r"\1", s)   # foo.c foo.ivm -> foo
         s = re.sub(r"^test-", "", s)
         # test-NAME.c, else the literal NAME.c (./ptest byte-sieve-prime)
-        got = sorted(glob.glob("test-%s.c" % s)) or sorted(glob.glob(s + ".c"))
+        got = (sorted(glob.glob("test-%s.c" % s) + glob.glob("test-%s.asm" % s))
+               or sorted(glob.glob(s + ".c")))
         if not got: print("%%Error: no test-%s.c or %s.c" % (s, s))
         tests += [g for g in got if g not in tests]
-    tests = [t[:-2] for t in tests]
+    tests = [t.rsplit(".", 1)[0] for t in tests]
 
     spec = "-".join(re.sub(r"^test-|\.c$", "", s) for s in specs)
     spec = spec.replace("*", "ALL").replace("?", "_").replace("/", "_")
@@ -312,7 +343,7 @@ def main():
         say("=== ./ptest %s   (%d tests)" %
             (" ".join(shlex.quote(a) for a in specs), len(tests)))
         say("#" * 60)
-        names = ["ivm", "asm", "fix", "zpjit", "hjit", "cc65", "oscar"]
+        names = ["ivm", "asm", "fix", "zpjit", "hjit", "cc65", "oscar", "lib"]
         say("= %-28s" % "test" + "".join("%15s" % n for n in names))
         for t, (res, status) in allres:
             row = {r[0]: r for r in res}

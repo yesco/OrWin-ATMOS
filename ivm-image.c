@@ -87,17 +87,123 @@ static int hl_load(const char *target) {
 static word hl_cut(word top, word floor) {
   static const char *const cut[] = { "_ivmlib_cut0", "_ivmlib_cut1",
     "_ivmlib_cut2", "_ivmlib_cut3", "_ivmlib_cut4", "_ivmlib_cut5",
-    "_ivmlib_cut6", "_ivmlib_end" };
+    "_ivmlib_cut6", "_ivmlib_cut7", "_ivmlib_end" };
   uchar k;
 
   if (top < floor) top = floor;
-  for (k = 0; k < 7 && top >= hl_sym(cut[k]); k++) ;
+  for (k = 0; k < 8 && top >= hl_sym(cut[k]); k++) ;
   return hl_sym(cut[k]);
 }
 
 // JIT-compile an un-relocated blob (as load_blob reads it on the host) and
 // write the image for target to outfile. zp: -z (zp_at 0: top down), org:
 // -a (0: right after the strings). 0: failed
+#ifdef MEMMAP
+// the lib in the memory map: its .bin's symbols in [beg, end], by
+// address. Each routine on its own line (its size: to the next one), a
+// "-- cut N --" line at each cut. Not listed: the startup's patched
+// operands, the routines' own (_adr)
+static int hl_mm_shown(const char *n) {
+  static const char *const show[] = { "_ivmlib_init", "_ivmlib_zpclr",
+    "_ivmlib_zpinit", "_ivmlib_start", "_ivmlib_exit", "_ivmlib_args",
+    "_ivmlib_libv", "_ivmlib_heap", "_ivmlib_heapend", 0 };
+  uchar k;
+
+  if (!strncmp(n, "_ivmlib_cut", 11) || !strncmp(n, "_ivmlib_pf", 10))
+    return 1;
+  if (!strncmp(n, "_op", 3)) return !strstr(n, "_adr");
+  for (k = 0; show[k]; k++)
+    if (!strcmp(n, show[k])) return 1;
+  return 0;
+}
+
+#define HL_MMN 128
+static void hl_mm_lib(word beg, word end) {
+  static word a[HL_MMN];
+  static const char *nm[HL_MMN];
+  const uchar *p = hl_syms;
+  const char *s, *t;
+  word i, w, n = 0, k, m;
+
+  // the symbols in it
+  for (i = 0; i < hl_nsym; i++) {
+    w = (word)(p[0] | p[1] << 8);
+    s = (const char *)p + 2;
+    if (w >= beg && (w < end || (w == end && !strncmp(s, "_ivmlib_cut", 11))) &&
+        hl_mm_shown(s) && n < HL_MMN) {
+      a[n] = w; nm[n++] = s;
+    }
+    p += 2 + strlen(s) + 1;
+  }
+
+  // by address (a cut first: it ends what was before)
+  for (k = 1; k < n; k++)
+    for (m = k; m && (a[m - 1] > a[m] || (a[m - 1] == a[m] &&
+                 strncmp(nm[m], "_ivmlib_cut", 11) == 0)); m--) {
+      w = a[m]; a[m] = a[m - 1]; a[m - 1] = w;
+      t = nm[m]; nm[m] = nm[m - 1]; nm[m - 1] = t;
+    }
+
+  // the list
+  for (k = 0; k < n; k++) {
+    if (!strncmp(nm[k], "_ivmlib_cut", 11)) {
+      printf("  -- cut %s --%s\n", nm[k] + 11,
+             a[k] == end ? "  (the image's lib ends here)" : "");
+      continue;
+    }
+    printf("  $%04X  %-24s %5u bytes\n", a[k], nm[k] + 1,
+           (unsigned)((k + 1 < n ? a[k + 1] : end) - a[k]));
+  }
+}
+#endif
+
+#ifdef MEMMAP
+// the map's head: the file (its bytes, where they load), the target's
+// base (the startup parts this image doesn't need: not loaded), zero page
+static char hl_mm_name[200];
+static struct {
+  const char *tg;
+  word hdr, base, beg, end, zplo, zptop, zpa, zpn, csp;
+} hl_mm;
+
+static void hl_mm_head(void) {
+  int sim = !strcmp(hl_mm.tg, "sim6502");
+
+  // the file
+  printf("file: %u bytes: a %u byte header, then $%04X-$%04X (%u bytes),"
+         " starts at $%04X\n\n",
+         (unsigned)(hl_mm.hdr + hl_mm.end - hl_mm.beg), (unsigned)hl_mm.hdr,
+         hl_mm.beg, hl_mm.end - 1, (unsigned)(hl_mm.end - hl_mm.beg),
+         hl_mm.beg);
+
+  // zero page
+  printf("$0000 --- zero page ---\n");
+  if (sim) {
+    printf("  $00-$01  NULL: 00 00 (a NULL pointer reads 0)\n");
+    printf("  $%02X-$%02X  sim65's arg pointer (CSP)\n", hl_mm.csp,
+           hl_mm.csp + 1);
+    printf("  $%02X-$%02X  ivm-lib: ptr1 ptr2 tmp3 tmp4\n", hl_mm.csp + 2,
+           hl_mm.zplo - 1);
+  } else {
+    printf("  $00-$01  NULL: 00 00 (a NULL pointer reads 0)\n");
+    printf("  $E2-$FB  ivm-lib: cc65's zero page (ptr1 .. tmp4)\n");
+  }
+  if (hl_mm.zpn)
+    printf("  $%02X-$%02X  mem[] (-z)\n", hl_mm.zpa,
+           hl_mm.zpa + hl_mm.zpn - 1);
+  else
+    printf("  (mem[] not in it: -z puts it below $%02X)\n", hl_mm.zptop);
+  printf("  $FC-$FD  JIT: array element pointer\n");
+  printf("  $FE-$FF  JIT: scratch (tmp1 tmp2)\n");
+
+  // the base, up to the image
+  if (hl_mm.beg > hl_mm.base)
+    printf("$%04X --- not loaded: the lib's startup parts this image doesn't"
+           " need (%u bytes) ---\n", hl_mm.base,
+           (unsigned)(hl_mm.beg - hl_mm.base));
+}
+#endif
+
 int host_image(uchar *blob, const char *target, uchar zp, uchar zp_at,
                word org, const char *outfile) {
   // header: magic[4] len memsz constidx main code call fp con data
@@ -237,6 +343,7 @@ int host_image(uchar *blob, const char *target, uchar zp, uchar zp_at,
   libbeg = hl_sym(bss_n ? "_ivmlib_init" : zp && membytes > n ? "_ivmlib_zpclr" :
                   n ? "_ivmlib_zpinit" : "_ivmlib_start");
 
+
   if (tg->hdr == 1) {                   // sim65: "sim65" ver cpu sp load reset
     memcpy(h, "sim65", 5);
     h[5]  = 2;
@@ -256,6 +363,29 @@ int host_image(uchar *blob, const char *target, uchar zp, uchar zp_at,
     h[13] = 'I'; h[14] = 'V'; h[15] = 'M'; h[16] = 0;
     hn = 17;
   }
+
+#ifdef MEMMAP
+  // the memory map (./jit): all it knows. The file, zero page, the lib
+  // from its .bin's symbols, mem[], the strings, the code, the heap
+  sprintf(hl_mm_name, "%.120s (%s, from %.60s)", outfile, tg->name,
+          mm_ivm ? mm_ivm : "?");
+  hl_mm.tg = tg->name; hl_mm.hdr = hn;
+  hl_mm.base = hl_sym("_ivmlib_init"); hl_mm.beg = libbeg; hl_mm.end = imgend;
+  hl_mm.zplo = *HL(hl_sym("_ivmlib_zplo")); hl_mm.zptop = tg->zptop;
+  hl_mm.zpa = zp ? zpa : 0; hl_mm.zpn = zp ? membytes : 0;
+  hl_mm.csp = *HL(hl_sym("_ivmlib_spzp"));
+  mm_area(MM_SLOTS, mem_base, membytes);
+  mm_area(MM_LIB, libbeg, (word)(libend - libbeg));
+  mm_area(MM_IMG, (word)(at + size), zp ? n : 0);
+  mm_area(MM_DATA, imgdata, datalen);
+  mm_area(MM_BSS, bss_img, bss_n);
+  mm_area(MM_CODE, at, size);
+  mm_area(MM_HEAP, heap, (word)(heapend - heap));
+  mm_lib = hl_mm_lib;
+  mm_title = hl_mm_name;
+  mm_head = hl_mm_head;
+  mm_print((uchar)memsz);
+#endif
 
   if (!(f = fopen(outfile, "wb"))) { printf("cannot write %s\n", outfile); goto done; }
   gap = (word)(at - (imgdata + datalen));
