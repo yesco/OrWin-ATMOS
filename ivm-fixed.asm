@@ -42,6 +42,7 @@ jmpvec: .res 2
 tmp_lo: .res 1
 tmp_hi: .res 1
 swpb:   .res 1
+swpi:   .res 1          ; op_A: the ii slot, held while jj's elem_adr runs
 savey:  .res 1          ; still used by a few multi-byte / flow ops
 
 .code
@@ -1234,6 +1235,67 @@ striped_ptrs:
         ldy     #0
         rts
 
+;;; Abb ii jj  swap ((word*)mem[bb])[mem[ii]] and [mem[jj]]; ACC = old[ii]
+;;; mem[bb] is a real pointer (its slot's own value, not another
+;;; plane): the array itself is real 6502 RAM, 2 bytes/elem, so this
+;;; swaps through (tmp_lo),y / (jmpvec),y, not MEM_LO/HI_BASE,x.
+op_A:
+        lda     (_ivm_ipc),y    ; bb
+        sta     swpb
+        iny
+        lda     (_ivm_ipc),y    ; ii
+        sta     swpi
+        iny
+        sty     savey           ; at jj: pnext skips it
+        lda     (_ivm_ipc),y    ; jj
+        ldx     swpb
+        jsr     elem_adr        ; jmpvec = &base[jj]
+        lda     tmp_lo
+        sta     jmpvec
+        lda     tmp_hi
+        sta     jmpvec+1
+        lda     swpi
+        ldx     swpb
+        jsr     elem_adr        ; tmp = &base[ii]
+
+        ldy     #1              ; hi byte
+        lda     (tmp_lo),y
+        tax
+        lda     (jmpvec),y
+        sta     (tmp_lo),y
+        txa
+        sta     (jmpvec),y
+        sta     _ivm_acc+1
+        dey                     ; lo byte
+        lda     (tmp_lo),y
+        tax
+        lda     (jmpvec),y
+        sta     (tmp_lo),y
+        txa
+        sta     (jmpvec),y
+        sta     _ivm_acc
+        jmp     pnext
+
+;;; tmp = MEM[X] (real base ptr, X = base slot) + 2*MEM[A] (real
+;;; index, A = index slot) - both read as absolute,X/Y: no need for
+;;; the (_ivm_memlo),y juggling elem_adr does in ivm-vm.asm.
+elem_adr:
+        tay
+        lda     MEM_LO_BASE,y
+        asl     a
+        sta     tmp_lo
+        lda     MEM_HI_BASE,y
+        rol     a
+        sta     tmp_hi
+        clc
+        lda     MEM_LO_BASE,x
+        adc     tmp_lo
+        sta     tmp_lo
+        lda     MEM_HI_BASE,x
+        adc     tmp_hi
+        sta     tmp_hi
+        rts
+
 ;;; $ vv  ACC = strlen(mem[vv])
 op_dollar:
         lda     (_ivm_ipc),y
@@ -1292,7 +1354,6 @@ op_m_page:
 ;;; ------------------------------------------------------------
 ;;; Not yet ported (code exists in ivm-vm.asm; needs param rewrite)
 ;;; ------------------------------------------------------------
-op_A:           ; swap word array elements
 op_V:           ; memmove
 op_x:           ; call with 1 arg
 op_y:           ; call with 2 args

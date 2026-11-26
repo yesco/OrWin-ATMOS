@@ -1,13 +1,16 @@
 # -- BNF for C → IVM engine
+# Rules are called as $X: $A..$Z, $a..$z for minor helpers
+# (same letter as the rule they help)
+# Plain letters in a pattern are literals
+#
 # Arguments Block Cscopedeclstatements Declare Expr Func
 # Gswitch Hassign Intcharetc Jprintone Kstatements
 # Massvardecl L(oop-for) Oexpr Program 
 # Q#lines RstartvalueofE Simpleval
 # Type Uvardecl Var WprintitemJ Z H
 #
-# Rules are called as $X: $A..$Z, $a..$z for minor helpers (same letter
-# as the rule they help); plain letters in a pattern are literals
-# -- letters free: N, all of $a..$z
+# TODO: UPDATE!
+# -- letters free: $b ... $z
 
 # Features TODO/missing:
 # - casting, advanced pointer stuff
@@ -171,8 +174,9 @@ K=$Y
 |puts("["]\u);[N]
 |puts(\i);[L\1PN]
 
-# raxiss's conio.h (libmos6502vm): _putc _puts, our own: as putchar, as
-#   puts without the newline
+# raxiss's conio.h (libmos6502vm): _putc _puts - let's just recognize it!
+|_putc(CR);[O\x0d]
+|_putc(LF);[O\x0a]
 |_putc($E);[E]
 |_puts("["]\u);
 |_puts($E);[P]

@@ -532,7 +532,9 @@ def rel_table(allres, names, baseline, idx, label):
         rows.append((base(t), cells))
     tw = max([len(n) for n, _ in rows] + [len("test")])
     w = [max(len(n), max(len(c[i]) for _, c in rows)) for i, n in enumerate(names)]
-    say("= relative %s (%s = 1.000x)" % (label, baseline))
+    say("=")
+    say("=")
+    say("=== RELATIVE %s (%s = 1.000x)" % (label, baseline))
     say("= %-*s%s" % (tw, "test",
         "".join(" %*s" % (w[i], n) for i, n in enumerate(names))))
     for n, cells in rows:
@@ -560,7 +562,8 @@ def size_table(allres, names):
         rows.append((base(t), cells))
     tw = max([len(n) for n, _ in rows] + [len("test")])
     w = 6
-    say("= bytes")
+    say("=")
+    say("=== BYTES")
     say("= %-*s%s" % (tw, "test", "".join(" %*s" % (w, n) for n in names)))
     for n, cells in rows:
         say("= %-*s%s" % (tw, n, "".join(" %*s" % (w, c) for c in cells)))
