@@ -581,7 +581,9 @@
 = test-vnalias                       169,665        257,315*       229,864*         9,278          1,782         39,553          7,822              - 
 = (* output differs, FAIL: failed, -: not run; see each test's results above)
 =
-= relative cycles (cc65 = 1.000x)
+=
+=
+=== RELATIVE cycles (cc65 = 1.000x)
 = test                         ivm    asm    fix  zpjit   hjit   cc65  oscar
 = test-42                     476x   806x   810x 0.674x 0.152x 1.000x 0.396x
 = test-addr                 3.028x 3.965x 3.545x 0.145x 0.016x 1.000x 0.168x
@@ -646,7 +648,8 @@
 = test-ternary              2.686x 3.852x 3.862x 0.139x 0.016x 1.000x 0.168x
 = test-vnalias              4.290x 6.506x 5.812x 0.235x 0.045x 1.000x 0.198x
 =
-= bytes
+=
+=== BYTES
 = test                         ivm    asm    fix  zpjit   hjit   cc65  oscar    lib
 = test-42                       33     33     33     68     19    195    139      -
 = test-addr                    206    206    206    722    642  3,019  4,344      -

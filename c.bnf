@@ -5,12 +5,15 @@
 #
 # Arguments Block Cscopedeclstatements Declare Expr Func
 # Gswitch Hassign Intcharetc Jprintone Kstatements
-# Massvardecl L(oop-for) Oexpr Program 
+# Massvardecl L(oop-for) Oexpr Program
 # Q#lines RstartvalueofE Simpleval
 # Type Uvardecl Var WprintitemJ Z H
 #
-# TODO: UPDATE!
-# -- letters free: $b ... $z
+# $A..$Z: all 26 taken (see above).
+# $a..$z taken (minor helpers): a c d e f g h j k n o p q x
+# $a..$z free: b i l m r s t u v w y z
+# (keep this current when a letter is claimed or freed - grep:
+#  grep -oE "^[a-z]=" c.bnf | sort -u)
 
 # Features TODO/missing:
 # - casting, advanced pointer stuff
@@ -165,21 +168,21 @@ K=$Y
 
 
 # - Input / Output
-# TODO: put these as prefix starting with pX X many alts
-|putchar('\\n');[N]
-|putchar(\d);[O\c1]
-|putchar(\i);[L\1E]
-|putchar($E);[E]
+# putNAME(...) / _putNAME(...): "put" / "_put" dispatches to $p (one
+# rule, not many K alts here - also matches the shared prefix once,
+# not once per variant)
 
-|puts("["]\u);[N]
-|puts(\i);[L\1PN]
-
-# raxiss's conio.h (libmos6502vm): _putc _puts - let's ju
-#|_putc(CR);[O\x0d] # TODO: - crashes?
-|_putc(LF);[O\x0a]
-|_putc($E);[E]
+# raxiss's _puts (conio.h, libmos6502vm): no trailing newline, unlike
+# puts() below. puts() itself isn't consistent on this across
+# platforms - that's why this compiler also has putz() (just the
+# chars, no newline) next to puts() (adds one). Lifted out ahead of
+# the dispatch below: "_put" + s(...) would otherwise reach puts's
+# s(...) alt in $p and wrongly add the newline
 |_puts("["]\u);
 |_puts($E);[P]
+
+|put$p
+|_put$p
 
 # peek / poke (a byte), deek / doke (a word) at an address: r w @ !
 #   through the address's slot (\j: a variable's own, else a temp).
@@ -404,6 +407,22 @@ L=$I\{ \+=0; \2<$E; \2++) \i\?\C\[\2\]=\d;\}[m\6\8]
 |$E; [\(\m] $E [?G\x] ;) $K[\-B\z\y\)]
 
 # END FOR
+
+
+# - p: putNAME / _putNAME, after K's "put" / "_put" is consumed.
+#   char(...): putchar. s(...): puts (the real one - adds N). only
+#   reached this way for "put": raxiss's _puts is lifted out in K,
+#   ahead of the dispatch, so "_put" here only ever means _putc.
+#   c(...): _putc (raxiss's; CR / LF are conio.h's names, not escapes)
+p=char('\\n');[N]
+|char(\d);[O\c1]
+|char(\i);[L\1E]
+|char($E);[E]
+|s("["]\u);[N]
+|s(\i);[L\1PN]
+|c(CR);[O\x0d]
+|c(LF);[O\x0a]
+|c($E);[E]
 
 
 # G = Switch interior items (declarations, case/default labels, or normal statements)

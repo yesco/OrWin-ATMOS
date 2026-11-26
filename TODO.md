@@ -2,15 +2,6 @@
 
 # MeteoriC-65 (parse.c c.bnf): next, after the manual (MeteoriC-man.md)
 
-- 05-0xcafe
-  - LF: their conio.h's #define  and CR
-  
-TODO: we don't need to define LF and CR but we can recognize their usage form
-  like I do with fputs(xyz, stdout); it''s just syntax! (cheat!)
-
-- fix has no A op (the swap, t = a[i]; a[i] = a[j]; a[j] = t). On both
-  sorts it prints %A and stops.
-    
 - What the samples need next:
 
   ┌──────────────────────────────────┬─────────┐

@@ -59,7 +59,8 @@
 import collections, difflib, glob, os, pty, re, shlex, shutil, signal
 import subprocess, sys, threading
 
-TIMEOUT = 600
+TIMEOUT = 90    # a hang, not a slow test: test-dispatch-loop on ivm (cc65
+                # C VM under sim65, 6.9B cycles) genuinely takes ~48s
 OSCAR64 = os.environ.get("OSCAR64",
                          os.path.expanduser("~/GIT/oscar64/bin/oscar64"))
 RAX = "../oricCompilerBenchmark/playground"

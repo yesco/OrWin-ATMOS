@@ -88,6 +88,11 @@ GRAMMAR ENCODING (parse.c, current)
   \"text" prints text on its own line, once per source place (rule L:
   the &x warning). Free directive chars: ` only.
 
+  c.bnf's own header comment tracks which $a..$z helper letters are
+  taken / free (this went stale once already - keep it current
+  whenever a letter is claimed or freed, not just "TODO: UPDATE!").
+  Ask Jonas before claiming a letter (op or rule): they're scarce.
+
 OPTIMIZATIONS (ivm-gen.c; impact: MeteoriC-man.md "Optimizations", test-opts.c)
   - IVM_OPT (-O: layout, gen_pack, gen_optimize = peephole + squeeze):
     on for host (./pc), off in cc65 parse.sim (-DIVM_OPT: 3.6 KB).
