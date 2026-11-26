@@ -157,6 +157,12 @@ _run_ivm_asm:
         ldy     #0
         beq     xnext           ; always
 
+;;; Y overflow rule (as ivm-fixed.asm): ops don't check Y.
+;;; - the compiler puts a DEL (127, op_del: FIXIPC) every 124 bytes of
+;;;   straight code (ivm-gen.c gen_fixipc)
+;;; - jumps, calls, returns and " re-base (FIXIPC) themselves
+;;; - anext and # can leave a big Y: they check (pfixnext)
+
 ;;; IPC += A + Y and FIXIPC if needed
 anext:
 ;;; 10c (17c 19c)
@@ -166,7 +172,18 @@ anext:
 	bcc     pfixnext
 	;; a bit clumsy
 	inc     _ivm_ipc+1
-	jmp     pfixnext
+	tya
+
+;;; Y >= 128 (N from Y): fold into ipc
+pfixnext:
+        bpl     xnext
+        FIXIPC                  ; ipc += Y, Y := 0
+        jmp     xnext
+
+;;; savey = the next op (no operand: after a jsr)
+ynext:
+        ldy     savey
+        jmp     xnext
 	
 
 ;;; xx11 b  11c (18c)
@@ -180,20 +197,12 @@ anext:
 
 ;;; ----- consume 1-byte operand -----
 ;;; if used parameter always need to savey
+;;; No Y check here any more: the DELs do it (see anext)
 pnext:
         ldy     savey
         iny
-        ;; if Y>=128 fold into ipc (matches comment above); else keep Y offset
-;;; TODO: 5-10% (2c spent testing here, maybe inject an fixop)
-pfixnext:
-        bpl     xnext
-        FIXIPC                  ; ipc += Y, Y := 0
-        jmp     xnext
-        
-;;; ----- main loop -----
-ynext:  
-        ldy     savey
 
+;;; ----- main loop -----
 xnext:
 ;;; FAST = (+ 5 2 2 2 11) = 22c (can remove 2c)
         lda     (_ivm_ipc),y
@@ -1836,8 +1845,17 @@ op_n_compute:
 
 ;;; NOP - SPACE
 op_sp:
-op_del:                 ;; DEL: NOP (ivm-fixed.asm: FIXIPC)
+.if ALTCODE=0
+op_del:                 ;; DEL: NOP here
+.endif
 	jmp     xnext
+
+.if ALTCODE
+;;; DEL (127): re-base ipc (the compiler puts one every 124 bytes)
+op_del:
+	FIXIPC
+	jmp     xnext
+.endif
 
 
 ;;; PAR ops that need C (mul/div/mod) — PAR already in _ivm_par
