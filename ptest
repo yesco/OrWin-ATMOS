@@ -14,6 +14,12 @@
 #   ./ptest -v     also one progress line on stderr: [5/17] test: variant
 #   ./ptest -v -v  everything: each command and its output
 #
+# On more than one test, after the summary table of cycles and bytes:
+# a narrower table of each backend's cycles, as a multiple of one
+# chosen backend's (default cc65 - oscar64 superoptimizes, a lopsided
+# 1.000x party).  ./ptest -rel=oscar  picks oscar64 as that party
+# instead.  Then a plain (not relative) table of bytes.
+#
 # The = lines also go to ptest.out (./ptest SPEC: ptest-SPEC.out): small,
 # checked in, to follow the results over time.
 #
@@ -175,6 +181,15 @@ def last_int(pat, text):
 
 def fsize(f):
     return os.path.getsize(f) if os.path.exists(f) else None
+
+
+def ratio(v, bv):
+    """v as a multiple of bv, as short as stays readable: 1.000x, 5.70x,
+    426x (so a huge cycle count doesn't blow up the column)."""
+    r = v / bv
+    if abs(r) >= 100: return "%.0fx" % r
+    if abs(r) >= 10: return "%.1fx" % r
+    return "%.3fx" % r
 
 
 def rm(*fs):
@@ -494,13 +509,74 @@ def results(t, res, have_ivm):
     return res, status
 
 
+def rel_table(allres, names, baseline, idx, label):
+    """print one extra table: every backend's cycles (idx 1), as a
+    multiple of baseline's (the 1.000x party, default cc65 - oscar64
+    superoptimizes and makes a lopsided baseline). FAIL/- as in the
+    main table; a test whose baseline didn't run is all '-' (nothing
+    to be a multiple of)."""
+    rows = []
+    for t, (res, status) in allres:
+        row = {r[0]: r for r in res}
+        br = row.get(baseline)
+        bv = br[idx] if br and status.get(baseline) != "FAILED" else None
+        cells = []
+        for n in names:
+            r, st = row.get(n), status.get(n)
+            if st == "FAILED":
+                cells.append("FAIL")
+            elif r is None or r[idx] is None or not bv:
+                cells.append("-")
+            else:
+                cells.append(ratio(r[idx], bv))
+        rows.append((base(t), cells))
+    tw = max([len(n) for n, _ in rows] + [len("test")])
+    w = [max(len(n), max(len(c[i]) for _, c in rows)) for i, n in enumerate(names)]
+    say("= relative %s (%s = 1.000x)" % (label, baseline))
+    say("= %-*s%s" % (tw, "test",
+        "".join(" %*s" % (w[i], n) for i, n in enumerate(names))))
+    for n, cells in rows:
+        say("= %-*s%s" % (tw, n,
+            "".join(" %*s" % (w[i], c) for i, c in enumerate(cells))))
+    say()
+
+
+def size_table(allres, names):
+    """print every backend's file size in bytes, plain (not relative:
+    bytes don't get smaller just because another party is dense),
+    6-digit columns."""
+    rows = []
+    for t, (res, status) in allres:
+        row = {r[0]: r for r in res}
+        cells = []
+        for n in names:
+            r, st = row.get(n), status.get(n)
+            if st == "FAILED":
+                cells.append("FAIL")
+            elif r is None or r[2] is None:
+                cells.append("-")
+            else:
+                cells.append("{:,}".format(r[2]))
+        rows.append((base(t), cells))
+    tw = max([len(n) for n, _ in rows] + [len("test")])
+    w = 6
+    say("= bytes")
+    say("= %-*s%s" % (tw, "test", "".join(" %*s" % (w, n) for n in names)))
+    for n, cells in rows:
+        say("= %-*s%s" % (tw, n, "".join(" %*s" % (w, c) for c in cells)))
+    say()
+
+
 # ---- main ---------------------------------------------------------------------
 
 def main():
     global out, res_out, verbose, step_n
     args = sys.argv[1:]
     verbose = sum(a.count("v") for a in args if re.match(r"^-v+$", a))
-    specs = [a for a in args if not re.match(r"^-v+$", a)]
+    rel_m = [re.match(r"^-rel=(\w+)$", a) for a in args]
+    rel_base = next((m.group(1) for m in rel_m if m), "cc65")
+    specs = [a for a in args if not re.match(r"^-v+$", a)
+             and not re.match(r"^-rel=\w+$", a)]
     tmp_dir()
 
     # the tests: ours (in the repo dir), raxiss's samples (dirs in RAX)
@@ -563,6 +639,16 @@ def main():
         say("= (* output differs, FAIL: failed, -: not run; see each test's"
             " results above)")
         say()
+
+        if rel_base not in names:
+            print("%%Error: -rel=%s: not a backend (%s)" %
+                  (rel_base, ", ".join(names)))
+        else:
+            say("=")
+            rel_names = [n for n in names if n != "lib"]
+            rel_table(allres, rel_names, rel_base, 1, "cycles")
+            say("=")
+            size_table(allres, names)
     out.close()
     res_out.close()
     print("results: %s.out   log: %s" % (name, os.path.join(TMP, name + ".log")))
