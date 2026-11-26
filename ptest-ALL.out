@@ -1,0 +1,561 @@
+=== ./ptest 42
+= 109,573 cycles (   33 bytes) - ivm   - test-42
+= 185,285 cycles (   33 bytes) - asm   - test-42
+= 185,223 cycles (   33 bytes) - fix   - test-42
+=     155 cycles (   68 bytes) - zpjit - test-42
+=      35 cycles (   19 bytes) - hjit  - test-42
+=     230 cycles (  195 bytes) - cc65  - test-42
+=      91 cycles (  139 bytes) - oscar - test-42
+=== ./ptest addr
+= 193,342 cycles (  206 bytes) - ivm   - test-addr
+= 253,124 cycles (  206 bytes) - asm   - test-addr  DIFFERS 5/5
+=         ./ivm-asm TMP/test-addr
+= 224,754 cycles (  206 bytes) - fix   - test-addr  DIFFERS 5/5
+=         ./ivm-fix TMP/test-addr
+=   9,278 cycles (  722 bytes) - zpjit - test-addr
+=   1,053 cycles (  642 bytes) - hjit  - test-addr
+=  63,842 cycles ( 3019 bytes) - cc65  - test-addr
+=  10,695 cycles ( 4344 bytes) - oscar - test-addr
+=== ./ptest array
+= 427,832 cycles (  569 bytes) - ivm   - test-array
+= 487,678 cycles (  569 bytes) - asm   - test-array
+= 485,674 cycles (  569 bytes) - fix   - test-array
+=  71,559 cycles ( 1431 bytes) - zpjit - test-array
+=   3,268 cycles ( 1237 bytes) - hjit  - test-array
+= 212,031 cycles ( 3930 bytes) - cc65  - test-array
+=  78,663 cycles ( 5066 bytes) - oscar - test-array
+=== ./ptest arrayinit
+= 365,815 cycles (  471 bytes) - ivm   - test-arrayinit
+= 437,717 cycles (  471 bytes) - asm   - test-arrayinit
+= 436,770 cycles (  471 bytes) - fix   - test-arrayinit
+=  34,893 cycles (  950 bytes) - zpjit - test-arrayinit
+=     972 cycles (  732 bytes) - hjit  - test-arrayinit
+= 179,016 cycles ( 3379 bytes) - cc65  - test-arrayinit
+=  49,634 cycles ( 5006 bytes) - oscar - test-arrayinit
+=== ./ptest bench-striped-struct
+= 29,520,248 cycles (  196 bytes) - ivm   - test-bench-striped-struct
+= 10,615,543 cycles (  196 bytes) - asm   - test-bench-striped-struct
+=  9,619,275 cycles (  196 bytes) - fix   - test-bench-striped-struct
+=  2,838,986 cycles ( 1123 bytes) - zpjit - test-bench-striped-struct
+=  2,979,815 cycles (  855 bytes) - hjit  - test-bench-striped-struct
+=  6,249,377 cycles ( 3118 bytes) - cc65  - test-bench-striped-struct
+=    880,941 cycles ( 4365 bytes) - oscar - test-bench-striped-struct
+=== ./ptest break
+= 825,823 cycles (  583 bytes) - ivm   - test-break
+= 743,941 cycles (  583 bytes) - asm   - test-break
+= 733,650 cycles (  583 bytes) - fix   - test-break
+=  66,934 cycles ( 2177 bytes) - zpjit - test-break
+=  10,689 cycles ( 2105 bytes) - hjit  - test-break
+= 559,942 cycles ( 4435 bytes) - cc65  - test-break
+=  97,334 cycles ( 5281 bytes) - oscar - test-break
+=== ./ptest char
+= 171,569 cycles (  155 bytes) - ivm   - test-char
+= 251,049 cycles (  155 bytes) - asm   - test-char
+= 249,802 cycles (  155 bytes) - fix   - test-char
+=   7,794 cycles (  440 bytes) - zpjit - test-char
+=   1,038 cycles (  201 bytes) - hjit  - test-char
+=  30,621 cycles ( 2793 bytes) - cc65  - test-char
+=   8,227 cycles ( 4371 bytes) - oscar - test-char
+=== ./ptest const
+= 114,441 cycles (   57 bytes) - ivm   - test-const
+= 195,395 cycles (   57 bytes) - asm   - test-const
+= 195,278 cycles (   57 bytes) - fix   - test-const
+=     257 cycles (   82 bytes) - zpjit - test-const
+=      35 cycles (   19 bytes) - hjit  - test-const
+=     230 cycles (  207 bytes) - cc65  - test-const
+=      91 cycles (  139 bytes) - oscar - test-const
+=== ./ptest cse
+= 300,400 cycles (  383 bytes) - ivm   - test-cse
+= 368,451 cycles (  383 bytes) - asm   - test-cse
+= 301,059 cycles (  383 bytes) - fix   - test-cse  DIFFERS 5/12
+=         ./ivm-fix TMP/test-cse
+=  31,157 cycles ( 1399 bytes) - zpjit - test-cse
+=   2,840 cycles ( 1104 bytes) - hjit  - test-cse
+= 134,229 cycles ( 3946 bytes) - cc65  - test-cse
+=  36,945 cycles ( 5046 bytes) - oscar - test-cse
+=== ./ptest dispatch-fun
+= 836,037,421 cycles (  151 bytes) - ivm   - test-dispatch-fun
+= 218,769,488 cycles (  151 bytes) - asm   - test-dispatch-fun
+= 209,599,511 cycles (  151 bytes) - fix   - test-dispatch-fun
+=  18,220,556 cycles (  418 bytes) - zpjit - test-dispatch-fun
+=  20,250,337 cycles (  358 bytes) - hjit  - test-dispatch-fun
+=  12,600,333 cycles (  545 bytes) - cc65  - test-dispatch-fun
+=     150,342 cycles (  164 bytes) - oscar - test-dispatch-fun
+=== ./ptest dispatch-inc
+= 329,160,459 cycles (  247 bytes) - ivm   - test-dispatch-inc
+=  77,015,706 cycles (  247 bytes) - asm   - test-dispatch-inc
+=  66,845,745 cycles (  247 bytes) - fix   - test-dispatch-inc
+=   8,255,944 cycles (  703 bytes) - zpjit - test-dispatch-inc
+=   9,269,867 cycles (  849 bytes) - hjit  - test-dispatch-inc
+=  35,604,269 cycles ( 1744 bytes) - cc65  - test-dispatch-inc
+=     150,342 cycles (  164 bytes) - oscar - test-dispatch-inc
+=== ./ptest dispatch-loop
+= 6,932,625,616 cycles (  136 bytes) - ivm   - test-dispatch-loop
+= 1,273,092,350 cycles (  136 bytes) - asm   - test-dispatch-loop
+= 1,172,512,192 cycles (  136 bytes) - fix   - test-dispatch-loop
+=   204,413,416 cycles (  415 bytes) - zpjit - test-dispatch-loop
+=   236,483,237 cycles (  419 bytes) - hjit  - test-dispatch-loop
+=   586,407,327 cycles (  631 bytes) - cc65  - test-dispatch-loop
+=        16,278 cycles (  164 bytes) - oscar - test-dispatch-loop
+=== ./ptest dispatch-pon
+= 119,035,414 cycles (  146 bytes) - ivm   - test-dispatch-pon
+=  41,763,628 cycles (  146 bytes) - asm   - test-dispatch-pon
+=  41,593,650 cycles (  146 bytes) - fix   - test-dispatch-pon
+=     190,470 cycles (  100 bytes) - zpjit - test-dispatch-pon
+=     220,353 cycles (   46 bytes) - hjit  - test-dispatch-pon
+=     590,331 cycles (  241 bytes) - cc65  - test-dispatch-pon
+=     150,342 cycles (  164 bytes) - oscar - test-dispatch-pon
+=== ./ptest dispatch-switch-ifif
+= 6,466,084 cycles (  397 bytes) - ivm   - test-dispatch-switch-ifif
+= 4,699,780 cycles (  397 bytes) - asm   - test-dispatch-switch-ifif  DIFFERS 142/142
+=           ./ivm-asm TMP/test-dispatch-switch-ifif
+= 4,101,673 cycles (  397 bytes) - fix   - test-dispatch-switch-ifif  DIFFERS 142/142
+=           ./ivm-fix TMP/test-dispatch-switch-ifif
+=   821,095 cycles ( 1282 bytes) - zpjit - test-dispatch-switch-ifif  DIFFERS 142/142
+=           ./ivm-jit.x -z -tsim6502 -oTMP/test-dispatch-switch-ifif.jit.sim TMP/test-dispatch-switch-ifif.ivm && sim65 -c TMP/test-dispatch-switch-ifif.jit.sim
+=   145,724 cycles ( 1298 bytes) - hjit  - test-dispatch-switch-ifif  DIFFERS 256/256
+=           ./ivm-jit.x TMP/test-dispatch-switch-ifif.ivm
+= 3,442,396 cycles ( 3241 bytes) - cc65  - test-dispatch-switch-ifif  DIFFERS 142/142
+=           cl65 -Dputz=printf -t sim6502 -Cl -Os -o TMP/test-dispatch-switch-ifif.sim TMP/test-dispatch-switch-ifif.c && sim65 -c TMP/test-dispatch-switch-ifif.sim
+=         - FAILED                - oscar - test-dispatch-switch-ifif
+=           ./oscar -Dputz=printf -Os -ep TMP/test-dispatch-switch-ifif.c
+=== ./ptest dispatch-switch
+= - FAILED                - pc    - test-dispatch-switch
+=   ./pc TMP/test-dispatch-switch
+= - FAILED                - cc65  - test-dispatch-switch
+=   cl65 -Dputz=printf -t sim6502 -Cl -Os -o TMP/test-dispatch-switch.sim TMP/test-dispatch-switch.c && sim65 -c TMP/test-dispatch-switch.sim
+= - FAILED                - oscar - test-dispatch-switch
+=   ./oscar -Dputz=printf -Os -ep TMP/test-dispatch-switch.c
+=== ./ptest dispatch
+= 93,566,296 cycles (  147 bytes) - ivm   - test-dispatch
+= 27,922,176 cycles (  147 bytes) - asm   - test-dispatch
+= 24,432,032 cycles (  147 bytes) - fix   - test-dispatch
+=    390,365 cycles (   97 bytes) - zpjit - test-dispatch
+=    430,259 cycles (   56 bytes) - hjit  - test-dispatch
+=    460,324 cycles (  231 bytes) - cc65  - test-dispatch
+=         91 cycles (  139 bytes) - oscar - test-dispatch
+=== ./ptest empty
+= 108,280 cycles (   30 bytes) - ivm   - test-empty
+= 183,098 cycles (   30 bytes) - asm   - test-empty
+= 183,053 cycles (   30 bytes) - fix   - test-empty
+=     151 cycles (   64 bytes) - zpjit - test-empty
+=      31 cycles (   15 bytes) - hjit  - test-empty
+=     226 cycles (  191 bytes) - cc65  - test-empty
+=      89 cycles (  137 bytes) - oscar - test-empty
+=== ./ptest entry
+= 212,455 cycles (  189 bytes) - ivm   - test-entry
+= 286,880 cycles (  189 bytes) - asm   - test-entry
+= 286,361 cycles (  189 bytes) - fix   - test-entry
+=  15,887 cycles (  609 bytes) - zpjit - test-entry
+=     345 cycles (  286 bytes) - hjit  - test-entry
+=  76,407 cycles ( 2662 bytes) - cc65  - test-entry
+=  20,290 cycles ( 4396 bytes) - oscar - test-entry
+=== ./ptest expr
+= 1,397,746 cycles (  132 bytes) - ivm   - test-expr
+= 1,229,637 cycles (  132 bytes) - asm   - test-expr
+= 1,214,083 cycles (  132 bytes) - fix   - test-expr
+=   199,820 cycles (  413 bytes) - zpjit - test-expr
+=    10,454 cycles (  202 bytes) - hjit  - test-expr
+=   884,949 cycles ( 2565 bytes) - cc65  - test-expr
+=   278,795 cycles ( 4296 bytes) - oscar - test-expr
+=== ./ptest exprinc
+= 275,936 cycles (  265 bytes) - ivm   - test-exprinc
+= 348,753 cycles (  265 bytes) - asm   - test-exprinc
+= 346,991 cycles (  265 bytes) - fix   - test-exprinc
+=  19,675 cycles (  885 bytes) - zpjit - test-exprinc
+=   1,401 cycles (  772 bytes) - hjit  - test-exprinc
+= 156,571 cycles ( 3275 bytes) - cc65  - test-exprinc
+=  27,419 cycles ( 4614 bytes) - oscar - test-exprinc
+=== ./ptest fixipc-op
+= 535,952 cycles (  975 bytes) - ivm   - test-fixipc-op
+= 349,429 cycles (  975 bytes) - asm   - test-fixipc-op
+= 327,589 cycles (  975 bytes) - fix   - test-fixipc-op
+=  23,711 cycles ( 2981 bytes) - zpjit - test-fixipc-op
+=  18,438 cycles ( 3795 bytes) - hjit  - test-fixipc-op
+=  68,474 cycles ( 6603 bytes) - cc65  - test-fixipc-op
+=  18,300 cycles ( 4541 bytes) - oscar - test-fixipc-op
+=== ./ptest getchar
+= 135,389 cycles (  537 bytes) - ivm   - test-getchar
+= 229,354 cycles (  537 bytes) - asm   - test-getchar
+= 229,164 cycles (  537 bytes) - fix   - test-getchar
+=   3,118 cycles ( 1619 bytes) - zpjit - test-getchar
+=     138 cycles ( 1256 bytes) - hjit  - test-getchar
+=   6,369 cycles ( 3960 bytes) - cc65  - test-getchar
+=   3,595 cycles ( 4989 bytes) - oscar - test-getchar
+=== ./ptest hello
+= 117,322 cycles (   48 bytes) - ivm   - test-hello
+= 192,393 cycles (   48 bytes) - asm   - test-hello
+= 192,331 cycles (   48 bytes) - fix   - test-hello
+=   1,432 cycles (  215 bytes) - zpjit - test-hello
+=      41 cycles (   36 bytes) - hjit  - test-hello
+=   3,362 cycles ( 2287 bytes) - cc65  - test-hello
+=   1,637 cycles ( 4101 bytes) - oscar - test-hello
+=== ./ptest ifdef
+= 229,808 cycles (  232 bytes) - ivm   - test-ifdef
+= 307,473 cycles (  232 bytes) - asm   - test-ifdef
+= 307,013 cycles (  232 bytes) - fix   - test-ifdef
+=  17,728 cycles (  564 bytes) - zpjit - test-ifdef
+=     405 cycles (  355 bytes) - hjit  - test-ifdef
+=  82,947 cycles ( 2774 bytes) - cc65  - test-ifdef  DIFFERS 1/10
+=         cl65 -Dputz=printf -t sim6502 -Cl -Os -o TMP/test-ifdef.sim TMP/test-ifdef.c && sim65 -c TMP/test-ifdef.sim
+=  24,167 cycles ( 4534 bytes) - oscar - test-ifdef  DIFFERS 1/10
+=         ./oscar -Dputz=printf -Os -ep TMP/test-ifdef.c
+=== ./ptest ifeq
+= 1,425,625 cycles (  581 bytes) - ivm   - test-ifeq
+=   860,938 cycles (  581 bytes) - asm   - test-ifeq
+=   835,130 cycles (  581 bytes) - fix   - test-ifeq
+=    85,479 cycles ( 2112 bytes) - zpjit - test-ifeq
+=    33,392 cycles ( 1974 bytes) - hjit  - test-ifeq
+=   449,744 cycles ( 4144 bytes) - cc65  - test-ifeq
+=    82,072 cycles ( 4971 bytes) - oscar - test-ifeq
+=== ./ptest incdec
+= 636,751 cycles (  873 bytes) - ivm   - test-incdec  DIFFERS 1/24
+=         ./ivm TMP/test-incdec
+= 664,732 cycles (  873 bytes) - asm   - test-incdec
+= 661,067 cycles (  873 bytes) - fix   - test-incdec
+=  85,690 cycles ( 2231 bytes) - zpjit - test-incdec
+=   5,139 cycles ( 2250 bytes) - hjit  - test-incdec
+= 383,684 cycles ( 5244 bytes) - cc65  - test-incdec
+= 102,907 cycles ( 6080 bytes) - oscar - test-incdec
+=== ./ptest logic
+= 295,926 cycles (  423 bytes) - ivm   - test-logic
+= 361,026 cycles (  423 bytes) - asm   - test-logic
+= 359,176 cycles (  423 bytes) - fix   - test-logic
+=  18,555 cycles ( 2009 bytes) - zpjit - test-logic
+=   2,809 cycles ( 1899 bytes) - hjit  - test-logic
+= 165,067 cycles ( 3862 bytes) - cc65  - test-logic
+=  26,779 cycles ( 4805 bytes) - oscar - test-logic
+=== ./ptest loop-count
+= 10,248,294 cycles (   68 bytes) - ivm   - test-loop-count
+=  2,215,553 cycles (   68 bytes) - asm   - test-loop-count
+=  2,015,575 cycles (   68 bytes) - fix   - test-loop-count
+=    274,572 cycles (  313 bytes) - zpjit - test-loop-count
+=    310,580 cycles (   94 bytes) - hjit  - test-loop-count
+=    914,112 cycles ( 2391 bytes) - cc65  - test-loop-count
+=      4,826 cycles ( 4128 bytes) - oscar - test-loop-count
+=== ./ptest loop-down
+= 10,697,434 cycles (   72 bytes) - ivm   - test-loop-down
+=  3,605,287 cycles (   72 bytes) - asm   - test-loop-down
+=  2,865,122 cycles (   72 bytes) - fix   - test-loop-down
+=    453,783 cycles (  328 bytes) - zpjit - test-loop-down
+=    550,408 cycles (  114 bytes) - hjit  - test-loop-down
+=    753,032 cycles ( 2384 bytes) - cc65  - test-loop-down
+=    304,465 cycles ( 4160 bytes) - oscar - test-loop-down
+=== ./ptest loop-for-acc
+= 11,050,795 cycles (   75 bytes) - ivm   - test-loop-for-acc
+=  2,538,702 cycles (   75 bytes) - asm   - test-loop-for-acc
+=  2,308,712 cycles (   75 bytes) - fix   - test-loop-for-acc
+=    394,641 cycles (  330 bytes) - zpjit - test-loop-for-acc
+=    480,397 cycles (  115 bytes) - hjit  - test-loop-for-acc
+=    824,116 cycles ( 2400 bytes) - cc65  - test-loop-for-acc
+=    285,139 cycles ( 4161 bytes) - oscar - test-loop-for-acc
+=== ./ptest loop-for-le-expr
+= 11,053,431 cycles (   87 bytes) - ivm   - test-loop-for-le-expr
+=  2,542,806 cycles (   87 bytes) - asm   - test-loop-for-le-expr
+=  2,312,762 cycles (   87 bytes) - fix   - test-loop-for-le-expr
+=    454,975 cycles (  343 bytes) - zpjit - test-loop-for-le-expr
+=    550,365 cycles (  132 bytes) - hjit  - test-loop-for-le-expr
+=    824,187 cycles ( 2404 bytes) - cc65  - test-loop-for-le-expr
+=    345,694 cycles ( 4172 bytes) - oscar - test-loop-for-le-expr
+=== ./ptest loop-for-le
+= 11,050,278 cycles (   74 bytes) - ivm   - test-loop-for-le
+=  2,538,210 cycles (   74 bytes) - asm   - test-loop-for-le
+=  2,308,230 cycles (   74 bytes) - fix   - test-loop-for-le
+=    394,547 cycles (  329 bytes) - zpjit - test-loop-for-le
+=    480,397 cycles (  114 bytes) - hjit  - test-loop-for-le
+=    824,093 cycles ( 2399 bytes) - cc65  - test-loop-for-le
+=    345,229 cycles ( 4167 bytes) - oscar - test-loop-for-le
+=== ./ptest loop-for-lt
+= 11,050,269 cycles (   74 bytes) - ivm   - test-loop-for-lt
+=  2,538,221 cycles (   74 bytes) - asm   - test-loop-for-lt
+=  2,308,231 cycles (   74 bytes) - fix   - test-loop-for-lt
+=    394,547 cycles (  329 bytes) - zpjit - test-loop-for-lt
+=    480,397 cycles (  114 bytes) - hjit  - test-loop-for-lt
+=    824,093 cycles ( 2399 bytes) - cc65  - test-loop-for-lt
+=    325,213 cycles ( 4163 bytes) - oscar - test-loop-for-lt
+=== ./ptest loop-for-pluseq
+= 11,052,283 cycles (   78 bytes) - ivm   - test-loop-for-pluseq
+=  2,540,103 cycles (   78 bytes) - asm   - test-loop-for-pluseq
+=  2,310,113 cycles (   78 bytes) - fix   - test-loop-for-pluseq
+=    394,914 cycles (  333 bytes) - zpjit - test-loop-for-pluseq
+=    480,397 cycles (  118 bytes) - hjit  - test-loop-for-pluseq
+=    824,164 cycles ( 2403 bytes) - cc65  - test-loop-for-pluseq
+=    325,585 cycles ( 4167 bytes) - oscar - test-loop-for-pluseq
+=== ./ptest loop-for-var
+= 11,051,213 cycles (   78 bytes) - ivm   - test-loop-for-var
+=  2,538,793 cycles (   78 bytes) - asm   - test-loop-for-var
+=  2,308,789 cycles (   78 bytes) - fix   - test-loop-for-var
+=    434,587 cycles (  336 bytes) - zpjit - test-loop-for-var
+=    530,363 cycles (  125 bytes) - hjit  - test-loop-for-var
+=    864,130 cycles ( 2412 bytes) - cc65  - test-loop-for-var
+=    325,306 cycles ( 4164 bytes) - oscar - test-loop-for-var
+=== ./ptest loop-postdec
+= 11,641,189 cycles (   81 bytes) - ivm   - test-loop-postdec
+=  3,798,449 cycles (   81 bytes) - asm   - test-loop-postdec
+=  3,088,274 cycles (   81 bytes) - fix   - test-loop-postdec
+=    524,686 cycles (  357 bytes) - zpjit - test-loop-postdec
+=    620,443 cycles (  146 bytes) - hjit  - test-loop-postdec
+=    874,159 cycles ( 2404 bytes) - cc65  - test-loop-postdec
+=    515,033 cycles ( 4175 bytes) - oscar - test-loop-postdec
+=== ./ptest loop-while-count
+= 11,631,436 cycles (   76 bytes) - ivm   - test-loop-while-count
+=  3,438,362 cycles (   76 bytes) - asm   - test-loop-while-count
+=  2,667,791 cycles (   76 bytes) - fix   - test-loop-while-count
+=    275,125 cycles (  319 bytes) - zpjit - test-loop-while-count
+=    310,580 cycles (  100 bytes) - hjit  - test-loop-while-count
+=    894,203 cycles ( 2397 bytes) - cc65  - test-loop-while-count
+=      5,384 cycles ( 4134 bytes) - oscar - test-loop-while-count
+=== ./ptest loop-while-expr
+= 16,142,769 cycles (   85 bytes) - ivm   - test-loop-while-expr
+=  4,960,822 cycles (   85 bytes) - asm   - test-loop-while-expr
+=  4,140,656 cycles (   85 bytes) - fix   - test-loop-while-expr
+=    584,866 cycles (  341 bytes) - zpjit - test-loop-while-expr
+=    670,349 cycles (  126 bytes) - hjit  - test-loop-while-expr
+=  1,014,226 cycles ( 2407 bytes) - cc65  - test-loop-while-expr
+=    535,528 cycles ( 4185 bytes) - oscar - test-loop-while-expr
+=== ./ptest loop-while
+= 12,429,837 cycles (   75 bytes) - ivm   - test-loop-while
+=  3,757,775 cycles (   75 bytes) - asm   - test-loop-while
+=  2,957,192 cycles (   75 bytes) - fix   - test-loop-while
+=    394,452 cycles (  328 bytes) - zpjit - test-loop-while
+=    480,397 cycles (  113 bytes) - hjit  - test-loop-while
+=    804,100 cycles ( 2398 bytes) - cc65  - test-loop-while
+=    325,120 cycles ( 4162 bytes) - oscar - test-loop-while
+=== ./ptest loops
+= 5,041,728 cycles ( 1069 bytes) - ivm   - test-loops
+= 1,992,880 cycles ( 1069 bytes) - asm   - test-loops
+= 1,873,711 cycles ( 1069 bytes) - fix   - test-loops
+=   270,472 cycles ( 3618 bytes) - zpjit - test-loops
+=   179,418 cycles ( 3773 bytes) - hjit  - test-loops
+= 1,240,337 cycles ( 7186 bytes) - cc65  - test-loops
+=   235,326 cycles ( 6559 bytes) - oscar - test-loops  DIFFERS 1/19
+=           ./oscar -Dputz=printf -Os -ep TMP/test-loops.c
+=== ./ptest memset
+= 13,949,689 cycles (  536 bytes) - ivm   - test-memset
+=  4,794,867 cycles (  536 bytes) - asm   - test-memset
+=  3,763,907 cycles (  536 bytes) - fix   - test-memset
+=    729,704 cycles ( 1432 bytes) - zpjit - test-memset
+=    683,673 cycles ( 1322 bytes) - hjit  - test-memset  DIFFERS 25/40
+=            ./ivm-jit.x TMP/test-memset.ivm
+=  2,489,326 cycles ( 3877 bytes) - cc65  - test-memset
+=          - FAILED                - oscar - test-memset
+=            ./oscar -Dputz=printf -Os -ep TMP/test-memset.c
+=== ./ptest nullread
+= 120,211 cycles (   49 bytes) - ivm   - test-nullread
+= 195,046 cycles (   49 bytes) - asm   - test-nullread
+= 194,967 cycles (   49 bytes) - fix   - test-nullread
+=   1,774 cycles (  281 bytes) - zpjit - test-nullread
+=      95 cycles (   66 bytes) - hjit  - test-nullread
+=  13,954 cycles ( 2331 bytes) - cc65  - test-nullread  DIFFERS 1/2
+=         cl65 -Dputz=printf -t sim6502 -Cl -Os -o TMP/test-nullread.sim TMP/test-nullread.c && sim65 -c TMP/test-nullread.sim
+=   2,528 cycles ( 4126 bytes) - oscar - test-nullread
+=== ./ptest nums
+= 221,693 cycles (  145 bytes) - ivm   - test-nums
+= 296,225 cycles (  145 bytes) - asm   - test-nums
+= 295,901 cycles (  145 bytes) - fix   - test-nums
+=  22,071 cycles (  481 bytes) - zpjit - test-nums
+=     323 cycles (  254 bytes) - hjit  - test-nums
+= 100,559 cycles ( 2738 bytes) - cc65  - test-nums  DIFFERS 3/10
+=         cl65 -Dputz=printf -t sim6502 -Cl -Os -o TMP/test-nums.sim TMP/test-nums.c && sim65 -c TMP/test-nums.sim
+=       - FAILED                - oscar - test-nums
+=         ./oscar -Dputz=printf -Os -ep TMP/test-nums.c
+=== ./ptest opts
+= 43,940,555 cycles (  371 bytes) - ivm   - test-opts
+=  9,249,351 cycles (  371 bytes) - asm   - test-opts
+=  7,950,486 cycles (  371 bytes) - fix   - test-opts  DIFFERS 5/14
+=            ./ivm-fix TMP/test-opts
+=  1,427,480 cycles ( 1331 bytes) - zpjit - test-opts
+=  1,542,158 cycles ( 1044 bytes) - hjit  - test-opts
+=  4,031,683 cycles ( 4370 bytes) - cc65  - test-opts
+=    467,838 cycles ( 5073 bytes) - oscar - test-opts
+=== ./ptest peekpoke
+= 183,660 cycles (  203 bytes) - ivm   - test-peekpoke
+= 267,018 cycles (  203 bytes) - asm   - test-peekpoke
+= 266,517 cycles (  203 bytes) - fix   - test-peekpoke
+=  11,804 cycles (  764 bytes) - zpjit - test-peekpoke
+=     573 cycles (  451 bytes) - hjit  - test-peekpoke
+=       - FAILED                - cc65  - test-peekpoke
+=         cl65 -Dputz=printf -t sim6502 -Cl -Os -o TMP/test-peekpoke.sim TMP/test-peekpoke.c && sim65 -c TMP/test-peekpoke.sim
+=       - FAILED                - oscar - test-peekpoke
+=         ./oscar -Dputz=printf -Os -ep TMP/test-peekpoke.c
+=== ./ptest pluseq
+= 288,327 cycles (  427 bytes) - ivm   - test-pluseq
+= 365,438 cycles (  427 bytes) - asm   - test-pluseq
+= 364,010 cycles (  427 bytes) - fix   - test-pluseq
+=  27,379 cycles ( 1339 bytes) - zpjit - test-pluseq
+=   1,544 cycles ( 1162 bytes) - hjit  - test-pluseq
+= 127,833 cycles ( 3633 bytes) - cc65  - test-pluseq
+=  35,232 cycles ( 4945 bytes) - oscar - test-pluseq
+=== ./ptest precedence-err
+= - FAILED                - pc    - test-precedence-err
+=   ./pc TMP/test-precedence-err
+= - FAILED                - cc65  - test-precedence-err
+=   cl65 -Dputz=printf -t sim6502 -Cl -Os -o TMP/test-precedence-err.sim TMP/test-precedence-err.c && sim65 -c TMP/test-precedence-err.sim
+= - FAILED                - oscar - test-precedence-err
+=   ./oscar -Dputz=printf -Os -ep TMP/test-precedence-err.c
+=== ./ptest precedence
+= 520,178 cycles (  774 bytes) - ivm   - test-precedence
+= 568,783 cycles (  774 bytes) - asm   - test-precedence
+= 566,067 cycles (  774 bytes) - fix   - test-precedence
+=  64,588 cycles ( 2314 bytes) - zpjit - test-precedence
+=   3,318 cycles ( 2275 bytes) - hjit  - test-precedence
+= 330,810 cycles ( 5414 bytes) - cc65  - test-precedence
+=  79,163 cycles ( 5516 bytes) - oscar - test-precedence
+=== ./ptest printf-asm
+= 46,351 cycles ( 2179 bytes) - lib   - test-printf-asm
+=== ./ptest printf
+=       - FAILED                - pc    - test-printf
+=         ./pc TMP/test-printf
+= 240,556 cycles ( 3316 bytes) - cc65  - test-printf  DIFFERS 9/28
+=         cl65 -Dputz=printf -t sim6502 -Cl -Os -o TMP/test-printf.sim TMP/test-printf.c && sim65 -c TMP/test-printf.sim
+=       - FAILED                - oscar - test-printf
+=         ./oscar -Dputz=printf -Os -ep TMP/test-printf.c
+=== ./ptest recover-err
+= - FAILED                - pc    - test-recover-err
+=   ./pc TMP/test-recover-err
+= - FAILED                - cc65  - test-recover-err
+=   cl65 -Dputz=printf -t sim6502 -Cl -Os -o TMP/test-recover-err.sim TMP/test-recover-err.c && sim65 -c TMP/test-recover-err.sim
+= - FAILED                - oscar - test-recover-err
+=   ./oscar -Dputz=printf -Os -ep TMP/test-recover-err.c
+=== ./ptest shiftrules
+= 269,806 cycles (  275 bytes) - ivm   - test-shiftrules
+= 344,837 cycles (  275 bytes) - asm   - test-shiftrules
+= 344,226 cycles (  275 bytes) - fix   - test-shiftrules
+=  29,257 cycles (  672 bytes) - zpjit - test-shiftrules
+=     817 cycles (  471 bytes) - hjit  - test-shiftrules
+= 116,700 cycles ( 3001 bytes) - cc65  - test-shiftrules  DIFFERS 1/10
+=         cl65 -Dputz=printf -t sim6502 -Cl -Os -o TMP/test-shiftrules.sim TMP/test-shiftrules.c && sim65 -c TMP/test-shiftrules.sim
+=  39,335 cycles ( 4534 bytes) - oscar - test-shiftrules  DIFFERS 2/10
+=         ./oscar -Dputz=printf -Os -ep TMP/test-shiftrules.c
+=== ./ptest shifts
+= 1,094,000 cycles ( 2277 bytes) - ivm   - test-shifts  DIFFERS 4/18
+=           ./ivm TMP/test-shifts
+= 1,066,666 cycles ( 2277 bytes) - asm   - test-shifts
+= 1,063,853 cycles ( 2277 bytes) - fix   - test-shifts
+=   176,961 cycles ( 2933 bytes) - zpjit - test-shifts
+=     6,566 cycles ( 4323 bytes) - hjit  - test-shifts  DIFFERS 240/249
+=           ./ivm-jit.x TMP/test-shifts.ivm
+=   852,794 cycles ( 6722 bytes) - cc65  - test-shifts  DIFFERS 8/18
+=           cl65 -Dputz=printf -t sim6502 -Cl -Os -o TMP/test-shifts.sim TMP/test-shifts.c && sim65 -c TMP/test-shifts.sim
+=         - FAILED                - oscar - test-shifts
+=           ./oscar -Dputz=printf -Os -ep TMP/test-shifts.c
+=== ./ptest static
+= 210,740 cycles (  183 bytes) - ivm   - test-static
+= 285,564 cycles (  183 bytes) - asm   - test-static
+= 284,559 cycles (  183 bytes) - fix   - test-static
+=  11,502 cycles (  598 bytes) - zpjit - test-static
+=   1,005 cycles (  397 bytes) - hjit  - test-static
+=  77,006 cycles ( 2841 bytes) - cc65  - test-static
+=  14,116 cycles ( 4491 bytes) - oscar - test-static
+=== ./ptest string
+= 279,083 cycles (  425 bytes) - ivm   - test-string
+= 350,713 cycles (  425 bytes) - asm   - test-string
+= 252,952 cycles (  425 bytes) - fix   - test-string  DIFFERS 5/5
+=         ./ivm-fix TMP/test-string
+=  22,506 cycles ( 2050 bytes) - zpjit - test-string
+=   2,029 cycles ( 1128 bytes) - hjit  - test-string
+= 111,500 cycles ( 3858 bytes) - cc65  - test-string
+=  22,504 cycles ( 5555 bytes) - oscar - test-string
+=== ./ptest struct-err
+= - FAILED                - pc    - test-struct-err
+=   ./pc TMP/test-struct-err
+= - FAILED                - cc65  - test-struct-err
+=   cl65 -Dputz=printf -t sim6502 -Cl -Os -o TMP/test-struct-err.sim TMP/test-struct-err.c && sim65 -c TMP/test-struct-err.sim
+= - FAILED                - oscar - test-struct-err
+=   ./oscar -Dputz=printf -Os -ep TMP/test-struct-err.c
+=== ./ptest struct
+=       - FAILED                - pc    - test-struct
+=         ./pc TMP/test-struct
+= 526,681 cycles ( 6339 bytes) - cc65  - test-struct
+=       - FAILED                - oscar - test-struct
+=         ./oscar -Dputz=printf -Os -ep TMP/test-struct.c
+=== ./ptest swap
+= 327,516 cycles (  402 bytes) - ivm   - test-swap
+= 377,975 cycles (  402 bytes) - asm   - test-swap
+= 233,515 cycles (  402 bytes) - fix   - test-swap  DIFFERS 11/12
+=         ./ivm-fix TMP/test-swap
+=  33,527 cycles ( 1608 bytes) - zpjit - test-swap
+=   3,761 cycles ( 1382 bytes) - hjit  - test-swap
+= 147,884 cycles ( 4347 bytes) - cc65  - test-swap
+=  39,535 cycles ( 5164 bytes) - oscar - test-swap
+=== ./ptest ternary
+= 219,321 cycles (  396 bytes) - ivm   - test-ternary
+= 314,568 cycles (  396 bytes) - asm   - test-ternary
+= 313,027 cycles (  396 bytes) - fix   - test-ternary
+=  11,335 cycles ( 1281 bytes) - zpjit - test-ternary
+=   1,327 cycles ( 1193 bytes) - hjit  - test-ternary
+=  81,656 cycles ( 3248 bytes) - cc65  - test-ternary
+=  13,712 cycles ( 4428 bytes) - oscar - test-ternary
+=== ./ptest vnalias
+= 169,665 cycles (  136 bytes) - ivm   - test-vnalias
+= 257,315 cycles (  136 bytes) - asm   - test-vnalias  DIFFERS 2/3
+=         ./ivm-asm TMP/test-vnalias
+= 228,312 cycles (  136 bytes) - fix   - test-vnalias  DIFFERS 2/3
+=         ./ivm-fix TMP/test-vnalias
+=   9,278 cycles (  853 bytes) - zpjit - test-vnalias
+=   1,782 cycles (  486 bytes) - hjit  - test-vnalias
+=  39,553 cycles ( 3057 bytes) - cc65  - test-vnalias
+=   7,822 cycles ( 4499 bytes) - oscar - test-vnalias
+=== ./ptest '*'   (60 tests)
+= test                                    ivm            asm            fix          zpjit           hjit           cc65          oscar            lib
+= test-42                            109,573        185,285        185,223            155             35            230             91              - 
+= test-addr                          193,342        253,124*       224,754*         9,278          1,053         63,842         10,695              - 
+= test-array                         427,832        487,678        485,674         71,559          3,268        212,031         78,663              - 
+= test-arrayinit                     365,815        437,717        436,770         34,893            972        179,016         49,634              - 
+= test-bench-striped-struct       29,520,248     10,615,543      9,619,275      2,838,986      2,979,815      6,249,377        880,941              - 
+= test-break                         825,823        743,941        733,650         66,934         10,689        559,942         97,334              - 
+= test-char                          171,569        251,049        249,802          7,794          1,038         30,621          8,227              - 
+= test-const                         114,441        195,395        195,278            257             35            230             91              - 
+= test-cse                           300,400        368,451        301,059*        31,157          2,840        134,229         36,945              - 
+= test-dispatch-fun              836,037,421    218,769,488    209,599,511     18,220,556     20,250,337     12,600,333        150,342              - 
+= test-dispatch-inc              329,160,459     77,015,706     66,845,745      8,255,944      9,269,867     35,604,269        150,342              - 
+= test-dispatch-loop           6,932,625,616  1,273,092,350  1,172,512,192    204,413,416    236,483,237    586,407,327         16,278              - 
+= test-dispatch-pon              119,035,414     41,763,628     41,593,650        190,470        220,353        590,331        150,342              - 
+= test-dispatch-switch-ifif        6,466,084      4,699,780*     4,101,673*       821,095*       145,724*     3,442,396*          FAIL              - 
+= test-dispatch-switch                     -              -              -              -              -           FAIL           FAIL              - 
+= test-dispatch                   93,566,296     27,922,176     24,432,032        390,365        430,259        460,324             91              - 
+= test-empty                         108,280        183,098        183,053            151             31            226             89              - 
+= test-entry                         212,455        286,880        286,361         15,887            345         76,407         20,290              - 
+= test-expr                        1,397,746      1,229,637      1,214,083        199,820         10,454        884,949        278,795              - 
+= test-exprinc                       275,936        348,753        346,991         19,675          1,401        156,571         27,419              - 
+= test-fixipc-op                     535,952        349,429        327,589         23,711         18,438         68,474         18,300              - 
+= test-getchar                       135,389        229,354        229,164          3,118            138          6,369          3,595              - 
+= test-hello                         117,322        192,393        192,331          1,432             41          3,362          1,637              - 
+= test-ifdef                         229,808        307,473        307,013         17,728            405         82,947*        24,167*             - 
+= test-ifeq                        1,425,625        860,938        835,130         85,479         33,392        449,744         82,072              - 
+= test-incdec                        636,751*       664,732        661,067         85,690          5,139        383,684        102,907              - 
+= test-logic                         295,926        361,026        359,176         18,555          2,809        165,067         26,779              - 
+= test-loop-count                 10,248,294      2,215,553      2,015,575        274,572        310,580        914,112          4,826              - 
+= test-loop-down                  10,697,434      3,605,287      2,865,122        453,783        550,408        753,032        304,465              - 
+= test-loop-for-acc               11,050,795      2,538,702      2,308,712        394,641        480,397        824,116        285,139              - 
+= test-loop-for-le-expr           11,053,431      2,542,806      2,312,762        454,975        550,365        824,187        345,694              - 
+= test-loop-for-le                11,050,278      2,538,210      2,308,230        394,547        480,397        824,093        345,229              - 
+= test-loop-for-lt                11,050,269      2,538,221      2,308,231        394,547        480,397        824,093        325,213              - 
+= test-loop-for-pluseq            11,052,283      2,540,103      2,310,113        394,914        480,397        824,164        325,585              - 
+= test-loop-for-var               11,051,213      2,538,793      2,308,789        434,587        530,363        864,130        325,306              - 
+= test-loop-postdec               11,641,189      3,798,449      3,088,274        524,686        620,443        874,159        515,033              - 
+= test-loop-while-count           11,631,436      3,438,362      2,667,791        275,125        310,580        894,203          5,384              - 
+= test-loop-while-expr            16,142,769      4,960,822      4,140,656        584,866        670,349      1,014,226        535,528              - 
+= test-loop-while                 12,429,837      3,757,775      2,957,192        394,452        480,397        804,100        325,120              - 
+= test-loops                       5,041,728      1,992,880      1,873,711        270,472        179,418      1,240,337        235,326*             - 
+= test-memset                     13,949,689      4,794,867      3,763,907        729,704        683,673*     2,489,326           FAIL              - 
+= test-nullread                      120,211        195,046        194,967          1,774             95         13,954*         2,528              - 
+= test-nums                          221,693        296,225        295,901         22,071            323        100,559*          FAIL              - 
+= test-opts                       43,940,555      9,249,351      7,950,486*     1,427,480      1,542,158      4,031,683        467,838              - 
+= test-peekpoke                      183,660        267,018        266,517         11,804            573           FAIL           FAIL              - 
+= test-pluseq                        288,327        365,438        364,010         27,379          1,544        127,833         35,232              - 
+= test-precedence-err                      -              -              -              -              -           FAIL           FAIL              - 
+= test-precedence                    520,178        568,783        566,067         64,588          3,318        330,810         79,163              - 
+= test-printf-asm                          -              -              -              -              -              -              -         46,351 
+= test-printf                              -              -              -              -              -        240,556*          FAIL              - 
+= test-recover-err                         -              -              -              -              -           FAIL           FAIL              - 
+= test-shiftrules                    269,806        344,837        344,226         29,257            817        116,700*        39,335*             - 
+= test-shifts                      1,094,000*     1,066,666      1,063,853        176,961          6,566*       852,794*          FAIL              - 
+= test-static                        210,740        285,564        284,559         11,502          1,005         77,006         14,116              - 
+= test-string                        279,083        350,713        252,952*        22,506          2,029        111,500         22,504              - 
+= test-struct-err                          -              -              -              -              -           FAIL           FAIL              - 
+= test-struct                              -              -              -              -              -        526,681           FAIL              - 
+= test-swap                          327,516        377,975        233,515*        33,527          3,761        147,884         39,535              - 
+= test-ternary                       219,321        314,568        313,027         11,335          1,327         81,656         13,712              - 
+= test-vnalias                       169,665        257,315*       228,312*         9,278          1,782         39,553          7,822              - 
+= (* output differs, FAIL: failed, -: not run; see each test's results above)

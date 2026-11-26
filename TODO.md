@@ -2,16 +2,60 @@
 
 # MeteoriC-65 (parse.c c.bnf): next, after the manual (MeteoriC-man.md)
 
+- 05-0xcafe
+  - LF: their conio.h's #define  and CR
+  
+TODO: we don't need to define LF and CR but we can recognize their usage form
+  like I do with fputs(xyz, stdout); it''s just syntax! (cheat!)
+
+- fix has no A op (the swap, t = a[i]; a[i] = a[j]; a[j] = t). On both
+  sorts it prints %A and stops.
+    
+- What the samples need next:
+
+  ┌──────────────────────────────────┬─────────┐
+  │             feature              │ samples │
+  ├──────────────────────────────────┼─────────┤
+  │ long                             │ 4       │
+  ├──────────────────────────────────┼─────────┤
+  │ prototypes                       │ 3       │
+  ├──────────────────────────────────┼─────────┤
+  │ &a[i]                            │ 3       │
+  ├──────────────────────────────────┼─────────┤
+  │ array size expressions ([N + 1]) │ 3       │
+  └──────────────────────────────────┴─────────┘
+
+  The rest come up in one or two samples each, and are listed in
+  raxis-compiler-test.txt.
+  
+- Signed compares: 14-insertion-sort now compiles. On the VMs it reads
+  array[65535], because while (j >= 0 && …) is always true when compares are
+  unsigned. Making int compares signed (unsigned staying unsigned) is a
+  design choice for you.
+  >> parse.x -v -v crashes (Trap) on that file. That's the VM's bad-access check
+  firing at run time, not the parser.
+
+TODO: make compares with <0 <=0 and >0 >=0 be "signed" give a warning
+      with our \"Warning: directive, assuming SIGNED compare w 0."
+
 - for (int j = 0; j < 3; j++) a++;              // ERR no declaration in for
   well, why not? we do "recognize it for memset" (not expect i set after)
 
-- I'm assuming that a[i]=a[i]+1; becomes quite efficient code? Adress
+TODO: just wrap all for  in \{ and \} - no harm?
+
+- I'm assuming that a[i]=a[i]+1; becomes quite efficient JIT code? Adress
   calc only once and reused. Particular for small fixed char arrays one
   can use INC $addr,X
+  
+- Is our ./parse generating 2--8 for local params load, any speed benefit
+  (not need if it's already slot 0-31 so do that first and only change Lii)
   
 - realloc; maybe user code Mnnzz Vnnppoo Cppnn - 10 bytes
   curiously if pp always is guaranteed to be 0, then Mppzz could 
   just see pp= 0 => malloc, if !0 ==> realloc!
+  TODO: wouldn't work for local var which may be anything? Analyze if
+        have value, or force init ptr?
+  TODO: how about array element assign, use local var/tmp first?
 
 - if a function is never called remove it and all under not used!
 

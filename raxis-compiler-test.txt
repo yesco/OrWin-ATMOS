@@ -93,48 +93,51 @@ How they're run (ptest, each as test-rax-NN-name):
 - cc65 and oscar: also their _puts.c, and a _putc that is putchar
 - MeteoriC-65 has its own: _putc _puts peek poke deek doke MEMPTR,
   uint8_t int8_t uint16_t int16_t
-- the expected output: their own gcc command (tools/test-samples.sh)
+- the expected output: their own gcc command (tools/test-samples.sh),
+  with -Wno-error=implicit-function-declaration (Termux's gcc is clang)
 
 The backends (cycles, sim65 / oscar's emulator):
 
-- ivm asm fix: MeteoriC-65's bytecode on the C VM / asm VM / fixed asm VM
-- zpjit: the JIT's 6502 image (mem[] in zero page), hjit: the same JIT on
-  the host's 6502 sim
+- ivm: MeteoriC-65's bytecode on the C VM
+- asm: on the asm VM
+- fix: on the fixed asm VM
+- zpjit: the JIT's 6502 image (mem[] in zero page)
+- hjit: the same JIT on the host's 6502 sim
 - cc65 -Os, oscar64 -Os: for comparison (with their I/O, above)
 
   -: not compiled, FAIL: no result, *: the output differs
 
-  sample                 ivm      asm      fix  zpjit  hjit         cc65       oscar
-  00-type-sizes            -        -        -      -     -         FAIL        FAIL
-  01-dummy           108,472  183,252  183,190    155    35          230          89
-  02-hello-world     118,814  192,720  192,658  1,887    41       11,915         897
-  03-bytecpy               -        -        -      -     -          238          97
-  04-memcopy               -        -        -      -     -      721,441     311,685
-  05-0xcafe                -        -        -      -     -       12,885       1,499
-  06-sieve                 -        -        -      -     -   12,568,166   4,130,355
-  07-aes256                -        -        -      -     -   24,042,833        FAIL
-  08-mandelbrot            -        -        -      -     -   21,534,810  6,014,540*
-  09-frogmove              -        -        -      -     -         FAIL   4,436,400
-  10-pi                    -        -        -      -     -  116,645,544  35,035,355
-  11-shuffle               -        -        -      -     -    3,624,468   1,286,346
-  12-bubble-sort           -        -        -      -     -   24,536,058   3,801,476
-  13-selection-sort        -        -        -      -     -   13,725,072   3,636,847
-  14-insertion-sort        -        -        -      -     -    8,161,414        FAIL
-  15-merge-sort            -        -        -      -     -   4,474,619*   1,208,749
-  16-quick-sort            -        -        -      -     -    3,670,808     977,990
-  17-counting-sort         -        -        -      -     -    2,274,195     518,627
-  18-radix-sort            -        -        -      -     -    6,923,662   1,604,989
-  19-shell-sort            -        -        -      -     -    3,917,450   1,059,031
-  20-heap-sort             -        -        -      -     -    4,659,624   1,952,617
-  21-eight-queens          -        -        -      -     -         FAIL        FAIL
-  22-qrcode                -        -        -      -     -   90,820,647  16,047,517
+  sample                     ivm         asm       fix      zpjit       hjit         cc65       oscar
+  00-type-sizes                -           -         -          -          -         FAIL        FAIL
+  01-dummy               108,472     183,252   183,190        155         35          230          89
+  02-hello-world         118,814     192,720   192,658      1,887         41       11,915         897
+  03-bytecpy                   -           -         -          -          -          238          97
+  04-memcopy                   -           -         -          -          -      721,441     311,685
+  05-0xcafe                    -           -         -          -          -       12,885       1,499
+  06-sieve                     -           -         -          -          -   12,568,166   4,130,355
+  07-aes256                    -           -         -          -          -   24,042,833        FAIL
+  08-mandelbrot                -           -         -          -          -   21,534,810  6,014,540*
+  09-frogmove                  -           -         -          -          -         FAIL   4,436,400
+  10-pi                        -           -         -          -          -  116,645,544  35,035,355
+  11-shuffle                   -           -         -          -          -    3,624,468   1,286,346
+  12-bubble-sort     101,904,366  32,367,989  225,828*  7,037,611  6,427,900   24,536,058   3,801,476
+  13-selection-sort            -           -         -          -          -   13,725,072   3,636,847
+  14-insertion-sort         FAIL        FAIL  244,594*       FAIL  4,274,908    8,161,414        FAIL
+  15-merge-sort                -           -         -          -          -   4,474,619*   1,208,749
+  16-quick-sort                -           -         -          -          -    3,670,808     977,990
+  17-counting-sort             -           -         -          -          -    2,274,195     518,627
+  18-radix-sort                -           -         -          -          -    6,923,662   1,604,989
+  19-shell-sort                -           -         -          -          -    3,917,450   1,059,031
+  20-heap-sort                 -           -         -          -          -    4,659,624   1,952,617
+  21-eight-queens              -           -         -          -          -         FAIL        FAIL
+  22-qrcode                    -           -         -          -          -   90,820,647  16,047,517
 
 Per sample: what's missing (the first ones the compiler stops at; more
 may follow behind them).
 
 00-type-sizes
-  - short long (sizeof(short), sizeof(long))
-  - LF CR: conio.h's #define (gone with the skipped include)
+  - sizeof(long)
+  - LF CR: their conio.h's #define (gone with the skipped include)
   - '\x0a': char escapes
   - _div16u _modr16u: compiler helpers, not C (cc65 and oscar fail too)
 
@@ -149,72 +152,91 @@ may follow behind them).
 
 04-memcopy
   - a global initializer with an expression: MEMPTR(0x4000)
-  - for (...; ++i)
 
 05-0xcafe
-  - LF: conio.h's #define
+  - LF: their conio.h's #define
 
 06-sieve
-  - an array size expression: primes[number + 1] (then primes is
-    undefined everywhere)
+  - an array size expression: primes[number + 1]
 
 07-aes256
-  - ^= (and the other op=)
-  - for (...; i += 4)
-  - prototypes (static void xprints(const char *s);)
   - typedef struct, & of a struct variable
+  - prototypes (void aes256_init(aes256_context*, ...);)
 
 08-mandelbrot
   - long
-  - negative literals (-100)
-  - for (...; i += 6)
   - the comma operator, assignments in a condition
 
 09-frogmove
-  - function pointers (typedef, a call to $0400)
-  - for (...; ++i)
+  - prototypes (void moveLeft(unsigned int addr);)
+  - function pointers (a call to $0400)
   - it pokes the Oric screen ($BB80)
 
 10-pi
   - long
-  - for (...; ++i), for (...; i -= 14)
+  - an array size expression: arr[NUM_DIG + 1]
 
-11-shuffle 12-bubble-sort 13-selection-sort 14-insertion-sort
-15-merge-sort 16-quick-sort 17-counting-sort 18-radix-sort
-19-shell-sort 20-heap-sort (all through sort-helper.h)
-  - /=: val /= 10
-  - its 256 value initialized array: "constant pool full"
-  - int array[] parameters
-  - 18-radix-sort: array size expressions (output[datasize + 1])
-  - 11-shuffle: long
+11-shuffle
+  - long (static long seed = 0x55aa55aa)
+
+12-bubble-sort
+  - runs: ivm asm zpjit hjit
+  - fix: no A op (the swap t = a[i]; a[i] = a[j]; a[j] = t)
+
+13-selection-sort 16-quick-sort 20-heap-sort
+  - & of an element: swap(&array[i], &array[j])
+
+14-insertion-sort
+  - compiles
+  - signed compares: while (j >= 0 && ...) with j = -1 is true for us,
+    then array[65535] (ivm asm: a bad access; hjit happens to be right)
+  - fix: no A op
+
+15-merge-sort
+  - precedence: m = l + (r - l) / 2 (a tighter / after a looser +)
+
+17-counting-sort
+  - ++ on an element: count[array[i]]++
+
+18-radix-sort
+  - an array size expression: output[datasize + 1]
+
+19-shell-sort
+  - a for step i /= 2
 
 21-eight-queens
-  - for (...; ++i)
   - _div16u _modr16u: compiler helpers, not C
 
 22-qrcode
-  - 70 errors; the first: a function called before its definition
-    (EncodeData: prototypes), locals initialized with an expression
-  - for (...; ++i) (36 uses)
+  - void * (types, parameters)
+  - prototypes
+  - locals initialized with an expression
 
 Needed, most samples first:
 
-  - op= (/= ^= ...):                                                 11
-  - for (...; ++i), for (...; i += N / i -= N):                      10
-  - initialized arrays past the constant pool (256 values):         10
-  - int x[] parameters:                                             10
-  - long / short:                                                    5
-  - array size expressions ([N + 1]):                                2
-  - prototypes / a call before the definition:                       2
+  - long:                                                            4
+  - prototypes:                                                      3
+  - & of an element (&a[i]):                                         3
+  - array size expressions ([N + 1]):                                3
+  - signed compares for int:                                         1
+  - _div16u _modr16u (not C: compiler helpers):                      2
   - conio.h's LF CR, '\x0a' char escapes:                            2
-  - negative literals:                                               1
+  - ++ / op= on an element (a[i]++):                                 1
+  - a / in a for step (i /= 2):                                      1
+  - precedence: a + (b - c) / 2:                                     1
   - typedef struct, & of a struct:                                   1
   - function pointers:                                               1
+  - void *:                                                          1
   - a store through a cast (*(char *)E = v):                         1
   - a global initializer with an expression:                         1
   - the comma operator, assignments in a condition:                  1
-  - _div16u _modr16u (not C: compiler helpers):                      2
+  - fix: the A op (swap):                                            2
 
-Already working, though MeteoriC-man.md's "Not supported" says no:
+Done since the first run (2026-11-26):
 
-  - ?: && recursion sizeof b[j++] = ... while (j-- > 0)
+  - op= (/= ^= *= ...)
+  - for steps ++i --i i += n i -= n, parts left out
+  - initialized arrays straight to data (no constant slots)
+  - int x[] parameters
+  - short, unsigned, signed
+  - negative literals
