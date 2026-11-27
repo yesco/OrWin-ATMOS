@@ -180,17 +180,21 @@ may follow behind them).
   - long (static long seed = 0x55aa55aa)
 
 12-bubble-sort
-  - runs: ivm asm zpjit hjit
-  - fix: no A op (the swap t = a[i]; a[i] = a[j]; a[j] = t)
+  - runs: all backends (2026-11-26: fix's A op)
 
-13-selection-sort 16-quick-sort 20-heap-sort
-  - & of an element: swap(&array[i], &array[j])
+13-selection-sort
+  - runs: all backends (2026-11-26: & of an element)
+
+16-quick-sort 20-heap-sort
+  - & of an element: done (2026-11-26) - but both still hang: the same
+    signed-compare gap as 14-insertion-sort (quick-sort's pi - 1 can
+    go negative; heap-sort's for (i = n - 1; i >= 0; i--) never ends,
+    i >= 0 unsigned is always true)
 
 14-insertion-sort
-  - compiles
+  - compiles, fix's A op done (2026-11-26)
   - signed compares: while (j >= 0 && ...) with j = -1 is true for us,
     then array[65535] (ivm asm: a bad access; hjit happens to be right)
-  - fix: no A op
 
 15-merge-sort
   - precedence: m = l + (r - l) / 2 (a tighter / after a looser +)
@@ -216,9 +220,8 @@ Needed, most samples first:
 
   - long:                                                            4
   - prototypes:                                                      3
-  - & of an element (&a[i]):                                         3
   - array size expressions ([N + 1]):                                3
-  - signed compares for int:                                         1
+  - signed compares for int (14, 16, 20):                            3
   - _div16u _modr16u (not C: compiler helpers):                      2
   - conio.h's LF CR, '\x0a' char escapes:                            2
   - ++ / op= on an element (a[i]++):                                 1
@@ -230,7 +233,6 @@ Needed, most samples first:
   - a store through a cast (*(char *)E = v):                         1
   - a global initializer with an expression:                         1
   - the comma operator, assignments in a condition:                  1
-  - fix: the A op (swap):                                            2
 
 Done since the first run (2026-11-26):
 
@@ -239,4 +241,6 @@ Done since the first run (2026-11-26):
   - initialized arrays straight to data (no constant slots)
   - int x[] parameters
   - short, unsigned, signed
+  - fix: the A op (swap)
+  - & of an element (&a[i]), p + E / p - E on a word* (int*)
   - negative literals

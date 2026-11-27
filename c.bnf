@@ -496,6 +496,12 @@ H=\i=\i\?\W\[\i\]; \2\[\3\]=\2\[\i\]; \2\[\7\]=\1;[A\2\3\7S\1]
 |\i\?\W+=$S;[L\2+\2+\1S\1]
 |\i\?\W=\1+1;[H\1]
 |\i\?\W=\1-1;[J\1J\1]
+# dest = p + E / p - E (p a word*): E<<1. Must come before \i=$S+$S
+# below (type-unaware, would otherwise claim this first and skip the
+# scaling).
+#   captures: 1=dest 2=p 3=E 4=const 1 / 5=temp (p-E only)
+|\i=\i\?\W+$S\#01;[L\3\{\4+\2S\1]
+|\i=\i\?\W-$S\#01;[L\3\{\4S\tL\2-\5S\1]
 |\i+=\i;[U\1\2]
 # x = x + y, x = y + x (x an int): the same U (matching \1 is a capture too: y is 3, 2)
 |\i\?w=\1+\i;[U\1\3]
@@ -676,8 +682,23 @@ R=getchar()[K]
 |\i\?c--[l\1S\tj\1L\2]
 |\i++\#01[I\1-\2]
 |\i--\#01[J\1+\2]
+# - &p[E], p+E, p-E on a word* (int*) p: the element is 2 bytes, so the
+#   offset is E<<1 (\#01: a const 1, the shift amount - {: ACC <<= mem[]).
+#   Works right on ACC, no temp needed for the add case. char* needs
+#   none of this - plain + / - (rule O) already does the right thing
+#   for 1-byte elements. Before &\i below: a static array's &\i\$\=1
+#   alt would otherwise match just "&cb", leaving "[2]" dangling.
+#   captures: 1=p 2=E raw (unused) 3=const 1 / 4=temp (p-E only)
+|&\i\?\C\[$E\][+\1]
+|&\i\?\W\[$E\]\#01[\{\3+\1]
+|\i\?\W +$E\#01[\{\3+\1]
+|\i\?\W -$E\#01[\{\3S\tL\1-\4]
+
 # - &x: the address of a variable (` op; the VM / JIT know mem[]'s). A
-#   static array: its address is the slot's value (also rule S)
+#   static array: its address is the slot's value (also rule S) - true
+#   for the IVM interpreters either way (the slot holds the object's
+#   address even for a "static" / const array); the JIT may bake a
+#   const array's address in directly, knowing it never changes.
 |&\i\$\=1[\l1]
 |&\i\"%Warning: &var of a slot-var will not work in optimized interpreter -asm and -fix."[`\1]
 |malloc($E)[M\t]

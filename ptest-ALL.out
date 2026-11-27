@@ -7,15 +7,15 @@
 =     230 cycles (  195 bytes) - cc65  - test-42
 =      91 cycles (  139 bytes) - oscar - test-42
 === ./ptest addr
-= 193,342 cycles (  206 bytes) - ivm   - test-addr
-= 253,124 cycles (  206 bytes) - asm   - test-addr  DIFFERS 5/5
+= 258,175 cycles (  341 bytes) - ivm   - test-addr
+= 267,491 cycles (  341 bytes) - asm   - test-addr  DIFFERS 6/6
 =         ./ivm-asm TMP/test-addr
-= 226,331 cycles (  206 bytes) - fix   - test-addr  DIFFERS 5/5
+= 240,764 cycles (  341 bytes) - fix   - test-addr  DIFFERS 6/6
 =         ./ivm-fix TMP/test-addr
-=   9,278 cycles (  722 bytes) - zpjit - test-addr
-=   1,053 cycles (  642 bytes) - hjit  - test-addr
-=  63,842 cycles ( 3019 bytes) - cc65  - test-addr
-=  10,695 cycles ( 4344 bytes) - oscar - test-addr
+=  18,355 cycles ( 1019 bytes) - zpjit - test-addr
+=   1,746 cycles (  995 bytes) - hjit  - test-addr
+= 123,066 cycles ( 3381 bytes) - cc65  - test-addr
+=  21,995 cycles ( 4708 bytes) - oscar - test-addr
 === ./ptest array
 = 427,832 cycles (  569 bytes) - ivm   - test-array
 = 487,678 cycles (  569 bytes) - asm   - test-array
@@ -518,7 +518,7 @@
 === ./ptest '*'   (62 tests)
 = test                                    ivm            asm            fix          zpjit           hjit           cc65          oscar            lib
 = test-42                            109,573        185,285        186,351            155             35            230             91              - 
-= test-addr                          193,342        253,124*       226,331*         9,278          1,053         63,842         10,695              - 
+= test-addr                          258,175        267,491*       240,764*        18,355          1,746        123,066         21,995              - 
 = test-array                         427,832        487,678        489,313         71,559          3,268        212,031         78,663              - 
 = test-arrayinit                     365,815        437,717        440,458         34,893            972        179,016         49,634              - 
 = test-bench-striped-struct       29,520,248     10,615,543      9,621,111      2,838,986      2,979,815      6,249,377        880,941              - 
@@ -586,7 +586,7 @@
 === RELATIVE cycles (cc65 = 1.000x)
 = test                         ivm    asm    fix  zpjit   hjit   cc65  oscar
 = test-42                     476x   806x   810x 0.674x 0.152x 1.000x 0.396x
-= test-addr                 3.028x 3.965x 3.545x 0.145x 0.016x 1.000x 0.168x
+= test-addr                 2.098x 2.174x 1.956x 0.149x 0.014x 1.000x 0.179x
 = test-array                2.018x 2.300x 2.308x 0.337x 0.015x 1.000x 0.371x
 = test-arrayinit            2.043x 2.445x 2.460x 0.195x 0.005x 1.000x 0.277x
 = test-bench-striped-struct 4.724x 1.699x 1.540x 0.454x 0.477x 1.000x 0.141x
@@ -652,7 +652,7 @@
 === BYTES
 = test                         ivm    asm    fix  zpjit   hjit   cc65  oscar    lib
 = test-42                       33     33     33     68     19    195    139      -
-= test-addr                    206    206    206    722    642  3,019  4,344      -
+= test-addr                    341    341    341  1,019    995  3,381  4,708      -
 = test-array                   569    569    569  1,431  1,237  3,930  5,066      -
 = test-arrayinit               471    471    471    950    732  3,379  5,006      -
 = test-bench-striped-struct    196    196    196  1,123    855  3,118  4,365      -

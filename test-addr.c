@@ -70,5 +70,32 @@ int main(void) {
   putchar(buf[1]);
   putchar('\n');
 
+  // --- &arr[i]: address of an element (int: scaled by 2), swap through it ---
+  putchar('F'); putchar(' ');
+  {
+    int arr[5];
+    int *wp;
+    int *wq;
+    int i, j;
+
+    arr[0] = 10; arr[1] = 20; arr[2] = 30; arr[3] = 40; arr[4] = 50;
+    i = 1; j = 3;
+    swap(&arr[i], &arr[j]);                // raxiss's pattern
+    printf("%d ", arr[0]);
+    printf("%d ", arr[1]);
+    printf("%d ", arr[2]);
+    printf("%d ", arr[3]);
+    printf("%d ", arr[4]);
+
+    wp = arr;
+    wq = &arr[2];
+    printf("%d ", *wq);
+    wq = wp + i;                           // word* + E: scaled
+    printf("%d ", *wq);
+    wq = wq - 1;                           // word* - E: scaled
+    printf("%d ", *wq);
+  }
+  putchar('\n');
+
   return 0;
 }
