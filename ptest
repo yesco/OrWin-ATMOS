@@ -263,10 +263,19 @@ def tmp_dir():
 
 
 def to_tmp(src):
-    """a test (its .c / .asm, its .out) copied to TMP: its name there"""
+    """a test (its .c / .asm, its .out) copied to TMP: its name there.
+    #pragma TIMED lines are stripped so oscar64 does not choke on them."""
     name, ext = src.rsplit(".", 1)
     t = os.path.join(TMP, base(name))
-    shutil.copyfile(src, t + "." + ext)
+    dest = t + "." + ext
+    if ext == "c":
+        with open(src, encoding="latin-1") as f:
+            text = f.read()
+        text = re.sub(r'^\s*#pragma\s+TIMED\b[^\n]*\n?', '', text, flags=re.M)
+        with open(dest, "w", encoding="latin-1") as f:
+            f.write(text)
+    else:
+        shutil.copyfile(src, dest)
     rm(t + ".out")
     if os.path.exists(name + ".out"):
         shutil.copyfile(name + ".out", t + ".out")
