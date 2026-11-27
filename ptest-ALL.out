@@ -14,59 +14,65 @@
 =         ./ivm-fix TMP/test-addr
 =  18,355 cycles ( 1019 bytes) - zpjit - test-addr
 =   1,746 cycles (  995 bytes) - hjit  - test-addr
-= 123,066 cycles ( 3381 bytes) - cc65  - test-addr
-=  21,995 cycles ( 4708 bytes) - oscar - test-addr
+=  80,848 cycles ( 1525 bytes) - cc65  - test-addr
+=   9,676 cycles (  810 bytes) - oscar - test-addr
 === ./ptest array
 = 427,832 cycles (  569 bytes) - ivm   - test-array
 = 487,678 cycles (  569 bytes) - asm   - test-array
 = 489,313 cycles (  569 bytes) - fix   - test-array
 =  71,559 cycles ( 1431 bytes) - zpjit - test-array
 =   3,268 cycles ( 1237 bytes) - hjit  - test-array
-= 212,031 cycles ( 3930 bytes) - cc65  - test-array
-=  78,663 cycles ( 5066 bytes) - oscar - test-array
+= 225,500 cycles ( 1989 bytes) - cc65  - test-array
+=  57,475 cycles ( 1178 bytes) - oscar - test-array
 === ./ptest arrayinit
-= 365,815 cycles (  471 bytes) - ivm   - test-arrayinit
-= 437,717 cycles (  471 bytes) - asm   - test-arrayinit
-= 440,458 cycles (  471 bytes) - fix   - test-arrayinit
-=  34,893 cycles (  950 bytes) - zpjit - test-arrayinit
-=     972 cycles (  732 bytes) - hjit  - test-arrayinit
-= 179,016 cycles ( 3379 bytes) - cc65  - test-arrayinit
-=  49,634 cycles ( 5006 bytes) - oscar - test-arrayinit
+= 365,884 cycles (  480 bytes) - ivm   - test-arrayinit  DIFFERS 16/18
+=         ./ivm TMP/test-arrayinit
+= 437,709 cycles (  480 bytes) - asm   - test-arrayinit  DIFFERS 16/18
+=         ./ivm-asm TMP/test-arrayinit
+= 440,450 cycles (  480 bytes) - fix   - test-arrayinit  DIFFERS 16/18
+=         ./ivm-fix TMP/test-arrayinit
+=  34,893 cycles (  950 bytes) - zpjit - test-arrayinit  DIFFERS 16/18
+=         ./ivm-jit.x -z -tsim6502 -oTMP/test-arrayinit.jit.sim TMP/test-arrayinit.ivm && sim65 -c TMP/test-arrayinit.jit.sim
+=     972 cycles (  732 bytes) - hjit  - test-arrayinit  DIFFERS 16/18
+=         ./ivm-jit.x TMP/test-arrayinit.ivm
+= 180,495 cycles ( 1411 bytes) - cc65  - test-arrayinit  DIFFERS 16/18
+=         cl65 -Dxputz=puts -Iptest-include -t sim6502 -Cl -Os -o TMP/test-arrayinit.sim TMP/test-arrayinit.c putn.c && sim65 -c TMP/test-arrayinit.sim
+=  28,636 cycles (  985 bytes) - oscar - test-arrayinit  DIFFERS 16/18
+=         ./oscar -O3 -Dxputz=puts -Os -ep putn.c TMP/test-arrayinit.c
 === ./ptest bench-striped-struct
-= 29,520,248 cycles (  196 bytes) - ivm   - test-bench-striped-struct
-= 10,615,543 cycles (  196 bytes) - asm   - test-bench-striped-struct
-=  9,621,111 cycles (  196 bytes) - fix   - test-bench-striped-struct
+= 29,520,265 cycles (  197 bytes) - ivm   - test-bench-striped-struct
+= 10,615,552 cycles (  197 bytes) - asm   - test-bench-striped-struct
+=  9,621,120 cycles (  197 bytes) - fix   - test-bench-striped-struct
 =  2,838,986 cycles ( 1123 bytes) - zpjit - test-bench-striped-struct
 =  2,979,815 cycles (  855 bytes) - hjit  - test-bench-striped-struct
-=  6,249,377 cycles ( 3118 bytes) - cc65  - test-bench-striped-struct
-=    880,941 cycles ( 4365 bytes) - oscar - test-bench-striped-struct
+=  6,248,510 cycles ( 1612 bytes) - cc65  - test-bench-striped-struct
+=    908,069 cycles (  662 bytes) - oscar - test-bench-striped-struct
 === ./ptest break
 = 825,823 cycles (  583 bytes) - ivm   - test-break
 = 743,941 cycles (  583 bytes) - asm   - test-break
 = 739,579 cycles (  583 bytes) - fix   - test-break
 =  66,934 cycles ( 2177 bytes) - zpjit - test-break
 =  10,689 cycles ( 2105 bytes) - hjit  - test-break
-= 559,942 cycles ( 4435 bytes) - cc65  - test-break
-=  97,334 cycles ( 5281 bytes) - oscar - test-break
+= 292,619 cycles ( 2598 bytes) - cc65  - test-break
+=  35,316 cycles ( 1322 bytes) - oscar - test-break
 === ./ptest bubble
-= 1,918,053,051 cycles (  256 bytes) - ivm   - test-bubble
-=   641,845,690 cycles (  256 bytes) - asm   - test-bubble
-=   530,964,601 cycles (  256 bytes) - fix   - test-bubble
+= 1,918,065,184 cycles (  245 bytes) - ivm   - test-bubble
+=   641,839,034 cycles (  245 bytes) - asm   - test-bubble
+=   530,939,934 cycles (  245 bytes) - fix   - test-bubble
 =   104,071,122 cycles ( 1141 bytes) - zpjit - test-bubble
-=   115,713,181 cycles (  814 bytes) - hjit  - test-bubble  DIFFERS 4/7
-=               ./ivm-jit.x TMP/test-bubble.ivm
-=   347,279,040 cycles ( 3628 bytes) - cc65  - test-bubble  DIFFERS 2/3
-=               cl65 -Dputz=printf -t sim6502 -Cl -Os -o TMP/test-bubble.sim TMP/test-bubble.c && sim65 -c TMP/test-bubble.sim
-=             - FAILED                - oscar - test-bubble
-=               ./oscar -Dputz=printf -Os -ep TMP/test-bubble.c
+=   115,713,169 cycles (  796 bytes) - hjit  - test-bubble
+=   347,298,101 cycles ( 2073 bytes) - cc65  - test-bubble  DIFFERS 1/1
+=               cl65 -Dxputz=puts -Iptest-include -t sim6502 -Cl -Os -o TMP/test-bubble.sim TMP/test-bubble.c putn.c && sim65 -c TMP/test-bubble.sim
+=    64,928,414 cycles ( 1321 bytes) - oscar - test-bubble  DIFFERS 1/1
+=               ./oscar -O3 -Dxputz=puts -Os -ep putn.c TMP/test-bubble.c
 === ./ptest char
-= 171,569 cycles (  155 bytes) - ivm   - test-char
-= 251,049 cycles (  155 bytes) - asm   - test-char
-= 251,532 cycles (  155 bytes) - fix   - test-char
-=   7,794 cycles (  440 bytes) - zpjit - test-char
-=   1,038 cycles (  201 bytes) - hjit  - test-char
-=  30,621 cycles ( 2793 bytes) - cc65  - test-char
-=   8,227 cycles ( 4371 bytes) - oscar - test-char
+= 172,755 cycles (  159 bytes) - ivm   - test-char
+= 252,053 cycles (  159 bytes) - asm   - test-char
+= 252,527 cycles (  159 bytes) - fix   - test-char
+=   7,946 cycles (  450 bytes) - zpjit - test-char
+=   1,056 cycles (  213 bytes) - hjit  - test-char
+=  41,369 cycles ( 1015 bytes) - cc65  - test-char
+=   5,235 cycles (  599 bytes) - oscar - test-char
 === ./ptest const
 = 114,441 cycles (   57 bytes) - ivm   - test-const
 = 195,395 cycles (   57 bytes) - asm   - test-const
@@ -81,8 +87,8 @@
 = 370,067 cycles (  383 bytes) - fix   - test-cse
 =  31,157 cycles ( 1399 bytes) - zpjit - test-cse
 =   2,840 cycles ( 1104 bytes) - hjit  - test-cse
-= 134,229 cycles ( 3946 bytes) - cc65  - test-cse
-=  36,945 cycles ( 5046 bytes) - oscar - test-cse
+= 139,199 cycles ( 2269 bytes) - cc65  - test-cse
+=  21,748 cycles ( 1162 bytes) - oscar - test-cse
 === ./ptest dispatch-fun
 = 836,037,421 cycles (  151 bytes) - ivm   - test-dispatch-fun
 = 218,769,488 cycles (  151 bytes) - asm   - test-dispatch-fun
@@ -100,7 +106,8 @@
 =  35,604,269 cycles ( 1744 bytes) - cc65  - test-dispatch-inc
 =     150,342 cycles (  164 bytes) - oscar - test-dispatch-inc
 === ./ptest dispatch-loop
-= 6,932,625,616 cycles (  136 bytes) - ivm   - test-dispatch-loop
+=             - FAILED                - ivm   - test-dispatch-loop
+=               ./ivm TMP/test-dispatch-loop
 = 1,273,092,350 cycles (  136 bytes) - asm   - test-dispatch-loop
 = 1,172,513,500 cycles (  136 bytes) - fix   - test-dispatch-loop
 =   204,413,416 cycles (  415 bytes) - zpjit - test-dispatch-loop
@@ -125,17 +132,17 @@
 =           ./ivm-jit.x -z -tsim6502 -oTMP/test-dispatch-switch-ifif.jit.sim TMP/test-dispatch-switch-ifif.ivm && sim65 -c TMP/test-dispatch-switch-ifif.jit.sim
 =   145,724 cycles ( 1298 bytes) - hjit  - test-dispatch-switch-ifif  DIFFERS 256/256
 =           ./ivm-jit.x TMP/test-dispatch-switch-ifif.ivm
-= 3,442,396 cycles ( 3241 bytes) - cc65  - test-dispatch-switch-ifif  DIFFERS 142/142
-=           cl65 -Dputz=printf -t sim6502 -Cl -Os -o TMP/test-dispatch-switch-ifif.sim TMP/test-dispatch-switch-ifif.c && sim65 -c TMP/test-dispatch-switch-ifif.sim
+= 3,090,426 cycles ( 1695 bytes) - cc65  - test-dispatch-switch-ifif  DIFFERS 142/142
+=           cl65 -Dxputz=puts -Iptest-include -t sim6502 -Cl -Os -o TMP/test-dispatch-switch-ifif.sim TMP/test-dispatch-switch-ifif.c putn.c && sim65 -c TMP/test-dispatch-switch-ifif.sim
 =         - FAILED                - oscar - test-dispatch-switch-ifif
-=           ./oscar -Dputz=printf -Os -ep TMP/test-dispatch-switch-ifif.c
+=           ./oscar -O3 -Dxputz=puts -Os -ep putn.c TMP/test-dispatch-switch-ifif.c
 === ./ptest dispatch-switch
 = - FAILED                - pc    - test-dispatch-switch
 =   ./pc TMP/test-dispatch-switch
 = - FAILED                - cc65  - test-dispatch-switch
-=   cl65 -Dputz=printf -t sim6502 -Cl -Os -o TMP/test-dispatch-switch.sim TMP/test-dispatch-switch.c && sim65 -c TMP/test-dispatch-switch.sim
+=   cl65 -Dxputz=puts -Iptest-include -t sim6502 -Cl -Os -o TMP/test-dispatch-switch.sim TMP/test-dispatch-switch.c -Dputz=puts && sim65 -c TMP/test-dispatch-switch.sim
 = - FAILED                - oscar - test-dispatch-switch
-=   ./oscar -Dputz=printf -Os -ep TMP/test-dispatch-switch.c
+=   ./oscar -O3 -Dxputz=puts -Os -ep -Dputz=puts TMP/test-dispatch-switch.c
 === ./ptest dispatch
 = 93,566,296 cycles (  147 bytes) - ivm   - test-dispatch
 = 27,922,176 cycles (  147 bytes) - asm   - test-dispatch
@@ -153,71 +160,86 @@
 =     226 cycles (  191 bytes) - cc65  - test-empty
 =      89 cycles (  137 bytes) - oscar - test-empty
 === ./ptest entry
-= 212,455 cycles (  189 bytes) - ivm   - test-entry
-= 286,880 cycles (  189 bytes) - asm   - test-entry
-= 288,629 cycles (  189 bytes) - fix   - test-entry
-=  15,887 cycles (  609 bytes) - zpjit - test-entry
-=     345 cycles (  286 bytes) - hjit  - test-entry
-=  76,407 cycles ( 2662 bytes) - cc65  - test-entry
-=  20,290 cycles ( 4396 bytes) - oscar - test-entry
+= 212,482 cycles (  191 bytes) - ivm   - test-entry  DIFFERS 2/4
+=         ./ivm TMP/test-entry
+= 286,893 cycles (  191 bytes) - asm   - test-entry  DIFFERS 2/4
+=         ./ivm-asm TMP/test-entry
+= 288,642 cycles (  191 bytes) - fix   - test-entry  DIFFERS 2/4
+=         ./ivm-fix TMP/test-entry
+=  15,887 cycles (  609 bytes) - zpjit - test-entry  DIFFERS 2/4
+=         ./ivm-jit.x -z -tsim6502 -oTMP/test-entry.jit.sim TMP/test-entry.ivm && sim65 -c TMP/test-entry.jit.sim
+=     345 cycles (  286 bytes) - hjit  - test-entry  DIFFERS 2/4
+=         ./ivm-jit.x TMP/test-entry.ivm
+=  76,927 cycles (  983 bytes) - cc65  - test-entry  DIFFERS 2/4
+=         cl65 -Dxputz=puts -Iptest-include -t sim6502 -Cl -Os -o TMP/test-entry.sim TMP/test-entry.c putn.c && sim65 -c TMP/test-entry.sim
+=  12,045 cycles (  582 bytes) - oscar - test-entry  DIFFERS 2/4
+=         ./oscar -O3 -Dxputz=puts -Os -ep putn.c TMP/test-entry.c
 === ./ptest expr
 = 1,397,746 cycles (  132 bytes) - ivm   - test-expr
 = 1,229,637 cycles (  132 bytes) - asm   - test-expr
 = 1,225,312 cycles (  132 bytes) - fix   - test-expr
 =   199,820 cycles (  413 bytes) - zpjit - test-expr
 =    10,454 cycles (  202 bytes) - hjit  - test-expr
-=   884,949 cycles ( 2565 bytes) - cc65  - test-expr
-=   278,795 cycles ( 4296 bytes) - oscar - test-expr
+= 1,037,998 cycles ( 1029 bytes) - cc65  - test-expr
+=   159,747 cycles (  608 bytes) - oscar - test-expr
 === ./ptest exprinc
-= 275,936 cycles (  265 bytes) - ivm   - test-exprinc
-= 348,753 cycles (  265 bytes) - asm   - test-exprinc
-= 349,841 cycles (  265 bytes) - fix   - test-exprinc
+= 275,937 cycles (  266 bytes) - ivm   - test-exprinc
+= 348,748 cycles (  266 bytes) - asm   - test-exprinc
+= 349,836 cycles (  266 bytes) - fix   - test-exprinc
 =  19,675 cycles (  885 bytes) - zpjit - test-exprinc
 =   1,401 cycles (  772 bytes) - hjit  - test-exprinc
-= 156,571 cycles ( 3275 bytes) - cc65  - test-exprinc
-=  27,419 cycles ( 4614 bytes) - oscar - test-exprinc
+=  88,370 cycles ( 1337 bytes) - cc65  - test-exprinc
+=  10,495 cycles (  590 bytes) - oscar - test-exprinc
 === ./ptest fixipc-op
-= 535,952 cycles (  975 bytes) - ivm   - test-fixipc-op
-= 349,429 cycles (  975 bytes) - asm   - test-fixipc-op
-= 329,503 cycles (  975 bytes) - fix   - test-fixipc-op
+= 535,962 cycles (  976 bytes) - ivm   - test-fixipc-op
+= 349,432 cycles (  976 bytes) - asm   - test-fixipc-op
+= 329,505 cycles (  976 bytes) - fix   - test-fixipc-op
 =  23,711 cycles ( 2981 bytes) - zpjit - test-fixipc-op
 =  18,438 cycles ( 3795 bytes) - hjit  - test-fixipc-op
-=  68,474 cycles ( 6603 bytes) - cc65  - test-fixipc-op
-=  18,300 cycles ( 4541 bytes) - oscar - test-fixipc-op
+=  66,457 cycles ( 5046 bytes) - cc65  - test-fixipc-op
+=  14,935 cycles (  783 bytes) - oscar - test-fixipc-op
 === ./ptest getchar
-= 135,389 cycles (  537 bytes) - ivm   - test-getchar
-= 229,354 cycles (  537 bytes) - asm   - test-getchar
-= 230,692 cycles (  537 bytes) - fix   - test-getchar
-=   3,118 cycles ( 1619 bytes) - zpjit - test-getchar
-=     138 cycles ( 1256 bytes) - hjit  - test-getchar
-=   6,369 cycles ( 3960 bytes) - cc65  - test-getchar
-=   3,595 cycles ( 4989 bytes) - oscar - test-getchar
+= 135,391 cycles (  539 bytes) - ivm   - test-getchar
+= 229,354 cycles (  539 bytes) - asm   - test-getchar
+= 230,710 cycles (  539 bytes) - fix   - test-getchar
+=   3,118 cycles ( 1626 bytes) - zpjit - test-getchar
+=     138 cycles ( 1263 bytes) - hjit  - test-getchar
+=       - FAILED                - cc65  - test-getchar
+=         cl65 -Dxputz=puts -Iptest-include -t sim6502 -Cl -Os -o TMP/test-getchar.sim TMP/test-getchar.c putn.c && sim65 -c TMP/test-getchar.sim
+=   2,309 cycles ( 1253 bytes) - oscar - test-getchar
 === ./ptest hello
-= 117,322 cycles (   48 bytes) - ivm   - test-hello
-= 192,393 cycles (   48 bytes) - asm   - test-hello
-= 193,543 cycles (   48 bytes) - fix   - test-hello
-=   1,432 cycles (  215 bytes) - zpjit - test-hello
-=      41 cycles (   36 bytes) - hjit  - test-hello
-=   3,362 cycles ( 2287 bytes) - cc65  - test-hello
-=   1,637 cycles ( 4101 bytes) - oscar - test-hello
+= 117,884 cycles (   49 bytes) - ivm   - test-hello
+= 192,874 cycles (   49 bytes) - asm   - test-hello
+= 194,028 cycles (   49 bytes) - fix   - test-hello
+=   1,508 cycles (  220 bytes) - zpjit - test-hello
+=      49 cycles (   41 bytes) - hjit  - test-hello
+=     816 cycles (  433 bytes) - cc65  - test-hello
+=     562 cycles (  216 bytes) - oscar - test-hello
 === ./ptest ifdef
 = 229,808 cycles (  232 bytes) - ivm   - test-ifdef
 = 307,473 cycles (  232 bytes) - asm   - test-ifdef
 = 309,371 cycles (  232 bytes) - fix   - test-ifdef
 =  17,728 cycles (  564 bytes) - zpjit - test-ifdef
 =     405 cycles (  355 bytes) - hjit  - test-ifdef
-=  82,947 cycles ( 2774 bytes) - cc65  - test-ifdef  DIFFERS 1/10
-=         cl65 -Dputz=printf -t sim6502 -Cl -Os -o TMP/test-ifdef.sim TMP/test-ifdef.c && sim65 -c TMP/test-ifdef.sim
-=  24,167 cycles ( 4534 bytes) - oscar - test-ifdef  DIFFERS 1/10
-=         ./oscar -Dputz=printf -Os -ep TMP/test-ifdef.c
+=  81,174 cycles ( 1071 bytes) - cc65  - test-ifdef  DIFFERS 1/10
+=         cl65 -Dxputz=puts -Iptest-include -t sim6502 -Cl -Os -o TMP/test-ifdef.sim TMP/test-ifdef.c putn.c && sim65 -c TMP/test-ifdef.sim
+=  12,880 cycles (  675 bytes) - oscar - test-ifdef  DIFFERS 1/10
+=         ./oscar -O3 -Dxputz=puts -Os -ep putn.c TMP/test-ifdef.c
 === ./ptest ifeq
-= 1,425,625 cycles (  581 bytes) - ivm   - test-ifeq
-=   860,938 cycles (  581 bytes) - asm   - test-ifeq
-=   839,846 cycles (  581 bytes) - fix   - test-ifeq
-=    85,479 cycles ( 2112 bytes) - zpjit - test-ifeq
-=    33,392 cycles ( 1974 bytes) - hjit  - test-ifeq
-=   449,744 cycles ( 4144 bytes) - cc65  - test-ifeq
-=    82,072 cycles ( 4971 bytes) - oscar - test-ifeq
+= 1,425,615 cycles (  582 bytes) - ivm   - test-ifeq  DIFFERS 2/7
+=           ./ivm TMP/test-ifeq
+=   860,920 cycles (  582 bytes) - asm   - test-ifeq  DIFFERS 2/7
+=           ./ivm-asm TMP/test-ifeq
+=   839,828 cycles (  582 bytes) - fix   - test-ifeq  DIFFERS 2/7
+=           ./ivm-fix TMP/test-ifeq
+=    85,479 cycles ( 2112 bytes) - zpjit - test-ifeq  DIFFERS 2/7
+=           ./ivm-jit.x -z -tsim6502 -oTMP/test-ifeq.jit.sim TMP/test-ifeq.ivm && sim65 -c TMP/test-ifeq.jit.sim
+=    33,392 cycles ( 1974 bytes) - hjit  - test-ifeq  DIFFERS 2/7
+=           ./ivm-jit.x TMP/test-ifeq.ivm
+=   248,445 cycles ( 2219 bytes) - cc65  - test-ifeq  DIFFERS 2/7
+=           cl65 -Dxputz=puts -Iptest-include -t sim6502 -Cl -Os -o TMP/test-ifeq.sim TMP/test-ifeq.c putn.c && sim65 -c TMP/test-ifeq.sim
+=    34,912 cycles (  883 bytes) - oscar - test-ifeq  DIFFERS 2/7
+=           ./oscar -O3 -Dxputz=puts -Os -ep putn.c TMP/test-ifeq.c
 === ./ptest incdec
 = 636,751 cycles (  873 bytes) - ivm   - test-incdec  DIFFERS 1/24
 =         ./ivm TMP/test-incdec
@@ -225,491 +247,763 @@
 = 667,354 cycles (  873 bytes) - fix   - test-incdec
 =  85,690 cycles ( 2231 bytes) - zpjit - test-incdec
 =   5,139 cycles ( 2250 bytes) - hjit  - test-incdec
-= 383,684 cycles ( 5244 bytes) - cc65  - test-incdec
-= 102,907 cycles ( 6080 bytes) - oscar - test-incdec
+= 410,449 cycles ( 3033 bytes) - cc65  - test-incdec
+=  61,928 cycles ( 1613 bytes) - oscar - test-incdec
 === ./ptest logic
 = 295,926 cycles (  423 bytes) - ivm   - test-logic
 = 361,026 cycles (  423 bytes) - asm   - test-logic
 = 361,833 cycles (  423 bytes) - fix   - test-logic
 =  18,555 cycles ( 2009 bytes) - zpjit - test-logic
 =   2,809 cycles ( 1899 bytes) - hjit  - test-logic
-= 165,067 cycles ( 3862 bytes) - cc65  - test-logic
-=  26,779 cycles ( 4805 bytes) - oscar - test-logic
+=  79,370 cycles ( 1913 bytes) - cc65  - test-logic
+=   9,226 cycles (  677 bytes) - oscar - test-logic
 === ./ptest loop-count
-= 10,248,294 cycles (   68 bytes) - ivm   - test-loop-count
-=  2,215,553 cycles (   68 bytes) - asm   - test-loop-count
-=  2,016,953 cycles (   68 bytes) - fix   - test-loop-count
+= 10,248,312 cycles (   69 bytes) - ivm   - test-loop-count
+=  2,215,562 cycles (   69 bytes) - asm   - test-loop-count
+=  2,016,962 cycles (   69 bytes) - fix   - test-loop-count
 =    274,572 cycles (  313 bytes) - zpjit - test-loop-count
 =    310,580 cycles (   94 bytes) - hjit  - test-loop-count
-=    914,112 cycles ( 2391 bytes) - cc65  - test-loop-count
-=      4,826 cycles ( 4128 bytes) - oscar - test-loop-count
+=    920,002 cycles (  880 bytes) - cc65  - test-loop-count
+=      3,639 cycles (  466 bytes) - oscar - test-loop-count
 === ./ptest loop-down
-= 10,697,434 cycles (   72 bytes) - ivm   - test-loop-down
-=  3,605,287 cycles (   72 bytes) - asm   - test-loop-down
-=  2,866,497 cycles (   72 bytes) - fix   - test-loop-down
+= 10,697,452 cycles (   73 bytes) - ivm   - test-loop-down
+=  3,605,296 cycles (   73 bytes) - asm   - test-loop-down
+=  2,866,506 cycles (   73 bytes) - fix   - test-loop-down
 =    453,783 cycles (  328 bytes) - zpjit - test-loop-down
 =    550,408 cycles (  114 bytes) - hjit  - test-loop-down
-=    753,032 cycles ( 2384 bytes) - cc65  - test-loop-down
-=    304,465 cycles ( 4160 bytes) - oscar - test-loop-down
+=    756,818 cycles (  880 bytes) - cc65  - test-loop-down
+=    402,936 cycles (  499 bytes) - oscar - test-loop-down
 === ./ptest loop-for-acc
-= 11,050,795 cycles (   75 bytes) - ivm   - test-loop-for-acc
-=  2,538,702 cycles (   75 bytes) - asm   - test-loop-for-acc
-=  2,310,135 cycles (   75 bytes) - fix   - test-loop-for-acc
+= 11,050,810 cycles (   76 bytes) - ivm   - test-loop-for-acc
+=  2,538,704 cycles (   76 bytes) - asm   - test-loop-for-acc
+=  2,310,137 cycles (   76 bytes) - fix   - test-loop-for-acc
 =    394,641 cycles (  330 bytes) - zpjit - test-loop-for-acc
 =    480,397 cycles (  115 bytes) - hjit  - test-loop-for-acc
-=    824,116 cycles ( 2400 bytes) - cc65  - test-loop-for-acc
-=    285,139 cycles ( 4161 bytes) - oscar - test-loop-for-acc
+=    831,190 cycles (  889 bytes) - cc65  - test-loop-for-acc
+=    283,922 cycles (  499 bytes) - oscar - test-loop-for-acc
 === ./ptest loop-for-le-expr
-= 11,053,431 cycles (   87 bytes) - ivm   - test-loop-for-le-expr
-=  2,542,806 cycles (   87 bytes) - asm   - test-loop-for-le-expr
-=  2,314,211 cycles (   87 bytes) - fix   - test-loop-for-le-expr
+= 11,053,441 cycles (   88 bytes) - ivm   - test-loop-for-le-expr
+=  2,542,808 cycles (   88 bytes) - asm   - test-loop-for-le-expr
+=  2,314,213 cycles (   88 bytes) - fix   - test-loop-for-le-expr
 =    454,975 cycles (  343 bytes) - zpjit - test-loop-for-le-expr
 =    550,365 cycles (  132 bytes) - hjit  - test-loop-for-le-expr
-=    824,187 cycles ( 2404 bytes) - cc65  - test-loop-for-le-expr
-=    345,694 cycles ( 4172 bytes) - oscar - test-loop-for-le-expr
+=    833,514 cycles (  893 bytes) - cc65  - test-loop-for-le-expr
+=    344,417 cycles (  510 bytes) - oscar - test-loop-for-le-expr
 === ./ptest loop-for-le
-= 11,050,278 cycles (   74 bytes) - ivm   - test-loop-for-le
-=  2,538,210 cycles (   74 bytes) - asm   - test-loop-for-le
-=  2,309,649 cycles (   74 bytes) - fix   - test-loop-for-le
+= 11,050,296 cycles (   75 bytes) - ivm   - test-loop-for-le
+=  2,538,219 cycles (   75 bytes) - asm   - test-loop-for-le
+=  2,309,658 cycles (   75 bytes) - fix   - test-loop-for-le
 =    394,547 cycles (  329 bytes) - zpjit - test-loop-for-le
 =    480,397 cycles (  114 bytes) - hjit  - test-loop-for-le
-=    824,093 cycles ( 2399 bytes) - cc65  - test-loop-for-le
-=    345,229 cycles ( 4167 bytes) - oscar - test-loop-for-le
+=    830,609 cycles (  888 bytes) - cc65  - test-loop-for-le
+=    344,027 cycles (  505 bytes) - oscar - test-loop-for-le
 === ./ptest loop-for-lt
-= 11,050,269 cycles (   74 bytes) - ivm   - test-loop-for-lt
-=  2,538,221 cycles (   74 bytes) - asm   - test-loop-for-lt
-=  2,309,650 cycles (   74 bytes) - fix   - test-loop-for-lt
+= 11,050,287 cycles (   75 bytes) - ivm   - test-loop-for-lt
+=  2,538,230 cycles (   75 bytes) - asm   - test-loop-for-lt
+=  2,309,659 cycles (   75 bytes) - fix   - test-loop-for-lt
 =    394,547 cycles (  329 bytes) - zpjit - test-loop-for-lt
 =    480,397 cycles (  114 bytes) - hjit  - test-loop-for-lt
-=    824,093 cycles ( 2399 bytes) - cc65  - test-loop-for-lt
-=    325,213 cycles ( 4163 bytes) - oscar - test-loop-for-lt
+=    830,609 cycles (  888 bytes) - cc65  - test-loop-for-lt
+=    324,011 cycles (  501 bytes) - oscar - test-loop-for-lt
 === ./ptest loop-for-pluseq
-= 11,052,283 cycles (   78 bytes) - ivm   - test-loop-for-pluseq
-=  2,540,103 cycles (   78 bytes) - asm   - test-loop-for-pluseq
-=  2,311,548 cycles (   78 bytes) - fix   - test-loop-for-pluseq
+= 11,052,301 cycles (   79 bytes) - ivm   - test-loop-for-pluseq
+=  2,540,112 cycles (   79 bytes) - asm   - test-loop-for-pluseq
+=  2,311,557 cycles (   79 bytes) - fix   - test-loop-for-pluseq
 =    394,914 cycles (  333 bytes) - zpjit - test-loop-for-pluseq
 =    480,397 cycles (  118 bytes) - hjit  - test-loop-for-pluseq
-=    824,164 cycles ( 2403 bytes) - cc65  - test-loop-for-pluseq
-=    325,585 cycles ( 4167 bytes) - oscar - test-loop-for-pluseq
+=    832,933 cycles (  892 bytes) - cc65  - test-loop-for-pluseq
+=    324,323 cycles (  505 bytes) - oscar - test-loop-for-pluseq
 === ./ptest loop-for-var
-= 11,051,213 cycles (   78 bytes) - ivm   - test-loop-for-var
-=  2,538,793 cycles (   78 bytes) - asm   - test-loop-for-var
-=  2,310,212 cycles (   78 bytes) - fix   - test-loop-for-var
+= 11,051,231 cycles (   79 bytes) - ivm   - test-loop-for-var
+=  2,538,802 cycles (   79 bytes) - asm   - test-loop-for-var
+=  2,310,221 cycles (   79 bytes) - fix   - test-loop-for-var
 =    434,587 cycles (  336 bytes) - zpjit - test-loop-for-var
 =    530,363 cycles (  125 bytes) - hjit  - test-loop-for-var
-=    864,130 cycles ( 2412 bytes) - cc65  - test-loop-for-var
-=    325,306 cycles ( 4164 bytes) - oscar - test-loop-for-var
+=    871,196 cycles (  901 bytes) - cc65  - test-loop-for-var
+=    324,089 cycles (  502 bytes) - oscar - test-loop-for-var
 === ./ptest loop-postdec
-= 11,641,189 cycles (   81 bytes) - ivm   - test-loop-postdec
-=  3,798,449 cycles (   81 bytes) - asm   - test-loop-postdec
-=  3,089,697 cycles (   81 bytes) - fix   - test-loop-postdec
+= 11,641,193 cycles (   82 bytes) - ivm   - test-loop-postdec
+=  3,798,444 cycles (   82 bytes) - asm   - test-loop-postdec
+=  3,089,692 cycles (   82 bytes) - fix   - test-loop-postdec
 =    524,686 cycles (  357 bytes) - zpjit - test-loop-postdec
 =    620,443 cycles (  146 bytes) - hjit  - test-loop-postdec
-=    874,159 cycles ( 2404 bytes) - cc65  - test-loop-postdec
-=    515,033 cycles ( 4175 bytes) - oscar - test-loop-postdec
+=    881,227 cycles (  900 bytes) - cc65  - test-loop-postdec
+=    513,816 cycles (  513 bytes) - oscar - test-loop-postdec
 === ./ptest loop-while-count
-= 11,631,436 cycles (   76 bytes) - ivm   - test-loop-while-count
-=  3,438,362 cycles (   76 bytes) - asm   - test-loop-while-count
-=  2,669,193 cycles (   76 bytes) - fix   - test-loop-while-count
+= 11,631,409 cycles (   77 bytes) - ivm   - test-loop-while-count
+=  3,438,378 cycles (   77 bytes) - asm   - test-loop-while-count
+=  2,669,209 cycles (   77 bytes) - fix   - test-loop-while-count
 =    275,125 cycles (  319 bytes) - zpjit - test-loop-while-count
 =    310,580 cycles (  100 bytes) - hjit  - test-loop-while-count
-=    894,203 cycles ( 2397 bytes) - cc65  - test-loop-while-count
-=      5,384 cycles ( 4134 bytes) - oscar - test-loop-while-count
+=    903,490 cycles (  886 bytes) - cc65  - test-loop-while-count
+=      4,107 cycles (  472 bytes) - oscar - test-loop-while-count
 === ./ptest loop-while-expr
-= 16,142,769 cycles (   85 bytes) - ivm   - test-loop-while-expr
-=  4,960,822 cycles (   85 bytes) - asm   - test-loop-while-expr
-=  4,142,096 cycles (   85 bytes) - fix   - test-loop-while-expr
+= 16,142,755 cycles (   86 bytes) - ivm   - test-loop-while-expr
+=  4,960,796 cycles (   86 bytes) - asm   - test-loop-while-expr
+=  4,142,070 cycles (   86 bytes) - fix   - test-loop-while-expr
 =    584,866 cycles (  341 bytes) - zpjit - test-loop-while-expr
 =    670,349 cycles (  126 bytes) - hjit  - test-loop-while-expr
-=  1,014,226 cycles ( 2407 bytes) - cc65  - test-loop-while-expr
-=    535,528 cycles ( 4185 bytes) - oscar - test-loop-while-expr
+=  1,022,989 cycles (  896 bytes) - cc65  - test-loop-while-expr
+=    584,263 cycles (  524 bytes) - oscar - test-loop-while-expr
 === ./ptest loop-while
-= 12,429,837 cycles (   75 bytes) - ivm   - test-loop-while
-=  3,757,775 cycles (   75 bytes) - asm   - test-loop-while
-=  2,958,607 cycles (   75 bytes) - fix   - test-loop-while
+= 12,429,852 cycles (   76 bytes) - ivm   - test-loop-while
+=  3,757,777 cycles (   76 bytes) - asm   - test-loop-while
+=  2,958,609 cycles (   76 bytes) - fix   - test-loop-while
 =    394,452 cycles (  328 bytes) - zpjit - test-loop-while
 =    480,397 cycles (  113 bytes) - hjit  - test-loop-while
-=    804,100 cycles ( 2398 bytes) - cc65  - test-loop-while
-=    325,120 cycles ( 4162 bytes) - oscar - test-loop-while
+=    810,030 cycles (  887 bytes) - cc65  - test-loop-while
+=    323,933 cycles (  500 bytes) - oscar - test-loop-while
 === ./ptest loops
-= 5,041,728 cycles ( 1069 bytes) - ivm   - test-loops
-= 1,992,880 cycles ( 1069 bytes) - asm   - test-loops
-= 1,883,885 cycles ( 1069 bytes) - fix   - test-loops
-=   270,472 cycles ( 3618 bytes) - zpjit - test-loops
-=   179,418 cycles ( 3773 bytes) - hjit  - test-loops
-= 1,240,337 cycles ( 7186 bytes) - cc65  - test-loops
-=   235,326 cycles ( 6559 bytes) - oscar - test-loops  DIFFERS 1/19
-=           ./oscar -Dputz=printf -Os -ep TMP/test-loops.c
+= 5,041,805 cycles ( 1071 bytes) - ivm   - test-loops  DIFFERS 4/19
+=           ./ivm TMP/test-loops
+= 1,992,922 cycles ( 1071 bytes) - asm   - test-loops  DIFFERS 4/19
+=           ./ivm-asm TMP/test-loops
+= 1,883,927 cycles ( 1071 bytes) - fix   - test-loops  DIFFERS 4/19
+=           ./ivm-fix TMP/test-loops
+=   270,472 cycles ( 3618 bytes) - zpjit - test-loops  DIFFERS 4/19
+=           ./ivm-jit.x -z -tsim6502 -oTMP/test-loops.jit.sim TMP/test-loops.ivm && sim65 -c TMP/test-loops.jit.sim
+=   179,418 cycles ( 3773 bytes) - hjit  - test-loops  DIFFERS 4/19
+=           ./ivm-jit.x TMP/test-loops.ivm
+=   859,110 cycles ( 4967 bytes) - cc65  - test-loops  DIFFERS 4/19
+=           cl65 -Dxputz=puts -Iptest-include -t sim6502 -Cl -Os -o TMP/test-loops.sim TMP/test-loops.c putn.c && sim65 -c TMP/test-loops.sim
+=   142,359 cycles ( 2207 bytes) - oscar - test-loops  DIFFERS 5/19
+=           ./oscar -O3 -Dxputz=puts -Os -ep putn.c TMP/test-loops.c
 === ./ptest memset
-= 13,949,689 cycles (  536 bytes) - ivm   - test-memset
-=  4,794,867 cycles (  536 bytes) - asm   - test-memset
-=  3,766,797 cycles (  536 bytes) - fix   - test-memset
+= 13,943,579 cycles (  414 bytes) - ivm   - test-memset
+=  4,792,876 cycles (  414 bytes) - asm   - test-memset
+=  3,764,614 cycles (  414 bytes) - fix   - test-memset
 =    729,704 cycles ( 1432 bytes) - zpjit - test-memset
-=    683,673 cycles ( 1322 bytes) - hjit  - test-memset  DIFFERS 25/40
-=            ./ivm-jit.x TMP/test-memset.ivm
-=  2,489,326 cycles ( 3877 bytes) - cc65  - test-memset
-=          - FAILED                - oscar - test-memset
-=            ./oscar -Dputz=printf -Os -ep TMP/test-memset.c
+=    683,577 cycles ( 1168 bytes) - hjit  - test-memset
+=  2,459,814 cycles ( 2267 bytes) - cc65  - test-memset
+=    474,665 cycles ( 1401 bytes) - oscar - test-memset
 === ./ptest nullread
-= 120,211 cycles (   49 bytes) - ivm   - test-nullread
-= 195,046 cycles (   49 bytes) - asm   - test-nullread
-= 196,182 cycles (   49 bytes) - fix   - test-nullread
+= 120,229 cycles (   50 bytes) - ivm   - test-nullread
+= 195,055 cycles (   50 bytes) - asm   - test-nullread
+= 196,191 cycles (   50 bytes) - fix   - test-nullread
 =   1,774 cycles (  281 bytes) - zpjit - test-nullread
 =      95 cycles (   66 bytes) - hjit  - test-nullread
-=  13,954 cycles ( 2331 bytes) - cc65  - test-nullread  DIFFERS 1/2
-=         cl65 -Dputz=printf -t sim6502 -Cl -Os -o TMP/test-nullread.sim TMP/test-nullread.c && sim65 -c TMP/test-nullread.sim
-=   2,528 cycles ( 4126 bytes) - oscar - test-nullread
+=  17,042 cycles (  823 bytes) - cc65  - test-nullread  DIFFERS 1/2
+=         cl65 -Dxputz=puts -Iptest-include -t sim6502 -Cl -Os -o TMP/test-nullread.sim TMP/test-nullread.c putn.c && sim65 -c TMP/test-nullread.sim
+=   2,697 cycles (  461 bytes) - oscar - test-nullread  DIFFERS 1/2
+=         ./oscar -O3 -Dxputz=puts -Os -ep putn.c TMP/test-nullread.c
 === ./ptest nums
-= 221,693 cycles (  145 bytes) - ivm   - test-nums
-= 296,225 cycles (  145 bytes) - asm   - test-nums
-= 298,600 cycles (  145 bytes) - fix   - test-nums
-=  22,071 cycles (  481 bytes) - zpjit - test-nums
+= 220,458 cycles (  143 bytes) - ivm   - test-nums
+= 293,083 cycles (  143 bytes) - asm   - test-nums
+= 295,416 cycles (  143 bytes) - fix   - test-nums
+=  22,043 cycles (  481 bytes) - zpjit - test-nums
 =     323 cycles (  254 bytes) - hjit  - test-nums
-= 100,559 cycles ( 2738 bytes) - cc65  - test-nums  DIFFERS 3/10
-=         cl65 -Dputz=printf -t sim6502 -Cl -Os -o TMP/test-nums.sim TMP/test-nums.c && sim65 -c TMP/test-nums.sim
-=       - FAILED                - oscar - test-nums
-=         ./oscar -Dputz=printf -Os -ep TMP/test-nums.c
+= 103,756 cycles (  945 bytes) - cc65  - test-nums
+=  18,021 cycles (  647 bytes) - oscar - test-nums
 === ./ptest opts
-= 43,940,555 cycles (  371 bytes) - ivm   - test-opts
-=  9,249,351 cycles (  371 bytes) - asm   - test-opts
-=  8,341,712 cycles (  371 bytes) - fix   - test-opts
-=  1,427,480 cycles ( 1331 bytes) - zpjit - test-opts
-=  1,542,158 cycles ( 1044 bytes) - hjit  - test-opts
-=  4,031,683 cycles ( 4370 bytes) - cc65  - test-opts
-=    467,838 cycles ( 5073 bytes) - oscar - test-opts
+= 43,940,583 cycles (  378 bytes) - ivm   - test-opts  DIFFERS 12/14
+=            ./ivm TMP/test-opts
+=  9,249,326 cycles (  378 bytes) - asm   - test-opts  DIFFERS 12/14
+=            ./ivm-asm TMP/test-opts
+=  8,341,687 cycles (  378 bytes) - fix   - test-opts  DIFFERS 12/14
+=            ./ivm-fix TMP/test-opts
+=  1,427,480 cycles ( 1331 bytes) - zpjit - test-opts  DIFFERS 12/14
+=            ./ivm-jit.x -z -tsim6502 -oTMP/test-opts.jit.sim TMP/test-opts.ivm && sim65 -c TMP/test-opts.jit.sim
+=  1,542,158 cycles ( 1044 bytes) - hjit  - test-opts  DIFFERS 12/14
+=            ./ivm-jit.x TMP/test-opts.ivm
+=  4,060,762 cycles ( 2836 bytes) - cc65  - test-opts  DIFFERS 12/14
+=            cl65 -Dxputz=puts -Iptest-include -t sim6502 -Cl -Os -o TMP/test-opts.sim TMP/test-opts.c putn.c && sim65 -c TMP/test-opts.sim
+=    458,237 cycles ( 1275 bytes) - oscar - test-opts  DIFFERS 12/14
+=            ./oscar -O3 -Dxputz=puts -Os -ep putn.c TMP/test-opts.c
 === ./ptest peekpoke
-= 183,660 cycles (  203 bytes) - ivm   - test-peekpoke
-= 267,018 cycles (  203 bytes) - asm   - test-peekpoke
-= 268,516 cycles (  203 bytes) - fix   - test-peekpoke
+= 183,670 cycles (  204 bytes) - ivm   - test-peekpoke
+= 267,020 cycles (  204 bytes) - asm   - test-peekpoke
+= 268,518 cycles (  204 bytes) - fix   - test-peekpoke
 =  11,804 cycles (  764 bytes) - zpjit - test-peekpoke
 =     573 cycles (  451 bytes) - hjit  - test-peekpoke
 =       - FAILED                - cc65  - test-peekpoke
-=         cl65 -Dputz=printf -t sim6502 -Cl -Os -o TMP/test-peekpoke.sim TMP/test-peekpoke.c && sim65 -c TMP/test-peekpoke.sim
+=         cl65 -Dxputz=puts -Iptest-include -t sim6502 -Cl -Os -o TMP/test-peekpoke.sim TMP/test-peekpoke.c putn.c && sim65 -c TMP/test-peekpoke.sim
 =       - FAILED                - oscar - test-peekpoke
-=         ./oscar -Dputz=printf -Os -ep TMP/test-peekpoke.c
+=         ./oscar -O3 -Dxputz=puts -Os -ep putn.c TMP/test-peekpoke.c
 === ./ptest pluseq
 = 288,327 cycles (  427 bytes) - ivm   - test-pluseq
 = 365,438 cycles (  427 bytes) - asm   - test-pluseq
 = 367,053 cycles (  427 bytes) - fix   - test-pluseq
 =  27,379 cycles ( 1339 bytes) - zpjit - test-pluseq
 =   1,544 cycles ( 1162 bytes) - hjit  - test-pluseq
-= 127,833 cycles ( 3633 bytes) - cc65  - test-pluseq
-=  35,232 cycles ( 4945 bytes) - oscar - test-pluseq
+= 133,339 cycles ( 1925 bytes) - cc65  - test-pluseq
+=  21,096 cycles ( 1041 bytes) - oscar - test-pluseq
 === ./ptest precedence-err
 = - FAILED                - pc    - test-precedence-err
 =   ./pc TMP/test-precedence-err
 = - FAILED                - cc65  - test-precedence-err
-=   cl65 -Dputz=printf -t sim6502 -Cl -Os -o TMP/test-precedence-err.sim TMP/test-precedence-err.c && sim65 -c TMP/test-precedence-err.sim
+=   cl65 -Dxputz=puts -Iptest-include -t sim6502 -Cl -Os -o TMP/test-precedence-err.sim TMP/test-precedence-err.c -Dputz=puts && sim65 -c TMP/test-precedence-err.sim
 = - FAILED                - oscar - test-precedence-err
-=   ./oscar -Dputz=printf -Os -ep TMP/test-precedence-err.c
+=   ./oscar -O3 -Dxputz=puts -Os -ep -Dputz=puts TMP/test-precedence-err.c
 === ./ptest precedence
 = 520,178 cycles (  774 bytes) - ivm   - test-precedence
 = 568,783 cycles (  774 bytes) - asm   - test-precedence
 = 570,846 cycles (  774 bytes) - fix   - test-precedence
 =  64,588 cycles ( 2314 bytes) - zpjit - test-precedence
 =   3,318 cycles ( 2275 bytes) - hjit  - test-precedence
-= 330,810 cycles ( 5414 bytes) - cc65  - test-precedence
-=  79,163 cycles ( 5516 bytes) - oscar - test-precedence
+= 290,794 cycles ( 3232 bytes) - cc65  - test-precedence
+=  42,205 cycles ( 1053 bytes) - oscar - test-precedence
 === ./ptest printf-asm
 = 46,351 cycles ( 2179 bytes) - lib   - test-printf-asm
 === ./ptest printf
-=       - FAILED                - pc    - test-printf
-=         ./pc TMP/test-printf
-= 240,556 cycles ( 3316 bytes) - cc65  - test-printf  DIFFERS 9/28
-=         cl65 -Dputz=printf -t sim6502 -Cl -Os -o TMP/test-printf.sim TMP/test-printf.c && sim65 -c TMP/test-printf.sim
-=       - FAILED                - oscar - test-printf
-=         ./oscar -Dputz=printf -Os -ep TMP/test-printf.c
+= - FAILED                - pc    - test-printf
+=   ./pc TMP/test-printf
+= - FAILED                - cc65  - test-printf
+=   cl65 -Dxputz=puts -Iptest-include -t sim6502 -Cl -Os -o TMP/test-printf.sim TMP/test-printf.c -Dputz=puts && sim65 -c TMP/test-printf.sim
+= - FAILED                - oscar - test-printf
+=   ./oscar -O3 -Dxputz=puts -Os -ep -Dputz=puts TMP/test-printf.c
 === ./ptest qsort
-= 519,810,902 cycles (  413 bytes) - ivm   - test-qsort
-= 156,609,092 cycles (  413 bytes) - asm   - test-qsort
-= 135,651,189 cycles (  413 bytes) - fix   - test-qsort
-=  35,224,291 cycles ( 1950 bytes) - zpjit - test-qsort
-=  38,649,856 cycles ( 1791 bytes) - hjit  - test-qsort  DIFFERS 4/8
-=             ./ivm-jit.x TMP/test-qsort.ivm
-=  75,918,868 cycles ( 4514 bytes) - cc65  - test-qsort  DIFFERS 2/4
-=             cl65 -Dputz=printf -t sim6502 -Cl -Os -o TMP/test-qsort.sim TMP/test-qsort.c && sim65 -c TMP/test-qsort.sim
-=           - FAILED                - oscar - test-qsort
-=             ./oscar -Dputz=printf -Os -ep TMP/test-qsort.c
+= 520,052,671 cycles (  404 bytes) - ivm   - test-qsort
+= 159,058,408 cycles (  404 bytes) - asm   - test-qsort
+= 135,166,470 cycles (  404 bytes) - fix   - test-qsort
+=  35,257,648 cycles ( 1958 bytes) - zpjit - test-qsort
+=  38,680,714 cycles ( 1782 bytes) - hjit  - test-qsort
+=  75,927,838 cycles ( 2942 bytes) - cc65  - test-qsort  DIFFERS 1/1
+=             cl65 -Dxputz=puts -Iptest-include -t sim6502 -Cl -Os -o TMP/test-qsort.sim TMP/test-qsort.c putn.c && sim65 -c TMP/test-qsort.sim
+=  27,644,625 cycles ( 1845 bytes) - oscar - test-qsort  DIFFERS 1/1
+=             ./oscar -O3 -Dxputz=puts -Os -ep putn.c TMP/test-qsort.c
 === ./ptest recover-err
 = - FAILED                - pc    - test-recover-err
 =   ./pc TMP/test-recover-err
 = - FAILED                - cc65  - test-recover-err
-=   cl65 -Dputz=printf -t sim6502 -Cl -Os -o TMP/test-recover-err.sim TMP/test-recover-err.c && sim65 -c TMP/test-recover-err.sim
+=   cl65 -Dxputz=puts -Iptest-include -t sim6502 -Cl -Os -o TMP/test-recover-err.sim TMP/test-recover-err.c putn.c && sim65 -c TMP/test-recover-err.sim
 = - FAILED                - oscar - test-recover-err
-=   ./oscar -Dputz=printf -Os -ep TMP/test-recover-err.c
+=   ./oscar -O3 -Dxputz=puts -Os -ep putn.c TMP/test-recover-err.c
 === ./ptest shiftrules
-= 269,806 cycles (  275 bytes) - ivm   - test-shiftrules
-= 344,837 cycles (  275 bytes) - asm   - test-shiftrules
-= 347,330 cycles (  275 bytes) - fix   - test-shiftrules
-=  29,257 cycles (  672 bytes) - zpjit - test-shiftrules
-=     817 cycles (  471 bytes) - hjit  - test-shiftrules
-= 116,700 cycles ( 3001 bytes) - cc65  - test-shiftrules  DIFFERS 1/10
-=         cl65 -Dputz=printf -t sim6502 -Cl -Os -o TMP/test-shiftrules.sim TMP/test-shiftrules.c && sim65 -c TMP/test-shiftrules.sim
-=  39,335 cycles ( 4534 bytes) - oscar - test-shiftrules  DIFFERS 2/10
-=         ./oscar -Dputz=printf -Os -ep TMP/test-shiftrules.c
+= 269,867 cycles (  280 bytes) - ivm   - test-shiftrules  DIFFERS 8/10
+=         ./ivm TMP/test-shiftrules
+= 344,864 cycles (  280 bytes) - asm   - test-shiftrules  DIFFERS 8/10
+=         ./ivm-asm TMP/test-shiftrules
+= 347,351 cycles (  280 bytes) - fix   - test-shiftrules  DIFFERS 8/10
+=         ./ivm-fix TMP/test-shiftrules
+=  29,257 cycles (  672 bytes) - zpjit - test-shiftrules  DIFFERS 8/10
+=         ./ivm-jit.x -z -tsim6502 -oTMP/test-shiftrules.jit.sim TMP/test-shiftrules.ivm && sim65 -c TMP/test-shiftrules.jit.sim
+=     817 cycles (  471 bytes) - hjit  - test-shiftrules  DIFFERS 8/10
+=         ./ivm-jit.x TMP/test-shiftrules.ivm
+= 151,693 cycles ( 1269 bytes) - cc65  - test-shiftrules  DIFFERS 8/10
+=         cl65 -Dxputz=puts -Iptest-include -t sim6502 -Cl -Os -o TMP/test-shiftrules.sim TMP/test-shiftrules.c putn.c && sim65 -c TMP/test-shiftrules.sim
+=  28,680 cycles (  714 bytes) - oscar - test-shiftrules  DIFFERS 9/10
+=         ./oscar -O3 -Dxputz=puts -Os -ep putn.c TMP/test-shiftrules.c
 === ./ptest shifts
-= 1,094,000 cycles ( 2277 bytes) - ivm   - test-shifts  DIFFERS 4/18
+= 1,036,861 cycles ( 1219 bytes) - ivm   - test-shifts  DIFFERS 4/18
 =           ./ivm TMP/test-shifts
-= 1,066,666 cycles ( 2277 bytes) - asm   - test-shifts
-= 1,076,587 cycles ( 2277 bytes) - fix   - test-shifts
-=   176,961 cycles ( 2933 bytes) - zpjit - test-shifts
-=     6,566 cycles ( 4323 bytes) - hjit  - test-shifts  DIFFERS 240/249
-=           ./ivm-jit.x TMP/test-shifts.ivm
-=   852,794 cycles ( 6722 bytes) - cc65  - test-shifts  DIFFERS 8/18
-=           cl65 -Dputz=printf -t sim6502 -Cl -Os -o TMP/test-shifts.sim TMP/test-shifts.c && sim65 -c TMP/test-shifts.sim
-=         - FAILED                - oscar - test-shifts
-=           ./oscar -Dputz=printf -Os -ep TMP/test-shifts.c
+= 1,046,301 cycles ( 1219 bytes) - asm   - test-shifts
+= 1,055,698 cycles ( 1219 bytes) - fix   - test-shifts
+=   176,697 cycles ( 2801 bytes) - zpjit - test-shifts
+=     5,378 cycles ( 2902 bytes) - hjit  - test-shifts
+= 1,038,299 cycles ( 3841 bytes) - cc65  - test-shifts  DIFFERS 7/18
+=           cl65 -Dxputz=puts -Iptest-include -t sim6502 -Cl -Os -o TMP/test-shifts.sim TMP/test-shifts.c putn.c && sim65 -c TMP/test-shifts.sim
+=   179,249 cycles ( 1515 bytes) - oscar - test-shifts  DIFFERS 7/18
+=           ./oscar -O3 -Dxputz=puts -Os -ep putn.c TMP/test-shifts.c
 === ./ptest static
-= 210,740 cycles (  183 bytes) - ivm   - test-static
-= 285,564 cycles (  183 bytes) - asm   - test-static
-= 286,728 cycles (  183 bytes) - fix   - test-static
+= 210,750 cycles (  184 bytes) - ivm   - test-static
+= 285,566 cycles (  184 bytes) - asm   - test-static
+= 286,730 cycles (  184 bytes) - fix   - test-static
 =  11,502 cycles (  598 bytes) - zpjit - test-static
 =   1,005 cycles (  397 bytes) - hjit  - test-static
-=  77,006 cycles ( 2841 bytes) - cc65  - test-static
-=  14,116 cycles ( 4491 bytes) - oscar - test-static
+=  50,257 cycles ( 1072 bytes) - cc65  - test-static
+=   6,403 cycles (  627 bytes) - oscar - test-static
 === ./ptest string
-= 279,083 cycles (  425 bytes) - ivm   - test-string
-= 350,713 cycles (  425 bytes) - asm   - test-string
-= 254,765 cycles (  425 bytes) - fix   - test-string  DIFFERS 5/5
+= 305,947 cycles (  434 bytes) - ivm   - test-string  DIFFERS 2/5
+=         ./ivm TMP/test-string
+= 380,195 cycles (  434 bytes) - asm   - test-string  DIFFERS 2/5
+=         ./ivm-asm TMP/test-string
+= 254,793 cycles (  434 bytes) - fix   - test-string  DIFFERS 5/5
 =         ./ivm-fix TMP/test-string
-=  22,506 cycles ( 2050 bytes) - zpjit - test-string
-=   2,029 cycles ( 1128 bytes) - hjit  - test-string
-= 111,500 cycles ( 3858 bytes) - cc65  - test-string
-=  22,504 cycles ( 5555 bytes) - oscar - test-string
+=  30,602 cycles ( 2078 bytes) - zpjit - test-string  DIFFERS 2/5
+=         ./ivm-jit.x -z -tsim6502 -oTMP/test-string.jit.sim TMP/test-string.ivm && sim65 -c TMP/test-string.jit.sim
+=   2,077 cycles ( 1156 bytes) - hjit  - test-string  DIFFERS 2/5
+=         ./ivm-jit.x TMP/test-string.ivm
+=  91,600 cycles ( 1997 bytes) - cc65  - test-string  DIFFERS 2/5
+=         cl65 -Dxputz=puts -Iptest-include -t sim6502 -Cl -Os -o TMP/test-string.sim TMP/test-string.c putn.c && sim65 -c TMP/test-string.sim
+=       - FAILED                - oscar - test-string
+=         ./oscar -O3 -Dxputz=puts -Os -ep putn.c TMP/test-string.c
 === ./ptest struct-err
 = - FAILED                - pc    - test-struct-err
 =   ./pc TMP/test-struct-err
 = - FAILED                - cc65  - test-struct-err
-=   cl65 -Dputz=printf -t sim6502 -Cl -Os -o TMP/test-struct-err.sim TMP/test-struct-err.c && sim65 -c TMP/test-struct-err.sim
+=   cl65 -Dxputz=puts -Iptest-include -t sim6502 -Cl -Os -o TMP/test-struct-err.sim TMP/test-struct-err.c -Dputz=puts && sim65 -c TMP/test-struct-err.sim
 = - FAILED                - oscar - test-struct-err
-=   ./oscar -Dputz=printf -Os -ep TMP/test-struct-err.c
+=   ./oscar -O3 -Dxputz=puts -Os -ep -Dputz=puts TMP/test-struct-err.c
 === ./ptest struct
 =       - FAILED                - pc    - test-struct
 =         ./pc TMP/test-struct
-= 526,681 cycles ( 6339 bytes) - cc65  - test-struct
+= 508,815 cycles ( 3956 bytes) - cc65  - test-struct
 =       - FAILED                - oscar - test-struct
-=         ./oscar -Dputz=printf -Os -ep TMP/test-struct.c
+=         ./oscar -O3 -Dxputz=puts -Os -ep putn.c TMP/test-struct.c
 === ./ptest swap
 = 327,516 cycles (  402 bytes) - ivm   - test-swap
 = 377,975 cycles (  402 bytes) - asm   - test-swap
 = 379,289 cycles (  402 bytes) - fix   - test-swap
 =  33,527 cycles ( 1608 bytes) - zpjit - test-swap
 =   3,761 cycles ( 1382 bytes) - hjit  - test-swap
-= 147,884 cycles ( 4347 bytes) - cc65  - test-swap
-=  39,535 cycles ( 5164 bytes) - oscar - test-swap
+= 148,404 cycles ( 2605 bytes) - cc65  - test-swap
+=  23,206 cycles ( 1204 bytes) - oscar - test-swap
 === ./ptest ternary
 = 219,321 cycles (  396 bytes) - ivm   - test-ternary
 = 314,568 cycles (  396 bytes) - asm   - test-ternary
 = 315,374 cycles (  396 bytes) - fix   - test-ternary
 =  11,335 cycles ( 1281 bytes) - zpjit - test-ternary
 =   1,327 cycles ( 1193 bytes) - hjit  - test-ternary
-=  81,656 cycles ( 3248 bytes) - cc65  - test-ternary
-=  13,712 cycles ( 4428 bytes) - oscar - test-ternary
+=  49,258 cycles ( 1424 bytes) - cc65  - test-ternary
+=   5,352 cycles (  572 bytes) - oscar - test-ternary
 === ./ptest vnalias
-= 169,665 cycles (  136 bytes) - ivm   - test-vnalias
-= 257,315 cycles (  136 bytes) - asm   - test-vnalias  DIFFERS 2/3
+= 169,685 cycles (  138 bytes) - ivm   - test-vnalias  DIFFERS 2/2
+=         ./ivm TMP/test-vnalias
+= 257,319 cycles (  138 bytes) - asm   - test-vnalias  DIFFERS 1/2
 =         ./ivm-asm TMP/test-vnalias
-= 229,864 cycles (  136 bytes) - fix   - test-vnalias  DIFFERS 2/3
+= 229,868 cycles (  138 bytes) - fix   - test-vnalias  DIFFERS 1/2
 =         ./ivm-fix TMP/test-vnalias
-=   9,278 cycles (  853 bytes) - zpjit - test-vnalias
-=   1,782 cycles (  486 bytes) - hjit  - test-vnalias
-=  39,553 cycles ( 3057 bytes) - cc65  - test-vnalias
-=   7,822 cycles ( 4499 bytes) - oscar - test-vnalias
-=== ./ptest '*'   (62 tests)
+=   9,278 cycles (  853 bytes) - zpjit - test-vnalias  DIFFERS 2/2
+=         ./ivm-jit.x -z -tsim6502 -oTMP/test-vnalias.jit.sim TMP/test-vnalias.ivm && sim65 -c TMP/test-vnalias.jit.sim
+=   1,782 cycles (  486 bytes) - hjit  - test-vnalias  DIFFERS 2/2
+=         ./ivm-jit.x TMP/test-vnalias.ivm
+=  26,111 cycles ( 1499 bytes) - cc65  - test-vnalias  DIFFERS 2/2
+=         cl65 -Dxputz=puts -Iptest-include -t sim6502 -Cl -Os -o TMP/test-vnalias.sim TMP/test-vnalias.c putn.c && sim65 -c TMP/test-vnalias.sim
+=   3,720 cycles (  726 bytes) - oscar - test-vnalias  DIFFERS 2/2
+=         ./oscar -O3 -Dxputz=puts -Os -ep putn.c TMP/test-vnalias.c
+=== ./ptest rax-00-type-sizes
+= - FAILED                - pc    - test-rax-00-type-sizes
+=   ./pc TMP/test-rax-00-type-sizes
+= - FAILED                - cc65  - test-rax-00-type-sizes
+=   cl65 -Dxputz=puts -Iptest-include -t sim6502 -Cl -Os -o TMP/test-rax-00-type-sizes.sim TMP/test-rax-00-type-sizes.c -Dputz=puts && sim65 -c TMP/test-rax-00-type-sizes.sim
+= - FAILED                - oscar - test-rax-00-type-sizes
+=   ./oscar -O3 -Dxputz=puts -Os -ep -Dputz=puts TMP/test-rax-00-type-sizes.c
+=== ./ptest rax-01-dummy
+= 108,472 cycles (   31 bytes) - ivm   - test-rax-01-dummy
+= 183,252 cycles (   31 bytes) - asm   - test-rax-01-dummy
+= 184,281 cycles (   31 bytes) - fix   - test-rax-01-dummy
+=     155 cycles (   67 bytes) - zpjit - test-rax-01-dummy
+=      35 cycles (   18 bytes) - hjit  - test-rax-01-dummy
+=       - FAILED                - cc65  - test-rax-01-dummy
+=         cl65 -Dxputz=puts -Iptest-include -t sim6502 -Cl -Os -o TMP/test-rax-01-dummy.sim TMP/test-rax-01-dummy.c -Dputz=puts && sim65 -c TMP/test-rax-01-dummy.sim
+=      89 cycles (  137 bytes) - oscar - test-rax-01-dummy
+=== ./ptest rax-02-hello-world
+= 118,814 cycles (   51 bytes) - ivm   - test-rax-02-hello-world
+= 192,720 cycles (   51 bytes) - asm   - test-rax-02-hello-world
+= 193,853 cycles (   51 bytes) - fix   - test-rax-02-hello-world
+=   1,887 cycles (  219 bytes) - zpjit - test-rax-02-hello-world
+=      41 cycles (   40 bytes) - hjit  - test-rax-02-hello-world
+=       - FAILED                - cc65  - test-rax-02-hello-world
+=         cl65 -Dxputz=puts -Iptest-include -t sim6502 -Cl -Os -o TMP/test-rax-02-hello-world.sim TMP/test-rax-02-hello-world.c -Dputz=puts && sim65 -c TMP/test-rax-02-hello-world.sim
+=     897 cycles (  213 bytes) - oscar - test-rax-02-hello-world
+=== ./ptest rax-03-bytecpy
+=  - FAILED                - pc    - test-rax-03-bytecpy
+=    ./pc TMP/test-rax-03-bytecpy
+=  - FAILED                - cc65  - test-rax-03-bytecpy
+=    cl65 -Dxputz=puts -Iptest-include -t sim6502 -Cl -Os -o TMP/test-rax-03-bytecpy.sim TMP/test-rax-03-bytecpy.c -Dputz=puts && sim65 -c TMP/test-rax-03-bytecpy.sim
+= 97 cycles (  143 bytes) - oscar - test-rax-03-bytecpy
+=== ./ptest rax-04-memcopy
+=       - FAILED                - pc    - test-rax-04-memcopy
+=         ./pc TMP/test-rax-04-memcopy
+=       - FAILED                - cc65  - test-rax-04-memcopy
+=         cl65 -Dxputz=puts -Iptest-include -t sim6502 -Cl -Os -o TMP/test-rax-04-memcopy.sim TMP/test-rax-04-memcopy.c -Dputz=puts && sim65 -c TMP/test-rax-04-memcopy.sim
+= 311,685 cycles (  178 bytes) - oscar - test-rax-04-memcopy
+=== ./ptest rax-05-0xcafe
+= 137,203 cycles (  156 bytes) - ivm   - test-rax-05-0xcafe
+= 219,114 cycles (  156 bytes) - asm   - test-rax-05-0xcafe
+= 220,101 cycles (  156 bytes) - fix   - test-rax-05-0xcafe
+=   2,412 cycles (  433 bytes) - zpjit - test-rax-05-0xcafe
+=     331 cycles (  255 bytes) - hjit  - test-rax-05-0xcafe
+=       - FAILED                - cc65  - test-rax-05-0xcafe
+=         cl65 -Dxputz=puts -Iptest-include -t sim6502 -Cl -Os -o TMP/test-rax-05-0xcafe.sim TMP/test-rax-05-0xcafe.c -Dputz=puts && sim65 -c TMP/test-rax-05-0xcafe.sim
+=   1,499 cycles (  311 bytes) - oscar - test-rax-05-0xcafe
+=== ./ptest rax-06-sieve
+=         - FAILED                - pc    - test-rax-06-sieve
+=           ./pc TMP/test-rax-06-sieve
+=         - FAILED                - cc65  - test-rax-06-sieve
+=           cl65 -Dxputz=puts -Iptest-include -t sim6502 -Cl -Os -o TMP/test-rax-06-sieve.sim TMP/test-rax-06-sieve.c -Dputz=puts && sim65 -c TMP/test-rax-06-sieve.sim
+= 4,130,355 cycles ( 1057 bytes) - oscar - test-rax-06-sieve
+=== ./ptest rax-07-aes256
+= - FAILED                - pc    - test-rax-07-aes256
+=   ./pc TMP/test-rax-07-aes256
+= - FAILED                - cc65  - test-rax-07-aes256
+=   cl65 -Dxputz=puts -Iptest-include -t sim6502 -Cl -Os -o TMP/test-rax-07-aes256.sim TMP/test-rax-07-aes256.c -Dputz=puts && sim65 -c TMP/test-rax-07-aes256.sim
+= - FAILED                - oscar - test-rax-07-aes256
+=   ./oscar -O3 -Dxputz=puts -Os -ep -Dputz=puts TMP/test-rax-07-aes256.c
+=== ./ptest rax-08-mandelbrot
+=         - FAILED                - pc    - test-rax-08-mandelbrot
+=           ./pc TMP/test-rax-08-mandelbrot
+=         - FAILED                - cc65  - test-rax-08-mandelbrot
+=           cl65 -Dxputz=puts -Iptest-include -t sim6502 -Cl -Os -o TMP/test-rax-08-mandelbrot.sim TMP/test-rax-08-mandelbrot.c -Dputz=puts && sim65 -c TMP/test-rax-08-mandelbrot.sim
+= 6,014,540 cycles (  774 bytes) - oscar - test-rax-08-mandelbrot  DIFFERS 2/2
+=           ./oscar -O3 -Dxputz=puts -Os -ep -Dputz=puts TMP/test-rax-08-mandelbrot.c
+=== ./ptest rax-09-frogmove
+=         - FAILED                - pc    - test-rax-09-frogmove
+=           ./pc TMP/test-rax-09-frogmove
+=         - FAILED                - cc65  - test-rax-09-frogmove
+=           cl65 -Dxputz=puts -Iptest-include -t sim6502 -Cl -Os -o TMP/test-rax-09-frogmove.sim TMP/test-rax-09-frogmove.c -Dputz=puts && sim65 -c TMP/test-rax-09-frogmove.sim
+= 4,436,400 cycles ( 1721 bytes) - oscar - test-rax-09-frogmove
+=== ./ptest rax-10-pi
+=          - FAILED                - pc    - test-rax-10-pi
+=            ./pc TMP/test-rax-10-pi
+=          - FAILED                - cc65  - test-rax-10-pi
+=            cl65 -Dxputz=puts -Iptest-include -t sim6502 -Cl -Os -o TMP/test-rax-10-pi.sim TMP/test-rax-10-pi.c -Dputz=puts && sim65 -c TMP/test-rax-10-pi.sim
+= 35,035,355 cycles ( 1501 bytes) - oscar - test-rax-10-pi
+=== ./ptest rax-11-shuffle
+=         - FAILED                - pc    - test-rax-11-shuffle
+=           ./pc TMP/test-rax-11-shuffle
+=         - FAILED                - cc65  - test-rax-11-shuffle
+=           cl65 -Dxputz=puts -Iptest-include -t sim6502 -Cl -Os -o TMP/test-rax-11-shuffle.sim TMP/test-rax-11-shuffle.c -Dputz=puts && sim65 -c TMP/test-rax-11-shuffle.sim
+= 1,286,346 cycles ( 1635 bytes) - oscar - test-rax-11-shuffle
+=== ./ptest rax-12-bubble-sort
+= 101,904,366 cycles (  706 bytes) - ivm   - test-rax-12-bubble-sort
+=  32,367,989 cycles (  706 bytes) - asm   - test-rax-12-bubble-sort
+=  28,252,366 cycles (  706 bytes) - fix   - test-rax-12-bubble-sort
+=   7,037,611 cycles ( 1441 bytes) - zpjit - test-rax-12-bubble-sort
+=   6,427,900 cycles (  655 bytes) - hjit  - test-rax-12-bubble-sort
+=           - FAILED                - cc65  - test-rax-12-bubble-sort
+=             cl65 -Dxputz=puts -Iptest-include -t sim6502 -Cl -Os -o TMP/test-rax-12-bubble-sort.sim TMP/test-rax-12-bubble-sort.c -Dputz=puts && sim65 -c TMP/test-rax-12-bubble-sort.sim
+=   3,801,476 cycles ( 1333 bytes) - oscar - test-rax-12-bubble-sort
+=== ./ptest rax-13-selection-sort
+= 67,924,457 cycles (  727 bytes) - ivm   - test-rax-13-selection-sort
+= 21,886,467 cycles (  727 bytes) - asm   - test-rax-13-selection-sort
+= 19,652,285 cycles (  727 bytes) - fix   - test-rax-13-selection-sort
+=  6,290,657 cycles ( 1517 bytes) - zpjit - test-rax-13-selection-sort
+=  5,609,419 cycles (  778 bytes) - hjit  - test-rax-13-selection-sort
+=          - FAILED                - cc65  - test-rax-13-selection-sort
+=            cl65 -Dxputz=puts -Iptest-include -t sim6502 -Cl -Os -o TMP/test-rax-13-selection-sort.sim TMP/test-rax-13-selection-sort.c -Dputz=puts && sim65 -c TMP/test-rax-13-selection-sort.sim
+=  3,636,847 cycles ( 1401 bytes) - oscar - test-rax-13-selection-sort
+=== ./ptest rax-14-insertion-sort
+=         - FAILED                - ivm   - test-rax-14-insertion-sort
+=           ./ivm TMP/test-rax-14-insertion-sort
+=         - FAILED                - asm   - test-rax-14-insertion-sort
+=           ./ivm-asm TMP/test-rax-14-insertion-sort
+=   246,297 cycles (  712 bytes) - fix   - test-rax-14-insertion-sort  DIFFERS 1/1
+=           ./ivm-fix TMP/test-rax-14-insertion-sort
+=         - FAILED                - zpjit - test-rax-14-insertion-sort
+=           ./ivm-jit.x -z -tsim6502 -oTMP/test-rax-14-insertion-sort.jit.sim TMP/test-rax-14-insertion-sort.ivm && sim65 -c TMP/test-rax-14-insertion-sort.jit.sim
+= 4,274,908 cycles (  750 bytes) - hjit  - test-rax-14-insertion-sort
+=         - FAILED                - cc65  - test-rax-14-insertion-sort
+=           cl65 -Dxputz=puts -Iptest-include -t sim6502 -Cl -Os -o TMP/test-rax-14-insertion-sort.sim TMP/test-rax-14-insertion-sort.c -Dputz=puts && sim65 -c TMP/test-rax-14-insertion-sort.sim
+=         - FAILED                - oscar - test-rax-14-insertion-sort
+=           ./oscar -O3 -Dxputz=puts -Os -ep -Dputz=puts TMP/test-rax-14-insertion-sort.c
+=== ./ptest rax-15-merge-sort
+=         - FAILED                - pc    - test-rax-15-merge-sort
+=           ./pc TMP/test-rax-15-merge-sort
+=         - FAILED                - cc65  - test-rax-15-merge-sort
+=           cl65 -Dxputz=puts -Iptest-include -t sim6502 -Cl -Os -o TMP/test-rax-15-merge-sort.sim TMP/test-rax-15-merge-sort.c -Dputz=puts && sim65 -c TMP/test-rax-15-merge-sort.sim
+= 1,208,749 cycles ( 2145 bytes) - oscar - test-rax-15-merge-sort
+=== ./ptest rax-16-quick-sort
+=         - FAILED                - ivm   - test-rax-16-quick-sort
+=           ./ivm TMP/test-rax-16-quick-sort
+=         - FAILED                - asm   - test-rax-16-quick-sort
+=           ./ivm-asm TMP/test-rax-16-quick-sort
+=         - FAILED                - fix   - test-rax-16-quick-sort
+=           ./ivm-fix TMP/test-rax-16-quick-sort
+= 1,560,169 cycles ( 1635 bytes) - zpjit - test-rax-16-quick-sort  DIFFERS 1/1
+=           ./ivm-jit.x -z -tsim6502 -oTMP/test-rax-16-quick-sort.jit.sim TMP/test-rax-16-quick-sort.ivm && sim65 -c TMP/test-rax-16-quick-sort.jit.sim
+=   360,952 cycles (  909 bytes) - hjit  - test-rax-16-quick-sort  DIFFERS 1/1
+=           ./ivm-jit.x TMP/test-rax-16-quick-sort.ivm
+=         - FAILED                - cc65  - test-rax-16-quick-sort
+=           cl65 -Dxputz=puts -Iptest-include -t sim6502 -Cl -Os -o TMP/test-rax-16-quick-sort.sim TMP/test-rax-16-quick-sort.c -Dputz=puts && sim65 -c TMP/test-rax-16-quick-sort.sim
+=   977,990 cycles ( 1707 bytes) - oscar - test-rax-16-quick-sort
+=== ./ptest rax-17-counting-sort
+=       - FAILED                - pc    - test-rax-17-counting-sort
+=         ./pc TMP/test-rax-17-counting-sort
+=       - FAILED                - cc65  - test-rax-17-counting-sort
+=         cl65 -Dxputz=puts -Iptest-include -t sim6502 -Cl -Os -o TMP/test-rax-17-counting-sort.sim TMP/test-rax-17-counting-sort.c -Dputz=puts && sim65 -c TMP/test-rax-17-counting-sort.sim
+= 518,627 cycles ( 1649 bytes) - oscar - test-rax-17-counting-sort
+=== ./ptest rax-18-radix-sort
+=         - FAILED                - pc    - test-rax-18-radix-sort
+=           ./pc TMP/test-rax-18-radix-sort
+=         - FAILED                - cc65  - test-rax-18-radix-sort
+=           cl65 -Dxputz=puts -Iptest-include -t sim6502 -Cl -Os -o TMP/test-rax-18-radix-sort.sim TMP/test-rax-18-radix-sort.c -Dputz=puts && sim65 -c TMP/test-rax-18-radix-sort.sim
+= 1,604,989 cycles ( 1817 bytes) - oscar - test-rax-18-radix-sort
+=== ./ptest rax-19-shell-sort
+=         - FAILED                - pc    - test-rax-19-shell-sort
+=           ./pc TMP/test-rax-19-shell-sort
+=         - FAILED                - cc65  - test-rax-19-shell-sort
+=           cl65 -Dxputz=puts -Iptest-include -t sim6502 -Cl -Os -o TMP/test-rax-19-shell-sort.sim TMP/test-rax-19-shell-sort.c -Dputz=puts && sim65 -c TMP/test-rax-19-shell-sort.sim
+= 1,059,031 cycles ( 1405 bytes) - oscar - test-rax-19-shell-sort
+=== ./ptest rax-20-heap-sort
+=         - FAILED                - ivm   - test-rax-20-heap-sort
+=           ./ivm TMP/test-rax-20-heap-sort
+=         - FAILED                - asm   - test-rax-20-heap-sort
+=           ./ivm-asm TMP/test-rax-20-heap-sort
+=         - FAILED                - fix   - test-rax-20-heap-sort
+=           ./ivm-fix TMP/test-rax-20-heap-sort
+=         - FAILED                - zpjit - test-rax-20-heap-sort
+=           ./ivm-jit.x -z -tsim6502 -oTMP/test-rax-20-heap-sort.jit.sim TMP/test-rax-20-heap-sort.ivm && sim65 -c TMP/test-rax-20-heap-sort.jit.sim
+=         - FAILED                - hjit  - test-rax-20-heap-sort
+=           ./ivm-jit.x TMP/test-rax-20-heap-sort.ivm
+=         - FAILED                - cc65  - test-rax-20-heap-sort
+=           cl65 -Dxputz=puts -Iptest-include -t sim6502 -Cl -Os -o TMP/test-rax-20-heap-sort.sim TMP/test-rax-20-heap-sort.c -Dputz=puts && sim65 -c TMP/test-rax-20-heap-sort.sim
+= 1,952,617 cycles ( 1839 bytes) - oscar - test-rax-20-heap-sort
+=== ./ptest rax-21-eight-queens
+= - FAILED                - pc    - test-rax-21-eight-queens
+=   ./pc TMP/test-rax-21-eight-queens
+= - FAILED                - cc65  - test-rax-21-eight-queens
+=   cl65 -Dxputz=puts -Iptest-include -t sim6502 -Cl -Os -o TMP/test-rax-21-eight-queens.sim TMP/test-rax-21-eight-queens.c -Dputz=puts && sim65 -c TMP/test-rax-21-eight-queens.sim
+= - FAILED                - oscar - test-rax-21-eight-queens
+=   ./oscar -O3 -Dxputz=puts -Os -ep -Dputz=puts TMP/test-rax-21-eight-queens.c
+=== ./ptest rax-22-qrcode
+=          - FAILED                - pc    - test-rax-22-qrcode
+=            ./pc TMP/test-rax-22-qrcode
+=          - FAILED                - cc65  - test-rax-22-qrcode
+=            cl65 -Dxputz=puts -Iptest-include -t sim6502 -Cl -Os -o TMP/test-rax-22-qrcode.sim TMP/test-rax-22-qrcode.c -Dputz=puts && sim65 -c TMP/test-rax-22-qrcode.sim
+= 16,047,517 cycles (10796 bytes) - oscar - test-rax-22-qrcode
+=== ./ptest    (85 tests)
 = test                                    ivm            asm            fix          zpjit           hjit           cc65          oscar            lib
 = test-42                            109,573        185,285        186,351            155             35            230             91              - 
-= test-addr                          258,175        267,491*       240,764*        18,355          1,746        123,066         21,995              - 
-= test-array                         427,832        487,678        489,313         71,559          3,268        212,031         78,663              - 
-= test-arrayinit                     365,815        437,717        440,458         34,893            972        179,016         49,634              - 
-= test-bench-striped-struct       29,520,248     10,615,543      9,621,111      2,838,986      2,979,815      6,249,377        880,941              - 
-= test-break                         825,823        743,941        739,579         66,934         10,689        559,942         97,334              - 
-= test-bubble                  1,918,053,051    641,845,690    530,964,601    104,071,122    115,713,181*   347,279,040*          FAIL              - 
-= test-char                          171,569        251,049        251,532          7,794          1,038         30,621          8,227              - 
+= test-addr                          258,175        267,491*       240,764*        18,355          1,746         80,848          9,676              - 
+= test-array                         427,832        487,678        489,313         71,559          3,268        225,500         57,475              - 
+= test-arrayinit                     365,884*       437,709*       440,450*        34,893*           972*       180,495*        28,636*             - 
+= test-bench-striped-struct       29,520,265     10,615,552      9,621,120      2,838,986      2,979,815      6,248,510        908,069              - 
+= test-break                         825,823        743,941        739,579         66,934         10,689        292,619         35,316              - 
+= test-bubble                  1,918,065,184    641,839,034    530,939,934    104,071,122    115,713,169    347,298,101*    64,928,414*             - 
+= test-char                          172,755        252,053        252,527          7,946          1,056         41,369          5,235              - 
 = test-const                         114,441        195,395        196,506            257             35            230             91              - 
-= test-cse                           300,400        368,451        370,067         31,157          2,840        134,229         36,945              - 
+= test-cse                           300,400        368,451        370,067         31,157          2,840        139,199         21,748              - 
 = test-dispatch-fun              836,037,421    218,769,488    209,600,834     18,220,556     20,250,337     12,600,333        150,342              - 
 = test-dispatch-inc              329,160,459     77,015,706     66,847,053      8,255,944      9,269,867     35,604,269        150,342              - 
-= test-dispatch-loop           6,932,625,616  1,273,092,350  1,172,513,500    204,413,416    236,483,237    586,407,327         16,278              - 
+= test-dispatch-loop                    FAIL  1,273,092,350  1,172,513,500    204,413,416    236,483,237    586,407,327         16,278              - 
 = test-dispatch-pon              119,035,414     41,763,628     41,594,921        190,470        220,353        590,331        150,342              - 
-= test-dispatch-switch-ifif        6,466,084      4,699,780*     4,042,460*       821,095*       145,724*     3,442,396*          FAIL              - 
+= test-dispatch-switch-ifif        6,466,084      4,699,780*     4,042,460*       821,095*       145,724*     3,090,426*          FAIL              - 
 = test-dispatch-switch                     -              -              -              -              -           FAIL           FAIL              - 
 = test-dispatch                   93,566,296     27,922,176     24,433,298        390,365        430,259        460,324             91              - 
 = test-empty                         108,280        183,098        184,144            151             31            226             89              - 
-= test-entry                         212,455        286,880        288,629         15,887            345         76,407         20,290              - 
-= test-expr                        1,397,746      1,229,637      1,225,312        199,820         10,454        884,949        278,795              - 
-= test-exprinc                       275,936        348,753        349,841         19,675          1,401        156,571         27,419              - 
-= test-fixipc-op                     535,952        349,429        329,503         23,711         18,438         68,474         18,300              - 
-= test-getchar                       135,389        229,354        230,692          3,118            138          6,369          3,595              - 
-= test-hello                         117,322        192,393        193,543          1,432             41          3,362          1,637              - 
-= test-ifdef                         229,808        307,473        309,371         17,728            405         82,947*        24,167*             - 
-= test-ifeq                        1,425,625        860,938        839,846         85,479         33,392        449,744         82,072              - 
-= test-incdec                        636,751*       664,732        667,354         85,690          5,139        383,684        102,907              - 
-= test-logic                         295,926        361,026        361,833         18,555          2,809        165,067         26,779              - 
-= test-loop-count                 10,248,294      2,215,553      2,016,953        274,572        310,580        914,112          4,826              - 
-= test-loop-down                  10,697,434      3,605,287      2,866,497        453,783        550,408        753,032        304,465              - 
-= test-loop-for-acc               11,050,795      2,538,702      2,310,135        394,641        480,397        824,116        285,139              - 
-= test-loop-for-le-expr           11,053,431      2,542,806      2,314,211        454,975        550,365        824,187        345,694              - 
-= test-loop-for-le                11,050,278      2,538,210      2,309,649        394,547        480,397        824,093        345,229              - 
-= test-loop-for-lt                11,050,269      2,538,221      2,309,650        394,547        480,397        824,093        325,213              - 
-= test-loop-for-pluseq            11,052,283      2,540,103      2,311,548        394,914        480,397        824,164        325,585              - 
-= test-loop-for-var               11,051,213      2,538,793      2,310,212        434,587        530,363        864,130        325,306              - 
-= test-loop-postdec               11,641,189      3,798,449      3,089,697        524,686        620,443        874,159        515,033              - 
-= test-loop-while-count           11,631,436      3,438,362      2,669,193        275,125        310,580        894,203          5,384              - 
-= test-loop-while-expr            16,142,769      4,960,822      4,142,096        584,866        670,349      1,014,226        535,528              - 
-= test-loop-while                 12,429,837      3,757,775      2,958,607        394,452        480,397        804,100        325,120              - 
-= test-loops                       5,041,728      1,992,880      1,883,885        270,472        179,418      1,240,337        235,326*             - 
-= test-memset                     13,949,689      4,794,867      3,766,797        729,704        683,673*     2,489,326           FAIL              - 
-= test-nullread                      120,211        195,046        196,182          1,774             95         13,954*         2,528              - 
-= test-nums                          221,693        296,225        298,600         22,071            323        100,559*          FAIL              - 
-= test-opts                       43,940,555      9,249,351      8,341,712      1,427,480      1,542,158      4,031,683        467,838              - 
-= test-peekpoke                      183,660        267,018        268,516         11,804            573           FAIL           FAIL              - 
-= test-pluseq                        288,327        365,438        367,053         27,379          1,544        127,833         35,232              - 
+= test-entry                         212,482*       286,893*       288,642*        15,887*           345*        76,927*        12,045*             - 
+= test-expr                        1,397,746      1,229,637      1,225,312        199,820         10,454      1,037,998        159,747              - 
+= test-exprinc                       275,937        348,748        349,836         19,675          1,401         88,370         10,495              - 
+= test-fixipc-op                     535,962        349,432        329,505         23,711         18,438         66,457         14,935              - 
+= test-getchar                       135,391        229,354        230,710          3,118            138           FAIL          2,309              - 
+= test-hello                         117,884        192,874        194,028          1,508             49            816            562              - 
+= test-ifdef                         229,808        307,473        309,371         17,728            405         81,174*        12,880*             - 
+= test-ifeq                        1,425,615*       860,920*       839,828*        85,479*        33,392*       248,445*        34,912*             - 
+= test-incdec                        636,751*       664,732        667,354         85,690          5,139        410,449         61,928              - 
+= test-logic                         295,926        361,026        361,833         18,555          2,809         79,370          9,226              - 
+= test-loop-count                 10,248,312      2,215,562      2,016,962        274,572        310,580        920,002          3,639              - 
+= test-loop-down                  10,697,452      3,605,296      2,866,506        453,783        550,408        756,818        402,936              - 
+= test-loop-for-acc               11,050,810      2,538,704      2,310,137        394,641        480,397        831,190        283,922              - 
+= test-loop-for-le-expr           11,053,441      2,542,808      2,314,213        454,975        550,365        833,514        344,417              - 
+= test-loop-for-le                11,050,296      2,538,219      2,309,658        394,547        480,397        830,609        344,027              - 
+= test-loop-for-lt                11,050,287      2,538,230      2,309,659        394,547        480,397        830,609        324,011              - 
+= test-loop-for-pluseq            11,052,301      2,540,112      2,311,557        394,914        480,397        832,933        324,323              - 
+= test-loop-for-var               11,051,231      2,538,802      2,310,221        434,587        530,363        871,196        324,089              - 
+= test-loop-postdec               11,641,193      3,798,444      3,089,692        524,686        620,443        881,227        513,816              - 
+= test-loop-while-count           11,631,409      3,438,378      2,669,209        275,125        310,580        903,490          4,107              - 
+= test-loop-while-expr            16,142,755      4,960,796      4,142,070        584,866        670,349      1,022,989        584,263              - 
+= test-loop-while                 12,429,852      3,757,777      2,958,609        394,452        480,397        810,030        323,933              - 
+= test-loops                       5,041,805*     1,992,922*     1,883,927*       270,472*       179,418*       859,110*       142,359*             - 
+= test-memset                     13,943,579      4,792,876      3,764,614        729,704        683,577      2,459,814        474,665              - 
+= test-nullread                      120,229        195,055        196,191          1,774             95         17,042*         2,697*             - 
+= test-nums                          220,458        293,083        295,416         22,043            323        103,756         18,021              - 
+= test-opts                       43,940,583*     9,249,326*     8,341,687*     1,427,480*     1,542,158*     4,060,762*       458,237*             - 
+= test-peekpoke                      183,670        267,020        268,518         11,804            573           FAIL           FAIL              - 
+= test-pluseq                        288,327        365,438        367,053         27,379          1,544        133,339         21,096              - 
 = test-precedence-err                      -              -              -              -              -           FAIL           FAIL              - 
-= test-precedence                    520,178        568,783        570,846         64,588          3,318        330,810         79,163              - 
+= test-precedence                    520,178        568,783        570,846         64,588          3,318        290,794         42,205              - 
 = test-printf-asm                          -              -              -              -              -              -              -         46,351 
-= test-printf                              -              -              -              -              -        240,556*          FAIL              - 
-= test-qsort                     519,810,902    156,609,092    135,651,189     35,224,291     38,649,856*    75,918,868*          FAIL              - 
+= test-printf                              -              -              -              -              -           FAIL           FAIL              - 
+= test-qsort                     520,052,671    159,058,408    135,166,470     35,257,648     38,680,714     75,927,838*    27,644,625*             - 
 = test-recover-err                         -              -              -              -              -           FAIL           FAIL              - 
-= test-shiftrules                    269,806        344,837        347,330         29,257            817        116,700*        39,335*             - 
-= test-shifts                      1,094,000*     1,066,666      1,076,587        176,961          6,566*       852,794*          FAIL              - 
-= test-static                        210,740        285,564        286,728         11,502          1,005         77,006         14,116              - 
-= test-string                        279,083        350,713        254,765*        22,506          2,029        111,500         22,504              - 
+= test-shiftrules                    269,867*       344,864*       347,351*        29,257*           817*       151,693*        28,680*             - 
+= test-shifts                      1,036,861*     1,046,301      1,055,698        176,697          5,378      1,038,299*       179,249*             - 
+= test-static                        210,750        285,566        286,730         11,502          1,005         50,257          6,403              - 
+= test-string                        305,947*       380,195*       254,793*        30,602*         2,077*        91,600*          FAIL              - 
 = test-struct-err                          -              -              -              -              -           FAIL           FAIL              - 
-= test-struct                              -              -              -              -              -        526,681           FAIL              - 
-= test-swap                          327,516        377,975        379,289         33,527          3,761        147,884         39,535              - 
-= test-ternary                       219,321        314,568        315,374         11,335          1,327         81,656         13,712              - 
-= test-vnalias                       169,665        257,315*       229,864*         9,278          1,782         39,553          7,822              - 
+= test-struct                              -              -              -              -              -        508,815           FAIL              - 
+= test-swap                          327,516        377,975        379,289         33,527          3,761        148,404         23,206              - 
+= test-ternary                       219,321        314,568        315,374         11,335          1,327         49,258          5,352              - 
+= test-vnalias                       169,685*       257,319*       229,868*         9,278*         1,782*        26,111*         3,720*             - 
+= test-rax-00-type-sizes                   -              -              -              -              -           FAIL           FAIL              - 
+= test-rax-01-dummy                  108,472        183,252        184,281            155             35           FAIL             89              - 
+= test-rax-02-hello-world            118,814        192,720        193,853          1,887             41           FAIL            897              - 
+= test-rax-03-bytecpy                      -              -              -              -              -           FAIL             97              - 
+= test-rax-04-memcopy                      -              -              -              -              -           FAIL        311,685              - 
+= test-rax-05-0xcafe                 137,203        219,114        220,101          2,412            331           FAIL          1,499              - 
+= test-rax-06-sieve                        -              -              -              -              -           FAIL      4,130,355              - 
+= test-rax-07-aes256                       -              -              -              -              -           FAIL           FAIL              - 
+= test-rax-08-mandelbrot                   -              -              -              -              -           FAIL      6,014,540*             - 
+= test-rax-09-frogmove                     -              -              -              -              -           FAIL      4,436,400              - 
+= test-rax-10-pi                           -              -              -              -              -           FAIL     35,035,355              - 
+= test-rax-11-shuffle                      -              -              -              -              -           FAIL      1,286,346              - 
+= test-rax-12-bubble-sort        101,904,366     32,367,989     28,252,366      7,037,611      6,427,900           FAIL      3,801,476              - 
+= test-rax-13-selection-sort      67,924,457     21,886,467     19,652,285      6,290,657      5,609,419           FAIL      3,636,847              - 
+= test-rax-14-insertion-sort            FAIL           FAIL        246,297*          FAIL      4,274,908           FAIL           FAIL              - 
+= test-rax-15-merge-sort                   -              -              -              -              -           FAIL      1,208,749              - 
+= test-rax-16-quick-sort                FAIL           FAIL           FAIL      1,560,169*       360,952*          FAIL        977,990              - 
+= test-rax-17-counting-sort                -              -              -              -              -           FAIL        518,627              - 
+= test-rax-18-radix-sort                   -              -              -              -              -           FAIL      1,604,989              - 
+= test-rax-19-shell-sort                   -              -              -              -              -           FAIL      1,059,031              - 
+= test-rax-20-heap-sort                 FAIL           FAIL           FAIL           FAIL           FAIL           FAIL      1,952,617              - 
+= test-rax-21-eight-queens                 -              -              -              -              -           FAIL           FAIL              - 
+= test-rax-22-qrcode                       -              -              -              -              -           FAIL     16,047,517              - 
 = (* output differs, FAIL: failed, -: not run; see each test's results above)
 =
 =
-=
-=== RELATIVE cycles (cc65 = 1.000x)
-= test                         ivm    asm    fix  zpjit   hjit   cc65  oscar
-= test-42                     476x   806x   810x 0.674x 0.152x 1.000x 0.396x
-= test-addr                 2.098x 2.174x 1.956x 0.149x 0.014x 1.000x 0.179x
-= test-array                2.018x 2.300x 2.308x 0.337x 0.015x 1.000x 0.371x
-= test-arrayinit            2.043x 2.445x 2.460x 0.195x 0.005x 1.000x 0.277x
-= test-bench-striped-struct 4.724x 1.699x 1.540x 0.454x 0.477x 1.000x 0.141x
-= test-break                1.475x 1.329x 1.321x 0.120x 0.019x 1.000x 0.174x
-= test-bubble               5.523x 1.848x 1.529x 0.300x 0.333x 1.000x   FAIL
-= test-char                 5.603x 8.199x 8.214x 0.255x 0.034x 1.000x 0.269x
-= test-const                  498x   850x   854x 1.117x 0.152x 1.000x 0.396x
-= test-cse                  2.238x 2.745x 2.757x 0.232x 0.021x 1.000x 0.275x
-= test-dispatch-fun          66.4x  17.4x  16.6x 1.446x 1.607x 1.000x 0.012x
-= test-dispatch-inc         9.245x 2.163x 1.878x 0.232x 0.260x 1.000x 0.004x
-= test-dispatch-loop         11.8x 2.171x 1.999x 0.349x 0.403x 1.000x 0.000x
-= test-dispatch-pon           202x  70.7x  70.5x 0.323x 0.373x 1.000x 0.255x
-= test-dispatch-switch-ifif 1.878x 1.365x 1.174x 0.239x 0.042x 1.000x   FAIL
-= test-dispatch-switch           -      -      -      -      -   FAIL   FAIL
-= test-dispatch               203x  60.7x  53.1x 0.848x 0.935x 1.000x 0.000x
-= test-empty                  479x   810x   815x 0.668x 0.137x 1.000x 0.394x
-= test-entry                2.781x 3.755x 3.778x 0.208x 0.005x 1.000x 0.266x
-= test-expr                 1.579x 1.390x 1.385x 0.226x 0.012x 1.000x 0.315x
-= test-exprinc              1.762x 2.227x 2.234x 0.126x 0.009x 1.000x 0.175x
-= test-fixipc-op            7.827x 5.103x 4.812x 0.346x 0.269x 1.000x 0.267x
-= test-getchar               21.3x  36.0x  36.2x 0.490x 0.022x 1.000x 0.564x
-= test-hello                 34.9x  57.2x  57.6x 0.426x 0.012x 1.000x 0.487x
-= test-ifdef                2.771x 3.707x 3.730x 0.214x 0.005x 1.000x 0.291x
-= test-ifeq                 3.170x 1.914x 1.867x 0.190x 0.074x 1.000x 0.182x
-= test-incdec               1.660x 1.732x 1.739x 0.223x 0.013x 1.000x 0.268x
-= test-logic                1.793x 2.187x 2.192x 0.112x 0.017x 1.000x 0.162x
-= test-loop-count            11.2x 2.424x 2.206x 0.300x 0.340x 1.000x 0.005x
-= test-loop-down             14.2x 4.788x 3.807x 0.603x 0.731x 1.000x 0.404x
-= test-loop-for-acc          13.4x 3.081x 2.803x 0.479x 0.583x 1.000x 0.346x
-= test-loop-for-le-expr      13.4x 3.085x 2.808x 0.552x 0.668x 1.000x 0.419x
-= test-loop-for-le           13.4x 3.080x 2.803x 0.479x 0.583x 1.000x 0.419x
-= test-loop-for-lt           13.4x 3.080x 2.803x 0.479x 0.583x 1.000x 0.395x
-= test-loop-for-pluseq       13.4x 3.082x 2.805x 0.479x 0.583x 1.000x 0.395x
-= test-loop-for-var          12.8x 2.938x 2.673x 0.503x 0.614x 1.000x 0.376x
-= test-loop-postdec          13.3x 4.345x 3.534x 0.600x 0.710x 1.000x 0.589x
-= test-loop-while-count      13.0x 3.845x 2.985x 0.308x 0.347x 1.000x 0.006x
-= test-loop-while-expr       15.9x 4.891x 4.084x 0.577x 0.661x 1.000x 0.528x
-= test-loop-while            15.5x 4.673x 3.679x 0.491x 0.597x 1.000x 0.404x
-= test-loops                4.065x 1.607x 1.519x 0.218x 0.145x 1.000x 0.190x
-= test-memset               5.604x 1.926x 1.513x 0.293x 0.275x 1.000x   FAIL
-= test-nullread             8.615x  14.0x  14.1x 0.127x 0.007x 1.000x 0.181x
-= test-nums                 2.205x 2.946x 2.969x 0.219x 0.003x 1.000x   FAIL
-= test-opts                  10.9x 2.294x 2.069x 0.354x 0.383x 1.000x 0.116x
-= test-peekpoke                  -      -      -      -      -   FAIL   FAIL
-= test-pluseq               2.255x 2.859x 2.871x 0.214x 0.012x 1.000x 0.276x
-= test-precedence-err            -      -      -      -      -   FAIL   FAIL
-= test-precedence           1.572x 1.719x 1.726x 0.195x 0.010x 1.000x 0.239x
-= test-printf-asm                -      -      -      -      -      -      -
-= test-printf                    -      -      -      -      - 1.000x   FAIL
-= test-qsort                6.847x 2.063x 1.787x 0.464x 0.509x 1.000x   FAIL
-= test-recover-err               -      -      -      -      -   FAIL   FAIL
-= test-shiftrules           2.312x 2.955x 2.976x 0.251x 0.007x 1.000x 0.337x
-= test-shifts               1.283x 1.251x 1.262x 0.208x 0.008x 1.000x   FAIL
-= test-static               2.737x 3.708x 3.723x 0.149x 0.013x 1.000x 0.183x
-= test-string               2.503x 3.145x 2.285x 0.202x 0.018x 1.000x 0.202x
-= test-struct-err                -      -      -      -      -   FAIL   FAIL
-= test-struct                    -      -      -      -      - 1.000x   FAIL
-= test-swap                 2.215x 2.556x 2.565x 0.227x 0.025x 1.000x 0.267x
-= test-ternary              2.686x 3.852x 3.862x 0.139x 0.016x 1.000x 0.168x
-= test-vnalias              4.290x 6.506x 5.812x 0.235x 0.045x 1.000x 0.198x
-=
+=== RELATIVE CYCLES (cc65 = 1.000x)
+= test                          ivm    asm    fix  zpjit   hjit   cc65  oscar lib
+= test-42                      476x   806x   810x 0.674x 0.152x 1.000x 0.396x   -
+= test-addr                  3.193x 3.309x 2.978x 0.227x 0.022x 1.000x 0.120x   -
+= test-array                 1.897x 2.163x 2.170x 0.317x 0.014x 1.000x 0.255x   -
+= test-arrayinit             2.027x 2.425x 2.440x 0.193x 0.005x 1.000x 0.159x   -
+= test-bench-striped-struct  4.724x 1.699x 1.540x 0.454x 0.477x 1.000x 0.145x   -
+= test-break                 2.822x 2.542x 2.527x 0.229x 0.037x 1.000x 0.121x   -
+= test-bubble                5.523x 1.848x 1.529x 0.300x 0.333x 1.000x 0.187x   -
+= test-char                  4.176x 6.093x 6.104x 0.192x 0.026x 1.000x 0.127x   -
+= test-const                   498x   850x   854x 1.117x 0.152x 1.000x 0.396x   -
+= test-cse                   2.158x 2.647x 2.659x 0.224x 0.020x 1.000x 0.156x   -
+= test-dispatch-fun           66.4x  17.4x  16.6x 1.446x 1.607x 1.000x 0.012x   -
+= test-dispatch-inc          9.245x 2.163x 1.878x 0.232x 0.260x 1.000x 0.004x   -
+= test-dispatch-loop           FAIL 2.171x 1.999x 0.349x 0.403x 1.000x 0.000x   -
+= test-dispatch-pon            202x  70.7x  70.5x 0.323x 0.373x 1.000x 0.255x   -
+= test-dispatch-switch-ifif  2.092x 1.521x 1.308x 0.266x 0.047x 1.000x   FAIL   -
+= test-dispatch-switch            -      -      -      -      -   FAIL   FAIL   -
+= test-dispatch                203x  60.7x  53.1x 0.848x 0.935x 1.000x 0.000x   -
+= test-empty                   479x   810x   815x 0.668x 0.137x 1.000x 0.394x   -
+= test-entry                 2.762x 3.729x 3.752x 0.207x 0.004x 1.000x 0.157x   -
+= test-expr                  1.347x 1.185x 1.180x 0.193x 0.010x 1.000x 0.154x   -
+= test-exprinc               3.123x 3.946x 3.959x 0.223x 0.016x 1.000x 0.119x   -
+= test-fixipc-op             8.065x 5.258x 4.958x 0.357x 0.277x 1.000x 0.225x   -
+= test-getchar                    -      -      -      -      -   FAIL      -   -
+= test-hello                   144x   236x   238x 1.848x 0.060x 1.000x 0.689x   -
+= test-ifdef                 2.831x 3.788x 3.811x 0.218x 0.005x 1.000x 0.159x   -
+= test-ifeq                  5.738x 3.465x 3.380x 0.344x 0.134x 1.000x 0.141x   -
+= test-incdec                1.551x 1.620x 1.626x 0.209x 0.013x 1.000x 0.151x   -
+= test-logic                 3.728x 4.549x 4.559x 0.234x 0.035x 1.000x 0.116x   -
+= test-loop-count             11.1x 2.408x 2.192x 0.298x 0.338x 1.000x 0.004x   -
+= test-loop-down              14.1x 4.764x 3.788x 0.600x 0.727x 1.000x 0.532x   -
+= test-loop-for-acc           13.3x 3.054x 2.779x 0.475x 0.578x 1.000x 0.342x   -
+= test-loop-for-le-expr       13.3x 3.051x 2.776x 0.546x 0.660x 1.000x 0.413x   -
+= test-loop-for-le            13.3x 3.056x 2.781x 0.475x 0.578x 1.000x 0.414x   -
+= test-loop-for-lt            13.3x 3.056x 2.781x 0.475x 0.578x 1.000x 0.390x   -
+= test-loop-for-pluseq        13.3x 3.050x 2.775x 0.474x 0.577x 1.000x 0.389x   -
+= test-loop-for-var           12.7x 2.914x 2.652x 0.499x 0.609x 1.000x 0.372x   -
+= test-loop-postdec           13.2x 4.310x 3.506x 0.595x 0.704x 1.000x 0.583x   -
+= test-loop-while-count       12.9x 3.806x 2.954x 0.305x 0.344x 1.000x 0.005x   -
+= test-loop-while-expr        15.8x 4.849x 4.049x 0.572x 0.655x 1.000x 0.571x   -
+= test-loop-while             15.3x 4.639x 3.652x 0.487x 0.593x 1.000x 0.400x   -
+= test-loops                 5.869x 2.320x 2.193x 0.315x 0.209x 1.000x 0.166x   -
+= test-memset                5.669x 1.948x 1.530x 0.297x 0.278x 1.000x 0.193x   -
+= test-nullread              7.055x  11.4x  11.5x 0.104x 0.006x 1.000x 0.158x   -
+= test-nums                  2.125x 2.825x 2.847x 0.212x 0.003x 1.000x 0.174x   -
+= test-opts                   10.8x 2.278x 2.054x 0.352x 0.380x 1.000x 0.113x   -
+= test-peekpoke                   -      -      -      -      -   FAIL   FAIL   -
+= test-pluseq                2.162x 2.741x 2.753x 0.205x 0.012x 1.000x 0.158x   -
+= test-precedence-err             -      -      -      -      -   FAIL   FAIL   -
+= test-precedence            1.789x 1.956x 1.963x 0.222x 0.011x 1.000x 0.145x   -
+= test-printf-asm                 -      -      -      -      -      -      -   -
+= test-printf                     -      -      -      -      -   FAIL   FAIL   -
+= test-qsort                 6.849x 2.095x 1.780x 0.464x 0.509x 1.000x 0.364x   -
+= test-recover-err                -      -      -      -      -   FAIL   FAIL   -
+= test-shiftrules            1.779x 2.273x 2.290x 0.193x 0.005x 1.000x 0.189x   -
+= test-shifts                0.999x 1.008x 1.017x 0.170x 0.005x 1.000x 0.173x   -
+= test-static                4.193x 5.682x 5.705x 0.229x 0.020x 1.000x 0.127x   -
+= test-string                3.340x 4.151x 2.782x 0.334x 0.023x 1.000x   FAIL   -
+= test-struct-err                 -      -      -      -      -   FAIL   FAIL   -
+= test-struct                     -      -      -      -      - 1.000x   FAIL   -
+= test-swap                  2.207x 2.547x 2.556x 0.226x 0.025x 1.000x 0.156x   -
+= test-ternary               4.452x 6.386x 6.402x 0.230x 0.027x 1.000x 0.109x   -
+= test-vnalias               6.499x 9.855x 8.803x 0.355x 0.068x 1.000x 0.142x   -
+= test-rax-00-type-sizes          -      -      -      -      -   FAIL   FAIL   -
+= test-rax-01-dummy               -      -      -      -      -   FAIL      -   -
+= test-rax-02-hello-world         -      -      -      -      -   FAIL      -   -
+= test-rax-03-bytecpy             -      -      -      -      -   FAIL      -   -
+= test-rax-04-memcopy             -      -      -      -      -   FAIL      -   -
+= test-rax-05-0xcafe              -      -      -      -      -   FAIL      -   -
+= test-rax-06-sieve               -      -      -      -      -   FAIL      -   -
+= test-rax-07-aes256              -      -      -      -      -   FAIL   FAIL   -
+= test-rax-08-mandelbrot          -      -      -      -      -   FAIL      -   -
+= test-rax-09-frogmove            -      -      -      -      -   FAIL      -   -
+= test-rax-10-pi                  -      -      -      -      -   FAIL      -   -
+= test-rax-11-shuffle             -      -      -      -      -   FAIL      -   -
+= test-rax-12-bubble-sort         -      -      -      -      -   FAIL      -   -
+= test-rax-13-selection-sort      -      -      -      -      -   FAIL      -   -
+= test-rax-14-insertion-sort   FAIL   FAIL      -   FAIL      -   FAIL   FAIL   -
+= test-rax-15-merge-sort          -      -      -      -      -   FAIL      -   -
+= test-rax-16-quick-sort       FAIL   FAIL   FAIL      -      -   FAIL      -   -
+= test-rax-17-counting-sort       -      -      -      -      -   FAIL      -   -
+= test-rax-18-radix-sort          -      -      -      -      -   FAIL      -   -
+= test-rax-19-shell-sort          -      -      -      -      -   FAIL      -   -
+= test-rax-20-heap-sort        FAIL   FAIL   FAIL   FAIL   FAIL   FAIL      -   -
+= test-rax-21-eight-queens        -      -      -      -      -   FAIL   FAIL   -
+= test-rax-22-qrcode              -      -      -      -      -   FAIL      -   -
 =
 === BYTES
-= test                         ivm    asm    fix  zpjit   hjit   cc65  oscar    lib
-= test-42                       33     33     33     68     19    195    139      -
-= test-addr                    341    341    341  1,019    995  3,381  4,708      -
-= test-array                   569    569    569  1,431  1,237  3,930  5,066      -
-= test-arrayinit               471    471    471    950    732  3,379  5,006      -
-= test-bench-striped-struct    196    196    196  1,123    855  3,118  4,365      -
-= test-break                   583    583    583  2,177  2,105  4,435  5,281      -
-= test-bubble                  256    256    256  1,141    814  3,628   FAIL      -
-= test-char                    155    155    155    440    201  2,793  4,371      -
-= test-const                    57     57     57     82     19    207    139      -
-= test-cse                     383    383    383  1,399  1,104  3,946  5,046      -
-= test-dispatch-fun            151    151    151    418    358    545    164      -
-= test-dispatch-inc            247    247    247    703    849  1,744    164      -
-= test-dispatch-loop           136    136    136    415    419    631    164      -
-= test-dispatch-pon            146    146    146    100     46    241    164      -
-= test-dispatch-switch-ifif    397    397    397  1,282  1,298  3,241   FAIL      -
-= test-dispatch-switch           -      -      -      -      -   FAIL   FAIL      -
-= test-dispatch                147    147    147     97     56    231    139      -
-= test-empty                    30     30     30     64     15    191    137      -
-= test-entry                   189    189    189    609    286  2,662  4,396      -
-= test-expr                    132    132    132    413    202  2,565  4,296      -
-= test-exprinc                 265    265    265    885    772  3,275  4,614      -
-= test-fixipc-op               975    975    975  2,981  3,795  6,603  4,541      -
-= test-getchar                 537    537    537  1,619  1,256  3,960  4,989      -
-= test-hello                    48     48     48    215     36  2,287  4,101      -
-= test-ifdef                   232    232    232    564    355  2,774  4,534      -
-= test-ifeq                    581    581    581  2,112  1,974  4,144  4,971      -
-= test-incdec                  873    873    873  2,231  2,250  5,244  6,080      -
-= test-logic                   423    423    423  2,009  1,899  3,862  4,805      -
-= test-loop-count               68     68     68    313     94  2,391  4,128      -
-= test-loop-down                72     72     72    328    114  2,384  4,160      -
-= test-loop-for-acc             75     75     75    330    115  2,400  4,161      -
-= test-loop-for-le-expr         87     87     87    343    132  2,404  4,172      -
-= test-loop-for-le              74     74     74    329    114  2,399  4,167      -
-= test-loop-for-lt              74     74     74    329    114  2,399  4,163      -
-= test-loop-for-pluseq          78     78     78    333    118  2,403  4,167      -
-= test-loop-for-var             78     78     78    336    125  2,412  4,164      -
-= test-loop-postdec             81     81     81    357    146  2,404  4,175      -
-= test-loop-while-count         76     76     76    319    100  2,397  4,134      -
-= test-loop-while-expr          85     85     85    341    126  2,407  4,185      -
-= test-loop-while               75     75     75    328    113  2,398  4,162      -
-= test-loops                 1,069  1,069  1,069  3,618  3,773  7,186  6,559      -
-= test-memset                  536    536    536  1,432  1,322  3,877   FAIL      -
-= test-nullread                 49     49     49    281     66  2,331  4,126      -
-= test-nums                    145    145    145    481    254  2,738   FAIL      -
-= test-opts                    371    371    371  1,331  1,044  4,370  5,073      -
-= test-peekpoke                203    203    203    764    451   FAIL   FAIL      -
-= test-pluseq                  427    427    427  1,339  1,162  3,633  4,945      -
-= test-precedence-err            -      -      -      -      -   FAIL   FAIL      -
-= test-precedence              774    774    774  2,314  2,275  5,414  5,516      -
-= test-printf-asm                -      -      -      -      -      -      -  2,179
-= test-printf                    -      -      -      -      -  3,316   FAIL      -
-= test-qsort                   413    413    413  1,950  1,791  4,514   FAIL      -
-= test-recover-err               -      -      -      -      -   FAIL   FAIL      -
-= test-shiftrules              275    275    275    672    471  3,001  4,534      -
-= test-shifts                2,277  2,277  2,277  2,933  4,323  6,722   FAIL      -
-= test-static                  183    183    183    598    397  2,841  4,491      -
-= test-string                  425    425    425  2,050  1,128  3,858  5,555      -
-= test-struct-err                -      -      -      -      -   FAIL   FAIL      -
-= test-struct                    -      -      -      -      -  6,339   FAIL      -
-= test-swap                    402    402    402  1,608  1,382  4,347  5,164      -
-= test-ternary                 396    396    396  1,281  1,193  3,248  4,428      -
-= test-vnalias                 136    136    136    853    486  3,057  4,499      -
+= test                          ivm    asm    fix  zpjit   hjit   cc65  oscar    lib
+= test-42                        33     33     33     68     19    195    139      -
+= test-addr                     341    341    341  1,019    995  1,525    810      -
+= test-array                    569    569    569  1,431  1,237  1,989  1,178      -
+= test-arrayinit                480    480    480    950    732  1,411    985      -
+= test-bench-striped-struct     197    197    197  1,123    855  1,612    662      -
+= test-break                    583    583    583  2,177  2,105  2,598  1,322      -
+= test-bubble                   245    245    245  1,141    796  2,073  1,321      -
+= test-char                     159    159    159    450    213  1,015    599      -
+= test-const                     57     57     57     82     19    207    139      -
+= test-cse                      383    383    383  1,399  1,104  2,269  1,162      -
+= test-dispatch-fun             151    151    151    418    358    545    164      -
+= test-dispatch-inc             247    247    247    703    849  1,744    164      -
+= test-dispatch-loop           FAIL    136    136    415    419    631    164      -
+= test-dispatch-pon             146    146    146    100     46    241    164      -
+= test-dispatch-switch-ifif     397    397    397  1,282  1,298  1,695   FAIL      -
+= test-dispatch-switch            -      -      -      -      -   FAIL   FAIL      -
+= test-dispatch                 147    147    147     97     56    231    139      -
+= test-empty                     30     30     30     64     15    191    137      -
+= test-entry                    191    191    191    609    286    983    582      -
+= test-expr                     132    132    132    413    202  1,029    608      -
+= test-exprinc                  266    266    266    885    772  1,337    590      -
+= test-fixipc-op                976    976    976  2,981  3,795  5,046    783      -
+= test-getchar                  539    539    539  1,626  1,263   FAIL  1,253      -
+= test-hello                     49     49     49    220     41    433    216      -
+= test-ifdef                    232    232    232    564    355  1,071    675      -
+= test-ifeq                     582    582    582  2,112  1,974  2,219    883      -
+= test-incdec                   873    873    873  2,231  2,250  3,033  1,613      -
+= test-logic                    423    423    423  2,009  1,899  1,913    677      -
+= test-loop-count                69     69     69    313     94    880    466      -
+= test-loop-down                 73     73     73    328    114    880    499      -
+= test-loop-for-acc              76     76     76    330    115    889    499      -
+= test-loop-for-le-expr          88     88     88    343    132    893    510      -
+= test-loop-for-le               75     75     75    329    114    888    505      -
+= test-loop-for-lt               75     75     75    329    114    888    501      -
+= test-loop-for-pluseq           79     79     79    333    118    892    505      -
+= test-loop-for-var              79     79     79    336    125    901    502      -
+= test-loop-postdec              82     82     82    357    146    900    513      -
+= test-loop-while-count          77     77     77    319    100    886    472      -
+= test-loop-while-expr           86     86     86    341    126    896    524      -
+= test-loop-while                76     76     76    328    113    887    500      -
+= test-loops                  1,071  1,071  1,071  3,618  3,773  4,967  2,207      -
+= test-memset                   414    414    414  1,432  1,168  2,267  1,401      -
+= test-nullread                  50     50     50    281     66    823    461      -
+= test-nums                     143    143    143    481    254    945    647      -
+= test-opts                     378    378    378  1,331  1,044  2,836  1,275      -
+= test-peekpoke                 204    204    204    764    451   FAIL   FAIL      -
+= test-pluseq                   427    427    427  1,339  1,162  1,925  1,041      -
+= test-precedence-err             -      -      -      -      -   FAIL   FAIL      -
+= test-precedence               774    774    774  2,314  2,275  3,232  1,053      -
+= test-printf-asm                 -      -      -      -      -      -      -  2,179
+= test-printf                     -      -      -      -      -   FAIL   FAIL      -
+= test-qsort                    404    404    404  1,958  1,782  2,942  1,845      -
+= test-recover-err                -      -      -      -      -   FAIL   FAIL      -
+= test-shiftrules               280    280    280    672    471  1,269    714      -
+= test-shifts                 1,219  1,219  1,219  2,801  2,902  3,841  1,515      -
+= test-static                   184    184    184    598    397  1,072    627      -
+= test-string                   434    434    434  2,078  1,156  1,997   FAIL      -
+= test-struct-err                 -      -      -      -      -   FAIL   FAIL      -
+= test-struct                     -      -      -      -      -  3,956   FAIL      -
+= test-swap                     402    402    402  1,608  1,382  2,605  1,204      -
+= test-ternary                  396    396    396  1,281  1,193  1,424    572      -
+= test-vnalias                  138    138    138    853    486  1,499    726      -
+= test-rax-00-type-sizes          -      -      -      -      -   FAIL   FAIL      -
+= test-rax-01-dummy              31     31     31     67     18   FAIL    137      -
+= test-rax-02-hello-world        51     51     51    219     40   FAIL    213      -
+= test-rax-03-bytecpy             -      -      -      -      -   FAIL    143      -
+= test-rax-04-memcopy             -      -      -      -      -   FAIL    178      -
+= test-rax-05-0xcafe            156    156    156    433    255   FAIL    311      -
+= test-rax-06-sieve               -      -      -      -      -   FAIL  1,057      -
+= test-rax-07-aes256              -      -      -      -      -   FAIL   FAIL      -
+= test-rax-08-mandelbrot          -      -      -      -      -   FAIL    774      -
+= test-rax-09-frogmove            -      -      -      -      -   FAIL  1,721      -
+= test-rax-10-pi                  -      -      -      -      -   FAIL  1,501      -
+= test-rax-11-shuffle             -      -      -      -      -   FAIL  1,635      -
+= test-rax-12-bubble-sort       706    706    706  1,441    655   FAIL  1,333      -
+= test-rax-13-selection-sort    727    727    727  1,517    778   FAIL  1,401      -
+= test-rax-14-insertion-sort   FAIL   FAIL    712   FAIL    750   FAIL   FAIL      -
+= test-rax-15-merge-sort          -      -      -      -      -   FAIL  2,145      -
+= test-rax-16-quick-sort       FAIL   FAIL   FAIL  1,635    909   FAIL  1,707      -
+= test-rax-17-counting-sort       -      -      -      -      -   FAIL  1,649      -
+= test-rax-18-radix-sort          -      -      -      -      -   FAIL  1,817      -
+= test-rax-19-shell-sort          -      -      -      -      -   FAIL  1,405      -
+= test-rax-20-heap-sort        FAIL   FAIL   FAIL   FAIL   FAIL   FAIL  1,839      -
+= test-rax-21-eight-queens        -      -      -      -      -   FAIL   FAIL      -
+= test-rax-22-qrcode              -      -      -      -      -   FAIL 10,796      -
