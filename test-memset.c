@@ -17,9 +17,6 @@
 // #TIMED "name": on the host simulator prints the cycles since the last
 // #TIMED (e.g. --- memset 8191: 81985c (incl 0c page)); the VMs skip it.
 
-// CC65 gives errors on...
-#pragma warn (unknown-pragma, push, off)
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -52,7 +49,7 @@ int chk(int len, int v) {
   k = len + 4;
   a = b[k];
   if (a != 170) { putz("overrun "); err++; }
-  printf("%d\n", len);
+  putnl(len);
   return err;
 }
 
@@ -127,14 +124,15 @@ memset(p, 1, 1);
   w = malloc(20);
   w[3] = 1234;
   a = w[3];
-  printf("%d\n", a);
+  putnl(a);
   c = (char*)w;
   a = c[6];
-  printf("%d\n", a);
+  putnl(a);
   a = c[7];
-  printf("%d\n", a);
+  putnl(a);
 
   putz("errors: ");
-  printf("%d\n", err);
+  putnl(err);
+
   return err;
 }

@@ -28,30 +28,30 @@ int main() {
   a[0] = 10; a[1] = 11; a[2] = 12; a[3] = 13; a[4] = 14;
 
   putz("int += 2:\t0 7 9 27\n\t\t");
-  x = 65534;	x+= 2;		printf("%u ", x);
-  x = 5;	x= x + 2; 	printf("%u ", x);
-  x = 7; 	x = 2 + x; 	printf("%u ", x);
-  x = 7;	x+= 20;		printf("%u ", x);
+  x = 65534;	x+= 2;		putn(x);
+  x = 5;	x= x + 2; 	putn(x);
+  x = 7; 	x = 2 + x; 	putn(x);
+  x = 7;	x+= 20;		putn(x);
   putz("\n");
 
   putz("int* +=:\t11 12 13 11\n\t\t");
-  p = a;	p+= 1;	 	printf("%u ", *p);
-  p = a;	p+= 2;	 	printf("%u ", *p);
-  p = a; n = 3;	p += n;		printf("%u ", *p);
-  p = a;	p = p + 1;	printf("%u ", *p);
+  p = a;	p+= 1;	 	putn(*p);
+  p = a;	p+= 2;	 	putn(*p);
+  p = a; n = 3;	p += n;		putn(*p);
+  p = a;	p = p + 1;	putn(*p);
   putz("\n");
 
   putz("char, int -=:\t1 255 65534 40\n\t\t");
-  c = 255;	c+= 2;	 	printf("%u ", c);
-  c = 1;	c-= 2;	 	printf("%u ", c);
-  x = 5;	x-= 7;	 	printf("%u ", x);
-  x = 50; n = 8;	x -= n + 2;	printf("%u ", x);
+  c = 255;	c+= 2;	 	putn(c);
+  c = 1;	c-= 2;	 	putn(c);
+  x = 5;	x-= 7;	 	putn(x);
+  x = 50; n = 8;	x -= n + 2;	putn(x);
   putz("\n");
 
   putz("int* -= += E:\t12 13 13\n\t\t");
-  p = a; p+= 4;	p -= 2;		printf("%u ", *p);
-  p = a; n = 1;	p += n + 2;	printf("%u ", *p);
-  p = a; p+= 4;	p -= n;		printf("%u ", *p);
+  p = a; p+= 4;	p -= 2;		putn(*p);
+  p = a; n = 1;	p += n + 2;	putn(*p);
+  p = a; p+= 4;	p -= n;		putn(*p);
   putz("\n");
 
   return 0;

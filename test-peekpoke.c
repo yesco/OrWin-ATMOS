@@ -41,9 +41,9 @@ int main() {
   putz("doke deek:\t4660 52 18\n\t\t");
   doke(a + 4, 4660);
   w = deek(a + 4);
-  printf("%u ", w);
-  printf("%u ", peek(a + 4));
-  printf("%u\n", peek(a + 5));
+  putn(w);
+  putn(peek(a + 4));
+  putn(peek(a + 5));
 
   return 0;
 }

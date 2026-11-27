@@ -5,7 +5,6 @@
 // Ours, not C: an initialized array in a function needs static (it is
 // set once), a static's initializer is a constant, the function comes
 // before main.
-// Only the printf forms the grammar knows: "%d " and "%d\n".
 
 #include <stdio.h>
 
@@ -48,21 +47,21 @@ int third(void) {
 
 int main(void) {
   putchar('A'); putchar(' ');
-  printf("%d ", counter());
-  printf("%d ", other(5));
-  printf("%d ", counter());
-  printf("%d ", counter());
+  putn(counter());
+  putn(other(5));
+  putn(counter());
+  putn(counter());
   putchar('\n');
 
   putchar('B'); putchar(' ');
-  printf("%d ", two());
-  printf("%d ", two());
-  printf("%d ", two());
+  putn(two());
+  putn(two());
+  putn(two());
   putchar('\n');
 
   putchar('C'); putchar(' ');
-  printf("%d ", third());
-  printf("%d ", counter());
-  printf("%d\n", third());
+  putn(third());
+  putn(counter());
+  putn(third());
   return 0;
 }

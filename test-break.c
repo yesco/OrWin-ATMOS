@@ -11,7 +11,7 @@
 int eq(int v) {
   putchar('=');
   putchar(' ');
-  printf("%d ", v);
+  putn(v);
   return 0;
 }
 
@@ -20,57 +20,57 @@ int main(void) {
 
   // --- for i <= const / i < const (t / u, closed by n) --------------------
   putchar('A'); putchar(' ');
-  for (i = 0; i <= 10; i++) { if (i == 5) break; printf("%d ", i); }
+  for (i = 0; i <= 10; i++) { if (i == 5) break; putn(i); }
   eq(i);
-  for (i = 0; i < 10; i++) { if (i & 1) continue; printf("%d ", i); }
+  for (i = 0; i < 10; i++) { if (i & 1) continue; putn(i); }
   eq(i); putchar('\n');
 
   // limit a variable
   putchar('B'); putchar(' ');
   n = 8;
-  for (i = 2; i < n; i++) { if (i == 4) continue; if (i == 6) break; printf("%d ", i); }
+  for (i = 2; i < n; i++) { if (i == 4) continue; if (i == 6) break; putn(i); }
   eq(i);
-  for (i = 2; i <= n; i++) { if (i > 3) break; printf("%d ", i); }
+  for (i = 2; i <= n; i++) { if (i > 3) break; putn(i); }
   eq(i); putchar('\n');
 
   // body starts by reading the loop var (the JIT keeps it in AX)
   putchar('C'); putchar(' ');
-  for (i = 1; i <= 9; i++) { printf("%d ", i); if (i == 3) continue; if (i == 7) break; }
+  for (i = 1; i <= 9; i++) { putn(i); if (i == 3) continue; if (i == 7) break; }
   eq(i); putchar('\n');
 
   // --- while (v <= lim) / while (v < lim) (t / u closed by B) -------------
   putchar('D'); putchar(' ');
   i = 0;
-  while (i <= 20) { i++; if (i == 3) continue; if (i == 6) break; printf("%d ", i); }
+  while (i <= 20) { i++; if (i == 3) continue; if (i == 6) break; putn(i); }
   eq(i);
   i = 0; n = 9;
-  while (i < n) { i++; if (i & 1) continue; printf("%d ", i); }
+  while (i < n) { i++; if (i & 1) continue; putn(i); }
   eq(i); putchar('\n');
 
   // --- while (E) ----------------------------------------------------------
   putchar('E'); putchar(' ');
   i = 10;
-  while (i) { i--; if (i == 7) continue; if (i == 4) break; printf("%d ", i); }
+  while (i) { i--; if (i == 7) continue; if (i == 4) break; putn(i); }
   eq(i);
   i = 0;
-  while (1) { i++; if (i > 4) break; printf("%d ", i); }
+  while (1) { i++; if (i > 4) break; putn(i); }
   eq(i); putchar('\n');
 
   // --- for (i = N; i--; ), for (i = N; i; i--) and friends ----------------
   putchar('F'); putchar(' ');
-  for (i = 6; i--; ) { if (i == 4) continue; if (i == 1) break; printf("%d ", i); }
+  for (i = 6; i--; ) { if (i == 4) continue; if (i == 1) break; putn(i); }
   eq(i);
-  for (i = 6; i; i--) { if (i == 5) continue; if (i == 2) break; printf("%d ", i); }
+  for (i = 6; i; i--) { if (i == 5) continue; if (i == 2) break; putn(i); }
   eq(i);
-  for (i = 6; i > 0; i--) { if (i == 3) break; printf("%d ", i); }
+  for (i = 6; i > 0; i--) { if (i == 3) break; putn(i); }
   eq(i); putchar('\n');
 
   // --- for (i = E; E; i++) -------------------------------------------------
   putchar('G'); putchar(' ');
-  for (i = 0; i != 9; i++) { if (i == 2) continue; if (i == 5) break; printf("%d ", i); }
+  for (i = 0; i != 9; i++) { if (i == 2) continue; if (i == 5) break; putn(i); }
   eq(i);
   s = 3;
-  for (i = 0; i != 20; i += s) { if (i == 6) continue; if (i == 15) break; printf("%d ", i); }
+  for (i = 0; i != 20; i += s) { if (i == 6) continue; if (i == 15) break; putn(i); }
   eq(i); putchar('\n');
 
   // --- nested: break / continue are the inner loop's ----------------------
@@ -80,7 +80,7 @@ int main(void) {
     for (j = 0; j < 9; j++) {
       if (j == 1) continue;
       if (j == 3) break;
-      printf("%d ", i * 10 + j);
+      putn(i * 10 + j);
     }
     eq(j);
   }
@@ -99,7 +99,7 @@ int main(void) {
   putchar('J'); putchar(' ');
   n = 0;
   for (i = 0; i < 50; i++) { n = n + i; if (n > 20) break; }
-  printf("%d ", n); eq(i); putchar('\n');
+  putn(n); eq(i); putchar('\n');
 
   return 0;
 }

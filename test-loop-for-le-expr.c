@@ -25,7 +25,7 @@ int main() {
 
   putz("for-le-expr:\t23800\n\t\t");
   for (i = 0; i <= N - 1; i++) s = s + i;
-  printf("%u\n", s & 32767);
+  putn(s & 32767);
 
   return 0;
 }

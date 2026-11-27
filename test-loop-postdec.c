@@ -24,7 +24,7 @@ int main() {
 
   putz("postdec:\t23800\n\t\t");
   for (i = N; i-- > 0; ) s = s + i;
-  printf("%u\n", s & 32767);
+  putn(s & 32767);
 
   return 0;
 }

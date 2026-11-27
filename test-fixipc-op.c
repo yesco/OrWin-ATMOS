@@ -115,7 +115,7 @@ int main() {
     j = j ^ c;
   }
 
-  printf("%d ", a); printf("%d ", b); printf("%d ", c); printf("%d\n", j);
+  putn(a); putn(b); putn(c); putn(j);
 
   return 0;
 }

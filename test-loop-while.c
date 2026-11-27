@@ -29,7 +29,7 @@ int main() {
   putz("while:\t23800\n\t\t");
   i = 0;
   while (i < N) { s = s + i; i++; }
-  printf("%u\n", s & 32767);
+  putn(s & 32767);
 
   return 0;
 }

@@ -1,27 +1,29 @@
 // local stdio.h — shadows the real one 
 
-#if 0
+#if 1
+
 #ifndef putz
   // dependding onplatform puts adds newline (mostly) or not...
-  #define putz puts
+//  #define putz puts
 #endif
 
 #ifdef __CC65__
-  #include "/data/data/com.termux/files/usr/share/cc65/include/stdio.h"
+  int putchar(int c);
+//extern void putz(const char* s);
+  int puts(const char*);
+  void putz(const char*);
+//  #include "/data/data/com.termux/files/usr/share/cc65/include/stdio.h"
 #endif
 
 #ifdef __OSCAR64__
+  int putchar(char c);
+  int puts(const char*);
+
   #include "~/GIT/oscar64/include/stdio.h"
 #endif
 #endif 
 
-int putchar(char c);
-int puts(char*);
 
-//extern void putz(const char *s);
-#ifndef __OSCAR64__
-extern void putz(const char* s);
-#endif
 extern void putn(unsigned int n);
 extern void putnl(unsigned int n);
 extern void nl(void);

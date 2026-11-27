@@ -13,7 +13,7 @@ int main() {
 
   putz("null:\t0\n\t\t");
   p = 0;
-  printf("%u\n", *p);
+  putn(*p);
 
   return 0;
 }

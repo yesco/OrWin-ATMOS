@@ -61,7 +61,7 @@ int main() {
   for (r = 0; r < ROUNDS; r++)
     for (k = 0; k < ROUNDS; k++)
       g++;
-  printf("%u\n", g);
+  putn(g);
 
   putz("jump:\t\t100 100\n\t\t");
   s = 0; t = 0;
@@ -70,7 +70,7 @@ int main() {
     if (!k) s++;
     if (k == 0) t++;
   }
-  printf("%u ", s); printf("%u\n", t);
+  putn(s); putn(t);
 
   putz("acc:\t\t20100\n\t\t");
   s = 0;
@@ -78,7 +78,7 @@ int main() {
     n = r + 1;
     s = s + n;
   }
-  printf("%u\n", s);
+  putn(s);
 
   putz("vn:\t\t12000\n\t\t");
   for (k = 0; k < 10; k++) a[k] = k * 10;
@@ -88,24 +88,24 @@ int main() {
     t = a[j + 1]; n = a[j + 1];
     s = s + t + n;
   }
-  printf("%u\n", s);
+  putn(s);
 
   putz("swap:\t\t0 90\n\t\t");
   for (r = 0; r < ROUNDS; r++) {
     i = 0; j = 9;
     t = a[i]; a[i] = a[j]; a[j] = t;
   }
-  printf("%u ", a[0]); printf("%u\n", a[9]);
+  putn(a[0]); putn(a[9]);
 
   putz("const:\t\t7\n\t\t");
   s = 7;
   if (0) s = UNUSED;
-  printf("%u\n", s);
+  putn(s);
 
   putz("frames:\t\t64\n\t\t");
   s = 0;
   for (r = 0; r < ROUNDS; r++) s = add3(5);
-  printf("%u\n", s);
+  putn(s);
 
   free(a);
   return 0;

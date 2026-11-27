@@ -18,12 +18,12 @@ int main() {
   // before the &: a[j + 1] twice, a store through a pointer between
   j = 2;
   s = a[j + 1]; *q = 5; t = a[j + 1];
-  printf("%u ", s); printf("%u\n", t);
+  putn(s); putn(t);
 
   // after it: q is j (the store changes j)
   q = &j;
   j = 2;
   s = a[j + 1]; *q = 5; t = a[j + 1];
-  printf("%u ", s); printf("%u ", t); printf("%u\n", j);
+  putn(s); putn(t); putn(j);
   return 0;
 }

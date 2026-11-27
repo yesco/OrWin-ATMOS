@@ -7,7 +7,7 @@ int main() {
   //for(c = 0; c < 69; c++) {
   
   for(c = 0; c <= 69; c++) {
-    printf("%u ", c);
+    putn(c);
 
     //  simple compares
     if (c <  42) putz("\t<  42\n");

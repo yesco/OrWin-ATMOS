@@ -55,46 +55,46 @@ int main() {
   int n;
 
   putz("int list:\t3 100 300\n\t\t");
-  n = sizeof(w) / 2; printf("%u ", n);
-  n = w[0]; printf("%u ", n);
-  n = w[2]; printf("%u\n", n);
+  n = sizeof(w) / 2; putn(n);
+  n = w[0]; putn(n);
+  n = w[2]; putn(n);
 
   putz("char list:\t97 66 3 0 5\n\t\t");
-  n = c[0]; printf("%u ", n);
-  n = c[1]; printf("%u ", n);
-  n = c[2]; printf("%u ", n);
-  n = c[4]; printf("%u ", n);
-  n = sizeof(c); printf("%u\n", n);
+  n = c[0]; putn(n);
+  n = c[1]; putn(n);
+  n = c[2]; putn(n);
+  n = c[4]; putn(n);
+  n = sizeof(c); putn(n);
 
   putz("string:\t\t97 0 0 8\n\t\t");
-  n = s[0]; printf("%u ", n);
-  n = s[3]; printf("%u ", n);
-  n = s[7]; printf("%u ", n);
-  n = sizeof(s); printf("%u\n", n);
+  n = s[0]; putn(n);
+  n = s[3]; putn(n);
+  n = s[7]; putn(n);
+  n = sizeof(s); putn(n);
 
   putz("exact:\t\t122 3\n\t\t");
-  n = t[2]; printf("%u ", n);
-  n = sizeof(t); printf("%u\n", n);
+  n = t[2]; putn(n);
+  n = sizeof(t); putn(n);
 
   putz("auto size:\t6 111\n\t\t");
-  n = sizeof(u); printf("%u ", n);
-  n = u[4]; printf("%u\n", n);
+  n = sizeof(u); putn(n);
+  n = u[4]; putn(n);
 
   putz("zero:\t\t0 8\n\t\t");
-  n = z[3]; printf("%u ", n);
-  n = sizeof(z); printf("%u\n", n);
+  n = z[3]; putn(n);
+  n = sizeof(z); putn(n);
 
   putz("write:\t\t7\n\t\t");
   w[1] = 7;
-  n = w[1]; printf("%u\n", n);
+  n = w[1]; putn(n);
 
   putz("static:\t\t5 6 7\n\t\t");
-  n = counter(); printf("%u ", n);
-  n = counter(); printf("%u ", n);
-  n = counter(); printf("%u\n", n);
+  n = counter(); putn(n);
+  n = counter(); putn(n);
+  n = counter(); putn(n);
 
   putz("const:\t\t2 3\n\t\t");
-  n = q[0]; printf("%u ", n);
-  n = q[1]; printf("%u\n", n);
+  n = q[0]; putn(n);
+  n = q[1]; putn(n);
   return 0;
 }

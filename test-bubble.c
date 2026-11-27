@@ -40,8 +40,8 @@ int main() {
       if (a[i - 1] > a[i]) bad++;
     }
   }
-  putz("first last: "); printf("%u ", a[0]); printf("%u\n", a[n - 1]);
-  putz("sum: "); printf("%u\n", sum);
-  putz("unsorted pairs: "); printf("%u\n", bad);
+  putz("first last: "); putn(a[0]); putn(a[n - 1]);
+  putz("sum: "); putn(sum);
+  putz("unsorted pairs: "); putn(bad);
   return 0;
 }

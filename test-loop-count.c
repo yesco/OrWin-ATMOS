@@ -24,7 +24,7 @@ int main() {
 
   putz("count:\t10000\n\t\t");
   for (i = 0; i < N; i++) n++;
-  printf("%u\n", n);
+  putn(n);
 
   return 0;
 }

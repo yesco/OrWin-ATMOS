@@ -39,6 +39,6 @@ int main(void) {
   // result
   s = 0;
   for (i = 0; i < 32; i++) s = s + ps[i].x + ps[i].y;
-  printf("%u\n", s);
+  putn(s);
   return 0;
 }

@@ -2,7 +2,6 @@
 //
 // Plain C: gcc test-logic.c && ./a.out gives the reference output. ^^ is
 // not C: under __MC65__ only (the others compute the same another way).
-// Only the printf forms the grammar knows: "%d " and "%d\n".
 
 #include <stdio.h>
 
@@ -21,52 +20,52 @@ int main(void) {
 
   // --- 0 / 1 results ---------------------------------------------------------
   putchar('A'); putchar(' ');
-  printf("%d ", a && b);
-  printf("%d ", a && c);
-  printf("%d ", b || c);
-  printf("%d ", b || b);
-  printf("%d ", c && c);
+  putn(a && b);
+  putn(a && c);
+  putn(b || c);
+  putn(b || b);
+  putn(c && c);
   putchar('\n');
 
   // --- precedence: && over ||, compares over both, left to right ----------
   putchar('B'); putchar(' ');
-  printf("%d ", a || b && b);
-  printf("%d ", b && b || a);
-  printf("%d ", c > 2 && c < 9);
-  printf("%d ", c > 7 || c == 5);
-  printf("%d ", a && b || c && a);
-  printf("%d ", !b && (a || b));
+  putn(a || b && b);
+  putn(b && b || a);
+  putn(c > 2 && c < 9);
+  putn(c > 7 || c == 5);
+  putn(a && b || c && a);
+  putn(!b && (a || b));
   putchar('\n');
 
   // --- short-circuit: the right side only when needed ----------------------
   putchar('C'); putchar(' ');
-  calls = 0; x = b && t(1); printf("%d ", x); printf("%d ", calls);
-  calls = 0; x = a || t(1); printf("%d ", x); printf("%d ", calls);
-  calls = 0; x = a && t(7); printf("%d ", x); printf("%d ", calls);
-  calls = 0; x = b || t(0); printf("%d ", x); printf("%d ", calls);
+  calls = 0; x = b && t(1); putn(x); putn(calls);
+  calls = 0; x = a || t(1); putn(x); putn(calls);
+  calls = 0; x = a && t(7); putn(x); putn(calls);
+  calls = 0; x = b || t(0); putn(x); putn(calls);
   putchar('\n');
 
   // --- in if / while conditions ----------------------------------------------
   putchar('D'); putchar(' ');
-  if (a && c > 3) printf("%d ", 1); else printf("%d ", 0);
-  if (b || c < 3) printf("%d ", 1); else printf("%d ", 0);
+  if (a && c > 3) putn(1); else putn(0);
+  if (b || c < 3) putn(1); else putn(0);
   x = 0;
   while (x < 10 && x != 4) x++;
-  printf("%d ", x);
+  putn(x);
   putchar('\n');
 
   // --- ^^: true when exactly one side is ---------------------------------------
   putchar('E'); putchar(' ');
 #ifdef __MC65__
-  printf("%d ", a ^^ b);
-  printf("%d ", a ^^ c);
-  printf("%d ", b ^^ b);
-  printf("%d ", b ^^ c > 2);
+  putn(a ^^ b);
+  putn(a ^^ c);
+  putn(b ^^ b);
+  putn(b ^^ c > 2);
 #else
-  printf("%d ", !a != !b);
-  printf("%d ", !a != !c);
-  printf("%d ", !b != !b);
-  printf("%d ", !b != !(c > 2));
+  putn(!a != !b);
+  putn(!a != !c);
+  putn(!b != !b);
+  putn(!b != !(c > 2));
 #endif
   putchar('\n');
 

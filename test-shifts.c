@@ -30,335 +30,335 @@ int main() {
 #pragma TIMED
   y = x << 0;
 #pragma TIMED "x << 0"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   y = x << 1;
 #pragma TIMED "x << 1"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   y = x << 2;
 #pragma TIMED "x << 2"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   y = x << 3;
 #pragma TIMED "x << 3"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   y = x << 4;
 #pragma TIMED "x << 4"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   y = x << 7;
 #pragma TIMED "x << 7"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   y = x << 8;
 #pragma TIMED "x << 8"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   y = x << 9;
 #pragma TIMED "x << 9"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   y = x << 12;
 #pragma TIMED "x << 12"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   y = x << 15;
 #pragma TIMED "x << 15"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   y = x << 16;
 #pragma TIMED "x << 16"
-  printf("%u ", y);
+  putn(y);
   putz("\n");
 
   putz("x>>k:\t37429 18714 9357 4678 2339 292 146 73 9 1 0\n\t");
 #pragma TIMED
   y = x >> 0;
 #pragma TIMED "x >> 0"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   y = x >> 1;
 #pragma TIMED "x >> 1"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   y = x >> 2;
 #pragma TIMED "x >> 2"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   y = x >> 3;
 #pragma TIMED "x >> 3"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   y = x >> 4;
 #pragma TIMED "x >> 4"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   y = x >> 7;
 #pragma TIMED "x >> 7"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   y = x >> 8;
 #pragma TIMED "x >> 8"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   y = x >> 9;
 #pragma TIMED "x >> 9"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   y = x >> 12;
 #pragma TIMED "x >> 12"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   y = x >> 15;
 #pragma TIMED "x >> 15"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   y = x >> 16;
 #pragma TIMED "x >> 16"
-  printf("%u ", y);
+  putn(y);
   putz("\n");
 
   putz("x << n:\t37429 9322 18644 37288 9040 6784 13568 27136 20480 32768 0\n\t");
 #pragma TIMED
   n = 0; y = x << n;
 #pragma TIMED "n = 0; x << n"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   n = 1; y = x << n;
 #pragma TIMED "n = 1; x << n"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   n = 2; y = x << n;
 #pragma TIMED "n = 2; x << n"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   n = 3; y = x << n;
 #pragma TIMED "n = 3; x << n"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   n = 4; y = x << n;
 #pragma TIMED "n = 4; x << n"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   n = 7; y = x << n;
 #pragma TIMED "n = 7; x << n"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   n = 8; y = x << n;
 #pragma TIMED "n = 8; x << n"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   n = 9; y = x << n;
 #pragma TIMED "n = 9; x << n"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   n = 12; y = x << n;
 #pragma TIMED "n = 12; x << n"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   n = 15; y = x << n;
 #pragma TIMED "n = 15; x << n"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   n = 16; y = x << n;
 #pragma TIMED "n = 16; x << n"
-  printf("%u ", y);
+  putn(y);
   putz("\n");
 
   putz("x >> n:\t37429 18714 9357 4678 2339 292 146 73 9 1 0\n\t");
 #pragma TIMED
   n = 0; y = x >> n;
 #pragma TIMED "n = 0; x >> n"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   n = 1; y = x >> n;
 #pragma TIMED "n = 1; x >> n"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   n = 2; y = x >> n;
 #pragma TIMED "n = 2; x >> n"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   n = 3; y = x >> n;
 #pragma TIMED "n = 3; x >> n"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   n = 4; y = x >> n;
 #pragma TIMED "n = 4; x >> n"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   n = 7; y = x >> n;
 #pragma TIMED "n = 7; x >> n"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   n = 8; y = x >> n;
 #pragma TIMED "n = 8; x >> n"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   n = 9; y = x >> n;
 #pragma TIMED "n = 9; x >> n"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   n = 12; y = x >> n;
 #pragma TIMED "n = 12; x >> n"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   n = 15; y = x >> n;
 #pragma TIMED "n = 15; x >> n"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   n = 16; y = x >> n;
 #pragma TIMED "n = 16; x >> n"
-  printf("%u ", y);
+  putn(y);
   putz("\n");
 
   putz("x*2^k:\t9322 18644 37288 9040 6784 13568 27136 32768\n\t");
 #pragma TIMED
   y = x * 2;
 #pragma TIMED "x * 2"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   y = x * 4;
 #pragma TIMED "x * 4"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   y = x * 8;
 #pragma TIMED "x * 8"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   y = x * 16;
 #pragma TIMED "x * 16"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   y = x * 128;
 #pragma TIMED "x * 128"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   y = x * 256;
 #pragma TIMED "x * 256"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   y = x * 512;
 #pragma TIMED "x * 512"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   y = x * 32768;
 #pragma TIMED "x * 32768"
-  printf("%u ", y);
+  putn(y);
   putz("\n");
 
   putz("x/2^k:\t18714 9357 4678 2339 292 146 73 1\n\t");
 #pragma TIMED
   y = x / 2;
 #pragma TIMED "x / 2"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   y = x / 4;
 #pragma TIMED "x / 4"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   y = x / 8;
 #pragma TIMED "x / 8"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   y = x / 16;
 #pragma TIMED "x / 16"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   y = x / 128;
 #pragma TIMED "x / 128"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   y = x / 256;
 #pragma TIMED "x / 256"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   y = x / 512;
 #pragma TIMED "x / 512"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   y = x / 32768;
 #pragma TIMED "x / 32768"
-  printf("%u ", y);
+  putn(y);
   putz("\n");
 
-  printf("x%2^k:\t1 1 5 5 53 53 53 4661 0\n\t");
+  putz("x%2^k:\t1 1 5 5 53 53 53 4661 0\n\t");
 #pragma TIMED
   y = x % 2;
 #pragma TIMED "x % 2"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   y = x % 4;
 #pragma TIMED "x % 4"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   y = x % 8;
 #pragma TIMED "x % 8"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   y = x % 16;
 #pragma TIMED "x % 16"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   y = x % 128;
 #pragma TIMED "x % 128"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   y = x % 256;
 #pragma TIMED "x % 256"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   y = x % 512;
 #pragma TIMED "x % 512"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   y = x % 32768;
 #pragma TIMED "x % 32768"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   y = x % 1;
 #pragma TIMED "x % 1"
-  printf("%u ", y);
+  putn(y);
   putz("\n");
 
   putz("const:\t9872 78 62 40\n\t");
 #pragma TIMED
   y = 1234 << 3;
 #pragma TIMED "1234 << 3"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   y = 40000 >> 9;
 #pragma TIMED "40000 >> 9"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   y = 1000 / 16;
 #pragma TIMED "1000 / 16"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   y = 1000 % 64;
 #pragma TIMED "1000 % 64"
-  printf("%u ", y);
+  putn(y);
   putz("\n");
 
   putz("in AX:\t146 37296 9357 54\n\t");
 #pragma TIMED
   y = (x + 1) >> 8;
 #pragma TIMED "(x + 1) >> 8"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   y = (x + 1) << 3;
 #pragma TIMED "(x + 1) << 3"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   y = (x + 1) / 4;
 #pragma TIMED "(x + 1) / 4"
-  printf("%u ", y);
+  putn(y);
 #pragma TIMED
   y = (x + 1) % 512;
 #pragma TIMED "(x + 1) % 512"
-  printf("%u ", y);
+  putn(y);
   putz("\n");
 
   return 0;

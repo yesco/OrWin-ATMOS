@@ -10,7 +10,7 @@
 char *h     = "Hello";
 char spc    = 32;
 char *world = "World";
-char nl     = '\n';
+char NL     = '\n';
 int  a      = 65;
 
 char* mylen = "Guess my length!";
@@ -27,21 +27,21 @@ int my_strlen(char* s) {
 }
 
 int main(void) {
-  printf("%d", a);
+  putn(a);
   putchar(a);
   putchar('>');        // op: O>
   putchar(spc);        // op: LvvE
-  printf("%s", h);     // op: LvvP
+  putz(h);             // op: LvvP
   putchar(32);         // op:"O "
-  printf("%s", world); // op: LvvP
+  putz(world);         // op: LvvP
   putchar('!');        // op: O!
   putchar('\n');       // op: N
+  putchar(NL);         // op: N
  
-  //printf("\"%s\" has %d characters\n", mylen, my_strlen(mylen));
   putchar('"');
-  fputs(mylen, stdout);
-  printf("\" has ");
-  printf("%d ", my_strlen(mylen));
+  putz(mylen);
+  putz("\" has ");
+  putn(my_strlen(mylen));
   putz("characters\n");
   
   return 42;

@@ -30,38 +30,38 @@ int main() {
   putz("swap 2 7:\t70 20 20\n\t\t");
   i = 2; j = 7;
   t = a[i]; a[i] = a[j]; a[j] = t;
-  printf("%u ", a[2]); printf("%u ", a[7]); printf("%u ", t);
+  putn(a[2]); putn(a[7]); putn(t);
   putz("\n");
 
   putz("swap 3 3:\t30 30\n\t\t");
   i = 3; j = 3;
   t = a[i]; a[i] = a[j]; a[j] = t;
-  printf("%u ", a[3]); printf("%u ", t);
+  putn(a[3]); putn(t);
   putz("\n");
 
   putz("swap 0 9:\t90 0 0\n\t\t");
   i = 0; j = 9;
   t = a[i]; a[i] = a[j]; a[j] = t;
-  printf("%u ", a[0]); printf("%u ", a[9]); printf("%u ", t);
+  putn(a[0]); putn(a[9]); putn(t);
   putz("\n");
 
   putz("j + 1:\t\t50 40 40\n\t\t");
   j = 4;
   t = a[j]; a[j] = a[j + 1]; a[j + 1] = t;
-  printf("%u ", a[4]); printf("%u ", a[5]); printf("%u ", t);
+  putn(a[4]); putn(a[5]); putn(t);
   putz("\n");
 
   putz("char:\t\t71 66 66\n\t\t");
   i = 1; j = 6;
   c = b[i]; b[i] = b[j]; b[j] = c;
-  printf("%u ", b[1]); printf("%u ", b[6]); printf("%u ", c);
+  putn(b[1]); putn(b[6]); putn(c);
   putz("\n");
 
   putz("twice:\t\t70 20\n\t\t");
   i = 2; j = 7;
   t = a[i]; a[i] = a[j]; a[j] = t;
   t = a[i]; a[i] = a[j]; a[j] = t;
-  printf("%u ", a[2]); printf("%u ", a[7]);
+  putn(a[2]); putn(a[7]);
   putz("\n");
 
   return 0;

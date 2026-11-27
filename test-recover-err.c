@@ -32,7 +32,7 @@ int main(void) {
     a = 3;
   }
   a = 3;
-  printf("x;}y", a +* 2 + );        // ERR ; } in a string
+  putn(a +* 2 + );        // ERR ; } in a string
   a = 4;
   { a = a + 1 * 2; }                // ERR in a nested block
   a = 5;

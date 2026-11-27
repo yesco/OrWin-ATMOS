@@ -26,25 +26,25 @@ int main() {
   putz("same twice:\t30 30\n\t\t");
   j = 2;
   s = a[j + 1]; t = a[j + 1];
-  printf("%u ", s); printf("%u ", t);
+  putn(s); putn(t);
   putz("\n");
 
   putz("j changed:\t30 40\n\t\t");
   j = 2;
   s = a[j + 1]; j++; t = a[j + 1];
-  printf("%u ", s); printf("%u ", t);
+  putn(s); putn(t);
   putz("\n");
 
   putz("store:\t\t51 51\n\t\t");
   j = 4;
   a[j + 1] = a[j + 1] + 1;
-  printf("%u ", a[5]); printf("%u ", a[j + 1]);
+  putn(a[5]); putn(a[j + 1]);
   putz("\n");
 
   putz("swap j+1:\t70 60 60\n\t\t");
   j = 6;
   t = a[j]; a[j] = a[j + 1]; a[j + 1] = t;
-  printf("%u ", a[6]); printf("%u ", a[7]); printf("%u ", t);
+  putn(a[6]); putn(a[7]); putn(t);
   putz("\n");
 
   putz("if:\t\t90 80\n\t\t");
@@ -52,13 +52,13 @@ int main() {
   if (a[j] < a[j + 1]) {
     t = a[j]; a[j] = a[j + 1]; a[j + 1] = t;
   }
-  printf("%u ", a[8]); printf("%u ", a[9]);
+  putn(a[8]); putn(a[9]);
   putz("\n");
 
   putz("loop:\t\t10 20 30\n\t\t");
   s = 0;
   for (i = 0; i < 3; i++) {
-    printf("%u ", a[i + 1]);
+    putn(a[i + 1]);
   }
   putz("\n");
 

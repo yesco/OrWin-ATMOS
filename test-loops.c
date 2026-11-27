@@ -8,7 +8,6 @@
 // Body starts vary on purpose: the JIT treats a body that starts by reading
 // the loop var (print i, k = p[i]) differently from one that does not
 // (cnt++), and p[i] = v (a store, var as index) is a third case.
-// Only the printf forms the grammar knows: "%d " and "%d\n".
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -17,7 +16,7 @@
 int eq(int v) {
   putchar('=');
   putchar(' ');
-  printf("%d ", v);
+  putn(v);
   return 0;
 }
 
@@ -29,83 +28,83 @@ int main(void) {
 
   // --- for: i <= const (i/n), body starts with the var ------------------
   putchar('A'); putchar(' ');
-  for (i = 7; i <= 12; i++) printf("%d ", i);
+  for (i = 7; i <= 12; i++) putn(i);
   eq(i); putchar('\n');
 
   // i < const (limit - 1 as the i/n limit)
   putchar('B'); putchar(' ');
-  for (i = 7; i < 12; i++) printf("%d ", i);
+  for (i = 7; i < 12; i++) putn(i);
   eq(i); putchar('\n');
 
   // start and limit expressions
   putchar('C'); putchar(' ');
-  for (i = 3 + 4; i < 11 + 1; i++) printf("%d ", i);
+  for (i = 3 + 4; i < 11 + 1; i++) putn(i);
   eq(i); putchar('\n');
 
   // start from a variable, limit a variable
   putchar('D'); putchar(' ');
   j = 5; n = 9;
-  for (i = j; i <= n; i++) printf("%d ", i);
+  for (i = j; i <= n; i++) putn(i);
   eq(i);
-  for (i = j; i < n; i++) printf("%d ", i);
+  for (i = j; i < n; i++) putn(i);
   eq(i); putchar('\n');
 
   // --- zero trips: the body must not run --------------------------------
   putchar('E'); putchar(' ');
   cnt = 0;
   for (i = 9; i <= 5; i++) cnt++;
-  printf("%d ", cnt); eq(i);
+  putn(cnt); eq(i);
   cnt = 0;
   for (i = 5; i < 5; i++) cnt++;
-  printf("%d ", cnt); eq(i);
+  putn(cnt); eq(i);
   cnt = 0; n = 0;
   for (i = 1; i <= n; i++) cnt++;
-  printf("%d ", cnt); eq(i);
+  putn(cnt); eq(i);
   cnt = 0; n = 3;
   for (i = n; i < n; i++) cnt++;
-  printf("%d ", cnt); eq(i); putchar('\n');
+  putn(cnt); eq(i); putchar('\n');
 
   // --- limits around a page: 255 256 511, body not reading the var -------
   putchar('F'); putchar(' ');
   cnt = 0;
   for (i = 0; i <= 255; i++) cnt++;
-  printf("%d ", cnt); eq(i);
+  putn(cnt); eq(i);
   cnt = 0;
   for (i = 0; i <= 256; i++) cnt++;
-  printf("%d ", cnt); eq(i);
+  putn(cnt); eq(i);
   cnt = 0;
   for (i = 0; i < 256; i++) cnt++;
-  printf("%d ", cnt); eq(i);
+  putn(cnt); eq(i);
   cnt = 0;
   for (i = 250; i <= 511; i++) cnt++;
-  printf("%d ", cnt); eq(i); putchar('\n');
+  putn(cnt); eq(i); putchar('\n');
 
   // --- the same, body starts with k = p[i] (read, var as index) ----------
   for (i = 0; i <= 600; i++) p[i] = 1;
   putchar('G'); putchar(' ');
   sum = 0;
   for (i = 0; i <= 255; i++) { k = p[i]; sum = sum + k; }
-  printf("%d ", sum); eq(i);
+  putn(sum); eq(i);
   sum = 0;
   for (i = 0; i <= 511; i++) { k = p[i]; sum = sum + k; }
-  printf("%d ", sum); eq(i);
+  putn(sum); eq(i);
   sum = 0;
   for (i = 250; i <= 260; i++) { k = p[i]; sum = sum + k; }
-  printf("%d ", sum); eq(i); putchar('\n');
+  putn(sum); eq(i); putchar('\n');
 
   // --- body starts with p[i] = v (store, var as index) -------------------
   putchar('H'); putchar(' ');
   for (i = 10; i <= 300; i++) p[i] = 2;
   sum = 0;
   for (i = 0; i <= 310; i++) { k = p[i]; sum = sum + k; }
-  printf("%d ", sum); eq(i); putchar('\n');
+  putn(sum); eq(i); putchar('\n');
 
   // --- memset form: for (i = 0; i < n; i++) p[i] = v ----------------------
   putchar('I'); putchar(' ');
   n = 100;
   for (i = 0; i < n; i++) p[i] = 3;
-  k = p[99]; printf("%d ", k);
-  k = p[100]; printf("%d ", k);
+  k = p[99]; putn(k);
+  k = p[100]; putn(k);
   eq(i); putchar('\n');
 
   // --- nested ------------------------------------------------------------
@@ -114,7 +113,7 @@ int main(void) {
   for (i = 1; i <= 4; i++) {
     for (j = i; j <= 5; j++) { cnt++; sum = sum + j; }
   }
-  printf("%d ", cnt); printf("%d ", sum); eq(i); printf("%d\n", j);
+  putn(cnt); putn(sum); eq(i); putn(j);
 
   // --- generic for, step 2: the increment runs AFTER the body -------------
   // TODO grammar: for (k = 0; k < 20; k = k + 2) is not parsed (the
@@ -124,22 +123,22 @@ int main(void) {
   // putchar('K'); putchar(' ');
   // last = 99;
   // for (k = 0; k < 20; k = k + 2) { last = k; }
-  // printf("%d ", last); eq(k);
+  // putn(last); eq(k);
   // cnt = 0;
   // for (k = 0; k < 20; k = k + 2) cnt++;
-  // printf("%d ", cnt); eq(k); putchar('\n');
+  // putn(cnt); eq(k); putchar('\n');
 
   // --- for with += s (U) ---------------------------------------------------
   putchar('L'); putchar(' ');
   s = 3; last = 99;
   for (k = 1; k <= 10; k += s) { last = k; }
-  printf("%d ", last); eq(k); putchar('\n');
+  putn(last); eq(k); putchar('\n');
 
   // --- generic for with i++ / i-- and a general condition ------------------
   putchar('M'); putchar(' ');
-  for (i = 0; i * 2 < 9; i++) printf("%d ", i);
+  for (i = 0; i * 2 < 9; i++) putn(i);
   eq(i);
-  for (i = 5; i != 1; i--) printf("%d ", i);
+  for (i = 5; i != 1; i--) putn(i);
   eq(i); putchar('\n');
 
   // --- nested generic for (the old embryo's G) -------------------------------
@@ -149,75 +148,75 @@ int main(void) {
   // for (i = 0; i < 6; i = i + 2) {
   // for (j = 0; j < 6; j = j + 3) cnt++;
   // }
-  // printf("%d ", cnt); eq(i); printf("%d\n", j);
+  // putn(cnt); eq(i); putn(j);
 
   // --- down loops (C semantics) ----------------------------------------------
   //   i--   and i-- > 0 : body sees N-1 .. 0, i ends at -1
   //   --i               : body sees N-1 .. 1, i ends at 0
   //   i; i--  and i > 0; i-- : body sees N .. 1, i ends at 0
-  //   (the VM prints unsigned, so "= i + 1": -1 shows as 0, 0 as 1)
+  //   (the VM prints unsigned, so "= i + 1": -1 shows as 0, 0 as 1) ???
   putchar('O'); putchar(' ');
-  for (i = 3; i--; ) printf("%d ", i);
+  for (i = 3; i--; ) putn(i);
   eq(i + 1);
-  for (i = 3; i-- > 0; ) printf("%d ", i);
+  for (i = 3; i-- > 0; ) putn(i);
   eq(i + 1); putchar('\n');
   putchar('P'); putchar(' ');
-  for (i = 3; --i; ) printf("%d ", i);
+  for (i = 3; --i; ) putn(i);
   eq(i + 1);
-  for (i = 3; i; i--) printf("%d ", i);
+  for (i = 3; i; i--) putn(i);
   eq(i + 1);
-  for (i = 3; i > 0; i--) printf("%d ", i);
+  for (i = 3; i > 0; i--) putn(i);
   eq(i + 1); putchar('\n');
   putchar('Q'); putchar(' ');
   cnt = 0;
   for (i = 0; i; i--) cnt++;
-  printf("%d ", cnt); eq(i + 1);
+  putn(cnt); eq(i + 1);
   cnt = 0;
   for (i = 0; i > 0; i--) cnt++;
-  printf("%d ", cnt); eq(i + 1); putchar('\n');
+  putn(cnt); eq(i + 1); putchar('\n');
 
   // --- while -----------------------------------------------------------------
   //   while (i <= const) / (i <= var): 'i' as the test, 'B' back
   putchar('R'); putchar(' ');
   i = 3;
-  while (i <= 7) { printf("%d ", i); i++; }
+  while (i <= 7) { putn(i); i++; }
   eq(i);
   i = 9;
-  while (i <= 7) { printf("%d ", i); i++; }
+  while (i <= 7) { putn(i); i++; }
   eq(i);
   i = 2; n = 5;
-  while (i <= n) { printf("%d ", i); i++; }
+  while (i <= n) { putn(i); i++; }
   eq(i); putchar('\n');
 
   //   general condition
   putchar('S'); putchar(' ');
   i = 0;
-  while (i < 5) { printf("%d ", i); i++; }
+  while (i < 5) { putn(i); i++; }
   eq(i);
   i = 10;
-  while (i != 0) { i = i - 3; if (i < 3) i = 0; printf("%d ", i); }
+  while (i != 0) { i = i - 3; if (i < 3) i = 0; putn(i); }
   eq(i); putchar('\n');
 
   //   stride: body ends with k += s (the JIT's Y/A stride loop)
   putchar('T'); putchar(' ');
   s = 7; k = 3; cnt = 0; last = 99;
   while (k <= 100) { p[k] = 5; last = k; cnt++; k += s; }
-  printf("%d ", cnt); printf("%d ", last); eq(k);
+  putn(cnt); putn(last); eq(k);
   s = 7; k = 3; cnt = 0;
   while (k <= 2) { cnt++; k += s; }
-  printf("%d ", cnt); eq(k);
+  putn(cnt); eq(k);
   s = 100; k = 0; cnt = 0;
   while (k <= 600) { p[k] = 6; cnt++; k += s; }
-  printf("%d ", cnt); eq(k);
-  k = p[3]; printf("%d ", k);
-  k = p[10]; printf("%d ", k);
-  k = p[600]; printf("%d\n", k);
+  putn(cnt); eq(k);
+  k = p[3]; putn(k);
+  k = p[10]; putn(k);
+  k = p[600]; putn(k);
 
   //   stride, body reads p[k] first
   putchar('U'); putchar(' ');
   s = 50; k = 0; sum = 0;
   while (k <= 300) { j = p[k]; sum = sum + j; k += s; }
-  printf("%d ", sum); eq(k); putchar('\n');
+  putn(sum); eq(k); putchar('\n');
 
   return 42;
 }

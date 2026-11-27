@@ -1,18 +1,21 @@
 #include <stdio.h>
 
-//#ifndef __CC65__
-  // other compilers remove if not needed.
-#define NEED_PUTN
-//#endif
-
-#ifdef NEED_PUTN
-
 #ifdef OSCAR64
-  #define putz putc
-#else
+ // TODO: not sure why cannot do this?
+ //#define putz puts
+
+ void putz(const char* s) {  while(*s) putchar(*s++); }
+#endif
+
+#ifdef __CC65__
 void putz(const char* s) {
   while(*s) putchar(*s++);
 }
+//  #define putz puts
+//  extern FILE* stdout;
+
+//  extern fputs(const char*, FILE*);
+//  #define putz(x) fputs((x),stdout)
 #endif
 
 void putnraw(unsigned int u) {
@@ -29,5 +32,3 @@ void putn(unsigned int u) { putnraw(u); putchar(' '); }
 void nl() { putchar('\n'); }
 
 void putnl(unsigned int u) { putnraw(u); nl(); }
-
-#endif

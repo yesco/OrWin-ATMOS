@@ -4,7 +4,6 @@
 // a == const, a == var, a == call (into a temp), with and without
 // else, values that differ only in the hi byte, char vars, and a small
 // decoder (as test-dispatch-switch-ifif.c, on defined data).
-// Only the printf forms the grammar knows: "%d " and "%d\n".
 
 #include <stdio.h>
 
@@ -40,41 +39,41 @@ int main(void) {
   // --- a == const, a == var ----------------------------------------------
   putchar('A'); putchar(' ');
   a = 5; b = 5; n = 7;
-  if (a == 5) printf("%d ", 1);
-  if (a == 6) printf("%d ", 2);
-  if (a == b) printf("%d ", 3);
-  if (a == n) printf("%d ", 4);
-  if (n == 7) printf("%d ", 5);
+  if (a == 5) putn(1);
+  if (a == 6) putn(2);
+  if (a == b) putn(3);
+  if (a == n) putn(4);
+  if (n == 7) putn(5);
   putchar('\n');
 
   // --- with else ------------------------------------------------------------
   putchar('B'); putchar(' ');
-  if (a == 5) printf("%d ", 1); else printf("%d ", 2);
-  if (a == 9) printf("%d ", 3); else printf("%d ", 4);
-  if (a == b) printf("%d ", 5); else printf("%d ", 6);
-  if (a == n) printf("%d ", 7); else printf("%d ", 8);
+  if (a == 5) putn(1); else putn(2);
+  if (a == 9) putn(3); else putn(4);
+  if (a == b) putn(5); else putn(6);
+  if (a == n) putn(7); else putn(8);
   putchar('\n');
 
   // --- only the hi byte differs -----------------------------------------------
   putchar('C'); putchar(' ');
   a = 0x1234; b = 0x0034; n = 0x1234;
-  if (a == b) printf("%d ", 1); else printf("%d ", 2);
-  if (a == n) printf("%d ", 3); else printf("%d ", 4);
-  if (a == 0x0034) printf("%d ", 5); else printf("%d ", 6);
-  if (a == 0x1234) printf("%d ", 7); else printf("%d ", 8);
+  if (a == b) putn(1); else putn(2);
+  if (a == n) putn(3); else putn(4);
+  if (a == 0x0034) putn(5); else putn(6);
+  if (a == 0x1234) putn(7); else putn(8);
   a = 0x0100;
-  if (a == 0) printf("%d ", 9); else printf("%d ", 10);
+  if (a == 0) putn(9); else putn(10);
   a = 0;
-  if (a == 0) printf("%d ", 11); else printf("%d ", 12);
+  if (a == 0) putn(11); else putn(12);
   putchar('\n');
 
   // --- a == call (R: into a temp) ----------------------------------------
   putchar('D'); putchar(' ');
   a = 12; b = 6; n = 3;
-  if (a == twice(b)) printf("%d ", 1); else printf("%d ", 2);
-  if (a == twice(n)) printf("%d ", 3); else printf("%d ", 4);
-  if (a == twice(6)) printf("%d ", 5);
-  if (b == twice(n)) printf("%d ", 6);
+  if (a == twice(b)) putn(1); else putn(2);
+  if (a == twice(n)) putn(3); else putn(4);
+  if (a == twice(6)) putn(5);
+  if (b == twice(n)) putn(6);
   putchar('\n');
 
   // --- char var, in a loop, nested ------------------------------------------
@@ -86,7 +85,7 @@ int main(void) {
     if (i == 7) s = s + 100;
     if (c == 44) { if (i == 300) s = s + 1000; else s = s + 10; }
   }
-  printf("%d ", s);
+  putn(s);
   putchar('\n');
 
   // --- a decoder on defined data --------------------------------------------
@@ -97,16 +96,16 @@ int main(void) {
     decode(x);
     n = len * 10;
     s = s + n + mode;
-    printf("%d ", mode);
+    putn(mode);
   }
-  printf("%d\n", s);
+  putn(s);
 
   // --- = 1 (Y): global init, int, char ---------------------------------------
   putchar('G'); putchar(' ');
-  printf("%d ", flag);
-  a = 7; a = 1; printf("%d ", a);
-  c = 9; c = 1; printf("%d ", c);
-  if (c == 1) printf("%d ", 2);
+  putn(flag);
+  a = 7; a = 1; putn(a);
+  c = 9; c = 1; putn(c);
+  if (c == 1) putn(2);
   putchar('\n');
 
   return 0;

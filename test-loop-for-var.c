@@ -25,7 +25,7 @@ int main() {
   putz("for-var:\t23800\n\t\t");
   n = N;
   for (i = 0; i < n; i++) s = s + i;
-  printf("%u\n", s & 32767);
+  putn(s & 32767);
 
   return 0;
 }

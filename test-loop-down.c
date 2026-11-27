@@ -24,7 +24,7 @@ int main() {
 
   putz("down:\t1032\n\t\t");
   for (i = N; i; i--) s = s + i;
-  printf("%u\n", s & 32767);
+  putn(s & 32767);
 
   return 0;
 }

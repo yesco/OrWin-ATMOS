@@ -26,7 +26,7 @@ int main() {
   putz("while-count:\t10000\n\t\t");
   i = 0;
   while (i < N) { n++; i++; }
-  printf("%u\n", n);
+  putn(n);
 
   return 0;
 }

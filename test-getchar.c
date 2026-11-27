@@ -1,4 +1,4 @@
-// test-getchar.c - a silly typewriter: getchar, putchar, printf
+// test-getchar.c - a silly typewriter: getchar, putchar
 //
 // Each letter you type prints a word starting with it (and a space), so
 // typing "hi" gives "hat ice ". Delete / backspace rubs out a random
@@ -86,7 +86,7 @@ int main(void) {
 
     // just print code
     putchar('[');
-    printf("%d", c);
+    putn(c);
     putz("] ");
   }
 

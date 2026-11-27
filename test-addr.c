@@ -1,7 +1,6 @@
 // test-addr.c - &x: the address of a variable (the ` op), and &arr
 //
 // Plain C: gcc test-addr.c && ./a.out gives the reference output.
-// Only the printf forms the grammar knows: "%d " and "%d\n".
 
 #include <stdio.h>
 
@@ -28,19 +27,19 @@ int main(void) {
   x = 5;
   p = &x;
   *p = 7;
-  printf("%d ", x);
-  printf("%d ", *p);
+  putn(x);
+  putn(*p);
   putchar('\n');
 
   // --- a pointer as an argument: set, swap ----------------------------------
   putchar('B'); putchar(' ');
   set(&y, 42);
-  printf("%d ", y);
+  putn(y);
   swap(&x, &y);
-  printf("%d ", x);
-  printf("%d ", y);
+  putn(x);
+  putn(y);
   set(&g, 9);
-  printf("%d ", g);
+  putn(g);
   putchar('\n');
 
   // --- the value changes behind the variable's back -------------------------
@@ -48,10 +47,10 @@ int main(void) {
   putchar('C'); putchar(' ');
   p = &x;
   y = x + 1;
-  printf("%d ", y);
+  putn(y);
   *p = 100;
   n = x + 1;
-  printf("%d ", n);
+  putn(n);
   putchar('\n');
 
   // --- char: through a char pointer -----------------------------------------
@@ -81,19 +80,19 @@ int main(void) {
     arr[0] = 10; arr[1] = 20; arr[2] = 30; arr[3] = 40; arr[4] = 50;
     i = 1; j = 3;
     swap(&arr[i], &arr[j]);                // raxiss's pattern
-    printf("%d ", arr[0]);
-    printf("%d ", arr[1]);
-    printf("%d ", arr[2]);
-    printf("%d ", arr[3]);
-    printf("%d ", arr[4]);
+    putn(arr[0]);
+    putn(arr[1]);
+    putn(arr[2]);
+    putn(arr[3]);
+    putn(arr[4]);
 
     wp = arr;
     wq = &arr[2];
-    printf("%d ", *wq);
+    putn(*wq);
     wq = wp + i;                           // word* + E: scaled
-    printf("%d ", *wq);
+    putn(*wq);
     wq = wq - 1;                           // word* - E: scaled
-    printf("%d ", *wq);
+    putn(*wq);
   }
   putchar('\n');
 

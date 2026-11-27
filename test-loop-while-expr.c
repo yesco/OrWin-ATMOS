@@ -25,7 +25,7 @@ int main() {
   putz("while-expr:\t23800\n\t\t");
   i = 0;
   while (i + 1 <= N) { s = s + i; i++; }
-  printf("%u\n", s & 32767);
+  putn(s & 32767);
 
   return 0;
 }
