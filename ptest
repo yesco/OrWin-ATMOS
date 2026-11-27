@@ -415,7 +415,9 @@ def test(t):
         run(["./ivm-jit.x", "-z", "-tatmos", "-o" + t + ".tap", t + ".ivm"],
             t + ".ztap.log")
         tapsize = fsize(t + ".tap")
-        res.append(("ztap", None, tapsize, t + ".tap", None, t + ".ztap.log"))
+        # cycles=0 so results() does not treat it as FAILED; size is what matters
+        res.append(("ztap", 0 if tapsize else None, tapsize, t + ".tap",
+                    [] if tapsize else None, t + ".ztap.log"))
 
         # hjit: the same JIT run in cpu6502.c on the host
         step(t, "hjit")
@@ -554,7 +556,6 @@ def results(t, res, have_ivm):
                 ("{:,}".format(cyc).rjust(w) if cyc is not None else "-".rjust(w),
                  size if size is not None else "?",
                  name, n, "  " + st if st else "", bbc))
-            bbc = ""
         if st:
             say("= %s %s" % (" " * w, repro(name, t)))
     say()
