@@ -42,7 +42,7 @@ int main(void) {
   fputs(mylen, stdout);
   printf("\" has ");
   printf("%d ", my_strlen(mylen));
-  printf("characters\n");
+  putz("characters\n");
   
   return 42;
 }

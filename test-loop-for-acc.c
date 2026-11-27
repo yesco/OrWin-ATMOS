@@ -27,7 +27,7 @@ int main() {
 
   s = 0; n = 0;
 
-  printf("for-acc:\t23800\n\t\t");
+  putz("for-acc:\t23800\n\t\t");
   for (i = 0; i < N; i++) s = i + s;
   printf("%u\n", s & 32767);
 

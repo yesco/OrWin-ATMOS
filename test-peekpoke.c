@@ -23,7 +23,7 @@ int main() {
   b = malloc(8);
   a = b;
 
-  printf("poke peek:\tABC\n\t\t");
+  putz("poke peek:\tABC\n\t\t");
   poke(a, 65);
   poke(a + 1, 66);
   poke(a + 2, 67);
@@ -34,11 +34,11 @@ int main() {
   _putc(peek(a + 2));
   _puts("\n");
 
-  printf("_puts MEMPTR:\tABC|\n\t\t");
+  putz("_puts MEMPTR:\tABC|\n\t\t");
   _puts(MEMPTR(a));
   _puts("|\n");
 
-  printf("doke deek:\t4660 52 18\n\t\t");
+  putz("doke deek:\t4660 52 18\n\t\t");
   doke(a + 4, 4660);
   w = deek(a + 4);
   printf("%u ", w);

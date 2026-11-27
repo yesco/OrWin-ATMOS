@@ -2,6 +2,8 @@
 
 # MeteoriC-65 (parse.c c.bnf): next, after the manual (MeteoriC-man.md)
 
+-  &a[i]  == a+i not right for word*
+
 - What the samples need next:
 
   ┌──────────────────────────────────┬─────────┐
@@ -11,14 +13,13 @@
   ├──────────────────────────────────┼─────────┤
   │ prototypes                       │ 3       │
   ├──────────────────────────────────┼─────────┤
-  │ &a[i]                            │ 3       │
-  ├──────────────────────────────────┼─────────┤
   │ array size expressions ([N + 1]) │ 3       │
   └──────────────────────────────────┴─────────┘
 
   The rest come up in one or two samples each, and are listed in
   raxis-compiler-test.txt.
   
+
 - Signed compares: 14-insertion-sort now compiles. On the VMs it reads
   array[65535], because while (j >= 0 && …) is always true when compares are
   unsigned. Making int compares signed (unsigned staying unsigned) is a
@@ -29,15 +30,18 @@
 TODO: make compares with <0 <=0 and >0 >=0 be "signed" give a warning
       with our \"Warning: directive, assuming SIGNED compare w 0."
 
+
 - for (int j = 0; j < 3; j++) a++;              // ERR no declaration in for
   well, why not? we do "recognize it for memset" (not expect i set after)
 
 TODO: just wrap all for  in \{ and \} - no harm?
 
+
 - I'm assuming that a[i]=a[i]+1; becomes quite efficient JIT code? Adress
   calc only once and reused. Particular for small fixed char arrays one
   can use INC $addr,X
   
+
 - Is our ./parse generating 2--8 for local params load, any speed benefit
   (not need if it's already slot 0-31 so do that first and only change Lii)
   
@@ -56,7 +60,6 @@ TODO: just wrap all for  in \{ and \} - no harm?
   otherwise call a library routine
 
 - assignement expressions
-- ++n ... as expression
 
 - #define META (ESC+'A'-1)    // can we evaluate/reduce constant expr?
 - #define CTRL -64            // negative unare numbers and vars 

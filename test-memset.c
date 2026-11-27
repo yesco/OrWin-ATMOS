@@ -41,17 +41,17 @@ int fill(int len) {
 
 int chk(int len, int v) {
   a = b[3];
-  if (a != 170) { printf("underrun "); err++; }
+  if (a != 170) { putz("underrun "); err++; }
   if (len) {
     a = p[0];
-    if (a != v) { printf("first "); err++; }
+    if (a != v) { putz("first "); err++; }
     k = len - 1;
     a = p[k];
-    if (a != v) { printf("last "); err++; }
+    if (a != v) { putz("last "); err++; }
   }
   k = len + 4;
   a = b[k];
-  if (a != 170) { printf("overrun "); err++; }
+  if (a != 170) { putz("overrun "); err++; }
   printf("%d\n", len);
   return err;
 }
@@ -134,7 +134,7 @@ memset(p, 1, 1);
   a = c[7];
   printf("%d\n", a);
 
-  printf("errors: ");
+  putz("errors: ");
   printf("%d\n", err);
   return err;
 }

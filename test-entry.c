@@ -15,10 +15,10 @@ int main(void) {
   int x;
 
   x = 7 * 4 + 35;
-  printf("first:\t\t63\n\t\t");
+  putz("first:\t\t63\n\t\t");
   printf("%d\n", x);
 
-  printf("const exprs:\t63 28 21 1 3 4 7 28 24464\n\t\t");
+  putz("const exprs:\t63 28 21 1 3 4 7 28 24464\n\t\t");
   x = 35 + (7 * 4); printf("%d ", x);
   x = 7 * 4; printf("%d ", x);
   x = 3 * 7; printf("%d ", x);

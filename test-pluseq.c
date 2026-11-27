@@ -27,32 +27,32 @@ int main() {
   a = malloc(20);
   a[0] = 10; a[1] = 11; a[2] = 12; a[3] = 13; a[4] = 14;
 
-  printf("int += 2:\t0 7 9 27\n\t\t");
+  putz("int += 2:\t0 7 9 27\n\t\t");
   x = 65534;	x+= 2;		printf("%u ", x);
   x = 5;	x= x + 2; 	printf("%u ", x);
   x = 7; 	x = 2 + x; 	printf("%u ", x);
   x = 7;	x+= 20;		printf("%u ", x);
-  printf("\n");
+  putz("\n");
 
-  printf("int* +=:\t11 12 13 11\n\t\t");
+  putz("int* +=:\t11 12 13 11\n\t\t");
   p = a;	p+= 1;	 	printf("%u ", *p);
   p = a;	p+= 2;	 	printf("%u ", *p);
   p = a; n = 3;	p += n;		printf("%u ", *p);
   p = a;	p = p + 1;	printf("%u ", *p);
-  printf("\n");
+  putz("\n");
 
-  printf("char, int -=:\t1 255 65534 40\n\t\t");
+  putz("char, int -=:\t1 255 65534 40\n\t\t");
   c = 255;	c+= 2;	 	printf("%u ", c);
   c = 1;	c-= 2;	 	printf("%u ", c);
   x = 5;	x-= 7;	 	printf("%u ", x);
   x = 50; n = 8;	x -= n + 2;	printf("%u ", x);
-  printf("\n");
+  putz("\n");
 
-  printf("int* -= += E:\t12 13 13\n\t\t");
+  putz("int* -= += E:\t12 13 13\n\t\t");
   p = a; p+= 4;	p -= 2;		printf("%u ", *p);
   p = a; n = 1;	p += n + 2;	printf("%u ", *p);
   p = a; p+= 4;	p -= n;		printf("%u ", *p);
-  printf("\n");
+  putz("\n");
 
   return 0;
 }

@@ -26,7 +26,7 @@ int main() {
 
   s = 0; n = 0;
 
-  printf("while:\t23800\n\t\t");
+  putz("while:\t23800\n\t\t");
   i = 0;
   while (i < N) { s = s + i; i++; }
   printf("%u\n", s & 32767);

@@ -10,15 +10,15 @@ int main() {
     printf("%u ", c);
 
     //  simple compares
-    if (c <  42) printf("\t<  42\n");
-    if (c <= 42) printf("\t<= 42\n");
-    if (c == 42) printf("\t== 42\n");
-    if (c >= 42) printf("\t>= 42\n");
-    if (c >  42) printf("\t>  42\n");
+    if (c <  42) putz("\t<  42\n");
+    if (c <= 42) putz("\t<= 42\n");
+    if (c == 42) putz("\t== 42\n");
+    if (c >= 42) putz("\t>= 42\n");
+    if (c >  42) putz("\t>  42\n");
 
     // combined compares
-    //if (c >= 17 && c <= 42) printf("\t17..42\n");
-    if (c >= 17) if (c <= 42) printf("\t17..42\n");
+    //if (c >= 17 && c <= 42) putz("\t17..42\n");
+    if (c >= 17) if (c <= 42) putz("\t17..42\n");
 
   }
 }

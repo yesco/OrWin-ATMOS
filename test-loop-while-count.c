@@ -23,7 +23,7 @@ int main() {
 
   s = 0; n = 0;
 
-  printf("while-count:\t10000\n\t\t");
+  putz("while-count:\t10000\n\t\t");
   i = 0;
   while (i < N) { n++; i++; }
   printf("%u\n", n);

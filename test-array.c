@@ -67,64 +67,64 @@ int main() {
   char *p;
   int *q;
 
-  printf("char idx:\t12 27\n\t\t");
+  putz("char idx:\t12 27\n\t\t");
   for (i = 0; i < 10; i++) a[i] = i * 3;
-  n = a[4]; printf("%u ", n);
-  n = a[9]; printf("%u\n", n);
+  n = a[4]; putn(n);
+  n = a[9]; putnl(n);
 
-  printf("word idx:\t3 10 7\n\t\t");
+  putz("word idx:\t3 10 7\n\t\t");
   k = 300;  big[k] = 3;
   k = 1000; big[k] = 10;
   k = 2047; big[k] = 7;
-  k = 300;  n = big[k]; printf("%u ", n);
-  k = 1000; n = big[k]; printf("%u ", n);
-  k = 2047; n = big[k]; printf("%u\n", n);
+  k = 300;  n = big[k]; putn(n);
+  k = 1000; n = big[k]; putn(n);
+  k = 2047; n = big[k]; putnl(n);
 
-  printf("zeroed:\t\t0 0\n\t\t");
-  n = big[500]; printf("%u ", n);
-  n = w[3]; printf("%u\n", n);
+  putz("zeroed:\t\t0 0\n\t\t");
+  n = big[500]; putn(n);
+  n = w[3]; putnl(n);
 
-  printf("int array:\t700 0\n\t\t");
+  putz("int array:\t700 0\n\t\t");
   for (k = 0; k < 10; k++) w[k] = k * 100;
-  n = w[7]; printf("%u ", n);
-  n = w[0]; printf("%u\n", n);
+  n = w[7]; putn(n);
+  n = w[0]; putnl(n);
 
-  printf("int const:\t7 301 302\n\t\t");
+  putz("int const:\t7 301 302\n\t\t");
   w[2] = 7;
   k = 301;
   w[4] = k;
   w[6] = k + 1;
-  n = w[2]; printf("%u ", n);
-  n = w[4]; printf("%u ", n);
-  n = w[6]; printf("%u\n", n);
+  n = w[2]; putn(n);
+  n = w[4]; putn(n);
+  n = w[6]; putnl(n);
 
-  printf("int* const:\t5 6 8 9 8 9\n\t\t");
+  putz("int* const:\t5 6 8 9 8 9\n\t\t");
   q = iw;
   q[1] = 5;
   k = 6;
   q[2] = k;
   q[127] = k + 2;
   q[128] = k + 3;
-  n = q[1]; printf("%u ", n);
-  n = q[2]; printf("%u ", n);
-  n = q[127]; printf("%u ", n);
-  n = q[128]; printf("%u ", n);
-  n = iw[127]; printf("%u ", n);
-  n = iw[128]; printf("%u\n", n);
+  n = q[1]; putn(n);
+  n = q[2]; putn(n);
+  n = q[127]; putn(n);
+  n = q[128]; putn(n);
+  n = iw[127]; putn(n);
+  n = iw[128]; putnl(n);
 
-  printf("const idx:\t5\n\t\t");
+  putz("const idx:\t5\n\t\t");
   a[2] = 5;
-  n = a[2]; printf("%u\n", n);
+  n = a[2]; putnl(n);
 
-  printf("sizeof:\t\t20 20\n\t\t");
-  n = sizeof(a); printf("%u ", n);
-  n = sizeof(w); printf("%u\n", n);
+  putz("sizeof:\t\t20 20\n\t\t");
+  n = sizeof(a); putn(n);
+  n = sizeof(w); putnl(n);
 
-  printf("pointer:\t12\n\t\t");
+  putz("pointer:\t12\n\t\t");
   p = a;
-  n = p[4]; printf("%u\n", n);
+  n = p[4]; putnl(n);
 
-  printf("local:\t\t9\n\t\t");
-  n = loc(); printf("%u\n", n);
+  putz("local:\t\t9\n\t\t");
+  n = loc(); putnl(n);
   return 0;
 }

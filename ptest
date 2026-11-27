@@ -39,8 +39,8 @@
 #          mem[] in zero page               size: .jit.sim
 #   hjit   ivm-jit.x   the same JIT on the host cpu sim (cpu6502.c):
 #          mem[] at $0300, not zp; lib calls 0 cycles  size: emitted code
-#   cc65   cl65 -Cl -Os                     size: .sim
-#   oscar  oscar64 -Os -ep                  size: .prg
+#   cc65   cl65 -Dputz=puts -Iptest-include -Cl -Os putn.c  size: .sim
+#   oscar  oscar64 -Iptest-include -Os -ep putn.c ...           size: .prg
 #
 # A test-NAME-asm.asm (6502 asm, ivm-lib's routines on their own, no
 # compiler) has one variant:
@@ -58,6 +58,10 @@
 
 import collections, difflib, glob, os, pty, re, shlex, shutil, signal
 import subprocess, sys, threading
+
+inc = os.path.abspath("ptest-include")
+# then
+# cl65 -I{inc} ...
 
 TIMEOUT = 90    # a hang, not a slow test: test-dispatch-loop on ivm (cc65
                 # C VM under sim65, 6.9B cycles) genuinely takes ~48s
@@ -217,8 +221,8 @@ def repro(name, t):
         "fix":   "./ivm-fix {t}",
         "zpjit": "./ivm-jit.x -z -tsim6502 -o{t}.jit.sim {t}.ivm && sim65 -c {t}.jit.sim",
         "hjit":  "./ivm-jit.x {t}.ivm",
-        "cc65":  "cl65 -Dputz=printf -t sim6502 -Cl -Os -o {t}.sim {t}.c && sim65 -c {t}.sim",
-        "oscar": "./oscar -Dputz=printf -Os -ep {t}.c",
+        "cc65":  "cl65 -Dxputz=puts -Iptest-include -t sim6502 -Cl -Os -o {t}.sim {t}.c putn.c && sim65 -c {t}.sim",
+        "oscar": "./oscar -O3 -Dputz=puts -Os -ep putn.c {t}.c",
         "lib":   "cl65 -t sim6502 -o {t}.sim {t}.asm ivm-lib.asm && sim65 -c {t}.sim",
     }[name].format(t=t)
 
@@ -398,7 +402,7 @@ def test(t):
 
     step(t, "cc65")
     rm(t + ".sim")
-    s = run(["cl65", "-Dputz=printf", "-t", "sim6502", "-Cl", "-Os", "-o", t + ".sim", t + ".c"] + io,
+    s = run(["cl65", f"-I{inc}", "-Dxputz=puts", "-t", "sim6502", "-Cl", "-Os", "-o", t + ".sim", t + ".c", "putn.c"] + io,
             t + ".cc65-build.log")
     if os.path.exists(t + ".sim"):
         s = run(["sim65", "-c", t + ".sim"], t + ".cc65.log")
@@ -411,7 +415,7 @@ def test(t):
 
     step(t, "oscar")
     rm(t + ".prg")
-    s = run([OSCAR64, "-Dputz=printf", "-Os", "-ep", t + ".c"] + io, t + ".oscar.log")
+    s = run([OSCAR64, f"-i={inc}", "-Dxputz=puts", "-Os", "-ep", "putn.c", t + ".c", "-o=" + t + ".prg"] + io, t + ".oscar.log")
     if os.path.exists(t + ".asm"):              # its listing (not ours)
         os.replace(t + ".asm", t + ".oscar.s")
     res.append(("oscar", last_int(r"^Total Cycles (\d+)", s),
@@ -468,7 +472,7 @@ def results(t, res, have_ivm):
         o = norm(o)
         if cyc is None or o is None:
             status[name] = "FAILED"
-            say("%%Error: %s FAILED on %s (see %s)" % (name, n, log))
+            say("%%Error: %s FAILED on %s (see %s )" % (name, n, log))
             say("  rerun: " + repro(name, t))
             continue
         say("%8s bytes %s" % (size if size is not None else "?", f))

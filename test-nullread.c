@@ -11,7 +11,7 @@
 int main() {
   int *p;
 
-  printf("null:\t0\n\t\t");
+  putz("null:\t0\n\t\t");
   p = 0;
   printf("%u\n", *p);
 

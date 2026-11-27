@@ -26,39 +26,39 @@ int rnd5() {
 }
 
 void word(int c) {
-  if (c == 'a') printf("apple ");
-  if (c == 'b') printf("banana ");
-  if (c == 'c') printf("cat ");
-  if (c == 'd') printf("dog ");
-  if (c == 'e') printf("egg ");
-  if (c == 'f') printf("fish ");
-  if (c == 'g') printf("goat ");
-  if (c == 'h') printf("hat ");
-  if (c == 'i') printf("ice ");
-  if (c == 'j') printf("jam ");
-  if (c == 'k') printf("kite ");
-  if (c == 'l') printf("lemon ");
-  if (c == 'm') printf("moon ");
-  if (c == 'n') printf("nose ");
-  if (c == 'o') printf("owl ");
-  if (c == 'p') printf("pig ");
-  if (c == 'q') printf("queen ");
-  if (c == 'r') printf("rat ");
-  if (c == 's') printf("sun ");
-  if (c == 't') printf("tree ");
-  if (c == 'u') printf("umbrella ");
-  if (c == 'v') printf("van ");
-  if (c == 'w') printf("wolf ");
-  if (c == 'x') printf("xray ");
-  if (c == 'y') printf("yak ");
-  if (c == 'z') printf("zebra ");
+  if (c == 'a') putz("apple ");
+  if (c == 'b') putz("banana ");
+  if (c == 'c') putz("cat ");
+  if (c == 'd') putz("dog ");
+  if (c == 'e') putz("egg ");
+  if (c == 'f') putz("fish ");
+  if (c == 'g') putz("goat ");
+  if (c == 'h') putz("hat ");
+  if (c == 'i') putz("ice ");
+  if (c == 'j') putz("jam ");
+  if (c == 'k') putz("kite ");
+  if (c == 'l') putz("lemon ");
+  if (c == 'm') putz("moon ");
+  if (c == 'n') putz("nose ");
+  if (c == 'o') putz("owl ");
+  if (c == 'p') putz("pig ");
+  if (c == 'q') putz("queen ");
+  if (c == 'r') putz("rat ");
+  if (c == 's') putz("sun ");
+  if (c == 't') putz("tree ");
+  if (c == 'u') putz("umbrella ");
+  if (c == 'v') putz("van ");
+  if (c == 'w') putz("wolf ");
+  if (c == 'x') putz("xray ");
+  if (c == 'y') putz("yak ");
+  if (c == 'z') putz("zebra ");
 }
 
 int main(void) {
   int c, n;
 
   seed = 4711;
-  printf("type away (Esc quits)\n");
+  putz("type away (Esc quits)\n");
 
   while (1) {
     c = getchar();
@@ -90,6 +90,6 @@ int main(void) {
     putz("] ");
   }
 
-  printf("\nbye\n");
+  putz("\nbye\n");
   return 0;
 }

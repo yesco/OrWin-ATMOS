@@ -21,19 +21,19 @@ int main() {
   x = 37429;
   c = 105;
 
-  printf("x<< 5 6:\t18080 36160\n\t\t");
+  putz("x<< 5 6:\t18080 36160\n\t\t");
   y = x << 5;
   printf("%u ", y);
   y = x << 6;
   printf("%u\n", y);
 
-  printf("x>> 5 6:\t1169 584\n\t\t");
+  putz("x>> 5 6:\t1169 584\n\t\t");
   y = x >> 5;
   printf("%u ", y);
   y = x >> 6;
   printf("%u\n", y);
 
-  printf("c>> 1 3 7 8 10:\t52 13 0 0 0\n\t\t");
+  putz("c>> 1 3 7 8 10:\t52 13 0 0 0\n\t\t");
   y = c >> 1;
   printf("%u ", y);
   y = c >> 3;
@@ -45,13 +45,13 @@ int main() {
   y = c >> 10;
   printf("%u\n", y);
 
-  printf("c<< 5 9:\t3360 53760\n\t\t");
+  putz("c<< 5 9:\t3360 53760\n\t\t");
   y = c << 5;
   printf("%u ", y);
   y = c << 9;
   printf("%u\n", y);
 
-  printf("(x + c) >> 9:\t73\n\t\t");
+  putz("(x + c) >> 9:\t73\n\t\t");
   y = (x + c) >> 9;
   printf("%u\n", y);
   return 0;

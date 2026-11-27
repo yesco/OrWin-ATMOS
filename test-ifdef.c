@@ -36,7 +36,7 @@ int main(void) {
   int r;
 
   // --- #if 1 / #if 0, with and without #else ---------------------------------
-  printf("if 1 0:\t\t1 2\n\t\t");
+  putz("if 1 0:\t\t1 2\n\t\t");
 #if 1
   r = 1;
 #endif
@@ -47,10 +47,10 @@ int main(void) {
   r = 2;
 #endif
   printf("%d ", r);
-  printf("\n");
+  putz("\n");
 
   // --- #ifdef / #ifndef: defined FOO, undefined BAR --------------------------
-  printf("ifdef:\t\t3 4 5 6\n\t\t");
+  putz("ifdef:\t\t3 4 5 6\n\t\t");
 #ifdef FOO
   r = 3;
 #else
@@ -73,10 +73,10 @@ int main(void) {
   r = 6;
 #endif
   printf("%d ", r);
-  printf("\n");
+  putz("\n");
 
   // --- nested: in a false branch all skipped, in a true one parsed ----------
-  printf("nested:\t\t7 8\n\t\t");
+  putz("nested:\t\t7 8\n\t\t");
 #if 0
   r = 9;
 #ifdef FOO
@@ -97,26 +97,26 @@ int main(void) {
 #endif
 #endif
   printf("%d ", r);
-  printf("\n");
+  putz("\n");
 
   // --- top level: the function from the true branch ---------------------------
-  printf("top level:\t1\n\t\t");
+  putz("top level:\t1\n\t\t");
   printf("%d ", which());
-  printf("\n");
+  putz("\n");
 
   // --- predefined (gcc: 0 0) ---------------------------------------------------
-  printf("predefined:\t1 19712\n\t\t");
+  putz("predefined:\t1 19712\n\t\t");
 #ifdef __TARGET_6502__
   printf("%d ", __TARGET_6502__);
 #else
-  printf("0 ");
+  putz("0 ");
 #endif
 #ifdef __MC65__
   printf("%d ", __MC65__);
 #else
-  printf("0 ");
+  putz("0 ");
 #endif
-  printf("\n");
+  putz("\n");
 
   return 0;
 }

@@ -66,9 +66,9 @@ int main() {
       if (a[i - 1] > a[i]) bad++;
     }
   }
-  printf("first last: "); printf("%u ", a[0]); printf("%u\n", a[n - 1]);
-  printf("sum: "); printf("%u\n", sum);
-  printf("unsorted pairs: "); printf("%u\n", bad);
-  printf("max stack: "); printf("%u\n", maxsp);
+  putz("first last: "); printf("%u ", a[0]); printf("%u\n", a[n - 1]);
+  putz("sum: "); printf("%u\n", sum);
+  putz("unsorted pairs: "); printf("%u\n", bad);
+  putz("max stack: "); printf("%u\n", maxsp);
   return 0;
 }

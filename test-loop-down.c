@@ -22,7 +22,7 @@ int main() {
 
   s = 0; n = 0;
 
-  printf("down:\t1032\n\t\t");
+  putz("down:\t1032\n\t\t");
   for (i = N; i; i--) s = s + i;
   printf("%u\n", s & 32767);
 

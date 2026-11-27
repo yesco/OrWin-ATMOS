@@ -22,7 +22,7 @@ int main() {
 
   s = 0; n = 0;
 
-  printf("for-le:\t23800\n\t\t");
+  putz("for-le:\t23800\n\t\t");
   for (i = 0; i <= 9999; i++) s = s + i;
   printf("%u\n", s & 32767);
 

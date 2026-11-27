@@ -26,7 +26,7 @@ int main() {
 
   x = 37429;
 
-  printf("x << k:\t37429 9322 18644 37288 9040 6784 13568 27136 20480 32768 0\n\t");
+  putz("x << k:\t37429 9322 18644 37288 9040 6784 13568 27136 20480 32768 0\n\t");
 #pragma TIMED
   y = x << 0;
 #pragma TIMED "x << 0"
@@ -71,9 +71,9 @@ int main() {
   y = x << 16;
 #pragma TIMED "x << 16"
   printf("%u ", y);
-  printf("\n");
+  putz("\n");
 
-  printf("x>>k:\t37429 18714 9357 4678 2339 292 146 73 9 1 0\n\t");
+  putz("x>>k:\t37429 18714 9357 4678 2339 292 146 73 9 1 0\n\t");
 #pragma TIMED
   y = x >> 0;
 #pragma TIMED "x >> 0"
@@ -118,9 +118,9 @@ int main() {
   y = x >> 16;
 #pragma TIMED "x >> 16"
   printf("%u ", y);
-  printf("\n");
+  putz("\n");
 
-  printf("x << n:\t37429 9322 18644 37288 9040 6784 13568 27136 20480 32768 0\n\t");
+  putz("x << n:\t37429 9322 18644 37288 9040 6784 13568 27136 20480 32768 0\n\t");
 #pragma TIMED
   n = 0; y = x << n;
 #pragma TIMED "n = 0; x << n"
@@ -165,9 +165,9 @@ int main() {
   n = 16; y = x << n;
 #pragma TIMED "n = 16; x << n"
   printf("%u ", y);
-  printf("\n");
+  putz("\n");
 
-  printf("x >> n:\t37429 18714 9357 4678 2339 292 146 73 9 1 0\n\t");
+  putz("x >> n:\t37429 18714 9357 4678 2339 292 146 73 9 1 0\n\t");
 #pragma TIMED
   n = 0; y = x >> n;
 #pragma TIMED "n = 0; x >> n"
@@ -212,9 +212,9 @@ int main() {
   n = 16; y = x >> n;
 #pragma TIMED "n = 16; x >> n"
   printf("%u ", y);
-  printf("\n");
+  putz("\n");
 
-  printf("x*2^k:\t9322 18644 37288 9040 6784 13568 27136 32768\n\t");
+  putz("x*2^k:\t9322 18644 37288 9040 6784 13568 27136 32768\n\t");
 #pragma TIMED
   y = x * 2;
 #pragma TIMED "x * 2"
@@ -247,9 +247,9 @@ int main() {
   y = x * 32768;
 #pragma TIMED "x * 32768"
   printf("%u ", y);
-  printf("\n");
+  putz("\n");
 
-  printf("x/2^k:\t18714 9357 4678 2339 292 146 73 1\n\t");
+  putz("x/2^k:\t18714 9357 4678 2339 292 146 73 1\n\t");
 #pragma TIMED
   y = x / 2;
 #pragma TIMED "x / 2"
@@ -282,7 +282,7 @@ int main() {
   y = x / 32768;
 #pragma TIMED "x / 32768"
   printf("%u ", y);
-  printf("\n");
+  putz("\n");
 
   printf("x%2^k:\t1 1 5 5 53 53 53 4661 0\n\t");
 #pragma TIMED
@@ -321,9 +321,9 @@ int main() {
   y = x % 1;
 #pragma TIMED "x % 1"
   printf("%u ", y);
-  printf("\n");
+  putz("\n");
 
-  printf("const:\t9872 78 62 40\n\t");
+  putz("const:\t9872 78 62 40\n\t");
 #pragma TIMED
   y = 1234 << 3;
 #pragma TIMED "1234 << 3"
@@ -340,9 +340,9 @@ int main() {
   y = 1000 % 64;
 #pragma TIMED "1000 % 64"
   printf("%u ", y);
-  printf("\n");
+  putz("\n");
 
-  printf("in AX:\t146 37296 9357 54\n\t");
+  putz("in AX:\t146 37296 9357 54\n\t");
 #pragma TIMED
   y = (x + 1) >> 8;
 #pragma TIMED "(x + 1) >> 8"
@@ -359,7 +359,7 @@ int main() {
   y = (x + 1) % 512;
 #pragma TIMED "(x + 1) % 512"
   printf("%u ", y);
-  printf("\n");
+  putz("\n");
 
   return 0;
 }

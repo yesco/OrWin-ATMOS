@@ -69,102 +69,102 @@ int main(void) {
   __striped struct pt b4[4];
 
   // --- a struct variable: its fields ---------------------------------------
-  printf("fields .:\t3 4 7\n\t\t");
+  putz("fields .:\t3 4 7\n\t\t");
   p.x = 3;
   p.y = 4;
   printf("%d ", p.x);
   printf("%d ", p.y);
   printf("%d ", p.x + p.y);
-  printf("\n");
+  putz("\n");
 
-  printf("++ += --:\t4 14 3\n\t\t");
+  putz("++ += --:\t4 14 3\n\t\t");
   p.x++;
   printf("%d ", p.x);
   p.y += 10;
   printf("%d ", p.y);
   p.x--;
   printf("%d ", p.x);
-  printf("\n");
+  putz("\n");
 
   // --- initializers --------------------------------------------------------
-  printf("init = {}:\t1 2 3 0\n\t\t");
+  putz("init = {}:\t1 2 3 0\n\t\t");
   printf("%d ", r.a);
   printf("%d ", r.b);
   printf("%d ", r.c);
   printf("%d ", r.d);
-  printf("\n");
+  putz("\n");
 
-  printf("init {0}:\t0 0 0\n\t\t");
+  putz("init {0}:\t0 0 0\n\t\t");
   printf("%d ", z.a);
   printf("%d ", z.b);
   printf("%d ", z.d);
-  printf("\n");
+  putz("\n");
 
-  printf("global:\t\t5 6 0\n\t\t");
+  putz("global:\t\t5 6 0\n\t\t");
   printf("%d ", g.a);
   printf("%d ", g.b);
   printf("%d ", g.c);
-  printf("\n");
+  putz("\n");
 
   // --- pointers: p->f ------------------------------------------------------
-  printf("p->f:\t\t11 22 33\n\t\t");
+  putz("p->f:\t\t11 22 33\n\t\t");
   q = malloc(sizeof(struct pt));
   q->x = 11;
   q->y = 22;
   printf("%d ", q->x);
   printf("%d ", q->y);
   printf("%d ", q->x + q->y);
-  printf("\n");
+  putz("\n");
 
-  printf("p->f ++ +=:\t12 32\n\t\t");
+  putz("p->f ++ +=:\t12 32\n\t\t");
   q->x++;
   q->y += 10;
   printf("%d ", q->x);
   printf("%d ", q->y);
-  printf("\n");
+  putz("\n");
 
-  printf("params:\t\t15 35 50\n\t\t");
+  putz("params:\t\t15 35 50\n\t\t");
   move(q, 3);
   printf("%d ", q->x);
   printf("%d ", q->y);
   printf("%d ", sum(q));
-  printf("\n");
+  putz("\n");
 
   // a pointer field
-  printf("s.f = ptr:\t1 2\n\t\t");
+  putz("s.f = ptr:\t1 2\n\t\t");
   a.v = 1;
   a.next = malloc(sizeof(struct node));
   n = a.next;
   n->v = 2;
   printf("%d ", a.v);
   printf("%d ", n->v);
-  printf("\n");
+  putz("\n");
 
   // --- &, returned pointers, arrays of pointers, chains --------------------
-  printf("&s:\t\t4 9\n\t\t");
+  putz("&s:\t\t4 9\n\t\t");
   p.x = 1;
   move(&p, 3);
   printf("%d ", p.x);
   q = &p;
   q->y = 9;
   printf("%d ", p.y);
-  printf("\n");
+  putz("\n");
 
-  printf("returned:\t6 7 13\n\t\t");
+  putz("returned:\t6 7 13\n\t\t");
   q = mk(6);
   printf("%d ", q->x);
   printf("%d ", q->y);
   printf("%d ", sum(q));
-  printf("\n");
+  putz("\n");
 
-  printf("mk()->f:\t20 0 2\n\t\t");
+  putz("mk()->f:\t20 0 2\n\t\t");
   printf("%d ", mk(20)->x);
   printf("%d ", mk(0)->x);
   printf("%d ", mk(1)->y);
-  printf("\n");
+  putz("\n");
 
   // an array of struct pointers: filled in a loop, indexed by var / const
-  printf("ps[i]->f:\t0 30 31 25\n\t\t");
+  putz("ps[i]->f:\t0 30 31 25\n\t\t");
   for (i = 0; i < 4; i++) ps[i] = mk(i * 10);
   printf("%d ", ps[0]->x);
   i = 3;
@@ -172,15 +172,15 @@ int main(void) {
   printf("%d ", ps[i]->y);
   ps[i - 1]->y = 25;
   printf("%d ", ps[2]->y);
-  printf("\n");
+  putz("\n");
 
-  printf("ps[i]->f +:\t40 70\n\t\t");
+  putz("ps[i]->f +:\t40 70\n\t\t");
   printf("%d ", ps[1]->x + ps[3]->x);
   printf("%d ", ps[i]->x + sum(ps[1]) + 19);
-  printf("\n");
+  putz("\n");
 
   // chains through a pointer field: a.next->v, q->next->next->v
-  printf("chains:\t\t7 7 4 4\n\t\t");
+  putz("chains:\t\t7 7 4 4\n\t\t");
   a.next = n;
   a.next->v = 7;
   printf("%d ", n->v);
@@ -189,18 +189,18 @@ int main(void) {
   n->next->next->v = 4;
   printf("%d ", n->v);
   printf("%d ", a.next->next->next->v);
-  printf("\n");
+  putz("\n");
 
   // in conditions and loops
-  printf("if while:\ty 13\n\t\t");
+  putz("if while:\ty 13\n\t\t");
   q = mk(3);
-  if (q->x == 3) printf("y ");
+  if (q->x == 3) putz("y ");
   while (q->x < 13) q->x++;
   printf("%d ", q->x);
-  printf("\n");
+  putz("\n");
 
   // --- an array of structs (SoA), a global and a local one ---------------
-  printf("a[i].f:\t\t30 31 8 3 49 30 0\n\t\t");
+  putz("a[i].f:\t\t30 31 8 3 49 30 0\n\t\t");
   for (i = 0; i < 5; i++) s3[i].x = i * 10;
   for (i = 0; i < 5; i++) s3[i].y = s3[i].x + 1;
   s3[2].z = 7;
@@ -214,18 +214,18 @@ int main(void) {
   printf("%d ", b4[3].y);
   printf("%d ", s3[i - 2].x);
   printf("%d ", s3[0].z);
-  printf("\n");
+  putz("\n");
 
-  printf("a[i].f += --:\t16 15\n\t\t");
+  putz("a[i].f += --:\t16 15\n\t\t");
   i = 1;
   s3[i].y += 5;
   printf("%d ", s3[1].y);
   s3[i].y--;
   printf("%d ", s3[i].y);
-  printf("\n");
+  putz("\n");
 
   // values > 255: the hi bytes (striped), var / const index, += ++
-  printf("hi bytes:\t1001 4660 1301 513 30000\n\t\t");
+  putz("hi bytes:\t1001 4660 1301 513 30000\n\t\t");
   i = 1;
   s3[i].z = 1000 + i;
   s3[3].z = 0x1234;
@@ -239,12 +239,12 @@ int main(void) {
   printf("%d ", s3[i + 3].y);
   printf("%d ", b4[2].x);
   printf("%d ", s3[0].x);
-  printf("\n");
+  putz("\n");
 
-  printf("sizeof:\t\t2 4\n\t\t");
+  putz("sizeof:\t\t2 4\n\t\t");
   printf("%d ", sizeof(struct pt) / sizeof(int));
   printf("%d ", sizeof(struct pt4) / sizeof(int));
-  printf("\n");
+  putz("\n");
 
   return 0;
 }

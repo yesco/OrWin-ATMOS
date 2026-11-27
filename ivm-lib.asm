@@ -399,19 +399,24 @@ _opprintstr:
 ;;; 30 B
         sta     sreg                    ;; AX kept for the return
         stx     sreg+1
+
         pla                             ;; -> last byte of the JSR
         clc
         adc     #1
         tay
         pla
         adc     #0
+
         tax
         tya                             ;; AX -> the string
+
         jsr     _opputs                 ;; ptr1 -> its 0
+
         inc     ptr1                    ;; past it: the next instruction
         bne     :+
         inc     ptr1+1
-:       lda     sreg
+:
+	lda     sreg
         ldx     sreg+1
         jmp     (ptr1)
 
@@ -423,21 +428,28 @@ _opputs:
 ;;; 29 B
         sta     tmp3
         stx     tmp4
+
         sta     ptr1
         stx     ptr1+1
         ora     ptr1+1
-        beq     retax                   ;; NULL
-@l:     ldy     #0
+
+        beq     retax                   ; NULL
+:
+	ldy     #0
         lda     (ptr1),y
         beq     retax
+
         jsr     _opputchar
+
         inc     ptr1
-        bne     @l
+        bne     :-
         inc     ptr1+1
-        bne     @l                      ;; (wrapped past $FFFF: done)
+
+        bne     :-                      ; (wrapped past $FFFF: done)
+
 retax:
 ;;; 5 B
-        lda     tmp3                    ;; AX as on entry
+        lda     tmp3                    ; AX as on entry
         ldx     tmp4
         rts
 
@@ -450,20 +462,23 @@ _ivmlib_cut2:
 
 _opputnum:
 ;;; 48 B
-        sta     tmp3                    ;; AX kept for the return
+        sta     tmp3                   ; AX kept for the return
         stx     tmp4
+
         sta     ptr1
         stx     ptr1+1
+
         lda     #0
-        pha                             ;; end marker
-@div:   lda     #0                      ;; ptr1 /= 10, A = remainder
+        pha                            ; end marker
+
+@div:   lda     #0                     ; ptr1 /= 10, A = remainder
         ldx     #16
 @bit:   asl     ptr1
         rol     ptr1+1
         rol     a
         cmp     #10
         bcc     @nb
-        sbc     #10                     ;; C=1
+        sbc     #10                    ; C=1
         inc     ptr1
 @nb:    dex
         bne     @bit
@@ -472,10 +487,11 @@ _opputnum:
         lda     ptr1
         ora     ptr1+1
         bne     @div
+
 @out:   pla
         beq     retax
         jsr     _opputchar
-        bne     @out                    ;; A kept: a digit, never 0
+        bne     @out                   ; A kept: a digit, never 0
 
 
 ;;; ---- cut 3: ... no mul/div/mod ----
@@ -490,10 +506,10 @@ _ivmlib_cut3:
 ;;; 44 B; 63-847 c: *10: 197 c, *255: 439 c, *65535: 847 c
 _opmul:
 ;;; 44 B
-        sta     ptr2                    ;; multiplier
+        sta     ptr2                   ; multiplier
         stx     ptr2+1
         lda     #0
-        sta     tmp3                    ;; result
+        sta     tmp3                   ; result
         sta     tmp4
 @l:     lsr     ptr2+1
         ror     ptr2
@@ -520,16 +536,16 @@ _opmul:
 ;;; 70 B; /0: 37 c, else 16 rounds: up to 1045 c
 _opmod:
 ;;; 2 B
-        sec                             ;; remainder
-        .byte   $24                     ;; BIT zp: skips the CLC
+        sec                            ; remainder
+        .byte   $24                    ; BIT zp: skips the CLC
 _opdiv:
 ;;; 68 B
-        clc                             ;; quotient
-        ror     tmp3                    ;; bit 7: 1 = opmod
-        sta     ptr2                    ;; divisor
+        clc                            ; quotient
+        ror     tmp3                   ; bit 7: 1 = opmod
+        sta     ptr2                   ; divisor
         stx     ptr2+1
         ora     ptr2+1
-        beq     @ja                     ;; /0
+        beq     @ja                    ; /0
         lda     #0
         sta     ptr1
         sta     ptr1+1
@@ -538,26 +554,26 @@ _opdiv:
         rol     JT+1
         rol     ptr1
         rol     ptr1+1
-        php                             ;; C: 17th remainder bit
+        php                            ; C: 17th remainder bit
         lda     ptr1
         sec
         sbc     ptr2
         tay
         lda     ptr1+1
         sbc     ptr2+1
-        bcs     @take                   ;; rem >= divisor
+        bcs     @take                  ; rem >= divisor
         plp
-        bcc     @next                   ;; rem < divisor (no 17th bit)
-        php                             ;; 17th bit: must subtract
+        bcc     @next                  ; rem < divisor (no 17th bit)
+        php                            ; 17th bit: must subtract
 @take:  plp
         sta     ptr1+1
         sty     ptr1
-        inc     JT                      ;; quotient bit
+        inc     JT                     ; quotient bit
 @next:  dex
         bne     @l
         bit     tmp3
-        bpl     @ja                     ;; opdiv: quotient
-        lda     ptr1                    ;; opmod: remainder
+        bpl     @ja                    ; opdiv: quotient
+        lda     ptr1                   ; opmod: remainder
         ldx     ptr1+1
         rts
 @ja:    lda     JT
@@ -582,30 +598,30 @@ _opmalloc:
         sta     tmp1
         txa
         adc     #0
-        sta     tmp2                    ;; tmp2:tmp1 = (n+1) & ~1
-        bcs     @null                   ;; n = $FFFF
+        sta     tmp2                   ; tmp2:tmp1 = (n+1) & ~1
+        bcs     @null                  ; n = $FFFF
         ora     tmp1
-        beq     @null                   ;; n = 0
+        beq     @null                  ; n = 0
         clc
         lda     _ivmlib_heap
         adc     tmp1
         sta     ptr2
         lda     _ivmlib_heap+1
         adc     tmp2
-        sta     ptr2+1                  ;; ptr2 = new top
+        sta     ptr2+1                 ; ptr2 = new top
         bcs     @null
         lda     _ivmlib_heapend
         cmp     ptr2
         lda     _ivmlib_heapend+1
         sbc     ptr2+1
-        bcc     @null                   ;; heapend < new top
+        bcc     @null                  ; heapend < new top
         lda     _ivmlib_heap
         sta     ptr1
         lda     _ivmlib_heap+1
         sta     ptr1+1
         lda     #0
         tay
-        ldx     tmp2                    ;; full pages
+        ldx     tmp2                   ; full pages
         beq     @part
 @page:  sta     (ptr1),y
         iny
@@ -613,12 +629,12 @@ _opmalloc:
         inc     ptr1+1
         dex
         bne     @page
-@part:  ldy     tmp1                    ;; rest
+@part:  ldy     tmp1                   ; rest
         beq     @done
 @byte:  dey
         sta     (ptr1),y
         bne     @byte
-@done:  lda     _ivmlib_heap            ;; result = old heap
+@done:  lda     _ivmlib_heap           ; result = old heap
         ldx     _ivmlib_heap+1
         pha
         lda     ptr2
@@ -637,8 +653,8 @@ _opfree:
 ;;; 5 B
         rts
 
-_ivmlib_heap:    .word 0                ;; next free heap byte
-_ivmlib_heapend: .word 0                ;; first byte after heap
+_ivmlib_heap:    .word 0               ; next free heap byte
+_ivmlib_heapend: .word 0               ; first byte after heap
 
 
 
@@ -653,9 +669,9 @@ _ivmlib_cut5:
 _opgetchar:
 ;;; SIM 22 B, ATMOS 19 B
 .ifdef SIM
-        ldx     #0                      ;; stdin
+        ldx     #0                     ; stdin
         jsr     pvio
-        jsr     _read                   ;; AX = read(0, &pcbuf, 1)
+        jsr     _read                  ; AX = read(0, &pcbuf, 1)
         cmp     #1
         bne     @eof
         lda     pcbuf
@@ -665,13 +681,13 @@ _opgetchar:
         tax
         rts
 .else
-@wait:  jsr     ROM_GETKEY              ;; N=1: a key, its code in the low 7
+@wait:  jsr     ROM_GETKEY             ; N=1: a key, its code in the low 7
         bpl     @wait
         and     #$7F
-        ldx     $0209                   ;; ROM: $A5 while FUNCT is held
+        ldx     $0209                  ; ROM: $A5 while FUNCT is held
         cpx     #$A5
         bne     @key
-        ora     #$80                    ;; FUNCT-x: hi bit (as cc65's getchar)
+        ora     #$80                   ; FUNCT-x: hi bit (as cc65's getchar)
 @key:   ldx     #0
         rts
 .endif
@@ -700,11 +716,11 @@ _ivmlib_cut6:
 ;;; TODO: zeropage? why not use tmp? and the index slot refs?
 ;;; TODO: actually instead of copying cheaper to PHA TXA PHA !!!!
 ;;;   (same cycles but 3 bytes instead of 4)
-_ivmlib_args:   .res    6               ;; a0 a1 a2
+_ivmlib_args:   .res    6              ; a0 a1 a2
 
 
-sflag:          .byte   0               ;; 1: stop at a NUL (str..)
-spad:           .byte   0               ;; strncpy: past the NUL, NULs
+sflag:          .byte   0              ; 1: stop at a NUL (str..)
+spad:           .byte   0              ; strncpy: past the NUL, NULs
 
 ;;; ptr1 = a0, ptr2 = a1, tmp3/tmp4 = a2 (a count), Y = 0
 ;;; This to call if you have 3 args?
@@ -756,7 +772,7 @@ _opmove:
         cmp     ptr1
         lda     ptr2+1
         sbc     ptr1+1
-        bcc     @back                   ;; s < d
+        bcc     @back                  ; s < d
 @fwd:   jsr     ndec
         beq     @done
         lda     (ptr2),y
@@ -767,8 +783,8 @@ _opmove:
 :       inc     ptr2
         bne     @fwd
         inc     ptr2+1
-        bne     @fwd                    ;; (always)
-@back:  clc                             ;; past both ends, then down
+        bne     @fwd                   ; (always)
+@back:  clc                            ; past both ends, then down
         lda     ptr1
         adc     tmp3
         sta     ptr1
@@ -820,7 +836,7 @@ _opstrlen:
 :       inc     tmp3
         bne     @l
         inc     tmp4
-        bne     @l                      ;; (always)
+        bne     @l                     ; (always)
 @d:     lda     tmp3
         ldx     tmp4
         rts
@@ -833,7 +849,7 @@ _opstrcmp:
 _opstrncmp:
 ;;; 3 B
         ldx     #1
-        .byte   $2C                     ;; BIT abs: skips the ldx #0
+        .byte   $2C                    ; BIT abs: skips the ldx #0
 _opmemcmp:
 ;;; 57 B
         ldx     #0
@@ -842,22 +858,22 @@ _opmemcmp:
         jsr     sargs
 
 @l:     jsr     ndec
-        beq     @eq                     ;; n done: equal
+        beq     @eq                    ; n done: equal
         lda     (ptr1),y
         cmp     (ptr2),y
         bne     @ne
         ldx     sflag
         beq     :+
         cmp     #0
-        beq     @eq                     ;; both at their NUL
+        beq     @eq                    ; both at their NUL
 :       inc     ptr1
         bne     :+
         inc     ptr1+1
 :       inc     ptr2
         bne     @l
         inc     ptr2+1
-        bne     @l                      ;; (always)
-@ne:    bcc     @lt                     ;; a < b
+        bne     @l                     ; (always)
+@ne:    bcc     @lt                    ; a < b
         lda     #1
         ldx     #0
         rts
@@ -879,12 +895,12 @@ _opmemchr:
 ;;; 45 B
         ldx     #0
         stx     sflag
-        jsr     sargs                   ;; ptr2: c (its lo)
+        jsr     sargs                  ; ptr2: c (its lo)
 @l:     jsr     ndec
         beq     @no
         lda     (ptr1),y
         cmp     ptr2
-        beq     @yes                    ;; (c may be the NUL)
+        beq     @yes                   ; (c may be the NUL)
         ldx     sflag
         beq     :+
         cmp     #0
@@ -892,7 +908,7 @@ _opmemchr:
 :       inc     ptr1
         bne     @l
         inc     ptr1+1
-        bne     @l                      ;; (always)
+        bne     @l                     ; (always)
 @yes:   lda     ptr1
         ldx     ptr1+1
         rts
@@ -913,29 +929,29 @@ _opstrncpy:
 
         jsr     sargs
 
-        sty     spad                    ;; (Y = 0)
+        sty     spad                   ; (Y = 0)
 @l:     jsr     ndec
         beq     @done
         lda     spad
-        bne     @z                      ;; past the NUL: NULs
+        bne     @z                     ; past the NUL: NULs
         lda     (ptr2),y
         sta     (ptr1),y
-        tax                             ;; Z: the NUL?
+        tax                            ; Z: the NUL?
         inc     ptr2
         bne     :+
         inc     ptr2+1
 :       txa
         bne     @nx
-        lda     sflag                   ;; the NUL: strcpy stops
+        lda     sflag                  ; the NUL: strcpy stops
         bne     @done
         inc     spad
-        bne     @nx                     ;; (always)
+        bne     @nx                    ; (always)
 @z:     lda     #0
         sta     (ptr1),y
 @nx:    inc     ptr1
         bne     @l
         inc     ptr1+1
-        bne     @l                      ;; (always)
+        bne     @l                     ; (always)
 @done:  lda     _ivmlib_args
         ldx     _ivmlib_args+1
         rts
@@ -984,16 +1000,16 @@ _ivmlib_pfprec:  .byte   0
 _ivmlib_pfcount: .word   0
 _ivmlib_pfout:   .word   0
 
-PFEND = 5                               ;; digits: 65535 (hex: 4)
+PFEND = 5                              ; digits: 65535 (hex: 4)
 
-pfw:    .byte   0                       ;; the width (signed)
-pfsg:   .byte   0                       ;; the sign char, 0: none
-pfup:   .byte   0                       ;; X: upper case hex
-pfi:    .byte   0                       ;; the first digit in pfbuf
-pfn:    .byte   0                       ;; the digits / chars
-pfz:    .byte   0                       ;; zeros before the digits (.N)
-pfc:    .byte   0                       ;; the pad char, while padding
-pfbuf:  .res    PFEND                   ;; the digits, from the end
+pfw:    .byte   0                      ; the width (signed)
+pfsg:   .byte   0                      ; the sign char, 0: none
+pfup:   .byte   0                      ; X: upper case hex
+pfi:    .byte   0                      ; the first digit in pfbuf
+pfn:    .byte   0                      ; the digits / chars
+pfz:    .byte   0                      ; zeros before the digits (.N)
+pfc:    .byte   0                      ; the pad char, while padding
+pfbuf:  .res    PFEND                  ; the digits, from the end
 
 pfhex:  .byte   "0123456789abcdef"
 
@@ -1006,7 +1022,7 @@ pfch:
         bne     :+
         inc     _ivmlib_pfcount+1
 :       pha
-        lda     _ivmlib_pfout+1         ;; 0: putchar (no routine in page 0)
+        lda     _ivmlib_pfout+1        ; 0: putchar (no routine in page 0)
         beq     @std
         pla
         jmp     (_ivmlib_pfout)
@@ -1019,13 +1035,13 @@ pfch:
 _opputfd:
 ;;; 24 B
         cpx     #$80
-        bcc     _opputfu                ;; >= 0
+        bcc     _opputfu               ; >= 0
         pha
         lda     #'-'
         sta     pfsg
         pla
 
-        ;; AX = -AX
+       ; AX = -AX
         eor     #$FF
         clc
         adc     #1
@@ -1045,7 +1061,7 @@ _opputfu:
         stx     ptr1+1
         ldy     #PFEND
 
-        ;; ptr1 /= 10, A = the remainder: a digit, from the end
+       ; ptr1 /= 10, A = the remainder: a digit, from the end
 @div:   lda     #0
         ldx     #16
 @bit:   asl     ptr1
@@ -1053,7 +1069,7 @@ _opputfu:
         rol     a
         cmp     #10
         bcc     @nb
-        sbc     #10                     ;; C=1
+        sbc     #10                    ; C=1
         inc     ptr1
 @nb:    dex
         bne     @bit
@@ -1082,7 +1098,7 @@ _opputfx:
         stx     ptr1+1
         ldy     #PFEND
 
-        ;; the low 4 bits: a digit, from the end
+       ; the low 4 bits: a digit, from the end
 @nib:   lda     ptr1
         and     #$0F
         tax
@@ -1091,11 +1107,11 @@ _opputfx:
         beq     @st
         cmp     #'a'
         bcc     @st
-        and     #$DF                    ;; upper case
+        and     #$DF                   ; upper case
 @st:    dey
         sta     pfbuf,y
 
-        ;; ptr1 >>= 4
+       ; ptr1 >>= 4
         ldx     #4
 @sh:    lsr     ptr1+1
         ror     ptr1
@@ -1112,13 +1128,13 @@ pfnum:
 ;;; 91 B
         sty     pfi
 
-        ;; the digits
+       ; the digits
         lda     #PFEND
         sec
         sbc     pfi
         sta     pfn
 
-        ;; zeros: .N - digits, if more
+       ; zeros: .N - digits, if more
         lda     _ivmlib_pfprec
         sec
         sbc     pfn
@@ -1126,16 +1142,16 @@ pfnum:
         lda     #0
 :       sta     pfz
 
-        ;; the width: digits, zeros, sign
+       ; the width: digits, zeros, sign
         lda     pfn
         clc
         adc     pfz
         ldx     pfsg
         beq     :+
         adc     #1
-:       tax                             ;; X = the field
+:       tax                            ; X = the field
 
-        ;; left: sign, number, spaces
+       ; left: sign, number, spaces
         lda     pfw
         bpl     @right
         jsr     pfsign
@@ -1143,7 +1159,7 @@ pfnum:
         jsr     pfspaces
         jmp     pfdone
 
-        ;; right: pad, sign, number (pad '0': sign, zeros, number)
+       ; right: pad, sign, number (pad '0': sign, zeros, number)
 @right: lda     _ivmlib_pfpad
         beq     @sp
         cmp     #' '
@@ -1180,7 +1196,7 @@ pfdigits:
         lda     pfbuf,y
         jsr     pfch
         iny
-        bne     @dl                     ;; (always)
+        bne     @dl                    ; (always)
 :       rts
 
 ;;; the pad: width - X (the field) times, the pad char (0: space).
@@ -1188,7 +1204,7 @@ pfdigits:
 pfspaces:
 ;;; 4 B
         lda     #' '
-        bne     pfpadc                  ;; (always)
+        bne     pfpadc                 ; (always)
 pfpad:
 ;;; 7 B
         lda     _ivmlib_pfpad
@@ -1200,13 +1216,13 @@ pfpadc:
         stx     pfn
         lda     pfw
         bpl     :+
-        eor     #$FF                    ;; |width|
+        eor     #$FF                   ; |width|
         clc
         adc     #1
 :       sec
         sbc     pfn
         beq     @x
-        bcc     @x                      ;; the field is wider: no pad
+        bcc     @x                     ; the field is wider: no pad
         tay
 @p:     lda     pfc
         jsr     pfch
@@ -1223,7 +1239,7 @@ _opputfs:
         sta     ptr1
         stx     ptr1+1
 
-        ;; its length, at most .N (0: no limit)
+       ; its length, at most .N (0: no limit)
         ldy     #0
 @len:   lda     (ptr1),y
         beq     @got
@@ -1231,9 +1247,9 @@ _opputfs:
         cpy     _ivmlib_pfprec
         bne     @len
 @got:   tya
-        tax                             ;; X = the field
+        tax                            ; X = the field
 
-        ;; left: the string, spaces. Right: the pad, the string
+       ; left: the string, spaces. Right: the pad, the string
         lda     pfw
         bpl     @right
         jsr     pfstr
@@ -1262,7 +1278,7 @@ pfstr:
         lda     (ptr1),y
         jsr     pfch
         iny
-        bne     @s                      ;; (always)
+        bne     @s                     ; (always)
 :       rts
 
 ;;; ---------------------------------------------------------------------------
@@ -1271,7 +1287,7 @@ pfstr:
 
 _opputfz:
 ;;; 31 B
-        pla                             ;; -> the last byte of the JSR
+        pla                            ; -> the last byte of the JSR
         sta     ptr1
         pla
         sta     ptr1+1
@@ -1283,7 +1299,7 @@ _opputfz:
         beq     @end
         jsr     pfch
         jmp     @l
-@end:   lda     ptr1+1                  ;; RTS: on after the 0
+@end:   lda     ptr1+1		       ; RTS: on after the 0
         pha
         lda     ptr1
         pha

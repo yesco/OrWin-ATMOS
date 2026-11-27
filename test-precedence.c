@@ -30,83 +30,83 @@ int main(void) {
   a = 12; b = 5; c = 3;
 
   // --- * / % then + - ------------------------------------------------------
-  printf("mul add:\t63 57 5\n\t\t");
+  putz("mul add:\t63 57 5\n\t\t");
   r = a * b + c; printf("%d ", r);
   r = a * b - c; printf("%d ", r);
   r = a / b + c; printf("%d ", r);
-  printf("\n");
+  putz("\n");
 
-  printf("same level:\t6 4 10 0 20\n\t\t");
+  putz("same level:\t6 4 10 0 20\n\t\t");
   r = a % b * c; printf("%d ", r);
   r = a - b - c; printf("%d ", r);
   r = a - b + c; printf("%d ", r);
   r = a / b / c; printf("%d ", r);
   r = a * b / c; printf("%d ", r);
-  printf("\n");
+  putz("\n");
 
   // --- shifts: below + -, left to right among themselves -------------------
-  printf("shift:\t\t34 15 48\n\t\t");
+  putz("shift:\t\t34 15 48\n\t\t");
   r = a + b << 1; printf("%d ", r);
   r = a * b >> 2; printf("%d ", r);
   r = a << b >> c; printf("%d ", r);
-  printf("\n");
+  putz("\n");
 
   // --- compares, then == != ------------------------------------------------
-  printf("compare:\t1 0 0 1\n\t\t");
+  putz("compare:\t1 0 0 1\n\t\t");
   r = a + b > c; printf("%d ", r);
   r = a - b < c; printf("%d ", r);
   r = a << 1 <= b; printf("%d ", r);
   r = a > b == 1; printf("%d ", r);
-  printf("\n");
+  putz("\n");
 
-  printf("equal:\t\t1 0 1\n\t\t");
+  putz("equal:\t\t1 0 1\n\t\t");
   r = a - c == 9; printf("%d ", r);
   r = a * b != 60; printf("%d ", r);
   r = a + 1 != b; printf("%d ", r);
-  printf("\n");
+  putz("\n");
 
   // --- & ^ |, below == ------------------------------------------------------
-  printf("bitwise:\t7 11 7 1 1 13\n\t\t");
+  putz("bitwise:\t7 11 7 1 1 13\n\t\t");
   r = a & b | c; printf("%d ", r);
   r = a ^ b | c; printf("%d ", r);
   r = a & b ^ c; printf("%d ", r);
   r = a + b & c; printf("%d ", r);
   r = a == 12 & c; printf("%d ", r);
   r = a | b; printf("%d ", r);
-  printf("\n");
+  putz("\n");
 
   // --- R operands: calls on the right ---------------------------------------
-  printf("R mul add:\t63 63 4 6 5\n\t\t");
+  putz("R mul add:\t63 63 4 6 5\n\t\t");
   r = id(a) * id(b) + id(c); printf("%d ", r);
   r = a * id(b) + c; printf("%d ", r);
   r = a - id(b) - c; printf("%d ", r);
   r = a % id(b) * c; printf("%d ", r);
   r = a / id(b) + c; printf("%d ", r);
-  printf("\n");
+  putz("\n");
 
-  printf("R shift cmp:\t48 3 1 0 7\n\t\t");
+  putz("R shift cmp:\t48 3 1 0 7\n\t\t");
   r = a << id(2); printf("%d ", r);
   r = a >> id(2); printf("%d ", r);
   r = a > id(b); printf("%d ", r);
   r = a <= id(b); printf("%d ", r);
   r = a & id(b) | id(c); printf("%d ", r);
-  printf("\n");
+  putz("\n");
 
   // --- parentheses: a tighter level after a looser one ---------------------
-  printf("parens:\t\t27 13 96 51 1\n\t\t");
+  putz("parens:\t\t27 13 96 51 1\n\t\t");
   r = a + (b * c); printf("%d ", r);
   r = a | (b & c); printf("%d ", r);
   r = a * (b + c); printf("%d ", r);
   r = (a + b) * c; printf("%d ", r);
   r = a == (b + 7); printf("%d ", r);
-  printf("\n");
+  putz("\n");
 
   // --- !: binds tight --------------------------------------------------------
-  printf("not:\t\t5 6 0\n\t\t");
+  putz("not:\t\t5 6 0\n\t\t");
   r = !a + b; printf("%d ", r);
   r = !(a - 12) + b; printf("%d ", r);
   r = !a; printf("%d ", r);
-  printf("\n");
+  putz("\n");
 
   return 0;
 }

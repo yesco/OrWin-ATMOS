@@ -56,14 +56,14 @@ int main() {
 
   a = malloc(40);
 
-  printf("load:\t\t40000\n\t\t");
+  putz("load:\t\t40000\n\t\t");
   g = 0;
   for (r = 0; r < ROUNDS; r++)
     for (k = 0; k < ROUNDS; k++)
       g++;
   printf("%u\n", g);
 
-  printf("jump:\t\t100 100\n\t\t");
+  putz("jump:\t\t100 100\n\t\t");
   s = 0; t = 0;
   for (r = 0; r < ROUNDS; r++) {
     k = r & 1;
@@ -72,7 +72,7 @@ int main() {
   }
   printf("%u ", s); printf("%u\n", t);
 
-  printf("acc:\t\t20100\n\t\t");
+  putz("acc:\t\t20100\n\t\t");
   s = 0;
   for (r = 0; r < ROUNDS; r++) {
     n = r + 1;
@@ -80,7 +80,7 @@ int main() {
   }
   printf("%u\n", s);
 
-  printf("vn:\t\t12000\n\t\t");
+  putz("vn:\t\t12000\n\t\t");
   for (k = 0; k < 10; k++) a[k] = k * 10;
   s = 0;
   for (r = 0; r < ROUNDS; r++) {
@@ -90,19 +90,19 @@ int main() {
   }
   printf("%u\n", s);
 
-  printf("swap:\t\t0 90\n\t\t");
+  putz("swap:\t\t0 90\n\t\t");
   for (r = 0; r < ROUNDS; r++) {
     i = 0; j = 9;
     t = a[i]; a[i] = a[j]; a[j] = t;
   }
   printf("%u ", a[0]); printf("%u\n", a[9]);
 
-  printf("const:\t\t7\n\t\t");
+  putz("const:\t\t7\n\t\t");
   s = 7;
   if (0) s = UNUSED;
   printf("%u\n", s);
 
-  printf("frames:\t\t64\n\t\t");
+  putz("frames:\t\t64\n\t\t");
   s = 0;
   for (r = 0; r < ROUNDS; r++) s = add3(5);
   printf("%u\n", s);
