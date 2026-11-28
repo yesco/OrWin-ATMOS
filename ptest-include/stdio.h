@@ -10,7 +10,8 @@
 #ifdef __CC65__
   int putchar(int c);
 //extern void putz(const char* s);
-  int puts(const char*);
+//  int puts(const char*);
+  void puts(const char*);
   void putz(const char*);
   extern int getchar();
 

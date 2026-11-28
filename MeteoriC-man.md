@@ -987,13 +987,14 @@ A call is cheap in bytecode; on the VMs it costs about two loop rounds.
 
 **Byte code generation:**
 
+- Call Tree analyzis reuses stack-slots
 - Peephole: minimize jump sizes from 2-3 bytes to 1 byte
 - Peephole: one byte loading op for registers/most frequent vars
 - Peephole: advanced (LOL) reuse of remaining ACC value of previous
   operation; may use associativey to reuse.
-- Const eliminiation if they not used
+- Const eliminiation if they are not used
+- Function elimination if they are not called (oscar64 does cc65 not)
 - Minimize allocated static memory area
-- Call Tree analyzis reuses stack-slots
 - CSR: Common Subexpression Reuse (from temps); subexpressions inside the
   same function calculating the same thing are reused if they are stored
   in ACC or in a temp variable slot.
@@ -1032,7 +1033,8 @@ none of them, 17514 with all) and on `test-opts.c` (cycles on
   one byte loads are what pays.
 - Not optimizations, but in the same pass: unused constants are not
   in the .ivm, and a DEL (FIXIPC) every 124 bytes of straight code
-  for `ivm-fix`.
+  for `ivm-fix`. This simlplifies interpretation saving about 4-5c
+  for every opcode executed.
 
 The sizes of this in the 6502 parse.sim (cc65): -O 3.6 KB (not
 built, `-DIVM_OPT`), value numbering 2.1 KB, CSE 3.5 KB (not built,
@@ -1056,19 +1058,18 @@ built, `-DIVM_OPT`), value numbering 2.1 KB, CSE 3.5 KB (not built,
 | recursion                                                   | loops (silent: hangs)           |
 | prototypes                                                  | define callee first             |
 | `long` `float` `typedef` `enum` `union`                     |                                 |
-| unary `-`, `~`                                              | `0 - x`, `x ^ 0xffff`           |
+| unary `-` on variables, `~`                                 | `0 - x`, `x ^ 0xffff`           |
 | signed compares / printing                                  | test `x & 0x8000`               |
 | `a + b * c` (tighter after looser)                          | `a + (b * c)` or `b * c + a`    |
-| assignment / `++` inside expressions (not `b[j++] = v`)     | separate statements             |
+| assignment inside expressions                               | separate statements             |
 | `a[i]++` `a[i] += n` (`op=` on an element)                  | `a[i] = a[i] + n;`              |
-| `*(p + i)`                                                  | `p[i]`                          |
-| `ptr + n` in expressions (not scaled: silent)               | `p += n;` then use `p`          |
-| `&x` of a variable                                          | an array of 1                   |
+| OUTDATED: I think works: `*(p + i)` -- TODO: maybe supported?                        | `p[i]`                          |
+| OUTDATED: I think works: `ptr + n` in expressions (not scaled: silent)               | `p += n;` then use `p`          |
+| `&x` of a variable (ivm and jit, but not ivm-asm            | an array of 1                   |
 | `do` `switch` `goto`                                        | `while`, `if` ... `else if`     |
-| `for (int i ...)`                                           | declare `i` before              |
-| 2D arrays                                                   | `m[r * COLS + c]`               |
-| global initializers with expressions                        | a constant, or assign in `main` |
+| TODO: `for (int i ...)`  (only for "memset")                | declare `i` before              |
+| 2D arrays / complex (pointer) types                         | `m[r * COLS + c]`               |
 | `#define` expressions / macros                              | `const int`, functions          |
-| `#if NAME` (always true: silent)                            | `#ifdef NAME`                   |
+| TODO: ???? `#if NAME` (always true (for functions): silent)                 | `#ifdef NAME`                   |
 | `printf` beyond the listed forms (silent)                   | split, `putchar`                |
 | `struct s x, y;` `struct s {..} x;` struct copies, by-value | one per line, pointers          |

@@ -3,6 +3,60 @@
 
 # MeteoriC-65 (parse.c c.bnf): next, after the manual (MeteoriC-man.md)
 
+-- ./pc TMP/test-rax-06-sieve.c                    --- parse ---
+    TMP/test-rax-06-sieve.c:18: error: cannot parse (function not defined: sizeof)                                                              TMP/test-rax-06-sieve.c:18:   for(j=0; j < sizeof(buf)/sizeof(char);) TMP/test-rax-06-sieve.c:18:                                         ^ TMP/test-rax-06-sieve.c:18: error: cannot parse (function not defined: sizeof)                                                              TMP/test-rax-06-sieve.c:18:   for(j=0; j < sizeof(buf)/sizeof(char);)
+    TMP/test-rax-06-sieve.c:18:                                         ^
+    TMP/test-rax-06-sieve.c:18: error: cannot parse                       TMP/test-rax-06-sieve.c:18:   for(j=0; j < sizeof(buf)/sizeof(char);) TMP/test-rax-06-sieve.c:18:                                         ^ TMP/test-rax-06-sieve.c:49: error: cannot parse                       TMP/test-rax-06-sieve.c:49:         else
+    TMP/test-rax-06-sieve.c:49:             ^
+
+According to RAXIS: not sure how cc65 gets that!!!
+
+(size, bytes)
+                                          osdk     osdk
+                 cc65  llvm-mos    vbcc  lcc65  ...-1.x  kickc             sdcc
+\BYTES             -O       -Oz  -O=991    -O3      -O2         --opt-code-size
+
+sieve            1108      1162     914   1160     9745      C            10012
+
+sieve            10,318407   6,786242    7,559299   14,943291   16,502355         C   20,788032
+
+Fastest: llvm-mos (6.79s) and vbcc (7.56s) are fastests
+cc65: can't replicate... It's at 22s! see below
+
+./ptest 06-sieve
+=== ./ptest rax-06-sieve                                              =          - FAILED                - pc    - test-rax-06-sieve        =            ./pc TMP/test-rax-06-sieve                               = 12,568,166 cycles ( 1509 bytes) - cc65  - test-rax-06-sieve
+=  4,130,355 cycles ( 1057 bytes) - oscar - test-rax-06-sieve
+~/GIT/OrwinClaude_1 $
+
+./ptest byte-sieve-array
+=== ./ptest byte-sieve-array
+= 334,348,469 cycles (  131 bytes) - ivm   - byte-sieve-array
+= 104,314,344 cycles (  131 bytes) - asm   - byte-sieve-array
+=  81,481,026 cycles (  131 bytes) - fix   - byte-sieve-array
+=  11,584,333 cycles (  478 bytes) - zpjit - byte-sieve-array  3.65 B/BC
+=       norun cycles (  465 bytes) - ztap  - byte-sieve-array  3.55 B/BC
+=  12,814,781 cycles (  274 bytes) - hjit  - byte-sieve-array  2.09 B/BC
+=  25,385,189 cycles ( 1106 bytes) - cc65  - byte-sieve-array  8.44 B/BC
+(-Cl -Oirs)
+=  22,792,649 cycles ( 1110 bytes) - cc65  - byte-sieve-array  8.47 B/BC
+BEFORE (printf)
+=  12,639,850 cycles ( 4337 bytes) - oscar - byte-sieve-array  33.11 B/BC
+=  12,822,517 cycles (  660 bytes) - oscar - byte-sieve-array  5.04 B/BC
+
+./ptest byte-sieve-prime
+=== ./ptest byte-sieve-prime
+= 333,853,144 cycles (  130 bytes) - ivm   - byte-sieve-prime
+= 104,322,336 cycles (  130 bytes) - asm   - byte-sieve-prime
+=  81,489,119 cycles (  130 bytes) - fix   - byte-sieve-prime             
+=  13,052,144 cycles (  707 bytes) - zpjit - byte-sieve-prime  5.44 B/BC  
+=       norun cycles (  696 bytes) - ztap  - byte-sieve-prime  5.35 B/BC
+=  14,981,309 cycles (  299 bytes) - hjit  - byte-sieve-prime  2.30 B/BC  
+=  26,598,152 cycles ( 1916 bytes) - cc65  - byte-sieve-prime  14.74 B/BC 
+=  15,047,706 cycles ( 1054 bytes) - oscar - byte-sieve-prime  8.11 B/BC  ~/GIT/OrwinClaude_1 $l
+
+
+-- NOT FAIR: we have fake malloc() and no free() lol
+
 -- fold function calls with constants (if called once?)
     cat TMP/test-rax-05-0xcafe.c
     // test-rax-05-0xcafe.c - raxiss's sample 05-0xcafe (made by ptest)

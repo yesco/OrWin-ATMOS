@@ -1034,7 +1034,11 @@ static void gen_drop_unused(void) {
     if (!func_live[v]) { any = 1; break; }
   if (!any) return;
 
-  // DEL every byte of each dead body; squeeze fixes vectors + jumps
+  // Replace each dead body with a single X (return). Zero-length
+  // functions make every dead vector collapse onto the next live entry
+  // after squeeze; the interpreters tolerate that, but the JIT labels
+  // and vector table do not (SIMRUN: Illegal opcode $FF at $FFFF).
+  // One stub byte keeps a unique, valid entry per vector.
   nb = (word)((bin_ptr >> 3) + 1);
   gen_tgt = (uchar *)calloc(nb, 2);
   if (!gen_tgt) IVM_GEN_FAIL("out of memory (drop unused)");
@@ -1042,7 +1046,9 @@ static void gen_drop_unused(void) {
 
   for (v = 0; v < nvector; v++) {
     if (func_live[v]) continue;
-    for (pc = starts[v]; pc < ends[v]; pc++)
+    if (starts[v] >= ends[v]) continue;   // already empty
+    bin[starts[v]] = 'X';                 // return stub (not DEL)
+    for (pc = starts[v] + 1; pc < ends[v]; pc++)
       DEL(pc);
     // no frame needed: packing skips dead functions (func_live)
     fneed[v] = 0;

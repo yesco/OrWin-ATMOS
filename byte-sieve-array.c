@@ -13,7 +13,7 @@ int main() {
   unsigned int i, prime, k, count, iter; 
 
   
-  printf("10 iterations\n");
+  putz("10 iterations\n");
 
   // < is incorect so use <= lol
   for (iter = 1; iter <= 10; iter++) {
@@ -44,7 +44,7 @@ int main() {
     }
   }
 
-  putz("primes: "); printf("%u \n", count);
+  putz("primes: "); putnl(count);
 
   return 0;
 }

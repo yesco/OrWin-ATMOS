@@ -437,7 +437,7 @@ def test(t):
 
     step(t, "cc65")
     rm(t + ".sim")
-    s = run(["cl65", f"-I{inc}", "-Dxputz=puts", "-t", "sim6502", "-Cl", "-Os",
+    s = run(["cl65", f"-I{inc}", "-Dxputz=puts", "-t", "sim6502", "-Cl", "-Oirs",
              "-o", t + ".sim", t + ".c"] + putn + io,
             t + ".cc65-build.log")
     if os.path.exists(t + ".sim"):
