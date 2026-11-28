@@ -92,6 +92,7 @@ uchar nvector;
 // Backtracking can only make it bigger (safe, just less packing).
 
 uchar fneed[MAX_VECTORS];
+uchar func_live[MAX_VECTORS]; // 1 = reachable from main (set by gen_drop_unused)
 uchar cur_func;           // function being emitted (gen_func_entry), 0xff none
 uchar next_slot; // frames/locals bump (and all slots when !optimize)
 
@@ -713,6 +714,7 @@ void gen_reset(void) {
   ginit_acc = 0xff;
   cur_func = 0xff;
   memset(fneed, 0, sizeof(fneed));
+  memset(func_live, 1, sizeof(func_live)); // optimistic until drop_unused
   memset(static_slot, 0, sizeof(static_slot));
 
   acc_invalidate();
@@ -976,7 +978,6 @@ static void gen_squeeze(void) {
 // call sites that live outside function bodies (global init is already
 // copied into main). A call is the single-byte 0xC0|vec.
 static void gen_drop_unused(void) {
-  uchar live[MAX_VECTORS];
   uchar stack[MAX_VECTORS];
   uchar sp = 0, v, c;
   word pc, n, starts[MAX_VECTORS], ends[MAX_VECTORS];
@@ -986,7 +987,7 @@ static void gen_drop_unused(void) {
 
   if (!nvector) return;
 
-  memset(live, 0, nvector);
+  memset(func_live, 0, nvector);
 
   // body [starts[v], ends[v]): next higher function entry, or bin_ptr
   for (v = 0; v < nvector; v++)
@@ -1001,12 +1002,12 @@ static void gen_drop_unused(void) {
 
   // root: main, or the body that owns main_offset
   if (main_vec != (uchar)0xff && main_vec < nvector) {
-    live[main_vec] = 1;
+    func_live[main_vec] = 1;
     stack[sp++] = main_vec;
   } else {
     for (v = 0; v < nvector; v++)
       if (vectors[v] == main_offset) {
-        live[v] = 1;
+        func_live[v] = 1;
         stack[sp++] = v;
       }
   }
@@ -1020,8 +1021,8 @@ static void gen_drop_unused(void) {
       if (!n) n = 1;
       if (*a >= 0xC0) {
         c = (uchar)(*a & 0x3f);
-        if (c < nvector && !live[c]) {
-          live[c] = 1;
+        if (c < nvector && !func_live[c]) {
+          func_live[c] = 1;
           stack[sp++] = c;
         }
       }
@@ -1030,7 +1031,7 @@ static void gen_drop_unused(void) {
   }
 
   for (v = 0; v < nvector; v++)
-    if (!live[v]) { any = 1; break; }
+    if (!func_live[v]) { any = 1; break; }
   if (!any) return;
 
   // DEL every byte of each dead body; squeeze fixes vectors + jumps
@@ -1040,23 +1041,26 @@ static void gen_drop_unused(void) {
   gen_del = gen_tgt + nb;
 
   for (v = 0; v < nvector; v++) {
-    if (live[v]) continue;
+    if (func_live[v]) continue;
     for (pc = starts[v]; pc < ends[v]; pc++)
       DEL(pc);
+    // no frame needed: packing skips dead functions (func_live)
+    fneed[v] = 0;
   }
   gen_squeeze();
 }
 
 // -O, after the slot remap (on the final slot numbers):
-// - drop unused functions first (whole bodies -> DEL)
 // - the peephole puts DELs where it drops bytes
 // - the squeeze removes them, and fixes the jumps and vectors
+// (unused functions already dropped before gen_pack)
 //
 // Done twice: some chances only show up after the first round.
 static void gen_optimize(void) {
   uchar i;
 
-  gen_drop_unused();
+  // gen_drop_unused already ran before gen_pack (so frames of dead
+  // functions are not reserved). Peephole only here.
   for (i = 0; i < 2; i++) {
     gen_peephole();
     gen_squeeze();
@@ -1475,10 +1479,16 @@ static uchar gen_pack(uchar *map) {
       }
   top = f0;
 
-  // frame of v starts fneed[v] cells above f0
+  // frame of v starts fneed[v] cells above f0 (dead functions: no cells)
   for (v = 0; v < nvector; v++) {
     b = frame_base[v];
     e = (v + 1 < nvector) ? frame_base[v + 1] : next_slot;
+    if (!func_live[v]) {
+      // still give map entries (any residual refs) but share one dummy cell
+      for (s = b; s < e; s++)
+        map[s] = f0;
+      continue;
+    }
     for (s = b; s < e; s++)
       map[s] = f0 + fneed[v] + s - b;
     if (f0 + fneed[v] + e - b > top)
@@ -1587,6 +1597,12 @@ uchar *build_blob(int *out_len) {
   else free(gen_tgt);
   if (gen_swap()) gen_squeeze();
   else free(gen_tgt);
+#endif
+
+  // Drop unreachable functions before packing frames: gen_pack reads
+  // func_live[] so dead frames free their slots. Also shrinks bin[].
+#ifdef IVM_OPT
+  if (optimize) gen_drop_unused();
 #endif
 
   // Pack const image at h.con: [string data-offs...][0000][other ints].
