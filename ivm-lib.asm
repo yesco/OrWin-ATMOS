@@ -475,71 +475,76 @@ pvframe: .word  pcbuf                   ; buf
 pvfd:    .word  0                       ; fd
 .endif
 
+
 ;;; ---------------------------------------------------------------------------
-;;; ": JSR _opprintstr / .asciiz "..." / next instruction: via opputs
-;;; 30 B; ~90 c + ~24 c per char + opputchar
+;;; ": JSR _opprintstr / .asciiz "..." / next instruction
+;;; 15 B; preserves AX
 
 _opprintstr:
-;;; 30 B
-        sta     sreg                    ; AX kept for the return
-        stx     sreg+1
+        sta     tmp3                    ; save AX
+        stx     tmp4
 
-        pla                             ; -> last byte of the JSR
-        clc
-        adc     #1
-        tay
+        pla                             ; pull return address -> last byte of JSR
+	tay
         pla
-        adc     #0
+	sta     ptr1+1
 
-;;; TODO: instead of add 1: 9 bytes, just make _opputs start w Y=1
-        tax
-        tya                             ; AX -> the string
+        jsr     _putsptr1y              ; skips first byte, prints until 0, leaves ptr1 at 0
 
-        jsr     _opputs                 ; ptr1 -> its 0
+	sty     ptr1
+	jmp     (ptr1)
 
-        inc     ptr1                    ; past it: the next instruction
-        bne     :+
-        inc     ptr1+1
-:
-	lda     sreg
-        ldx     sreg+1
-        jmp     (ptr1)
+;        rts
 
 ;;; ---------------------------------------------------------------------------
 ;;; P: print 0-terminated string at AX, AX kept (retax: putnum's too)
-;;; 34 B; ~40 c + ~24 c per char + opputchar
+;;; 30 B; preserves AX
 
 _opputs:
-;;; 29 B
-        sta     tmp3
+	;; save AX for retax
+        sta     tmp3                    
         stx     tmp4
+        ldy     #0
 
-        sta     ptr1
+	tay
         stx     ptr1+1
-        ora     ptr1+1
 
-        beq     retax                   ; NULL
-:
-	ldy     #0
-        lda     (ptr1),y
+	;; NULL check
+        ora     ptr1+1
         beq     retax
 
+_putsptr1y:	
+	lda     #0
+	sta     ptr1
+	
+_opputs_loop:
+        lda     (ptr1),y
+	
+	iny
+        bne     :+
+        inc     ptr1+1
+        bne     :+
+:	
+	
         jsr     _opputchar
 
-        inc     ptr1
-        bne     :-
-        inc     ptr1+1
+	bne     _opputs_loop
 
-        bne     :-                      ; (wrapped past $FFFF: done)
 
 retax:
-;;; 5 B
-        lda     tmp3                    ; AX as on entry
+        lda     tmp3                    ; restore AX as on entry
         ldx     tmp4
+
         rts
+
+
 
 ;;; ---- cut 2: ... no number printing ----
 _ivmlib_cut2:
+
+
+
+
 
 ;;; ---------------------------------------------------------------------------
 ;;; .: print AX unsigned decimal, AX kept
