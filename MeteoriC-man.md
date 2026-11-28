@@ -513,7 +513,9 @@ struct pt *mk(int x) { ... return p; }      /* a pointer result */
 - Calls work as statements, in expressions and as arguments.
 - Each function has a fixed frame: its parameters and locals at fixed
   slots (with `-O` frames of functions never active at the same time
-  share memory).
+  share memory). With `-O`, functions never called from `main` are
+  dropped (body → `X` stub, frame slots freed; the vector table entry
+  remains). See [Unused functions](#unused-functions-gen_drop_unused-under--o).
 
 **NOTE (silent): no recursion.** A function calling itself (directly or
 not) overwrites its own frame and does not come back:
@@ -993,7 +995,7 @@ A call is cheap in bytecode; on the VMs it costs about two loop rounds.
 - Peephole: advanced (LOL) reuse of remaining ACC value of previous
   operation; may use associativey to reuse.
 - Const eliminiation if they are not used
-- Function elimination if they are not called (oscar64 does cc65 not)
+- Function elimination if they are not called (see below)
 - Minimize allocated static memory area
 - CSR: Common Subexpression Reuse (from temps); subexpressions inside the
   same function calculating the same thing are reused if they are stored
@@ -1050,6 +1052,39 @@ built, `-DIVM_OPT`), value numbering 2.1 KB, CSE 3.5 KB (not built,
 - Array lookup/setting; addopts to size of indexing variable, size of
   array, constant index, constant pointer/array, setting constant value.
 
+
+### Unused functions optimizations (`gen_drop_unused`, under `-O`)
+
+Because frames are a static FORTRAN-style stack and there is no
+recursion or forward calls, the call graph is a DAG. From `main` (or
+the program entry) the compiler marks every reachable function; the
+rest are unused.
+
+What is removed and what is not:
+
+| | removed | kept |
+| --- | --- | --- |
+| **bytecode body** | yes — replaced by a single `X` (return) stub | — |
+| **frame slots**   | yes — packing does not reserve cells for them (`func_live`) | — |
+| **call vector**   | no — the vector table still has one entry per defined function | the slot points at the `X` stub |
+| **symbol / name** | no (debug / `.sym` may still list it) | — |
+
+So a large library of helpers that the program never calls costs almost
+nothing in code size or `memsz`: their bodies and frames go away. The
+vector table still has one word per defined function (nulled to the
+stub, not deleted). That is intentional and cheap; compacting the
+table would require renumbering every call site.
+
+Example (`test-fun-unused.c`): `fat_dead` with many locals, and a
+`dead_mid` → `dead_leaf` chain, never called from `main`. After `-O`
+the dump shows three one-byte `X` bodies, their `frame` bases all
+share the dummy cell, and `memsz` stays at the live frames only
+(`used_leaf`, `used_mid`, `main`). Interpreters and the JIT all run
+that image; a true zero-length body (no stub) collapses several
+vectors onto the next live entry and breaks the JIT.
+
+Requires `-O` (`IVM_OPT`). Without `-O`, unused functions stay in the
+image in full.
 
 ## Not supported: a summary
 
