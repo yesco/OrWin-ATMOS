@@ -648,6 +648,10 @@ E=\i\?c=\;=$E[s\1l\1]
 |(char)$R\#ff[&\2]$O
 |(char)$S\#ff[\l1&\2]$O
 
+|(uint16_t)$E
+|(int)$E
+|(unsigned int)$E
+
 |$R$O$k$j$o$q
 |$S[\l1]$O$k$j$o$q
 

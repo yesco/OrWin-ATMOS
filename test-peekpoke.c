@@ -2,7 +2,6 @@
 //
 // - peek(a) poke(a, v): a byte at address a
 // - deek(a) doke(a, v): a word (little endian)
-// - _putc(c) _puts(s): putchar, puts without the newline
 // - uint8_t uint16_t: unsigned char, int
 // - MEMPTR(a): a as a byte pointer
 //
@@ -14,6 +13,17 @@
 #include <stdlib.h>
 #include <stdint.h>
 
+#ifndef __MC65__
+  #define peek(a) (*(uint8_t*)(a))
+  #define poke(a,v) (*(uint8_t*)(a)=(v))
+
+  #define deek(a) (*(uint16_t*)(a))
+  #define doke(a,v) (*(uint16_t*)(a)=(v))
+
+// TODO: not right for oscar
+  #define MEMPTR(p) ((uint16_t)(p))
+#endif
+
 uint8_t c;
 uint16_t w;
 
@@ -22,7 +32,7 @@ int main() {
   int a;
 
   b = malloc(8);
-  a = b;
+  a = (uint16_t)b;
 
   putz("poke peek:\tABC\n\t\t");
   poke(a, 65);
@@ -36,6 +46,7 @@ int main() {
   putz("\n");
 
   putz("_puts MEMPTR:\tABC|\n\t\t");
+// TODO: oscar struggles
   putz(MEMPTR(a));
   putz("|\n");
 
