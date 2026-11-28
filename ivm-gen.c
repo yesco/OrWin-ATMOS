@@ -967,7 +967,88 @@ static void gen_squeeze(void) {
 }
 
 #ifdef IVM_OPT
+// Drop functions never reachable from main / entry.
+// Static FORTRAN stack + no recursion/forwards => call graph is a DAG.
+// Reachability from the roots; unused bodies become DELs; gen_squeeze
+// removes them and fixes vectors[] / jumps (same path as peephole).
+//
+// Roots: main_vec (or main_offset when there is no main FUNC), plus any
+// call sites that live outside function bodies (global init is already
+// copied into main). A call is the single-byte 0xC0|vec.
+static void gen_drop_unused(void) {
+  uchar live[MAX_VECTORS];
+  uchar stack[MAX_VECTORS];
+  uchar sp = 0, v, c;
+  word pc, n, starts[MAX_VECTORS], ends[MAX_VECTORS];
+  word nb;
+  uchar *a;
+  uchar any = 0;
+
+  if (!nvector) return;
+
+  memset(live, 0, nvector);
+
+  // body [starts[v], ends[v]): next higher function entry, or bin_ptr
+  for (v = 0; v < nvector; v++)
+    starts[v] = vectors[v];
+  for (v = 0; v < nvector; v++) {
+    word e = (word)bin_ptr;
+    for (c = 0; c < nvector; c++)
+      if (starts[c] > starts[v] && starts[c] < e)
+        e = starts[c];
+    ends[v] = e;
+  }
+
+  // root: main, or the body that owns main_offset
+  if (main_vec != (uchar)0xff && main_vec < nvector) {
+    live[main_vec] = 1;
+    stack[sp++] = main_vec;
+  } else {
+    for (v = 0; v < nvector; v++)
+      if (vectors[v] == main_offset) {
+        live[v] = 1;
+        stack[sp++] = v;
+      }
+  }
+
+  // DFS over the call DAG (0xC0|vec sites only; no indirect calls)
+  while (sp) {
+    v = stack[--sp];
+    for (pc = starts[v]; pc < ends[v]; ) {
+      a = bin + pc;
+      n = ivm_oplen(a);
+      if (!n) n = 1;
+      if (*a >= 0xC0) {
+        c = (uchar)(*a & 0x3f);
+        if (c < nvector && !live[c]) {
+          live[c] = 1;
+          stack[sp++] = c;
+        }
+      }
+      pc += n;
+    }
+  }
+
+  for (v = 0; v < nvector; v++)
+    if (!live[v]) { any = 1; break; }
+  if (!any) return;
+
+  // DEL every byte of each dead body; squeeze fixes vectors + jumps
+  nb = (word)((bin_ptr >> 3) + 1);
+  gen_tgt = (uchar *)calloc(nb, 2);
+  if (!gen_tgt) IVM_GEN_FAIL("out of memory (drop unused)");
+  gen_del = gen_tgt + nb;
+
+  for (v = 0; v < nvector; v++) {
+    if (live[v]) continue;
+    for (pc = starts[v]; pc < ends[v]; pc++)
+      DEL(pc);
+  }
+  gen_squeeze();
+}
+
 // -O, after the slot remap (on the final slot numbers):
+// - drop unused functions first (whole bodies -> DEL)
 // - the peephole puts DELs where it drops bytes
 // - the squeeze removes them, and fixes the jumps and vectors
 //
@@ -975,6 +1056,7 @@ static void gen_squeeze(void) {
 static void gen_optimize(void) {
   uchar i;
 
+  gen_drop_unused();
   for (i = 0; i < 2; i++) {
     gen_peephole();
     gen_squeeze();
