@@ -1182,6 +1182,90 @@ uchar vn_temp(word from, uchar t) {
 }
 #endif
 
+// ---- constant folding (parse.c \== \=!) -----------------------------------
+//
+// The code of one expression, [from, bin_ptr[, run here in the compiler.
+//
+// Allowed:
+// - loads of numbers
+// - stores to its own temps (slots tmp ..)
+// - the ALU and compare ops, as ivm.c does them (16 bits, unsigned)
+//
+// Result: a slot holding the value, and the code is dropped:
+// - a single load: that slot (a variable or string too)
+// - all constant: a const slot
+// Else -1: the code stays.
+#define FOLD_TMPS 8
+
+int gen_fold(word from, uchar tmp) {
+  word v[FOLD_TMPS], acc = 0, b, pc, start = from;
+  uchar set = 0, op, a, i;
+  int k;
+
+  // main's entry: the global inits went in first, not ours
+  if (main_vec != 0xff && main_offset == from) from += ginit_len;
+
+  pc = from;
+  b = (word)(bin_ptr - from);
+
+  // single load
+  if (b == 1 && bin[pc] < 32) k = bin[pc];
+  else if (b == 2 && bin[pc] == 'L') k = bin[pc + 1];
+  else {
+
+    // run it
+    for (; pc < (word)bin_ptr; pc++) {
+      op = bin[pc];
+      if (op == '?') { acc = !acc; continue; }
+      if (op == '~') { acc = ~acc; continue; }
+
+      // operand slot
+      if (op < 32) { a = op; op = 'L'; }
+      else a = bin[++pc];
+      i = (uchar)(a - tmp);
+
+      // temp store
+      if (op == 'S') {
+        if (i >= FOLD_TMPS) return -1;      // a variable: not constant
+        v[i] = acc;
+        set |= (uchar)(1 << i);
+        continue;
+      }
+
+      // its value: a number, or a temp of ours
+      if (isconst(a) && !const_is_reloc[CONST_TOP - a]) b = const_val(a);
+      else if (i < FOLD_TMPS && (set & (1 << i))) b = v[i];
+      else return -1;
+
+      switch (op) {
+      case 'L': acc = b; break;
+      case '+': acc += b; break;
+      case '-': acc -= b; break;
+      case '*': acc *= b; break;
+      case '/': if (!b) return -1; acc /= b; break;
+      case '%': if (!b) return -1; acc %= b; break;
+      case '&': acc &= b; break;
+      case '|': acc |= b; break;
+      case '^': acc ^= b; break;
+      case '{': acc = b < 16 ? (word)(acc << b) : 0; break;
+      case '}': acc = b < 16 ? (word)(acc >> b) : 0; break;
+      case '<': acc = acc < b; break;
+      case '=': acc = acc == b; break;
+      case '>': acc = acc > b; break;
+      default: return -1;                   // calls, jumps, memory ...
+      }
+    }
+    k = as_addr(lit_addr(acc));
+  }
+
+  // drop the code (main's entry went too: ask for it again, a static
+  // declaration must leave no code)
+  bin_ptr = start;
+  if (from != start) pending_func_entry = main_vec;
+  acc_invalidate();
+  return k;
+}
+
 #ifdef IVM_CSE
 // "load x; OP y; S t" at pc? -> its length, x op y t
 static uchar cse_seq(word pc, uchar *x, uchar *op, uchar *y, uchar *t) {

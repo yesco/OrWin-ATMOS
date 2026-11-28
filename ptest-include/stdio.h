@@ -13,8 +13,12 @@
   int puts(const char*);
   void putz(const char*);
   extern int getchar();
-// Somehow not working
+
+// Somehow not working with cc65, does't respect/use full path
+// TODO: this is a problem for like "printf" etc... we can extern them?
+
 //  #include "/data/data/com.termux/files/usr/share/cc65/include/stdio.h"
+
 #endif
 
 #ifdef __OSCAR64__

@@ -89,6 +89,7 @@
 //   \1..\9     match same ident as capture N (match_ident_same)
 //
 // GUARDS:
+//   \`         a number / 'c' right before , or }: an element, no const slot
 //   \;c        fail if the next char is c (reads nothing: & not &&)
 //   \?X        fail unless result type high-byte is X
 //   \| \. etc  literal escaped char (not a directive)
@@ -100,6 +101,10 @@
 //              whole)
 //
 //   \=n        result := capture n (no new capture)
+//   \==        constant folding of the expression just parsed (code from
+//              \m): one load or constant: no code, result := its slot;
+//              else result := ACC
+//   \=!        the same, but fail unless it is a number
 //   \#xx       result := hex const xx
 //
 //   \o         commit: drop line buffer up to current point
@@ -987,6 +992,30 @@ static word force_addr(uchar n) {
 
 
 // ------------------------------------------------------------
+// CONSTANT FOLDING
+
+// \== \=!: the E just matched (the last capture), its code from \m
+// (gen_fold in ivm-gen.c). must: '!', a number or fail
+static uchar fold_expr(uchar must) {
+  int k = gen_fold(cur.mark, cur.slot_save);
+
+  // E's own result isn't reliable: set it
+  cur.result = VAL_ACC;
+  if (k >= 0) {
+    cur.result = MAKE_CAP(k, TY_WORD);
+    pl_end = 0xffff;                       // that load is gone
+  }
+  cur.prod_cap[cur.prod_n] = cur.result;
+
+  if (must != '!') return 1;
+
+  // a number (not a variable, not an address)
+  if (k < 0 || !isconst(k) || const_is_reloc[CONST_TOP - k]) return 0;
+  next_slot = cur.slot_save;               // its temps
+  return 1;
+}
+
+// ------------------------------------------------------------
 // (BIG) PRODUCTION
 
 
@@ -1239,7 +1268,9 @@ static uchar *run_production(uchar *p) {
       //   scope 0: defer until main entry; else emit L+S now
       case HIDIR('g'):
         dest = cur.prod_cap[1] & 0xff;
-        src  = as_addr(cur.prod_cap[2] & 0xff);
+        b    = cur.prod_cap[2] == VAL_ACC;    // not constant: in ACC
+        src  = b ? 0 : as_addr(cur.prod_cap[2] & 0xff);
+        if (b) pending_const = 0;             // no const to alias
         if (pending_const) {
           // rebind the declared name to the const slot; no store emitted
           pending_const = 0;
@@ -1274,7 +1305,10 @@ static uchar *run_production(uchar *p) {
         // has no code to go into: nothing runs at scope 0. So it's
         // recorded in ginit_*, and gen_func_entry() emits Z/C stores
         // at the start of main. Inside a function it's a plain L+S.
-        if (scope_depth == 0 || static_decl) {
+        if (b) {
+          // (at the top / static: rule V reports the code)
+          emitop2(is_char ? 's' : 'S', dest);
+        } else if (scope_depth == 0 || static_decl) {
           // (a static: main's prologue, if main is still to come)
           if (scope_depth && main_vec != 0xff)
             FAIL("static: initialized after main (move the function up)");
@@ -2368,6 +2402,8 @@ int run() {
     ia_raw = 1;
     ok = match_num();
     ia_raw = 0;
+    skip_ws();                          // alone? not "2 * N"
+    if (nextc != ',' && nextc != '}') ok = 0;
   }
   else if (c == HIBIT(',')) ok = init_elem();
   else if (c == HIBIT('.')) ok = init_end();
@@ -2391,7 +2427,9 @@ int run() {
   // SET other result than LAST
   else if (c == HIBIT('=')) {
     e = a[1] - '0';
-    if (e >= 1 && e <= cur.prod_n)
+    if (e > 9)                          // \== \=!
+      ok = fold_expr(a[1]);
+    else if (e >= 1 && e <= cur.prod_n)
       cur.result = cur.prod_cap[e];
     adv = 2;
   }

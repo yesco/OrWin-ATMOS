@@ -90,6 +90,15 @@
 =      35 cycles (   19 bytes) - hjit  - test-const  0.33 B/BC
 =     230 cycles (  207 bytes) - cc65  - test-const  3.63 B/BC
 =      91 cycles (  139 bytes) - oscar - test-const  2.44 B/BC
+=== ./ptest constexpr
+= 447,576 cycles (  493 bytes) - ivm   - test-constexpr
+= 537,154 cycles (  493 bytes) - asm   - test-constexpr
+= 540,334 cycles (  493 bytes) - fix   - test-constexpr
+= 123,224 cycles (  976 bytes) - zpjit - test-constexpr  1.98 B/BC
+=   norun cycles (  965 bytes) - ztap  - test-constexpr  1.96 B/BC
+=     882 cycles (  777 bytes) - hjit  - test-constexpr  1.58 B/BC
+= 299,126 cycles ( 1445 bytes) - cc65  - test-constexpr  2.93 B/BC
+=  32,994 cycles ( 1053 bytes) - oscar - test-constexpr  2.14 B/BC
 === ./ptest cse
 = 300,400 cycles (  383 bytes) - ivm   - test-cse
 = 368,451 cycles (  383 bytes) - asm   - test-cse
@@ -226,8 +235,7 @@
 =   3,118 cycles ( 1626 bytes) - zpjit - test-getchar  3.02 B/BC
 =   norun cycles ( 1611 bytes) - ztap  - test-getchar  2.99 B/BC
 =     138 cycles ( 1263 bytes) - hjit  - test-getchar  2.34 B/BC
-=       - FAILED                - cc65  - test-getchar
-=         cl65 -Dxputz=puts -Iptest-include -t sim6502 -Cl -Os -o TMP/test-getchar.sim TMP/test-getchar.c putn.c && sim65 -c TMP/test-getchar.sim
+=  16,880 cycles ( 2222 bytes) - cc65  - test-getchar  4.12 B/BC
 =   2,309 cycles ( 1253 bytes) - oscar - test-getchar  2.32 B/BC
 === ./ptest hello
 = 117,884 cycles (   49 bytes) - ivm   - test-hello
@@ -454,14 +462,13 @@
 =    458,237 cycles ( 1275 bytes) - oscar - test-opts  DIFFERS 12/14  3.37 B/BC
 =            ./oscar -O3 -Dxputz=puts -Os -ep putn.c TMP/test-opts.c
 === ./ptest peekpoke
-= 183,670 cycles (  204 bytes) - ivm   - test-peekpoke
-= 267,020 cycles (  204 bytes) - asm   - test-peekpoke
-= 268,518 cycles (  204 bytes) - fix   - test-peekpoke
+= 183,478 cycles (  204 bytes) - ivm   - test-peekpoke
+= 267,043 cycles (  204 bytes) - asm   - test-peekpoke
+= 268,530 cycles (  204 bytes) - fix   - test-peekpoke
 =  11,804 cycles (  764 bytes) - zpjit - test-peekpoke  3.75 B/BC
 =   norun cycles (  753 bytes) - ztap  - test-peekpoke  3.69 B/BC
 =     573 cycles (  451 bytes) - hjit  - test-peekpoke  2.21 B/BC
-=       - FAILED                - cc65  - test-peekpoke
-=         cl65 -Dxputz=puts -Iptest-include -t sim6502 -Cl -Os -o TMP/test-peekpoke.sim TMP/test-peekpoke.c putn.c && sim65 -c TMP/test-peekpoke.sim
+=  60,789 cycles ( 1457 bytes) - cc65  - test-peekpoke  7.14 B/BC
 =       - FAILED                - oscar - test-peekpoke
 =         ./oscar -O3 -Dxputz=puts -Os -ep putn.c TMP/test-peekpoke.c
 === ./ptest pluseq
@@ -650,11 +657,16 @@
 =    cl65 -Dxputz=puts -Iptest-include -t sim6502 -Cl -Os -o TMP/test-rax-03-bytecpy.sim TMP/test-rax-03-bytecpy.c -Dputz=puts && sim65 -c TMP/test-rax-03-bytecpy.sim
 = 97 cycles (  143 bytes) - oscar - test-rax-03-bytecpy
 === ./ptest rax-04-memcopy
-=       - FAILED                - pc    - test-rax-04-memcopy
-=         ./pc TMP/test-rax-04-memcopy
-=       - FAILED                - cc65  - test-rax-04-memcopy
-=         cl65 -Dxputz=puts -Iptest-include -t sim6502 -Cl -Os -o TMP/test-rax-04-memcopy.sim TMP/test-rax-04-memcopy.c -Dputz=puts && sim65 -c TMP/test-rax-04-memcopy.sim
-= 311,685 cycles (  178 bytes) - oscar - test-rax-04-memcopy
+=         - FAILED                - ivm   - test-rax-04-memcopy
+=           ./ivm TMP/test-rax-04-memcopy
+= 2,919,178 cycles (   56 bytes) - asm   - test-rax-04-memcopy
+= 2,609,050 cycles (   56 bytes) - fix   - test-rax-04-memcopy
+=   614,766 cycles (  119 bytes) - zpjit - test-rax-04-memcopy  2.12 B/BC
+=     norun cycles (  120 bytes) - ztap  - test-rax-04-memcopy  2.14 B/BC
+=   688,338 cycles (   76 bytes) - hjit  - test-rax-04-memcopy  1.36 B/BC
+=         - FAILED                - cc65  - test-rax-04-memcopy
+=           cl65 -Dxputz=puts -Iptest-include -t sim6502 -Cl -Os -o TMP/test-rax-04-memcopy.sim TMP/test-rax-04-memcopy.c -Dputz=puts && sim65 -c TMP/test-rax-04-memcopy.sim
+=   311,685 cycles (  178 bytes) - oscar - test-rax-04-memcopy  3.18 B/BC
 === ./ptest rax-05-0xcafe
 = 137,203 cycles (  156 bytes) - ivm   - test-rax-05-0xcafe
 = 219,114 cycles (  156 bytes) - asm   - test-rax-05-0xcafe
@@ -805,7 +817,7 @@
 =          - FAILED                - cc65  - test-rax-22-qrcode
 =            cl65 -Dxputz=puts -Iptest-include -t sim6502 -Cl -Os -o TMP/test-rax-22-qrcode.sim TMP/test-rax-22-qrcode.c -Dputz=puts && sim65 -c TMP/test-rax-22-qrcode.sim
 = 16,047,517 cycles (10796 bytes) - oscar - test-rax-22-qrcode
-=== ./ptest    (85 tests)
+=== ./ptest    (86 tests)
 = test                                    ivm            asm            fix          zpjit           ztap           hjit           cc65          oscar            lib
 = test-42                            109,573        185,285        186,351            155              0*            35            230             91              - 
 = test-addr                          258,175        267,491*       240,764*        18,355              0*         1,746         80,848          9,676              - 
@@ -816,6 +828,7 @@
 = test-bubble                  1,918,065,184    641,839,034    530,939,934    104,071,122              0*   115,713,169    347,298,101*    64,928,414*             - 
 = test-char                          172,755        252,053        252,527          7,946              0*         1,056         41,369          5,235              - 
 = test-const                         114,441        195,395        196,506            257              0*            35            230             91              - 
+= test-constexpr                     447,576        537,154        540,334        123,224              0*           882        299,126         32,994              - 
 = test-cse                           300,400        368,451        370,067         31,157              0*         2,840        139,199         21,748              - 
 = test-dispatch-fun              836,037,421    218,769,488    209,600,834     18,220,556              0*    20,250,337     12,600,333        150,342              - 
 = test-dispatch-inc              329,160,459     77,015,706     66,847,053      8,255,944              0*     9,269,867     35,604,269        150,342              - 
@@ -829,7 +842,7 @@
 = test-expr                        1,397,746      1,229,637      1,225,312        199,820              0*        10,454      1,037,998        159,747              - 
 = test-exprinc                       275,937        348,748        349,836         19,675              0*         1,401         88,370         10,495              - 
 = test-fixipc-op                     535,962        349,432        329,505         23,711              0*        18,438         66,457         14,935              - 
-= test-getchar                       135,391        229,354        230,710          3,118              0*           138           FAIL          2,309              - 
+= test-getchar                       135,391        229,354        230,710          3,118              0*           138         16,880          2,309              - 
 = test-hello                         117,884        192,874        194,028          1,508              0*            49            816            562              - 
 = test-ifdef                         229,808        307,473        309,371         17,728              0*           405         81,174*        12,880*             - 
 = test-ifeq                        1,425,615*       860,920*       839,828*        85,479*             0*        33,392*       248,445*        34,912*             - 
@@ -852,7 +865,7 @@
 = test-nullread                      120,229        195,055        196,191          1,774              0*            95         17,042*         2,697*             - 
 = test-nums                          220,458        293,083        295,416         22,043              0*           323        103,756         18,021              - 
 = test-opts                       43,940,583*     9,249,326*     8,341,687*     1,427,480*             0*     1,542,158*     4,060,762*       458,237*             - 
-= test-peekpoke                      183,670        267,020        268,518         11,804              0*           573           FAIL           FAIL              - 
+= test-peekpoke                      183,478        267,043        268,530         11,804              0*           573         60,789           FAIL              - 
 = test-pluseq                        288,327        365,438        367,053         27,379              0*         1,544        133,339         21,096              - 
 = test-precedence-err                      -              -              -              -              -              -           FAIL           FAIL              - 
 = test-precedence                    520,178        568,783        570,846         64,588              0*         3,318        290,794         42,205              - 
@@ -873,7 +886,7 @@
 = test-rax-01-dummy                  108,472        183,252        184,281            155              0*            35           FAIL             89              - 
 = test-rax-02-hello-world            118,814        192,720        193,853          1,887              0*            41           FAIL            897              - 
 = test-rax-03-bytecpy                      -              -              -              -              -              -           FAIL             97              - 
-= test-rax-04-memcopy                      -              -              -              -              -              -           FAIL        311,685              - 
+= test-rax-04-memcopy                   FAIL      2,919,178      2,609,050        614,766              0*       688,338           FAIL        311,685              - 
 = test-rax-05-0xcafe                 137,203        219,114        220,101          2,412              0*           331           FAIL          1,499              - 
 = test-rax-06-sieve                        -              -              -              -              -              -           FAIL      4,130,355              - 
 = test-rax-07-aes256                       -              -              -              -              -              -           FAIL           FAIL              - 
@@ -906,6 +919,7 @@
 = test-bubble                5.523x 1.848x 1.529x 0.300x 0.000x 0.333x 1.000x 0.187x   -
 = test-char                  4.176x 6.093x 6.104x 0.192x 0.000x 0.026x 1.000x 0.127x   -
 = test-const                   498x   850x   854x 1.117x 0.000x 0.152x 1.000x 0.396x   -
+= test-constexpr             1.496x 1.796x 1.806x 0.412x 0.000x 0.003x 1.000x 0.110x   -
 = test-cse                   2.158x 2.647x 2.659x 0.224x 0.000x 0.020x 1.000x 0.156x   -
 = test-dispatch-fun           66.4x  17.4x  16.6x 1.446x 0.000x 1.607x 1.000x 0.012x   -
 = test-dispatch-inc          9.245x 2.163x 1.878x 0.232x 0.000x 0.260x 1.000x 0.004x   -
@@ -919,7 +933,7 @@
 = test-expr                  1.347x 1.185x 1.180x 0.193x 0.000x 0.010x 1.000x 0.154x   -
 = test-exprinc               3.123x 3.946x 3.959x 0.223x 0.000x 0.016x 1.000x 0.119x   -
 = test-fixipc-op             8.065x 5.258x 4.958x 0.357x 0.000x 0.277x 1.000x 0.225x   -
-= test-getchar                    -      -      -      -      -      -   FAIL      -   -
+= test-getchar               8.021x  13.6x  13.7x 0.185x 0.000x 0.008x 1.000x 0.137x   -
 = test-hello                   144x   236x   238x 1.848x 0.000x 0.060x 1.000x 0.689x   -
 = test-ifdef                 2.831x 3.788x 3.811x 0.218x 0.000x 0.005x 1.000x 0.159x   -
 = test-ifeq                  5.738x 3.465x 3.380x 0.344x 0.000x 0.134x 1.000x 0.141x   -
@@ -942,7 +956,7 @@
 = test-nullread              7.055x  11.4x  11.5x 0.104x 0.000x 0.006x 1.000x 0.158x   -
 = test-nums                  2.125x 2.825x 2.847x 0.212x 0.000x 0.003x 1.000x 0.174x   -
 = test-opts                   10.8x 2.278x 2.054x 0.352x 0.000x 0.380x 1.000x 0.113x   -
-= test-peekpoke                   -      -      -      -      -      -   FAIL   FAIL   -
+= test-peekpoke              3.018x 4.393x 4.417x 0.194x 0.000x 0.009x 1.000x   FAIL   -
 = test-pluseq                2.162x 2.741x 2.753x 0.205x 0.000x 0.012x 1.000x 0.158x   -
 = test-precedence-err             -      -      -      -      -      -   FAIL   FAIL   -
 = test-precedence            1.789x 1.956x 1.963x 0.222x 0.000x 0.011x 1.000x 0.145x   -
@@ -963,7 +977,7 @@
 = test-rax-01-dummy               -      -      -      -      -      -   FAIL      -   -
 = test-rax-02-hello-world         -      -      -      -      -      -   FAIL      -   -
 = test-rax-03-bytecpy             -      -      -      -      -      -   FAIL      -   -
-= test-rax-04-memcopy             -      -      -      -      -      -   FAIL      -   -
+= test-rax-04-memcopy          FAIL      -      -      -      -      -   FAIL      -   -
 = test-rax-05-0xcafe              -      -      -      -      -      -   FAIL      -   -
 = test-rax-06-sieve               -      -      -      -      -      -   FAIL      -   -
 = test-rax-07-aes256              -      -      -      -      -      -   FAIL   FAIL   -
@@ -994,6 +1008,7 @@
 = test-bubble                   245    245    245  1,141  1,130    796  2,073  1,321      -
 = test-char                     159    159    159    450    439    213  1,015    599      -
 = test-const                     57     57     57     82     83     19    207    139      -
+= test-constexpr                493    493    493    976    965    777  1,445  1,053      -
 = test-cse                      383    383    383  1,399  1,388  1,104  2,269  1,162      -
 = test-dispatch-fun             151    151    151    418    419    358    545    164      -
 = test-dispatch-inc             247    247    247    703    704    849  1,744    164      -
@@ -1007,7 +1022,7 @@
 = test-expr                     132    132    132    413    400    202  1,029    608      -
 = test-exprinc                  266    266    266    885    872    772  1,337    590      -
 = test-fixipc-op                976    976    976  2,981  2,968  3,795  5,046    783      -
-= test-getchar                  539    539    539  1,626  1,611  1,263   FAIL  1,253      -
+= test-getchar                  539    539    539  1,626  1,611  1,263  2,222  1,253      -
 = test-hello                     49     49     49    220    209     41    433    216      -
 = test-ifdef                    232    232    232    564    551    355  1,071    675      -
 = test-ifeq                     582    582    582  2,112  2,099  1,974  2,219    883      -
@@ -1030,7 +1045,7 @@
 = test-nullread                  50     50     50    281    270     66    823    461      -
 = test-nums                     143    143    143    481    470    254    945    647      -
 = test-opts                     378    378    378  1,331  1,320  1,044  2,836  1,275      -
-= test-peekpoke                 204    204    204    764    753    451   FAIL   FAIL      -
+= test-peekpoke                 204    204    204    764    753    451  1,457   FAIL      -
 = test-pluseq                   427    427    427  1,339  1,328  1,162  1,925  1,041      -
 = test-precedence-err             -      -      -      -      -      -   FAIL   FAIL      -
 = test-precedence               774    774    774  2,314  2,301  2,275  3,232  1,053      -
@@ -1051,7 +1066,7 @@
 = test-rax-01-dummy              31     31     31     67     68     18   FAIL    137      -
 = test-rax-02-hello-world        51     51     51    219    208     40   FAIL    213      -
 = test-rax-03-bytecpy             -      -      -      -      -      -   FAIL    143      -
-= test-rax-04-memcopy             -      -      -      -      -      -   FAIL    178      -
+= test-rax-04-memcopy          FAIL     56     56    119    120     76   FAIL    178      -
 = test-rax-05-0xcafe            156    156    156    433    422    255   FAIL    311      -
 = test-rax-06-sieve               -      -      -      -      -      -   FAIL  1,057      -
 = test-rax-07-aes256              -      -      -      -      -      -   FAIL   FAIL      -

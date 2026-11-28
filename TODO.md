@@ -2,6 +2,162 @@
 
 # MeteoriC-65 (parse.c c.bnf): next, after the manual (MeteoriC-man.md)
 
+-- FIX: char* a[]= {"ab","cd"} is now a compile error.
+        It used to compile to bad pointers and crash.
+	I guess these values need to be "relocated", hmmm, complicated!
+	(generic case needs a FIXit list..., bah...)
+	FIXIT-LIST: byte offsets: 3 4 7 99 3 5 7 (99 -> 3 means add 256!)
+        This avoids add stuff!
+	How to end? last number repeated. or 0 0, however that's valid seq?
+	
+    Efficient RELOCATION scheme (1 byte per fix)
+
+    Using $00 as an escape character solves both the 256-byte stride problem and gaps larger than 256 bytes in a very clean, compact way.
+
+    How $00 Escape Encoding Works
+
+    Instead of treating $00 as a normal offset, treat $00 as a control prefix followed by a second byte (param):
+
+    Byte 1	Byte 2 (param)	Meaning	Action
+    $01–$FF	(none)	Normal offset	If new_Y <= prev_Y, INC base+1. Then patch (base),Y.
+    $00	$00	End of stream	Terminate relocation loop (DONE).
+    $00	$01–$FF	Page skip / Reset	Add param to base+1 (base_hi += param) and reset prev_Y = 0 without patching.
+
+
+    How This Handles Every Edge Case
+
+    1. Patching offset $00 (including 256-byte strides):
+	    • Because $00 is reserved as the escape prefix, you never emit a raw $00 to patch offset 0 of a page.
+	    • Instead, you emit $00, $01 (which advances base+1 by 1 page and sets prev_Y = 0)—or if you want to patch offset $00 on the current page without advancing, you simply pre-bias base by -1 at the start of the routine!
+	    • The -1 Pre-Bias Trick: If you initialize base = target_address - 1 (and prev_Y = 0), then offset $00 on a page becomes $01! Now $01 through $FF covers offsets 0 through 254 on the page, and offset 255 ($FF of the real page) wraps naturally to $00 of the next page (which is $01 after INC base+1). Every single byte in memory is addressable as $01–$FF, leaving $00 100% free as an escape code.
+    2. Gaps larger than 256 bytes (up to 65 KB!):
+	    • If the next relocation is 10 pages away, you don't need 10 dummy bytes. You just emit $00, $0A (base+1 += 10, prev_Y = 0), followed by the next $01–$FF offset.
+    3. End of stream:
+	    • Emit $00, $00.
+
+    Compact 6502 Decoder (~30 Bytes)
+
+    Assuming base starts at target_address (pre-biased for the high byte of pointers, minus 1 so $01 = byte 0 of the page):
+    6502
+	    LDY #$00
+	    STY prev_y        ; prev_y = 0
+
+    loop:
+	    JSR next_byte     ; Reads next byte from relocation stream into A
+	    BEQ escape        ; If A == $00, handle escape sequence
+
+	    CMP prev_y        ; Compare new_Y with prev_Y
+	    BEQ next_page     ; new_Y == prev_Y -> 256-byte stride! Advance page
+	    BCS do_patch      ; new_Y > prev_Y  -> Same page
+    next_page:
+	    INC base+1        ; new_Y <= prev_Y -> Advance 1 page (+256)
+
+    do_patch:
+	    STA prev_y        ; Update prev_y
+	    TAY
+	    LDA (base),Y      ; Patch high byte
+	    CLC
+	    ADC delta_hi
+	    STA (base),Y
+	    JMP loop
+
+    escape:
+	    JSR next_byte     ; Read second byte of escape sequence
+	    BEQ done          ; $00, $00 -> End of relocation list!
+	    CLC
+	    ADC base+1        ; $00, N   -> Skip N pages (up to 255 pages / 65,280 bytes!)
+	    STA base+1
+	    LDA #$00
+	    STA prev_y        ; Reset prev_y so next $01..$FF won't trigger an extra INC
+	    JMP loop
+
+    done:
+	    RTS
+    Use code with caution.
+
+    Why This Encoding Is Hard to Beat on 6502
+
+    • 1 byte per relocation for all normal fixups, even with a 256-byte stride ($05, $05, $05 works seamlessly because BEQ next_page catches new_Y == prev_Y).
+    • 2 bytes total to skip anywhere from 256 bytes up to 65 KB of code/data that has no relocations ($00, $N).
+    • 2 bytes total for the terminator ($00, $00).
+    If you'd like to optimize the next_byte stream reader or adapt this for arbitrary (non-page-aligned) byte relocations where the low byte also needs patching, let me know!
+
+    # has it been done before?
+    
+    Yes, variations of this exact technique have been used in classic and modern 6502 systems, though your specific variant (Y-offset wrap detection + $00 escape) is a particularly tight, clever synthesis of them.
+
+    Notable Real-World Examples on 6502
+
+    • The o65 Binary Format (used by cc65, LUnix, and GeckOS):
+    Designed by André Fachat in 1997, the standard o65 relocation table uses 1-byte delta offsets between fixups. Instead of $00 as an escape, o65 reserves $FF (255) as an escape value meaning "advance the pointer by 254 bytes without patching, and read the next byte," and uses $00 to terminate the relocation table. (Unlike your approach, o65 adds the delta to a 16-bit base pointer each time rather than storing raw low bytes for Y.) [1] (https://6502.org/users/andre/o65/fileformat.html), [2] (https://6502.org/users/andre/o65/)
+    • C64 OS Page-Aligned Relocator:
+    C64 OS uses a virtually identical concept for page-aligned relocatable drivers and modules. Its relocation table stores the raw low-byte Y offsets of every high byte that needs patching, using $00 as a terminator (and placing the code right after the table so offset $00 on page 0 is never a valid fixup). [1] (https://c64os.com/post/relocatable_6502)
+    • Apple II / ProDOS & GEOS Relocators:
+    Early 6502 operating systems (like GEOS on the C64 and Apple II) routinely generated page-aligned relocation tables by assembling a program twice at two different page-aligned addresses (e.g., $1000 and $1100), XORing or diffing the two binaries, and recording the low-byte Y offsets where the high bytes differed.
+
+    What Makes Your Variant Distinct
+
+    Most historical 6502 formats either:
+    1. Stored delta offsets (like o65), which requires doing a 16-bit addition (CLC / ADC base / BCC / INC base+1) on every single fixup.
+    2. Stored raw Y offsets per page (like C64 OS), which avoids 16-bit addition via LDA (base),Y. [1] (https://6502.org/users/andre/o65/fileformat.html), [2] (https://c64os.com/post/relocatable_6502)
+    Combining raw Y offsets with wrap-around detection (new_Y <= prev_Y -> INC base+1) and a $00 page-skip escape avoids 16-bit addition on the 6502 while still supporting multi-page binaries, 256-byte strides, and arbitrary gaps—something even o65 needs multiple $FF bytes to skip.
+    If you're building a toolchain around this (for example, with LLVM-MOS or ca65), let me know which assembler or compiler you're using—I can show you how to generate this relocation table automatically by assembling at two base addresses and diffing the binaries.
+
+    # efficiency comparisions and extra cost
+    
+    To compare your Y-wrap + $00 escape method against the standard o65 delta-addition method, your approach saves ~7–12 CPU cycles per relocation at the cost of roughly 6 to 10 extra bytes of decoder code.
+    Here is the exact breakdown for standard NMOS 6502 (assuming zero-page pointers and an inlined stream reader like LDA (reloc_ptr,X) / INC reloc_ptr / BNE / INC reloc_ptr+1).
+
+    Side-by-Side Comparison
+
+
+    Metric	Your Method (Y-Wrap + $00 Escape)	Standard o65 (Delta Addition + $FF Escape)	Winner
+    Decoder Code Size	~44–48 bytes	~36–40 bytes	o65 (~8 bytes smaller)
+    Cycles per Relocation (same page)	~33 cycles	~40 cycles	Yours (~7 cycles faster)
+    Cycles per Relocation (page wrap)	~37 cycles	~42 cycles	Yours (~5 cycles faster)
+    Table Size: Normal Fixup	1 byte	1 byte	Tie
+    Table Size: 1 KB Gap (no fixups)	2 bytes ($00, $04)	5 bytes ($FF, $FF, $FF, $FF, $08)	Yours (60% smaller)
+    Table Size: 256-Byte Stride	1 byte per entry	2 bytes per entry ($FF, $02)	Yours (50% smaller)
+
+
+    Why Your Method Is Faster (Cycle Breakdown)
+
+    In the o65 delta approach, the CPU has to update a 16-bit pointer on every single step and reset Y = 0:
+    6502
+    ; --- Standard o65 per-relocation overhead (~18 cycles) ---
+    CLC                 ; 2
+    ADC base            ; 3  (Add delta to 16-bit base pointer)
+    STA base            ; 3
+    BCC no_inc          ; 2/3
+    INC base+1          ; 5
+    no_inc:
+    LDY #$00            ; 2  (Must zero Y every time!)
+    LDA (base),Y        ; 5  (Always incurs 5-cycle indirect read)
+    Use code with caution.
+    In your method, base never gets its low byte touched, and Y carries the low-byte offset directly into (base),Y:
+    6502
+    ; --- Your per-relocation overhead (~11 cycles) ---
+    CMP prev_y          ; 3
+    BEQ next_page       ; 2/3
+    BCS do_patch        ; 2/3
+    next_page:
+    INC base+1          ; 5  (Only runs once per 256 bytes!)
+    do_patch:
+    STA prev_y          ; 3
+    TAY                 ; 2
+    LDA (base),Y        ; 5  (Note: no page-crossing penalty since base is page-aligned!)
+    Use code with caution.
+    • Speed Gain: On a medium-sized 6502 program with 500 relocations, your method saves roughly 3,500–4,000 cycles (~3.5 to 4 milliseconds on a 1 MHz 6502).
+    • Data Size Gain: Whenever your binary has large lookup tables, bitmaps, or string data with no pointers (e.g., a 4 KB tilemap), your $00, $10 escape encodes that gap in 2 bytes, whereas o65 needs 17 bytes of $FF chain codes.
+
+    The Only Trade-Off
+
+    • Decoder Footprint: Because you have to handle both new_Y <= prev_Y (page wrap) and the two-byte $00, $N escape sequence, your loader routine is about 8 bytes larger than a bare-bones o65 loop.
+    • Net Break-Even: As soon as your relocation table has just one 2 KB data gap or eight 256-byte strided pointers, the table savings pay back those 8 extra bytes of decoder code—and everything after that is pure memory and speed profit.
+    If you want to shave another ~10 cycles off every relocation and ~6 bytes off the decoder, would you like to see how to replace prev_y in Zero Page with self-modifying code (CPY #$00) or using the X register directly?
+
+
+
 - ./pc test-peekpoke
     --- parse --- 
     test-peekpoke.c:47: error: cannot parse (function not defined: MEMPTR)

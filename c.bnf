@@ -10,8 +10,8 @@
 # Type Uvardecl Var WprintitemJ Z H
 #
 # $A..$Z: all 26 taken (see above).
-# $a..$z taken (minor helpers): a c d e f g h j k n o p q x
-# $a..$z free: b i l m r s t u v w y z
+# $a..$z taken (minor helpers): a c d e f g h j k n o p q x y
+# $a..$z free: b i l m r s t u v w z
 # (keep this current when a letter is claimed or freed - grep:
 #  grep -oE "^[a-z]=" c.bnf | sort -u)
 
@@ -61,14 +61,17 @@ f=$T \p$e;\<|
 e=,\p\<|
 
 # - # lines, at the top and in blocks (C)
-#   #define NAME number|"string" -> const (\c only after a full match: a
-#   failed alt must not leave it set). Predefined (parse.c predef, made
+#   #define NAME number|"string"|(constant expression) -> const (\c only
+#   after a full match: a failed alt must not leave it set). Without ( ) an
+#   expression is skipped: C pastes the text, NAME*2 would differ.
+#   Predefined (parse.c predef, made
 #   when first used): __MC65__ the version (the .ivm mark's last 2 bytes,
 #   hi lo), __TARGET_6502__ 1
 #   #ifdef / #ifndef NAME, #if 0 / #if N: a false one skips lines (\%) to
 #   its #else / #endif; an #else reached is the end of a true one: skips
 #   to #endif. #endif, any other # line: skipped
 Q=#define \+ \d\c[\g]\n
+|#define \+ ($y)\c[\g]\n
 |#define \+ \s\c[\g]\n
 |#ifdef \i\*\n
 |#ifdef \*\n\%
@@ -82,30 +85,38 @@ Q=#define \+ \d\c[\g]\n
 # - Declarations: optional register\b -> REGISTER slot 0..31
 # -O: REGISTER 0..31, other globals 32..95, frames at 96+
 V=const\c $T $M|register\b $T $M|static\_ $T $M
-|struct\'s \i \+={\:$N}\.;|struct\'s \i \+\[$S\]\@;|struct\'s \i \+\@;
-|__striped struct\'z \i \+\[$S\]\@;
+|struct\'s \i \+={\:$N}\.;|struct\'s \i \+\[$y\]\@;|struct\'s \i \+\@;
+|__striped struct\'z \i \+\[$y\]\@;
 |$T $M
-# name[N]: a static array of N (a number or const) elements: zeroed (\@),
+# name[N]: a static array of N (a constant expression, rule y) elements: zeroed (\@),
 #   also = {0}; initialized: = "text" / = {1, 2, 'c', ...} (\: \, \.),
 #   [] its size from the initializer, [N] zeros after it. Arrays are
 #   static: initialized once, so in a function an initializer (\:) needs
 #   "static" (C would set it on every call). static (\_): a global with
 #   the name local: its initializer a const, once at the start (\g)
-M=\+\[$S\]={0}\:\@$U
-|\+\[$S\]=\:\s\.$U|\+\[\]=\:\s\.$U
-|\+\[$S\]={\:$N}\.$U|\+\[\]={\:$N}\.$U
-|\+\[$S\]\@$U|\+=$S[\g]$U|\+=$E[S\1]$U|\+$U
+M=\+\[$y\]={0}\:\@$U
+|\+\[$y\]=\:\s\.$U|\+\[\]=\:\s\.$U
+|\+\[$y\]={\:$N}\.$U|\+\[\]={\:$N}\.$U
+|\+\[$y\]\@$U|\+=[\m]$E\==[\g]$U|\+$U
 # initializer elements: consts, a trailing , allowed. The , before \, : a
 #   failed alt does not take back data (the last one went in twice)
 N=$g,\,\<|$g\,|
-# an element: a number / 'c' straight to the data (\`: no const slot, a
-#   256 value table must not fill the pool), else a const name ($S)
-g=\`|$S
+# an element: a number / 'c' alone (then , or }) straight to the data (\`:
+#   no const slot, a 256 value table must not fill the pool), else a
+#   constant expression
+g=\`|$y
+
+# - Constant expression: any E, run by the compiler (\==), no code left.
+#   y: it must be a number (\=!), else the alt fails. Operators as in E:
+#   2 * N + 1 parses, N + 2 * 3 needs ( ). No && || ?: (they jump)
+y=[\m]$E\=!
 
 # - TODO: deep recursion might be bad...
-# the ; here, not in V: "int b = a + 1;" - M's "\+=$S" alt matched "b = a"
-#   and returned, V's ; then failed (a rule that returned is not tried
-#   again); now that alt fails itself, the "\+=$E" one comes
+# the ; here, not in V: a rule that returned is not tried again, so an M
+#   alt must fail itself for the next one to be tried
+# M's "=": one alt for every initializer. \== makes E a slot if it is one
+#   load or constant (\g: as before, also at the top / const), else the
+#   value is in ACC (\g: stores it)
 U=,$M|;
 
 # - TODO: why I^* - pascal artifact?
@@ -856,6 +867,9 @@ Control:
   \,    add the last capture (a const) as an element
   \.    end it: zeros up to the size; the ident (\1) points to it
   \=n   result := capture n
+  \==   the E just parsed (from \m): one load or constant -> drop its code,
+        result := the slot; else result := ACC
+  \=!   the same, but fail unless it is a number
 
 Generate:
   [..]     production  (-v prints GEN only when alt commits)
