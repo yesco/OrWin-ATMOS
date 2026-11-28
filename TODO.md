@@ -2,7 +2,16 @@
 
 # MeteoriC-65 (parse.c c.bnf): next, after the manual (MeteoriC-man.md)
 
--  &a[i]  == a+i not right for word*
+- zero page out of order, lol
+======== MEMMAP test-empty.tap (atmos, from test-empty.ivm) ======== 
+file: 65 bytes: a 17 byte header, then $0509-$0538 (48 bytes), starts at $0509     
+$0000 --- zero page ---      
+  $00-$01  NULL: 00 00 (a NULL pointer reads 0)                     
+  $E2-$FB  ivm-lib: cc65's zero page (ptr1 .. tmp4)         
+  $DA-$E1  mem[] (-z)                               
+  $FC-$FD  JIT: array element pointer       
+  $FE-$FF  JIT: scratch (tmp1 tmp2)
+$0500 --- not loaded: the lib's startup parts this imag
 
 - What the samples need next:
 

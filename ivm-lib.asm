@@ -131,25 +131,33 @@ JT = $FE
 
 .code
 
-;;; ===========================================================================
+;;; =====================================================================
 ;;; Stand-alone entry: load/reset/autorun address of an ivm -o image
-;;;; ===========================================================================
-;;; ===========================================================================
-;;; Load in place (ivm.c jit_load, sim65 run in place): copy the -o image
-;;; after the lib down to _ivmlib_dst (the image's end of the lib: a cut),
-;;; then start it as if loaded (_ivmlib_run: the image's first byte). The image
-;;; is 4 segments (src, len): mem image, strings, gap (src 0: zeros), JIT
-;;; code: no buffer to build it in. Before _ivmlib_init: not in -o images,
-;;; not overwritten by the copy. Forward: the sources are above.  63 B + 16
-;;; ===========================================================================
+;;; =====================================================================
+;;; Load in place (ivm.c jit_load, sim65 run in place):
+;;;   - copy the -o image
+;;;   - after the lib down to _ivmlib_dst (the image's end of the lib: a cut),
+;;;   - then start it as if loaded (_ivmlib_run: the image's first byte).
+;;; 
+;;; The image  is 4 segments (src, len):
+;;;   1. mem image
+;;;   2. strings
+;;;   3. gap (src 0: zeros),
+;;;   4. JIT code
+;;; 
+;;; 63 B + 16 (???)
+;;; =====================================================================
+
 _ivmlib_seg:     .res 16                ;; 4 x (src, len)
 _ivmlib_dst:     .word 0                ;; where: the image's lib end (a cut)
+
 _ivmlib_spzp:                           ;; sim65 header needs sp's zp address
 .ifdef SIM
                  .byte CSP
 .else
                  .byte 0
 .endif
+
 _ivmlib_zplo:                           ;; -z mem[] from here up (lib zp below)
 .ifdef SIM
                  .byte ZP_LIB+ZP_LIBN
@@ -157,21 +165,49 @@ _ivmlib_zplo:                           ;; -z mem[] from here up (lib zp below)
                  .byte 0
 .endif
 
-;;; x / y id (16 on): their routines, for the JIT to look the address up
+;;; TODO: not used? not clear, relevant? Rewrite if relevant.
+;;; 
+;;; x/y ID (16 on?): their routines, for the JIT to look the address up
 ;;; (ivm.c ivm_libv: the same order). Not in images (before _ivmlib_init)
 _ivmlib_libv:
         .word   _opstrcmp, _opstrncmp, _opmemcmp, _opstrchr, _opmemchr
         .word   _opstrcpy, _opstrncpy
 
+
+;;; "Load the library" - what the hell does this code do?
+;;;    is it used for inmemory run inside ivm-jit on 6502?
+	
+;;; TODO: describe the purpose of the code and what it does
+;;; TODO: describe what "registers do"
+
+;;; TODO: this looks like 81 bytes stupid code! - just make 1 contigous!!!!
+;;;   basically this could call once to memmove?
+;;;   we are the ones building the image, we can lay out the data correctly!
+;;;   
+;;;   sure, you may wan to copy our init data to zeropage / mem
+;;;   clear the test with zeroes, up to before constants
+	
+
+;;; Registers used:
+;;;   - ptr2 = destination, counting up
+;;;   - ptr1 = source (for segement), counting up
+;;;   - tmp1/tmp2 = length counter, counting down
+
 _ivmlib_load:
 ;;; 81 B
+	;; ptr2 = destination
         lda     _ivmlib_dst
         sta     ptr2
         lda     _ivmlib_dst+1
         sta     ptr2+1
+
+;;; looks like we have a list of 4 segments (4 bytes each)
+;;; this loops over tmem, maybe? copying (appending?) each
         ldx     #0
 @seg:   cpx     #16
         beq     ldrun                   ;; all copied: run
+
+	;; each segment has 2 words: address, and length in bytes
         lda     _ivmlib_seg,x
         sta     ptr1
         lda     _ivmlib_seg+1,x
@@ -180,31 +216,44 @@ _ivmlib_load:
         sta     tmp1                    ;; len lo
         lda     _ivmlib_seg+3,x
         sta     tmp2                    ;; len hi
+
         inx
         inx
         inx
         inx
+
+;;; copy one segemnt
+;;; TODO: if this is a "memcpy" say so??? but this must be worst ever" LOL
+
         ldy     #0
 @byte:  lda     tmp1                    ;; len-- (done at 0)
         bne     @n1
         lda     tmp2
         beq     @seg
+
         dec     tmp2
 @n1:    dec     tmp1
+
         tya                             ;; A = 0 (the gap)
         ldy     ptr1+1
         beq     @z                      ;; src $00xx: zeros, src stays
+
         ldy     #0
         lda     (ptr1),y
+
         inc     ptr1
         bne     @z
         inc     ptr1+1
+
 @z:     ldy     #0
         sta     (ptr2),y
+
         inc     ptr2
         bne     @byte
         inc     ptr2+1
+
         bne     @byte                   ;; always
+
 ldrun:
 ;;; 3 B
         jmp     _ivmlib_start           ;; patched: the image's first byte
@@ -213,15 +262,19 @@ _ivmlib_run = ldrun + 1
 
 ;;; ===========================================================================
 ;;; Startup. An image starts at the first part it needs (ivm.c jit_libbeg):
+;;; 
 ;;;   _ivmlib_init    static arrays: zeroed (needs memset: cut1)
 ;;;   _ivmlib_zpclr   -z: mem[] past the image's last non-0 byte zeroed
 ;;;   _ivmlib_zpinit  -z: mem[] image copied to zp
 ;;;   _ivmlib_start   run main, exit
+;;; 
 ;;; each falls into the next. Operands patched by ivm.c, no variables.
 ;;; ===========================================================================
 
+
 ;;; bss zero: opmemset with X pages, Y rest; ivm.c set _opmemset_adr to
 ;;; bss + pages * 256 (the last page)
+
 ;;; 10 B
 _ivmlib_init:
 ;;; 9 B
@@ -232,9 +285,11 @@ _ivmlib_bssr = * - 1
         lda     #0                      ;; fill
         jsr     _opmemset
 
+
 ;;; -z: zero the live mem[] the image doesn't carry: from its last byte
 ;;; (the const cut) down to the image's bytes (memory isn't 0 at load:
 ;;; sim65 fills it with $FF). Equal: none
+
 ;;; 13 B
 _ivmlib_zpclr:
 ;;; 6 B
@@ -253,7 +308,9 @@ zpcl2:
 _ivmlib_zpcn = * - 1
         bne     zpcl1
 
+
 ;;; -z: copy mem[] image to zp, down from the last byte. 0 bytes: none
+
 ;;; 12 B
 _ivmlib_zpinit:
 ;;; 4 B
@@ -272,28 +329,36 @@ _ivmlib_zpdst = * - 1
 ;;; JSR the JIT code, then exit (sim65: A = exit code) / back to BASIC.
 ;;; _ivmlib_exit: where the program is done (an emulator's breakpoint:
 ;;; ./oric counts the cycles from the image's start to it)
+
 ;;; SIM 9 B, ATMOS 4 B
 _ivmlib_start:
 ;;; SIM 11 B, ATMOS 9 B
+
 .ifdef SIM
         ;; NULL: 00 00 (sim65 loads with $FF everywhere)
         ldx     #0
         stx     $00
         stx     $01
+
         dex                             ;; no C stack: pvio points CSP
         txs
+	
         jsr     $FFFF                   ;; patched: JIT code start
-_ivmlib_entry = * - 2
+	_ivmlib_entry = * - 2
+
 _ivmlib_exit:
 ;;; 3 B
         jmp     exit                    ;; A = exit code (lo of result)
+
 .else
         ;; NULL: 00 00 ($00-$0B: not used by the ROM / BASIC)
         ldx     #0
         stx     $00
         stx     $01
+
         jsr     $FFFF                   ;; patched: JIT code start
-_ivmlib_entry = * - 2
+	_ivmlib_entry = * - 2
+
 _ivmlib_exit:
 ;;; 1 B
         rts                             ;; back to BASIC
@@ -303,19 +368,26 @@ _ivmlib_exit:
 _ivmlib_cut0:
 
 ;;; ===========================================================================
-;;; m: memset. Self-moddifying (savas 1c/byte using LDA ,x instead of LDA (),y)
+;;; Memset, self-moddifying. (savas 1c/byte)
 ;;;
 ;;; A : fill byte
 ;;; Y : rest (i.e. low byte size)
-;;; _opmemset_adr: pointer +
+;;; _opmemset_adr: pointer +      (TODO: + what?)
 ;;;
+;;; 
+;;; How to call:
+;;; 
 ;;;   LDA #fill / LDY #rest / JSR _opmemset
 ;;;
-;;; Algo: First rest of last page; full pages downwards.
+;;; Algo: First rest (lo byte length) of last page; full pages downwards.
+;;; 
 ;;; NOTE: Max 32K (because terminate by BPL)
+;;; 
+;;; Only called for large/variable sized memset > 256
+;;; 
+;;; Otherwise inlined a smaller version (~ setup cost)
 ;;; ===========================================================================
 
-;;; Only called for large/variable sized memset
 
 ;;; 17 B; ~20 c + 10 c per byte + 11 c per page
 _opmemset:
@@ -344,41 +416,53 @@ pcbuf:  .byte   0                       ;; char for putchar/getchar
 pcx:    .byte   0
 pcy:    .byte   0
 
+
+
 ;;; ===========================================================================
 ;;; Character I/O trampolines
 ;;; ===========================================================================
 
 ;;; SIM 27 B, ATMOS 34 B; ~50 c + pvio + _write (SIM) / ROM
 _opputchar:
-;;; SIM 27 B, ATMOS 34 B
+
+	;; retains AX & Y!
         sta     pcbuf
         stx     pcx
         sty     pcy
+
 .ifdef SIM
         ldx     #1                      ;; stdout
         jsr     pvio
         jsr     _write                  ;; write(1, &pcbuf, 1)
 .else
-        cmp     #$0A                    ;; LF -> CR LF
+	;; LF -> CR, LF
+        cmp     #$0A                    ;; CR
         bne     @ch
-        ldx     #$0D
+        ldx     #$0D		        ; LF
         jsr     ROM_PRCHR
 @ch:    ldx     pcbuf
         jsr     ROM_PRCHR
 .endif
+
+	;; restore AX & Y!
         ldy     pcy
         ldx     pcx
-        lda     pcbuf                   ;; last: Z/N from the char
+        lda     pcbuf                   ; last: Z/N from the char
+
         rts
 
 .ifdef SIM
 ;;; the args (buf=&pcbuf, fd=X) as a static frame: CSP points at it, the
 ;;; hook pops them from there (and moves CSP: set again each call).
 ;;; AX = count 1. No C stack.
+
+;;; TODO: isn't the pvframe alwasys the same? So set it at startup?
+	
+
 ;;; 16 B + 4 B frame, ~24 c
 pvio:
 ;;; 20 B
-        stx     pvfd                    ;; fd lo (hi stays 0)
+        stx     pvfd                    ; fd lo (hi stays 0)
         lda     #<pvframe
         sta     CSP
         lda     #>pvframe
@@ -387,8 +471,8 @@ pvio:
         ldx     #0
         rts
 
-pvframe: .word  pcbuf                   ;; buf
-pvfd:    .word  0                       ;; fd
+pvframe: .word  pcbuf                   ; buf
+pvfd:    .word  0                       ; fd
 .endif
 
 ;;; ---------------------------------------------------------------------------
@@ -397,22 +481,23 @@ pvfd:    .word  0                       ;; fd
 
 _opprintstr:
 ;;; 30 B
-        sta     sreg                    ;; AX kept for the return
+        sta     sreg                    ; AX kept for the return
         stx     sreg+1
 
-        pla                             ;; -> last byte of the JSR
+        pla                             ; -> last byte of the JSR
         clc
         adc     #1
         tay
         pla
         adc     #0
 
+;;; TODO: instead of add 1: 9 bytes, just make _opputs start w Y=1
         tax
-        tya                             ;; AX -> the string
+        tya                             ; AX -> the string
 
-        jsr     _opputs                 ;; ptr1 -> its 0
+        jsr     _opputs                 ; ptr1 -> its 0
 
-        inc     ptr1                    ;; past it: the next instruction
+        inc     ptr1                    ; past it: the next instruction
         bne     :+
         inc     ptr1+1
 :
@@ -664,6 +749,8 @@ _ivmlib_cut5:
 ;;; ===========================================================================
 ;;; getchar: the last tier (an image with it ends at _ivmlib_end). Uses
 ;;; pvio / pcbuf (cut 1: below, so in such an image)
+;;; 
+;;; Basically, reads one byte from STDIN=1
 ;;; ===========================================================================
 
 _opgetchar:
@@ -957,42 +1044,81 @@ _opstrncpy:
         rts
 
 
+
+
+
+
+
+
+
+
+
 ;;; ---- cut 7: ... no putf (printf's parts: else _ivmlib_end) ----
 _ivmlib_cut7:
 
 ;;; ===========================================================================
-;;; putf: printf's parts. The compiler splits the format, each part one
-;;; call:
-;;;
+;;; PRINTF
+;;; ------
+;;; We implement printf by splitting up it's operation in several small
+;;; functions and calls. The rationale is that pushing an argument on
+;;; the stack (3 bytes), or writing to register (4 bytes) is as costly
+;;; as a function call.; this is also faster and need no format string
+;;; parser.
+;;; 
+;;; LIMITATION: cannot handle dynamic changeable format strings, lol
+;;; (I've probably never seen one...)
+;;; 
+;;; Example:
+;;; 
 ;;;   printf("x=%-4u!\n", x)    LDA/LDX x  LDY #-4  JSR putfuz  "!\n"
 ;;;
-;;; - putfu putfd putfx putfX putfs: print the value
-;;; - putfuz putfdz putfxz putfXz putfsz: the value, then the string
-;;;   after the JSR (returns after its 0)
-;;; - putfz: only the string after the JSR
+;;; Primitive value formatting printers:
+;;; 
+;;;   %u = putfu
+;;;   %d = putfd
+;;;   %x = putfx
+;;;   %X = putfX
+;;;   %s = putfs
+;;; 
+;;; Then an observation: a format variable is often followed by
+;;; literal string till the next %? so we have a variant of the
+;;; all the function above that prints a following inline zero-
+;;; terminated string - just like our '"' operator does.
 ;;;
+;;;   - putfuz
+;;;   -	putfdz
+;;;   - utfxz
+;;;   - putfXz
+;;;   - putfsz
+;;; 
+;;; TODO: Isn't this a duplicate?
+;;;
+;;;   - putfz: only the string after the JSR
+	
 ;;; The arguments:
 ;;;
-;;; - AX: the value (u d x X), the string's address (s)
-;;; - Y: the width, signed: 4 is %4 (right aligned), -4 is %-4 (left).
-;;;   0: none. As C: a longer value is printed in full.
+;;; - AX: (lo,hi) the numeric value (udxX), or the string's address (s)
+;;; - Y : the signed width; %4 (right aligned), %-4 for (left), 0 (none)
+;;;        As in C: a longer value is printed in full.
 ;;;
-;;; Anything else is in the control block. Its default is 0, and every
-;;; putf sets it back to 0 at the end, so set it right before:
+;;; All other formatting and options are in the control block.
+;;; Its default is 0, and every putf sets it back to 0 at the end
+;;; so set it right before the next call.
 ;;;
-;;; - _ivmlib_pfpad: the pad char (0: space). %05u: '0'
-;;; - _ivmlib_pfprec: .N (0: none). %.3s: at most 3 chars, %.3u: at
-;;;   least 3 digits (zeros in front)
+;;; _ivmlib_pfpad : the pad char (0: space). %05u: '0'
+;;; _ivmlib_pfprec: .N (0: none). %.3s: at most 3 chars, %.3u: at
+;;;                  least 3 digits (zeros in front)
 ;;;
 ;;; Kept over calls:
 ;;;
-;;; - _ivmlib_pfcount: the chars printed, a word. putfn: AX = it,
-;;;   putfn0: back to 0 (sprintf's n)
-;;; - _ivmlib_pfout: the output routine (A = the char, keeps X Y).
-;;;   putfout: AX = it, 0: putchar again
+;;; ivmlib_pfcount: the chars printed, a word. putfn: AX = it,
+;;;                 putfn0: back to 0 (sprintf's n)
+;;; _ivmlib_pfout:  the output routine (A = the char, keeps X Y).
+;;;                 putfout: AX = it, 0: putchar again
 ;;;
-;;; ACC (AX) is not kept. Signed d: the sign counts in the width; with
-;;; pad '0' it comes first (-0042), as in C.
+;;; ACC (AX) is not kept.
+;;; Signed d: the sign counts in the width;
+;;; with pad '0' it comes first (-0042), as in C.
 ;;; ===========================================================================
 
 _ivmlib_pfpad:   .byte   0
@@ -1009,12 +1135,18 @@ pfi:    .byte   0                      ; the first digit in pfbuf
 pfn:    .byte   0                      ; the digits / chars
 pfz:    .byte   0                      ; zeros before the digits (.N)
 pfc:    .byte   0                      ; the pad char, while padding
+
+;;; TODO: use the low end of the stack? LOL
 pfbuf:  .res    PFEND                  ; the digits, from the end
 
 pfhex:  .byte   "0123456789abcdef"
 
+
+
 ;;; ---------------------------------------------------------------------------
 ;;; one char (A) out: counted. Keeps X Y
+
+;;; TODO: desribe what this code dos????
 
 pfch:
 ;;; 22 B
@@ -1029,6 +1161,7 @@ pfch:
 @std:   pla
         jmp     _opputchar
 
+
 ;;; ---------------------------------------------------------------------------
 ;;; d: signed decimal. Negative: the sign, then as u
 
@@ -1041,7 +1174,7 @@ _opputfd:
         sta     pfsg
         pla
 
-       ; AX = -AX
+	;; AX = -AX   === (AX ^ $ff)+1
         eor     #$FF
         clc
         adc     #1
@@ -1051,6 +1184,7 @@ _opputfd:
         adc     #0
         tax
         pla
+	;; fall-through to _opputfu
 
 ;;; u: unsigned decimal
 
@@ -1061,7 +1195,7 @@ _opputfu:
         stx     ptr1+1
         ldy     #PFEND
 
-       ; ptr1 /= 10, A = the remainder: a digit, from the end
+	;; ptr1 /= 10, A = the remainder: a digit, from the end
 @div:   lda     #0
         ldx     #16
 @bit:   asl     ptr1
@@ -1098,7 +1232,7 @@ _opputfx:
         stx     ptr1+1
         ldy     #PFEND
 
-       ; the low 4 bits: a digit, from the end
+        ;; the low 4 bits: a digit, from the end
 @nib:   lda     ptr1
         and     #$0F
         tax
@@ -1111,7 +1245,7 @@ _opputfx:
 @st:    dey
         sta     pfbuf,y
 
-       ; ptr1 >>= 4
+        ;; ptr1 >>= 4
         ldx     #4
 @sh:    lsr     ptr1+1
         ror     ptr1
@@ -1128,13 +1262,13 @@ pfnum:
 ;;; 91 B
         sty     pfi
 
-       ; the digits
+        ;; the digits
         lda     #PFEND
         sec
         sbc     pfi
         sta     pfn
 
-       ; zeros: .N - digits, if more
+        ;; zeros: .N - digits, if more
         lda     _ivmlib_pfprec
         sec
         sbc     pfn
@@ -1142,7 +1276,7 @@ pfnum:
         lda     #0
 :       sta     pfz
 
-       ; the width: digits, zeros, sign
+        ;; the width: digits, zeros, sign
         lda     pfn
         clc
         adc     pfz
@@ -1151,7 +1285,7 @@ pfnum:
         adc     #1
 :       tax                            ; X = the field
 
-       ; left: sign, number, spaces
+        ;; left: sign, number, spaces
         lda     pfw
         bpl     @right
         jsr     pfsign
@@ -1159,7 +1293,7 @@ pfnum:
         jsr     pfspaces
         jmp     pfdone
 
-       ; right: pad, sign, number (pad '0': sign, zeros, number)
+        ;; right: pad, sign, number (pad '0': sign, zeros, number)
 @right: lda     _ivmlib_pfpad
         beq     @sp
         cmp     #' '
@@ -1196,8 +1330,12 @@ pfdigits:
         lda     pfbuf,y
         jsr     pfch
         iny
+
         bne     @dl                    ; (always)
+
+;;; TODO: share rts? (unles cut)
 :       rts
+
 
 ;;; the pad: width - X (the field) times, the pad char (0: space).
 ;;; pfspaces: spaces (left aligned: C pads with spaces then)
@@ -1305,6 +1443,8 @@ _opputfz:
         pha
         rts
 
+;;; ---------------------------------------------------------------------------
+
 _opputfuz:
 ;;; 6 B
         jsr     _opputfu
@@ -1326,6 +1466,7 @@ _opputfsz:
         jsr     _opputfs
         jmp     _opputfz
 
+
 ;;; ---------------------------------------------------------------------------
 ;;; the counter (AX = it; n0: 0), the output routine (AX = it, 0: putchar)
 
@@ -1334,12 +1475,14 @@ _opputfn:
         lda     _ivmlib_pfcount
         ldx     _ivmlib_pfcount+1
         rts
+
 _opputfn0:
 ;;; 9 B
         lda     #0
         sta     _ivmlib_pfcount
         sta     _ivmlib_pfcount+1
         rts
+
 _opputfout:
 ;;; 7 B
         sta     _ivmlib_pfout
