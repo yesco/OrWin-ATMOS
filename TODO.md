@@ -232,7 +232,6 @@ BEFORE (printf)
     If you want to shave another ~10 cycles off every relocation and ~6 bytes off the decoder, would you like to see how to replace prev_y in Zero Page with self-modifying code (CPY #$00) or using the X register directly?
 
 
-
 - ./pc test-peekpoke
     --- parse --- 
     test-peekpoke.c:47: error: cannot parse (function not defined: MEMPTR)
@@ -410,6 +409,239 @@ imacs.c:71:                   ^                                           imacs.
 
 - if (a == b) break;: rule Y's v form wins (v a b 02 0 zjp, 6 bytes) over
   a =b G (5 bytes, but 3 dispatches when not taken)
+
+-------------------------------------------------------------
+
+# grok regaring functions
+
+A few that fit the same “cheap because of the static DAG” spirit:
+
+### High leverage, still simple
+
+1. **Vector table compaction (optional)**  
+
+   You deliberately kept dead vector slots. A second mode could
+   renumber live functions only and rewrite `0xC0|v` sites. One dense
+   table, fewer words in the blob, nicer dumps. Not required for
+   libraries; nice for tiny apps.
+
+2. **Drop unused *globals* / statics**  
+
+   Same idea as consts: walk live code for slot operands, anything
+   never loaded/stored goes away and packing closes the gap. `static`
+   arrays that nothing touches are pure `memsz` waste today.
+
+3. **Inline the one-call leaves**  
+
+   You already know callees-before-callers and exact call counts. A
+   function with exactly one call site and a tiny body can be spliced
+   in place of the `0xC0|v` (and then its vector/`X` stub goes
+   away). Huge win on `used_leaf`-style helpers; keep a size threshold
+   so you don’t explode code.
+
+4. **`fneed` only over live edges**  
+
+   After `func_live`, recompute packing ignoring dead callees
+   entirely. You mostly have this; a clean “live-only call tree” pass
+   might squeeze main’s band a bit more when dead fat frames used to
+   sit under it in the old layout.
+
+### Fun / characteristic of this VM
+
+5. **Tail-call → jump**  
+
+   Still no recursion stack, but `return f(args)` where `f` is a
+   sibling/other fixed frame can become a jump + frame reuse if the
+   frames are compatible (or after packing share the same
+   cells). Turns some “must be a loop” patterns into structured mutual
+   tail calls without a dynamic stack.
+
+6. **Cold-path stubs in a separate segment**  
+
+   Rarely taken `if` arms and error `puts` could be emitted after
+   main’s hot code so FIXIPC / JIT I-cache stays on the hot path. The
+   bytecode is linear; a “move cold ranges to the end + fix jumps”
+   pass is mechanical.
+
+7. **Library “link” as reachability**  
+
+   Ship a big `lib.ivm` of vectors; the program only *names* what it
+   needs. Host pass merges blobs and runs the same `gen_drop_unused`
+   over the union. That’s your unused-function work as a real
+   linker—very on-brand for “compile several small programs into one
+   OrWIN binary.”
+
+8. **Profile-guided vector order**  
+
+   Host runs once, counts calls, reorders the vector table so the
+   hottest targets sit together (or get short encodings if you ever
+   add them). Tiny, measurable on the ASM/JIT backends.
+
+### Probably not worth it (for this project)
+
+- Full SSA / register allocation  
+- General inlining heuristics  
+- Removing the vector slots entirely without a renumber pass (you
+  already decided stubs are fine)
+
+If you want one next experiment: **single-call-site inlining of leaf
+functions** is the most fun relative to effort—you already have call
+counts, body bounds, and the squeeze path. I can sketch or implement
+that pass the same way as `gen_drop_unused` if you want.
+
+## -- should it be done?
+
+Short answer: for *this* VM, inlining is only modestly useful as a
+pure call-overhead kill, and it gets interesting mainly when the
+callee is tiny **and** the call site feeds constants (or
+loop-invariant values) into folding/peephole. A forced `INLINE(...)`
+is the right interface if you do it at all.
+
+### What a call costs here
+
+A vector call is already cheap compared to a real 6502 `JSR` stack frame:
+
+- one bytecode `0xC0|v` (and arg setup)
+- fixed frame, no dynamic push
+- JIT: roughly a `JSR abs` to a known address
+
+So the *direct* win of inlining is small: drop the call op, maybe a
+bit of arg shuffling, and (if that was the only call) the callee’s `X`
+stub / vector can go away via the unused-function pass you already
+have.
+
+Where it *does* pay:
+
+- **Inside a hot loop** — call overhead × iterations (ASM/JIT care;
+    pure `./ivm` less so).
+
+- **Constant / known args** — after splice, `gen_fold` / peephole /
+    const loads can erase most of a 3–10 byte leaf (`return a+1`,
+    `return a+b`, thin wrappers). That is often more than the call
+    itself.
+
+- **Only-used-once helpers** — inlining + `gen_drop_unused` removes
+    the body entirely; net size can go **down**, not up.
+
+Without folding, inlining a 20-byte body at one site is roughly a size
+wash (lose call, gain body). At two sites it grows. So: **not** “only
+useful for constant folding,” but folding is what turns “wash / slight
+loss” into a clear win on small pure leaves.
+
+### How hard is it *here*?
+
+Easier than in a normal C compiler, still not free.
+
+**Helps you:**
+
+- No recursion, callees before callers, direct vectors only → easy to
+  find callees and bodies.
+
+- You already have body ranges, call sites, and squeeze/DEL.
+
+- Frames are static: you are not merging activation records in the
+  abstract; you are **copying bytecode** and **remapping slots**.
+
+**Hurts you:**
+
+- Callee uses **frame-relative slots** (params/locals at
+  `frame_base[v] + …`). Inlining must rewrite every slot operand to
+  the caller’s temps / existing slots, or allocate temps in the caller
+  frame.
+
+- Args are not a single calling convention in the bytecode in a
+  trivial way (last arg in ACC, others stored). The call site sequence
+  must be matched and replaced carefully.
+
+- Jumps inside the callee are relative; after a splice they must be
+  fixed (you already have that machinery for squeeze).
+
+- Multiple returns, early `X`/`Q`/`;` — each becomes a jump to a join
+  point after the inlined chunk (or only allow single-exit leaves at
+  first).
+
+- Don’t inline across things that clobber your ACC/peephole
+  assumptions without invalidating ACC state the way a real call
+  would.
+
+So: **harder than `gen_drop_unused`, easier than a general inliner.** A realistic v1 is “leaf, single exit, no internal calls, small body, optional only-one-call-site.”
+
+### How much C would you expect?
+
+Order of magnitude, if kept strict:
+
+| Policy | Rough code | Notes |
+|--------|------------|--------|
+| Auto: size ≤ N bytes, 1 call site, leaf, 1 exit | ~80–150 lines | Reuse body bounds + DEL/squeeze ideas |
+| + remap slots into caller temps | +50–100 | The fiddly part |
+| + multi-site / size heuristic | +30–50 | Easy to regress code size |
+| `INLINE(expr)` grammar + force flag | ~20–40 in grammar/parse + a flag on the call emit | Cleanest UX |
+
+A “do it properly for general functions” pass is the wrong project for
+MeteoriC; a **leaf splicer** is in character.
+
+### Real benefits on *your* targets
+
+- **Blob size:** often neutral; positive when 1-call-site leaves
+    disappear entirely; negative if you inline medium functions at
+    many sites.
+
+- **`./ivm` / `ivm-asm`:** small cycle wins except in tight loops.
+
+- **JIT:** more meaningful (call barrier goes away, more straight-line
+    for their const/ACC opts).
+
+- **Folding:** the real multiplier — `INLINE(min(a, 3))` or a one-line
+    `scale(x)` with a constant `x` at the site is where bytecode can
+    collapse hard.
+
+For a big unused library, **you already won** with dead-function
+elimination. Inlining does not replace that.
+
+### `INLINE(fun(a,b,c))` — yes, and it’s the better design
+
+Auto-inlining heuristics on a size-sensitive 6502 backend are easy to
+get wrong. A forced form is honest and testable:
+
+```c
+r = INLINE( used_leaf(3) );
+r = INLINE( used_mid(2, 4) );
+```
+
+Semantics:
+
+- Must still type-check as a normal call (same function, same args).
+
+- Compiler **requires** inlining or errors (“not inlinable: not a leaf
+  / too large / has calls”).
+
+- No heuristic surprises; loops and const sites opt in explicitly.
+
+- Implementation: grammar recognizes `INLINE ( call )`, sets a flag on
+  that call emit; late pass (or emit-time) splices instead of
+  `0xC0|v`.
+
+Optional later: `-O` may auto-inline only `static`-ish single-use
+leaves under a byte limit; `INLINE` always forces.
+
+### Recommendation
+
+- **Don’t** chase general inlining for “call overhead.”
+
+- **Do** consider a **forced leaf inline** if you care about hot
+    helpers + folding, or as a teaching/experiment pass.
+
+- **Ship order:** keep `gen_drop_unused` as the library-size tool; add
+    `INLINE` only if you want explicit hot-path control; skip auto
+    multi-site inlining unless measurements on `test-opts` / sieve say
+    otherwise.
+
+If you want to prototype, the minimal contract is: *leaf, one exit, no
+nested calls, body ≤ ~16–24 bytes, slot remap into caller temps,
+`INLINE` only.* That stays in the same league of complexity as what
+you just added, and avoids the heuristic swamp.
+
+-------------------------------------------------------------
 
 
 # gemini
