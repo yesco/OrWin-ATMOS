@@ -12,6 +12,8 @@
 //extern void putz(const char* s);
   int puts(const char*);
   void putz(const char*);
+  extern int getchar();
+// Somehow not working
 //  #include "/data/data/com.termux/files/usr/share/cc65/include/stdio.h"
 #endif
 

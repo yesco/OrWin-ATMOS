@@ -12,6 +12,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 
 uint8_t c;
 uint16_t w;
@@ -29,14 +30,14 @@ int main() {
   poke(a + 2, 67);
   poke(a + 3, 0);
   c = peek(a);
-  _putc(c);
-  _putc(peek(a + 1));
-  _putc(peek(a + 2));
-  _puts("\n");
+  putchar(c);
+  putchar(peek(a + 1));
+  putchar(peek(a + 2));
+  putz("\n");
 
   putz("_puts MEMPTR:\tABC|\n\t\t");
-  _puts(MEMPTR(a));
-  _puts("|\n");
+  putz(MEMPTR(a));
+  putz("|\n");
 
   putz("doke deek:\t4660 52 18\n\t\t");
   doke(a + 4, 4660);

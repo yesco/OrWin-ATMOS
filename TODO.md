@@ -2,6 +2,28 @@
 
 # MeteoriC-65 (parse.c c.bnf): next, after the manual (MeteoriC-man.md)
 
+- ./pc test-peekpoke
+    --- parse --- 
+    test-peekpoke.c:47: error: cannot parse (function not defined: MEMPTR)
+    test-peekpoke.c:47:   puts(MEMPTR(a)); 
+    test-peekpoke.c:47:              ^                                            
+    --- 1 error ---
+
+--- # - Casting # TODO: - casting is tighter!
+    #|(I)$E  - not work (type annotation require a symbol?
+    #|(T*)E - not work
+    |(char*)$E
+    |(int)$E
+    |(word)$E
+    # raxiss's types.h: MEMPTR(a) is (uint8_t *)(a)
+    |MEMPTR($E)
+    |(int*) $E
+    |(word*)$E
+    # (char): binds tighter than the operators: (char)x + y casts x only
+    |(char)$R\#ff[&\2]$O
+    |(char)$S\#ff[\l1&\2]$O
+
+
 - zero page out of order, lol
 ======== MEMMAP test-empty.tap (atmos, from test-empty.ivm) ======== 
 file: 65 bytes: a 17 byte header, then $0509-$0538 (48 bytes), starts at $0509     
